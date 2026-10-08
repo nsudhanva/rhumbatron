@@ -13,3 +13,9 @@ variable "zone_name" {
   type        = string
   default     = "rhumbatron.com"
 }
+
+variable "clerk_secret_key" {
+  description = "Clerk development secret key. Loaded from the Keychain by `bun run tf dev`."
+  type        = string
+  sensitive   = true
+}

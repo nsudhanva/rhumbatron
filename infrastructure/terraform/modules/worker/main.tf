@@ -37,7 +37,7 @@ resource "cloudflare_worker_version" "this" {
   account_id          = var.account_id
   worker_id           = cloudflare_worker.this.id
   compatibility_date  = var.compatibility_date
-  compatibility_flags = var.compatibility_flags
+  compatibility_flags = length(var.compatibility_flags) > 0 ? var.compatibility_flags : null
   main_module         = var.main_module
   bindings            = var.bindings
   migrations          = var.migrations

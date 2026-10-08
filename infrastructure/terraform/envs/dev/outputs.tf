@@ -22,3 +22,19 @@ output "queues" {
   description = "Queue names and IDs."
   value       = module.async.queues
 }
+
+output "api_worker" {
+  description = "API Worker name and deployed version."
+  value = {
+    name       = module.api_worker.name
+    version_id = module.api_worker.version_id
+  }
+}
+
+output "web_worker" {
+  description = "Web Worker name and deployed version."
+  value = {
+    name       = module.web_worker.name
+    version_id = module.web_worker.version_id
+  }
+}

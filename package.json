@@ -32,7 +32,8 @@
     "prepare": "lefthook install",
     "tf": "bun scripts/tf.ts",
     "tf:plan:prod": "bun scripts/tf.ts prod plan -out=prod.tfplan",
-    "tf:drift": "bun scripts/tf.ts global plan -detailed-exitcode && bun scripts/tf.ts dev plan -detailed-exitcode"
+    "tf:drift": "bun scripts/tf.ts global plan -detailed-exitcode && bun scripts/tf.ts dev plan -detailed-exitcode",
+    "smoke:dev": "bun scripts/smoke.ts dev"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

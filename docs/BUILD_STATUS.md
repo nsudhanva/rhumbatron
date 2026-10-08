@@ -1,16 +1,18 @@
 # Build Status
 
 ## Current phase
-Phase 1 - Terraform bootstrap and Cloudflare foundation (complete for dev)
+Phase 2 - Web shell and API shell (dev live)
 
 ## Completed
 - P0-01 through P0-10
 - P1-01 through P1-09, P1-11, P1-12
-- Partial Phase 2: TanStack Start web app, Hono API `/health`, Worker build script, Terraform `worker` module (not applied)
+- P2-01, P2-02, P2-04, P2-06 through P2-11: web and API live on dev via Terraform
+  - https://dev.rhumbatron.com, https://api-dev.rhumbatron.com (`bun run smoke:dev`)
 - Clerk authentication in apps/web (local development instance)
 
 ## Active
-- None
+- P2-03 Zustand (TanStack Query done)
+- P2-05 Zod request and response wrapper
 
 ## Blocked
 - P1-10 Vectorize deferred to Phase 7 (ADR 0003).
@@ -18,7 +20,7 @@ Phase 1 - Terraform bootstrap and Cloudflare foundation (complete for dev)
 ## Cost
 - Cloudflare plan: Workers Free
 - Cloudflare fixed monthly base: $0
-- Remote resources: state bucket (global); 4 zone settings (global); dev D1, KV, R2 + lifecycle, 6 Queues
+- Remote resources: state bucket (global); 4 zone settings (global); dev D1, KV, R2 + lifecycle, 6 Queues; dev web and API Workers with custom domains
 - Prod: planned, not applied
 - Current Change model spend: $0.00
 
@@ -33,4 +35,5 @@ Phase 1 - Terraform bootstrap and Cloudflare foundation (complete for dev)
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 
 ## Next
-- Phase 2: deploy web and API Workers to dev through Terraform (dev.rhumbatron.com, api-dev.rhumbatron.com).
+- Finish P2-05 and P2-03, then Phase 3 (Project and Change state, Durable Objects).
+- Tracking: Linear project Rhumbatron (AGENTS.md rule 49).

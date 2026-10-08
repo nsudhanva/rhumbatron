@@ -20,6 +20,11 @@ const keychain: Record<string, string> = {
   AWS_SECRET_ACCESS_KEY: "rhumbatron-r2-state-secret-access-key",
 };
 
+// Per-root secrets, loaded only for the root that needs them.
+const rootKeychain: Record<string, Record<string, string>> = {
+  dev: { TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-dev" },
+};
+
 const [root, ...args] = process.argv.slice(2);
 const dir = root ? roots[root] : undefined;
 if (!dir || args.length === 0) {
@@ -32,7 +37,10 @@ if (args.includes("-auto-approve")) {
 }
 
 const env: Record<string, string> = { ...process.env } as Record<string, string>;
-for (const [name, service] of Object.entries(keychain)) {
+for (const [name, service] of Object.entries({
+  ...keychain,
+  ...(rootKeychain[root ?? ""] ?? {}),
+})) {
   if (env[name]) continue;
   const value = (
     await $`security find-generic-password -s ${service} -w`.quiet().nothrow().text()

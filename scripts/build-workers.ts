@@ -53,6 +53,20 @@ async function hashFiles(files: string[], base: string): Promise<string> {
   return hash.digest("hex");
 }
 
+/** Reads compatibility settings from a Worker's wrangler.jsonc so Terraform matches local dev. */
+async function readWranglerConfig(dir: string) {
+  const raw = await readFile(join(root, dir, "wrangler.jsonc"), "utf8");
+  const json = raw.replace(/^\s*\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1");
+  const config = JSON.parse(json) as {
+    compatibility_date: string;
+    compatibility_flags?: string[];
+  };
+  return {
+    compatibility_date: config.compatibility_date,
+    compatibility_flags: config.compatibility_flags ?? [],
+  };
+}
+
 function contentType(file: string): string | undefined {
   if (file.endsWith(".js") || file.endsWith(".mjs")) return "application/javascript+module";
   if (file.endsWith(".wasm")) return "application/wasm";
@@ -75,6 +89,7 @@ for (const d of deployables) {
     }));
   const assetFiles = d.assetsDir ? await listFiles(join(root, d.assetsDir)) : [];
   manifest[d.name] = {
+    ...(await readWranglerConfig(d.dir)),
     main_module: d.mainModule,
     modules,
     assets_directory: d.assetsDir ?? null,
