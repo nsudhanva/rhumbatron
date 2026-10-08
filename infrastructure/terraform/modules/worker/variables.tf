@@ -3,13 +3,23 @@ variable "account_id" {
   type        = string
 }
 
-variable "name" {
-  description = "Worker name, for example rhumbatron-api-dev."
+variable "component" {
+  description = "Component name, for example api or web. The Worker is named rhumbatron-<component>-<environment>."
   type        = string
 
   validation {
-    condition     = can(regex("^rhumbatron-[a-z0-9-]+-(dev|prod)$", var.name))
-    error_message = "Worker names must match rhumbatron-<service>-<dev|prod>."
+    condition     = can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.component))
+    error_message = "component must be lowercase kebab-case."
+  }
+}
+
+variable "environment" {
+  description = "Environment name (dev or prod)."
+  type        = string
+
+  validation {
+    condition     = contains(["dev", "prod"], var.environment)
+    error_message = "environment must be dev or prod."
   }
 }
 
@@ -87,8 +97,8 @@ variable "logs_head_sampling_rate" {
   }
 }
 
-variable "tags" {
-  description = "Worker tags."
+variable "extra_tags" {
+  description = "Additional Worker tags. Standard tags (project, env, component, managed-by) are always set."
   type        = set(string)
   default     = []
 }

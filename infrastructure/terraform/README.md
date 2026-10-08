@@ -5,12 +5,50 @@ the dashboard, `wrangler deploy`, or direct API writes.
 
 ## Layout
 
-| Path | Purpose |
-|---|---|
-| `bootstrap/` | Creates the R2 state bucket. Local state first, then migrated to R2. |
-| `envs/dev/` | Dev environment root. State key `dev/terraform.tfstate`. |
-| `envs/prod/` | Prod environment root. State key `prod/terraform.tfstate`. Create after the first end-to-end Change works. |
-| `modules/` | Reusable modules (`worker`, `dns`, `state`, `async`, `ai`, `code-storage`, `observability`, `security`). |
+| Path | State key | Purpose |
+|---|---|---|
+| `bootstrap/` | local, then `bootstrap/terraform.tfstate` | R2 state bucket `rhumbatron-terraform-state-global`. |
+| `envs/global/` | `global/terraform.tfstate` | Zone-wide singletons for `rhumbatron.com` (TLS settings, later WAF). Owned once, never by dev or prod. Applied. |
+| `envs/dev/` | `dev/terraform.tfstate` | Dev environment. Applied. |
+| `envs/prod/` | `prod/terraform.tfstate` | Prod environment. Planned only until the first end-to-end Change works (AGENTS.md section 10). |
+| `modules/` | - | `worker`, `dns`, `state`, `async`, `security` are implemented. `ai`, `code-storage`, `observability` are placeholders. |
+
+## Environments
+
+| | local | dev | prod |
+|---|---|---|---|
+| Runs on | Miniflare via `bun run dev` | Cloudflare | Cloudflare |
+| Resources | Simulated by Wrangler, stored in `.wrangler/state` | Terraform `envs/dev` | Terraform `envs/prod` |
+| Name suffix | none | `-dev` | `-prod` |
+| Web hostname | `localhost:5173` | `dev.rhumbatron.com` | `rhumbatron.com` |
+| API hostname | `localhost:8787` | `api-dev.rhumbatron.com` | `api.rhumbatron.com` |
+| R2 `events/` retention | none | 30 days | 365 days |
+| R2 `evidence/` retention | none | 30 days | kept |
+| R2 `tmp/` retention | none | 7 days | 7 days |
+| Clerk instance | development | development | production (not configured yet) |
+
+Hostnames stay one label deep so Universal SSL covers them.
+
+## Binding names
+
+Every Worker uses the same binding names in `wrangler.jsonc` (local) and Terraform (dev, prod).
+
+| Binding | Resource | dev name |
+|---|---|---|
+| `DB` | D1 | `rhumbatron-control-dev` |
+| `CONFIG` | KV | `rhumbatron-config-dev` |
+| `EVIDENCE` | R2 | `rhumbatron-evidence-dev` |
+| `MEMORY` | Vectorize (deferred, ADR 0003) | `rhumbatron-memory-dev` |
+| Queue producers | Queues | `rhumbatron-<purpose>-dev` for agent-wakeups, integration, verification, indexing, release, dead-letter |
+
+R2 lifecycle rules are prefix-based. Write objects under `events/`, `evidence/`, or `tmp/`.
+
+## Apply order
+
+1. `bootstrap` (once).
+2. `envs/global`.
+3. `envs/dev`.
+4. `envs/prod` (after the first end-to-end Change).
 
 ## Credentials
 
@@ -18,30 +56,41 @@ Keep all credentials outside the repository.
 
 | Variable | Use |
 |---|---|
-| `CLOUDFLARE_API_TOKEN` | Cloudflare provider. |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare provider. Account token; see Token permissions below. |
 | `TF_VAR_account_id` | Cloudflare account ID. |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Bucket-scoped R2 key for the S3 backend. |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Bucket-scoped R2 key for the S3 backend. Stored in the Keychain. |
 
 ## Bootstrap (run once)
 
-1. `terraform -chdir=infrastructure/terraform/bootstrap init`
-2. `terraform -chdir=infrastructure/terraform/bootstrap plan`
-3. `terraform -chdir=infrastructure/terraform/bootstrap apply`
-4. Create a bucket-scoped R2 API token for `rhumbatron-terraform-state`. Export its keys.
-5. Add a `backend "s3"` block to `bootstrap/versions.tf` with key `bootstrap/terraform.tfstate`
-   and the same settings as `envs/dev/versions.tf`.
-6. `terraform -chdir=infrastructure/terraform/bootstrap init -migrate-state -backend-config=../envs/dev/backend.hcl`
-7. Confirm the state object exists in R2. Then delete the local `terraform.tfstate*` files.
+The Terraform token and the state backend key are created with the `cf` CLI (ADR 0004).
+
+1. Load the token: `export CLOUDFLARE_API_TOKEN=$(security find-generic-password -s rhumbatron-cloudflare-api-token -w)`.
+2. `terraform -chdir=infrastructure/terraform/bootstrap init`, then `plan`, then `apply` (local state).
+3. Create the bucket-scoped backend key with the `cf` CLI and store it in the Keychain.
+4. Add an `s3` backend block to `bootstrap/versions.tf` with key `bootstrap/terraform.tfstate`.
+5. `terraform -chdir=infrastructure/terraform/bootstrap init -migrate-state -backend-config=backend.hcl`.
+6. Confirm the state object exists in R2. Then delete the local `terraform.tfstate*` files.
+
+## Token permissions
+
+See ADR 0004 for the exact scopes of `rhumbatron-terraform-global` and the backend key.
+
+## Naming
+
+See `docs/operations/naming.md`. Pattern: `rhumbatron-<component>-<env>`.
 
 ## Environment workflow
 
+`bun run tf <root> <args>` loads credentials from the Keychain (ADR 0004) and runs Terraform in
+that root. It refuses `-auto-approve`.
+
 ```sh
-cp infrastructure/terraform/envs/dev/backend.example.hcl infrastructure/terraform/envs/dev/backend.hcl
-terraform -chdir=infrastructure/terraform/envs/dev init -backend-config=backend.hcl
-bun run cf:bundle
-terraform -chdir=infrastructure/terraform/envs/dev plan
-terraform -chdir=infrastructure/terraform/envs/dev apply   # never -auto-approve
-terraform -chdir=infrastructure/terraform/envs/dev plan -detailed-exitcode   # must be clean
+cp infrastructure/terraform/envs/dev/backend.example.hcl infrastructure/terraform/envs/dev/backend.hcl  # once
+bun run tf dev init -backend-config=backend.hcl   # once
+bun run cf:bundle                                  # when Workers change
+bun run tf:plan:dev                                # writes dev.tfplan, read it
+bun run tf:apply:dev                               # applies exactly that plan
+bun run tf:drift                                   # global and dev must report no changes
 ```
 
 ## Static checks
@@ -51,5 +100,5 @@ and `tflint` for every root. It does not contact the state backend and does not 
 
 ## Provider coverage gaps (cloudflare 5.27)
 
-No first-party resource exists yet for Artifacts, K2, or Sandboxes/Containers. Follow AGENTS.md
+No first-party resource exists yet for Vectorize, Artifacts, K2, or Sandboxes/Containers. Follow AGENTS.md
 section 11.4 when a phase needs them: write an ADR first. Never call the API directly.

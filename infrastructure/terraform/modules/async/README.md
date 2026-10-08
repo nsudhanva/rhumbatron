@@ -1,6 +1,6 @@
 # Module: async
 
-Status: placeholder. Add resources when the owning phase starts.
+Status: implemented for Phase 1. Items marked "when supported" or "later" are not built yet.
 
 Owns:
 

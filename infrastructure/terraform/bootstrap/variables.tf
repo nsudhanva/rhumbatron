@@ -11,5 +11,5 @@ variable "account_id" {
 variable "state_bucket_name" {
   description = "R2 bucket that stores Terraform state for every environment."
   type        = string
-  default     = "rhumbatron-terraform-state"
+  default     = "rhumbatron-terraform-state-global"
 }

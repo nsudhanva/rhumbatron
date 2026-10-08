@@ -61,3 +61,6 @@ Thumbs.db
 
 # Modules do not commit provider lock files
 infrastructure/terraform/modules/**/.terraform.lock.hcl
+
+# Offline Terraform check data
+infrastructure/terraform/.terraform-check/

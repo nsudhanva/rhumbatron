@@ -1,7 +1,22 @@
+locals {
+  name = "rhumbatron-${var.component}-${var.environment}"
+
+  # Standard grouping tags (docs/operations/naming.md).
+  tags = setunion(
+    [
+      "project:rhumbatron",
+      "env:${var.environment}",
+      "component:${var.component}",
+      "managed-by:terraform",
+    ],
+    var.extra_tags,
+  )
+}
+
 resource "cloudflare_worker" "this" {
   account_id = var.account_id
-  name       = var.name
-  tags       = var.tags
+  name       = local.name
+  tags       = local.tags
 
   subdomain = {
     enabled          = var.enable_workers_dev

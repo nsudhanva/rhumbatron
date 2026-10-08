@@ -24,12 +24,15 @@
     "check": "bun run lint && bun run typecheck && bun run check:guardrails && bun run check:deps && bun run check:secrets && bun run tf:check",
     "check:guardrails": "bun scripts/check-guardrails.ts",
     "check:deps": "knip && sherif",
-    "check:secrets": "gitleaks dir . --redact --no-banner",
+    "check:secrets": "gitleaks git --redact --no-banner && gitleaks git --staged --redact --no-banner",
     "tf:fmt": "terraform fmt -recursive infrastructure/terraform",
     "tf:check": "bun scripts/terraform-check.ts",
-    "tf:plan:dev": "terraform -chdir=infrastructure/terraform/envs/dev plan",
-    "tf:apply:dev": "terraform -chdir=infrastructure/terraform/envs/dev apply",
-    "prepare": "lefthook install"
+    "tf:plan:dev": "bun scripts/tf.ts dev plan -out=dev.tfplan",
+    "tf:apply:dev": "bun scripts/tf.ts dev apply dev.tfplan",
+    "prepare": "lefthook install",
+    "tf": "bun scripts/tf.ts",
+    "tf:plan:prod": "bun scripts/tf.ts prod plan -out=prod.tfplan",
+    "tf:drift": "bun scripts/tf.ts global plan -detailed-exitcode && bun scripts/tf.ts dev plan -detailed-exitcode"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
