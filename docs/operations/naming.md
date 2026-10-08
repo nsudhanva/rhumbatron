@@ -26,6 +26,10 @@ rhumbatron-<component>-<env>
 | Queues | `rhumbatron-<purpose>-dev` | `rhumbatron-<purpose>-prod` | |
 | Vectorize (deferred) | `rhumbatron-memory-dev` | `rhumbatron-memory-prod` | |
 | Workers | `rhumbatron-<component>-dev` | `rhumbatron-<component>-prod` | |
+| K2 streams | `rhumbatron_events_00_dev`..`07` | `rhumbatron_events_00_prod`..`07` | |
+
+K2 streams are the one exception: K2 names allow only letters, digits, and underscores, so they
+use `rhumbatron_events_NN_<env>` (ADR 0006).
 
 Queue purposes: `agent-wakeups`, `integration`, `verification`, `indexing`, `release`, `dead-letter`.
 

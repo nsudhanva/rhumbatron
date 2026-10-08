@@ -104,5 +104,6 @@ and `tflint` for every root. It does not contact the state backend and does not 
 
 ## Provider coverage gaps (cloudflare 5.27)
 
-No first-party resource exists yet for Vectorize, Artifacts, K2, or Sandboxes/Containers. Follow AGENTS.md
+No first-party resource exists yet for Vectorize, Artifacts, K2, or Sandboxes/Containers. K2 uses a
+temporary adapter (ADR 0006). Follow AGENTS.md
 section 11.4 when a phase needs them: write an ADR first. Never call the API directly.

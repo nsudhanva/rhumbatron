@@ -106,6 +106,39 @@ module "web_worker" {
   }]
 }
 
+# K2 event streams (AGENTS.md section 19). Provider 5.27 has no K2 resource, so a temporary
+# adapter creates them (ADR 0006). Names allow only letters, digits, and underscores.
+locals {
+  k2_config = {
+    streams = [for i in range(8) : {
+      name              = format("rhumbatron_events_%02d_%s", i, local.environment)
+      retention_seconds = 604800 # 7 days
+    }]
+    subscriptions = ["causal-router", "project-view-projector", "audit-archiver", "analytics-projector"]
+  }
+  k2_stream_names = [for s in local.k2_config.streams : s.name]
+}
+
+resource "terraform_data" "k2_streams" {
+  triggers_replace = { config = jsonencode(local.k2_config) }
+
+  provisioner "local-exec" {
+    command = "bun ${local.repo_root}/scripts/k2-sync.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      K2_ACCOUNT_ID         = var.account_id
+      K2_CONFIG             = jsonencode(local.k2_config)
+    }
+  }
+}
+
+# Deferred to apply time by depends_on, so a fresh environment works in one apply.
+data "external" "k2_streams" {
+  program    = ["bun", "${local.repo_root}/scripts/k2-read.ts"]
+  query      = { account_id = var.account_id, names = join(",", local.k2_stream_names) }
+  depends_on = [terraform_data.k2_streams]
+}
+
 # Strong coordination Durable Objects (AGENTS.md section 12.3). SQLite-backed, Workers Free.
 module "coordinator_worker" {
   source      = "../../modules/durable-worker"
@@ -122,13 +155,21 @@ module "coordinator_worker" {
     content_type = m.content_type
   }]
 
-  bindings = [
-    { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
-    { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-coordinator-${local.environment}" },
-    { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO" },
-    { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO" },
-    { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO" },
-  ]
+  bindings = concat(
+    [
+      { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
+      { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-coordinator-${local.environment}" },
+      { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO" },
+      { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO" },
+      { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO" },
+    ],
+    # Outbox publishers produce to EVENTS_00..EVENTS_07; a project hashes to one stream.
+    [for i, name in local.k2_stream_names : {
+      type   = "k2"
+      name   = format("EVENTS_%02d", i)
+      stream = data.external.k2_streams.result[name]
+    }],
+  )
 
   # Durable Object migrations are a transition from the live tag (old_tag) to the target (new_tag).
   # v1 (ProjectRootDO, ResourceShardDO, ProjectViewDO as SQLite classes) is applied, so steady
