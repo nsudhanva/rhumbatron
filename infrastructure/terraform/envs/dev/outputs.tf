@@ -38,3 +38,8 @@ output "web_worker" {
     version_id = module.web_worker.version_id
   }
 }
+
+output "coordinator_worker" {
+  description = "Coordinator Worker name."
+  value       = module.coordinator_worker.name
+}

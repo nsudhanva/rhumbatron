@@ -7,12 +7,14 @@ Phase 3 - Core project state and Durable Objects
 - P0-01 through P0-10
 - P1-01 through P1-09, P1-11, P1-12
 - P2-01, P2-02, P2-04 through P2-11
-- P3-01 through P3-03: schemas, first migration, Terraform-run migrations (applied to dev): web and API live on dev via Terraform
+- P3-01 through P3-03: schemas, first migration, Terraform-run migrations (applied to dev)
+- P3-07, P3-11: coordinator Worker with 3 SQLite Durable Objects on dev; CAS critical tests: web and API live on dev via Terraform
   - https://dev.rhumbatron.com, https://api-dev.rhumbatron.com (`bun run smoke:dev`)
 - Clerk authentication in apps/web (local development instance)
 
 ## Active
-- P2-03 Zustand (TanStack Query done; add with the first client-state page)
+- P3-04 to P3-06 in review: DO code deployed, live path exercised by P3-08 to P3-10
+- P2-03 Zustand (add with the first client-state page)
 
 ## Blocked
 - P1-10 Vectorize deferred to Phase 7 (ADR 0003).
@@ -31,6 +33,7 @@ Phase 3 - Core project state and Durable Objects
 - User authentication: Clerk, docs/adr/0002-clerk-authentication.md.
 - Naming rhumbatron-<component>-<env>; bootstrap credentials via cf CLI: docs/adr/0004.
 - Provider cloudflare 5.27 has no Vectorize, Artifacts, K2, Containers, or resource-tagging resource. Section 11.4 applies.
+- Durable Object Workers deploy via cloudflare_workers_script: docs/adr/0005.
 - envs/global owns zone-wide settings. Prod is planned only until the first E2E Change.
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 

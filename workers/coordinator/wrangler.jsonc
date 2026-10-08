@@ -12,5 +12,16 @@
   "vars": {
     "ENVIRONMENT": "local",
     "SERVICE_NAME": "rhumbatron-coordinator"
-  }
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "PROJECT_ROOT", "class_name": "ProjectRootDO" },
+      { "name": "RESOURCE_SHARD", "class_name": "ResourceShardDO" },
+      { "name": "PROJECT_VIEW", "class_name": "ProjectViewDO" }
+    ]
+  },
+  // SQLite-backed Durable Objects (available on Workers Free).
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ProjectRootDO", "ResourceShardDO", "ProjectViewDO"] }
+  ]
 }

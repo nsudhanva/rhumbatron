@@ -1,3 +1,7 @@
+export { ProjectRootDO } from "./project-root-do.ts";
+export { ProjectViewDO } from "./project-view-do.ts";
+export { ResourceShardDO } from "./resource-shard-do.ts";
+
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);

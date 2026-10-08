@@ -9,7 +9,13 @@
     "apps/web": {
       "ignoreDependencies": ["cloudflare"]
     },
-    "workers/*": {},
+    "workers/*": {
+      "ignoreDependencies": ["cloudflare"]
+    },
     "packages/*": {}
+  },
+  "ignoreExportsUsedInFile": {
+    "interface": true,
+    "type": true
   }
 }

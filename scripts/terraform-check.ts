@@ -30,7 +30,7 @@ for (const dir of roots) {
 }
 
 // The worker module is not called from any root yet, so validate it directly.
-for (const module of ["modules/worker"]) {
+for (const module of ["modules/worker", "modules/durable-worker"]) {
   const cwd = resolve(tfRoot, module);
   console.log(`\n== ${module}`);
   const env = offlineEnv(module);

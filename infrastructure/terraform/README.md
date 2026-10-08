@@ -11,7 +11,7 @@ the dashboard, `wrangler deploy`, or direct API writes.
 | `envs/global/` | `global/terraform.tfstate` | Zone-wide singletons for `rhumbatron.com` (TLS settings, later WAF). Owned once, never by dev or prod. Applied. |
 | `envs/dev/` | `dev/terraform.tfstate` | Dev environment. Applied. |
 | `envs/prod/` | `prod/terraform.tfstate` | Prod environment. Planned only until the first end-to-end Change works (AGENTS.md section 10). |
-| `modules/` | - | `worker`, `dns`, `state`, `async`, `security` are implemented. `ai`, `code-storage`, `observability` are placeholders. |
+| `modules/` | - | `worker`, `durable-worker` (ADR 0005), `dns`, `state`, `async`, `security` are implemented. `ai`, `code-storage`, `observability` are placeholders. |
 
 ## Environments
 

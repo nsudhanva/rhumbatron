@@ -99,6 +99,41 @@ module "web_worker" {
   }]
 }
 
+# Strong coordination Durable Objects (AGENTS.md section 12.3). SQLite-backed, Workers Free.
+locals {
+  coordinator_classes = ["ProjectRootDO", "ResourceShardDO", "ProjectViewDO"]
+}
+
+module "coordinator_worker" {
+  source      = "../../modules/durable-worker"
+  account_id  = var.account_id
+  component   = "coordinator"
+  environment = local.environment
+
+  main_module         = local.bundles.coordinator.main_module
+  compatibility_date  = local.bundles.coordinator.compatibility_date
+  compatibility_flags = local.bundles.coordinator.compatibility_flags
+  modules = [for m in local.bundles.coordinator.modules : {
+    name         = m.name
+    content_file = "${local.repo_root}/${m.content_file}"
+    content_type = m.content_type
+  }]
+
+  bindings = [
+    { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
+    { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-coordinator-${local.environment}" },
+    { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO" },
+    { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO" },
+    { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO" },
+  ]
+
+  # Matches wrangler.jsonc migrations. Add a new tag for every class change; never edit v1.
+  migrations = {
+    new_tag            = "v1"
+    new_sqlite_classes = local.coordinator_classes
+  }
+}
+
 # D1 schema migrations (AGENTS.md section 11.6). Re-runs when any migration file changes.
 # The script applies only unapplied files and is safe to run again.
 locals {
