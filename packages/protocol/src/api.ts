@@ -1,7 +1,14 @@
 import { z } from "zod";
 
 /** Machine-readable error codes returned by every Rhumbatron API. */
-export const ApiErrorCode = z.enum(["invalid_request", "not_found", "conflict", "internal"]);
+export const ApiErrorCode = z.enum([
+  "invalid_request",
+  "unauthorized",
+  "forbidden",
+  "not_found",
+  "conflict",
+  "internal",
+]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCode>;
 
 /** Error body: `{ error: { code, message, details? } }`. */

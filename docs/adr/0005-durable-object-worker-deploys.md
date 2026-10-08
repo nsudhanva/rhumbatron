@@ -16,7 +16,9 @@ AGENTS.md section 11.5 prefers `cloudflare_worker` + `cloudflare_worker_version`
   `cloudflare_workers_script` (full deploy, supports `migrations`). Today: `rhumbatron-coordinator`.
   Later: `rhumbatron-agents`.
 - All other Workers keep `modules/worker` (version + deployment), which canary rollout needs later.
-- Migration tags in Terraform must equal the Worker's `wrangler.jsonc`. Never edit an applied tag.
+- Migrations are expressed as a transition from the live tag to the target tag. `old_tag` must
+  equal the live tag, or Cloudflare rejects the upload (412, code 10079). Steady state is
+  `old_tag = new_tag = <live tag>` with no class changes. Never edit an applied tag.
 
 ## Consequences
 

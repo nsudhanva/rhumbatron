@@ -11,6 +11,31 @@
   },
   "vars": {
     "ENVIRONMENT": "local",
-    "SERVICE_NAME": "rhumbatron-api"
+    "SERVICE_NAME": "rhumbatron-api",
+    "CLERK_AUTHORIZED_PARTIES": "http://localhost:5173",
+    "CLERK_ALLOW_MISSING_AZP": "true"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rhumbatron-control-local",
+      "database_id": "local",
+      "migrations_dir": "../../migrations/d1"
+    }
+  ],
+  // Durable Objects live in the coordinator Worker. Run both with multi-worker `wrangler dev`.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PROJECT_ROOT",
+        "class_name": "ProjectRootDO",
+        "script_name": "rhumbatron-coordinator"
+      },
+      {
+        "name": "PROJECT_VIEW",
+        "class_name": "ProjectViewDO",
+        "script_name": "rhumbatron-coordinator"
+      }
+    ]
   }
 }

@@ -1,19 +1,20 @@
 # Build Status
 
 ## Current phase
-Phase 3 - Core project state and Durable Objects
+Phase 3 - Core project state and Durable Objects (functionally complete on dev)
 
 ## Completed
 - P0-01 through P0-10
 - P1-01 through P1-09, P1-11, P1-12
 - P2-01, P2-02, P2-04 through P2-11
 - P3-01 through P3-03: schemas, first migration, Terraform-run migrations (applied to dev)
-- P3-07, P3-11: coordinator Worker with 3 SQLite Durable Objects on dev; CAS critical tests: web and API live on dev via Terraform
+- P3-04, P3-06 to P3-12: Durable Objects, Clerk-authenticated Project and Change API, live on dev
+  - `bun run smoke:dev`: 16 checks including the authenticated flow (Clerk smoke user): web and API live on dev via Terraform
   - https://dev.rhumbatron.com, https://api-dev.rhumbatron.com (`bun run smoke:dev`)
 - Clerk authentication in apps/web (local development instance)
 
 ## Active
-- P3-04 to P3-06 in review: DO code deployed, live path exercised by P3-08 to P3-10
+- P3-05 ResourceShardDO in review: deployed, first live use is Phase 9 claims
 - P2-03 Zustand (add with the first client-state page)
 
 ## Blocked
@@ -38,5 +39,6 @@ Phase 3 - Core project state and Durable Objects
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 
 ## Next
+- Phase 4 (event fabric) needs K2, which needs Workers Paid: decide before starting.
 - Phase 3 (Project and Change state, Durable Objects).
 - Tracking: Linear project Rhumbatron (AGENTS.md rule 49).

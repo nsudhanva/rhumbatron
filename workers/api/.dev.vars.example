@@ -1,0 +1,2 @@
+# Copy to .dev.vars (Git ignores it). Use the Clerk development secret key.
+CLERK_SECRET_KEY=

@@ -60,6 +60,13 @@ module "api_worker" {
   bindings = [
     { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
     { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-api-${local.environment}" },
+    { type = "plain_text", name = "CLERK_AUTHORIZED_PARTIES", text = "https://${local.hostnames.web},http://localhost:5173" },
+    { type = "secret_text", name = "CLERK_SECRET_KEY", text = var.clerk_secret_key },
+    # Dev only: accept backend-minted smoke-test tokens without azp. Prod must set "false".
+    { type = "plain_text", name = "CLERK_ALLOW_MISSING_AZP", text = "true" },
+    module.state.bindings.DB,
+    { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
+    { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = module.coordinator_worker.name },
   ]
 
   custom_domains = [{
@@ -100,10 +107,6 @@ module "web_worker" {
 }
 
 # Strong coordination Durable Objects (AGENTS.md section 12.3). SQLite-backed, Workers Free.
-locals {
-  coordinator_classes = ["ProjectRootDO", "ResourceShardDO", "ProjectViewDO"]
-}
-
 module "coordinator_worker" {
   source      = "../../modules/durable-worker"
   account_id  = var.account_id
@@ -127,10 +130,13 @@ module "coordinator_worker" {
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO" },
   ]
 
-  # Matches wrangler.jsonc migrations. Add a new tag for every class change; never edit v1.
+  # Durable Object migrations are a transition from the live tag (old_tag) to the target (new_tag).
+  # v1 (ProjectRootDO, ResourceShardDO, ProjectViewDO as SQLite classes) is applied, so steady
+  # state is v1 -> v1. To add a class: old_tag = "v1", new_tag = "v2", new_sqlite_classes = [...],
+  # and add the same v2 entry to wrangler.jsonc.
   migrations = {
-    new_tag            = "v1"
-    new_sqlite_classes = local.coordinator_classes
+    old_tag = "v1"
+    new_tag = "v1"
   }
 }
 
