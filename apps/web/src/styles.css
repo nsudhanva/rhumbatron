@@ -1,0 +1,5 @@
+@import "@cloudflare/kumo/styles/tailwind";
+@import "tailwindcss";
+
+/* Tailwind v4 does not scan node_modules. Kumo classes must be sourced explicitly. */
+@source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";

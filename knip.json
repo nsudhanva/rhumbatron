@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreBinaries": ["gitleaks", "terraform", "tflint"],
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.ts"],
+      "ignoreDependencies": ["wrangler"]
+    },
+    "apps/web": {
+      "ignoreDependencies": ["cloudflare"]
+    },
+    "workers/*": {},
+    "packages/*": {}
+  }
+}

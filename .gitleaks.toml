@@ -1,0 +1,31 @@
+# Gitleaks configuration. Extends the default rule set with Cloudflare-specific rules.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "cloudflare-api-token"
+description = "Cloudflare API token assigned to a variable"
+regex = '''(?i)(?:cloudflare|cf)[_-]?api[_-]?token\s*[:=]\s*["']?([A-Za-z0-9_-]{40})["']?'''
+secretGroup = 1
+keywords = ["cloudflare", "cf_api", "cf-api"]
+
+[[rules]]
+id = "r2-secret-access-key"
+description = "R2 S3-compatible secret access key"
+regex = '''(?i)(?:secret[_-]?access[_-]?key|secret_key)\s*[:=]\s*["']?([a-f0-9]{64})["']?'''
+secretGroup = 1
+keywords = ["secret_access_key", "secret-access-key", "secret_key"]
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API key"
+regex = '''sk-ant-[A-Za-z0-9_-]{20,}'''
+keywords = ["sk-ant-"]
+
+[allowlist]
+description = "Generated and vendored files"
+paths = [
+  '''bun\.lock''',
+  '''\.terraform\.lock\.hcl''',
+  '''worker-configuration\.d\.ts''',
+]

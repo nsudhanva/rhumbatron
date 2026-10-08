@@ -1,0 +1,16 @@
+{
+  "name": "@rhumbatron/agents",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "cf:types": "wrangler types",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "wrangler": "4.149.0"
+  }
+}

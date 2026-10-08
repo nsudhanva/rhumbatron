@@ -1,0 +1,30 @@
+# Local quality gates. Install with `bun install` (runs `lefthook install`).
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome
+      glob: "*.{js,jsx,ts,tsx,json,jsonc,css}"
+      run: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true
+    - name: gitleaks
+      run: gitleaks git --staged --redact --no-banner
+    - name: terraform-fmt
+      glob: "*.{tf,tfvars}"
+      run: terraform fmt -check {staged_files}
+    - name: guardrails
+      run: bun scripts/check-guardrails.ts
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: bunx commitlint --edit {1}
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: typecheck
+      run: bun run typecheck
+    - name: deps
+      run: bun run check:deps
+    - name: terraform
+      run: bun run tf:check

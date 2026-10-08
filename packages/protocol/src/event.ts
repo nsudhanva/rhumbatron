@@ -1,0 +1,87 @@
+import { z } from "zod";
+import { CanonicalGeneration, Id, SemanticResource, Timestamp } from "./common.ts";
+
+/** Initial Event types. Dot-separated. Events are facts, never commands. */
+export const EVENT_TYPES = [
+  "project.created",
+  "change.created",
+  "change.compiled",
+  "change.cancelled",
+  "task.created",
+  "task.ready",
+  "task.assigned",
+  "task.started",
+  "task.completed",
+  "task.failed",
+  "claim.acquired",
+  "claim.renewed",
+  "claim.released",
+  "claim.expired",
+  "intent.declared",
+  "intent.changed",
+  "challenge.created",
+  "challenge.resolved",
+  "changeset.proposed",
+  "changeset.accepted",
+  "changeset.rejected",
+  "candidate.forked",
+  "candidate.composed",
+  "candidate.stale",
+  "verification.started",
+  "verification.check.completed",
+  "verification.completed",
+  "preview.ready",
+  "approval.requested",
+  "approval.granted",
+  "approval.rejected",
+  "canonical.promotion.requested",
+  "canonical.advanced",
+  "artifact.promoted",
+  "build.started",
+  "build.completed",
+  "deployment.started",
+  "deployment.completed",
+  "test.failed",
+  "security.check.failed",
+  "performance.check.failed",
+  "agent.woken",
+  "agent.slept",
+  "agent.escalated",
+  "model.route.decided",
+] as const;
+
+export const EventType = z.enum(EVENT_TYPES);
+export type EventType = z.infer<typeof EventType>;
+
+export const Actor = z.object({
+  kind: z.enum(["user", "agent", "system"]),
+  id: Id,
+});
+export type Actor = z.infer<typeof Actor>;
+
+/**
+ * Envelope for every Event. `eventId` is generated before publication and
+ * reused on retry. Payloads must not contain secrets or private reasoning.
+ */
+export const eventEnvelope = <T extends z.ZodType>(payload: T) =>
+  z.object({
+    eventId: Id,
+    eventType: EventType,
+    eventVersion: z.number().int().positive(),
+    tenantId: Id,
+    projectId: Id,
+    changeId: Id.optional(),
+    taskId: Id.optional(),
+    actor: Actor,
+    resource: SemanticResource.optional(),
+    canonicalGeneration: CanonicalGeneration,
+    causedBy: Id.optional(),
+    correlationId: Id,
+    timestamp: Timestamp,
+    payload,
+  });
+
+export const AnyEventEnvelope = eventEnvelope(z.unknown());
+export type EventEnvelope<T = unknown> = Omit<z.infer<typeof AnyEventEnvelope>, "payload"> & {
+  payload: T;
+};

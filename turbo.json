@@ -1,0 +1,26 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  "tasks": {
+    "cf:types": {
+      "inputs": ["wrangler.jsonc"],
+      "outputs": ["worker-configuration.d.ts"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck", "cf:types"],
+      "outputs": []
+    },
+    "build": {
+      "dependsOn": ["^build", "cf:types"],
+      "outputs": ["dist/**"]
+    },
+    "test:critical": {
+      "dependsOn": ["cf:types"],
+      "outputs": []
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

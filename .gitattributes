@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
+bun.lock linguist-generated=true -diff
+**/routeTree.gen.ts linguist-generated=true
+.terraform.lock.hcl linguist-generated=true

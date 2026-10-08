@@ -1,0 +1,34 @@
+{
+  "name": "@rhumbatron/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "cf:types": "wrangler types",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cloudflare/kumo": "2.14.0",
+    "@phosphor-icons/react": "2.1.10",
+    "@tanstack/react-query": "5.104.1",
+    "@tanstack/react-router": "1.170.41",
+    "@tanstack/react-router-ssr-query": "1.167.3",
+    "@tanstack/react-start": "1.168.60",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.63.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.4",
+    "wrangler": "4.149.0"
+  }
+}

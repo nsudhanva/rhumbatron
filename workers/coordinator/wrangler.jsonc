@@ -1,0 +1,16 @@
+// Local development configuration only. Terraform owns the remote Worker.
+// Keep binding names identical to infrastructure/terraform.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "rhumbatron-coordinator",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-08",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "SERVICE_NAME": "rhumbatron-coordinator"
+  }
+}

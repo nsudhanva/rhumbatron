@@ -1,0 +1,5 @@
+[install]
+# Pin exact versions so bun.lock and package.json agree.
+exact = true
+# Isolated installs stop packages from importing undeclared dependencies.
+linker = "isolated"

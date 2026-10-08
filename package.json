@@ -1,0 +1,46 @@
+{
+  "name": "rhumbatron",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "engines": {
+    "bun": ">=1.3.14"
+  },
+  "workspaces": [
+    "apps/*",
+    "workers/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "typecheck": "turbo typecheck && tsc -p tsconfig.json",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "test:critical": "turbo test:critical",
+    "cf:types": "turbo cf:types",
+    "cf:bundle": "bun scripts/build-workers.ts",
+    "check": "bun run lint && bun run typecheck && bun run check:guardrails && bun run check:deps && bun run check:secrets && bun run tf:check",
+    "check:guardrails": "bun scripts/check-guardrails.ts",
+    "check:deps": "knip && sherif",
+    "check:secrets": "gitleaks dir . --redact --no-banner",
+    "tf:fmt": "terraform fmt -recursive infrastructure/terraform",
+    "tf:check": "bun scripts/terraform-check.ts",
+    "tf:plan:dev": "terraform -chdir=infrastructure/terraform/envs/dev plan",
+    "tf:apply:dev": "terraform -chdir=infrastructure/terraform/envs/dev apply",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@commitlint/cli": "21.2.3",
+    "@commitlint/config-conventional": "21.2.3",
+    "@types/bun": "1.4.2",
+    "knip": "6.40.0",
+    "lefthook": "2.2.1",
+    "sherif": "1.13.0",
+    "turbo": "2.11.7",
+    "typescript": "7.0.2",
+    "wrangler": "4.149.0"
+  }
+}

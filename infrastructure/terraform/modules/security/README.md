@@ -1,0 +1,12 @@
+# Module: security
+
+Status: placeholder. Add resources when the owning phase starts.
+
+Owns:
+
+- WAF and rate-limit policy.
+- Access policy.
+- Turnstile resources.
+- DNS security settings.
+
+Add these controls only after the protected endpoint exists (section 40.4).
