@@ -14,6 +14,7 @@ import {
   MIN_TTL_MS,
   nextAlarmAt,
 } from "./claims.ts";
+import { migrateOutbox, OutboxPublisher } from "./outbox.ts";
 
 /**
  * Owner of hot claim and lease state for one shard of semantic resources (AGENTS.md section 13.2).
@@ -71,10 +72,12 @@ const SYSTEM_ACTOR_ID = "resource-shard-do";
 
 export class ResourceShardDO extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  private readonly outbox: OutboxPublisher;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.outbox = new OutboxPublisher(this.sql, env);
     // Schema setup runs before any request reaches this instance.
     ctx.blockConcurrencyWhile(async () => this.migrate());
   }
@@ -96,17 +99,8 @@ export class ResourceShardDO extends DurableObject<Env> {
       CREATE UNIQUE INDEX IF NOT EXISTS claims_one_active_per_resource
         ON claims (project_id, resource) WHERE status = 'active';
       CREATE INDEX IF NOT EXISTS claims_status_expiry ON claims (status, lease_expires_at);
-      CREATE TABLE IF NOT EXISTS outbox (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        event_id TEXT NOT NULL UNIQUE,
-        event_type TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        published_at TEXT,
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT
-      );
     `);
+    migrateOutbox(this.sql);
   }
 
   /**
@@ -240,7 +234,7 @@ export class ResourceShardDO extends DurableObject<Env> {
     return rows.map((r) => toClaim(fromRow(r)));
   }
 
-  /** Expires overdue claims, prunes old finished rows, and sets the next alarm. */
+  /** Expires overdue claims, prunes old finished rows, publishes the outbox, sets the next alarm. */
   override async alarm(): Promise<void> {
     const now = Date.now();
     this.ctx.storage.transactionSync(() => {
@@ -250,18 +244,13 @@ export class ResourceShardDO extends DurableObject<Env> {
         now - TERMINAL_RETENTION_MS,
       );
     });
+    await this.outbox.publishAllDue(now);
     await this.rescheduleAlarm();
   }
 
-  /** Unpublished outbox rows, oldest first. The publisher is built in P4-05. */
-  async pendingOutbox(limit = 50): Promise<{ eventId: string; eventType: string }[]> {
-    return this.sql
-      .exec<{ event_id: string; event_type: string }>(
-        "SELECT event_id, event_type FROM outbox WHERE published_at IS NULL ORDER BY id LIMIT ?",
-        limit,
-      )
-      .toArray()
-      .map((r) => ({ eventId: r.event_id, eventType: r.event_type }));
+  /** Unpublished outbox rows (pending or failed), oldest first. */
+  async pendingOutbox(limit = 50) {
+    return this.outbox.pending(limit);
   }
 
   private assertTtl(ttlMs: number) {
@@ -318,9 +307,12 @@ export class ResourceShardDO extends DurableObject<Env> {
       .exec<ClaimRow>("SELECT * FROM claims WHERE status = 'active'")
       .toArray()
       .map(fromRow);
-    const at = nextAlarmAt(active);
-    if (at === null) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(at);
+    // One alarm serves both lease expiry and outbox publishing: take the earlier of the two.
+    const candidates = [nextAlarmAt(active), this.outbox.nextDueAt()].filter(
+      (t): t is number => t !== null,
+    );
+    if (candidates.length === 0) await this.ctx.storage.deleteAlarm();
+    else await this.ctx.storage.setAlarm(Math.max(Math.min(...candidates), Date.now()));
   }
 
   /** Writes one claim event to the outbox. Call it in the same transaction as the state change. */

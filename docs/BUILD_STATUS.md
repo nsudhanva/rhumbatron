@@ -8,7 +8,8 @@ Phase 4 - Event and command fabric
 - P1-01 through P1-09, P1-11, P1-12
 - P2-01, P2-02, P2-04 through P2-11
 - P3-01 through P3-03: schemas, first migration, Terraform-run migrations (applied to dev)
-- P4-01, P4-03, P4-04, P4-07: envelopes; 8 K2 streams x 4 subscriptions on dev (ADR 0006)
+- P4-01 to P4-05, P4-07: envelopes, transactional outbox, alarm publisher to K2 (verified: project.created on dev)
+  - 8 K2 streams x 4 subscriptions on dev (ADR 0006)
 - P3-04, P3-06 to P3-12: Durable Objects, Clerk-authenticated Project and Change API, live on dev
   - `bun run smoke:dev`: 16 checks including the authenticated flow (Clerk smoke user): web and API live on dev via Terraform
   - https://dev.rhumbatron.com, https://api-dev.rhumbatron.com (`bun run smoke:dev`)
@@ -40,6 +41,6 @@ Phase 4 - Event and command fabric
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 
 ## Next
-- P4-05 outbox publisher, P4-06 dedupe, P4-08 event router, P4-09 projector, P4-10 archive.
+- P4-06 dedupe, P4-08 event router (K2 pull consumer), P4-09 projector, P4-10 R2 archive, P4-11/12 fault tests.
 - Phase 3 (Project and Change state, Durable Objects).
 - Tracking: Linear project Rhumbatron (AGENTS.md rule 49).

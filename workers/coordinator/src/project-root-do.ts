@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { AnyEventEnvelope, type EventEnvelope } from "@rhumbatron/protocol";
+import { migrateOutbox, OutboxPublisher } from "./outbox.ts";
 import {
   type CanonicalState,
   decidePromotion,
@@ -58,10 +59,12 @@ type RootRow = {
 
 export class ProjectRootDO extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  private readonly outbox: OutboxPublisher;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.outbox = new OutboxPublisher(this.sql, env);
     // Schema setup runs before any request reaches this instance.
     ctx.blockConcurrencyWhile(async () => this.migrate());
   }
@@ -82,17 +85,8 @@ export class ProjectRootDO extends DurableObject<Env> {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS outbox (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        event_id TEXT NOT NULL UNIQUE,
-        event_type TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        published_at TEXT,
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT
-      );
     `);
+    migrateOutbox(this.sql);
   }
 
   private row(): RootRow | null {
@@ -122,19 +116,45 @@ export class ProjectRootDO extends DurableObject<Env> {
       return this.snapshot(existing);
     }
     const now = new Date().toISOString();
-    this.sql.exec(
-      `INSERT INTO project_root (id, project_id, org_id, canonical_generation, canonical_artifact_ref,
-         canonical_tree_sha, active_policy_version, created_at, updated_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      input.projectId,
-      input.orgId,
-      input.generation ?? 0,
-      input.artifactRef,
-      input.treeSha,
-      input.policyVersion,
-      now,
-      now,
-    );
+    const generation = input.generation ?? 0;
+    const event: EventEnvelope<{ orgId: string; generation: number; policyVersion: string }> = {
+      eventId: crypto.randomUUID(),
+      eventType: "project.created",
+      eventVersion: 1,
+      tenantId: input.orgId,
+      projectId: input.projectId,
+      actor: { kind: "system", id: "project-root-do" },
+      canonicalGeneration: generation,
+      correlationId: input.projectId,
+      timestamp: now,
+      payload: { orgId: input.orgId, generation, policyVersion: input.policyVersion },
+    };
+    AnyEventEnvelope.parse(event);
+
+    // The root row and its project.created event commit together (AGENTS.md section 18).
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        `INSERT INTO project_root (id, project_id, org_id, canonical_generation, canonical_artifact_ref,
+           canonical_tree_sha, active_policy_version, created_at, updated_at)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        input.projectId,
+        input.orgId,
+        generation,
+        input.artifactRef,
+        input.treeSha,
+        input.policyVersion,
+        now,
+        now,
+      );
+      this.sql.exec(
+        "INSERT INTO outbox (event_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
+        event.eventId,
+        event.eventType,
+        JSON.stringify(event),
+        now,
+      );
+    });
+    await this.scheduleAlarm();
     return this.snapshot(this.requireRow());
   }
 
@@ -217,18 +237,25 @@ export class ProjectRootDO extends DurableObject<Env> {
       );
     });
 
+    await this.scheduleAlarm();
     return { ok: true, generation: decision.next.generation, alreadyPromoted: false };
   }
 
-  /** Unpublished outbox rows, oldest first. The publisher is built in P4-05. */
-  async pendingOutbox(limit = 50): Promise<{ eventId: string; eventType: string }[]> {
-    return this.sql
-      .exec<{ event_id: string; event_type: string }>(
-        "SELECT event_id, event_type FROM outbox WHERE published_at IS NULL ORDER BY id LIMIT ?",
-        limit,
-      )
-      .toArray()
-      .map((r) => ({ eventId: r.event_id, eventType: r.event_type }));
+  /** Publishes due outbox rows to K2, then schedules the next attempt if any remain. */
+  override async alarm(): Promise<void> {
+    await this.outbox.publishAllDue(Date.now());
+    await this.scheduleAlarm();
+  }
+
+  private async scheduleAlarm() {
+    const at = this.outbox.nextDueAt();
+    if (at === null) await this.ctx.storage.deleteAlarm();
+    else await this.ctx.storage.setAlarm(Math.max(at, Date.now()));
+  }
+
+  /** Unpublished outbox rows (pending or failed), oldest first. */
+  async pendingOutbox(limit = 50) {
+    return this.outbox.pending(limit);
   }
 
   private requireRow(): RootRow {
