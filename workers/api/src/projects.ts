@@ -110,7 +110,14 @@ export const projects = new Hono<AppEnv>()
       return fail(c, 409, "conflict", `Project slug "${body.slug}" already exists`);
     }
 
-    // Both initializers are idempotent, so a retry after a partial failure is safe.
+    // Both initializers are idempotent, so a retry after a partial failure is safe. The view goes
+    // first: ProjectRootDO emits project.created, and the projector needs the view to exist.
+    await projectView(c.env, projectId).initialize({
+      projectId,
+      name: body.name,
+      canonicalGeneration: 0,
+    });
+
     await projectRoot(c.env, projectId).initialize({
       projectId,
       orgId,
@@ -118,12 +125,6 @@ export const projects = new Hono<AppEnv>()
       generation: 0,
       policyVersion: DEFAULT_POLICIES.modelPolicyVersion,
     });
-    await projectView(c.env, projectId).initialize({
-      projectId,
-      name: body.name,
-      canonicalGeneration: 0,
-    });
-
     const project = await loadProject(c.env, projectId);
     if (!project || !(await canAccessProject(c.env.DB, userId, projectId))) {
       throw new Error("Project was not readable after creation");

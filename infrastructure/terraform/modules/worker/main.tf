@@ -80,3 +80,13 @@ resource "cloudflare_workers_custom_domain" "this" {
 
   depends_on = [cloudflare_workers_deployment.this]
 }
+
+resource "cloudflare_workers_cron_trigger" "this" {
+  count = length(var.cron_schedules) > 0 ? 1 : 0
+
+  account_id  = var.account_id
+  script_name = cloudflare_worker.this.name
+  schedules   = [for cron in var.cron_schedules : { cron = cron }]
+
+  depends_on = [cloudflare_workers_deployment.this]
+}

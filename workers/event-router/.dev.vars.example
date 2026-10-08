@@ -1,0 +1,2 @@
+# Copy to .dev.vars (Git ignores it). K2 consume-only token.
+K2_CONSUMER_TOKEN=

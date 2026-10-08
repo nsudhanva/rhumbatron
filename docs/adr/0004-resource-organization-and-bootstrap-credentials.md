@@ -27,12 +27,13 @@
 
 ### Bootstrap credentials
 
-These two credentials are the only Cloudflare objects created outside Terraform. Both are created
+These credentials are the only Cloudflare objects created outside Terraform. Both are created
 with the `cf` CLI and stored in the macOS Keychain, never in Git or Terraform files.
 
 | Token | Scope | Keychain service |
 |---|---|---|
 | `rhumbatron-terraform-global` | Account: R2, D1, KV, Queues, Vectorize, Workers Scripts, AI Gateway (write), Account Settings (read). Zone `rhumbatron.com`: Zone (read), Zone Settings, DNS, Workers Routes (write). | `rhumbatron-cloudflare-api-token` |
+| `rhumbatron-k2-consumer-dev` | K2 Consume only. Passed to the event router as a Worker secret via Terraform. | `rhumbatron-k2-consumer-token-dev` |
 | `rhumbatron-terraform-state-backend-global` | R2 object read/write on `rhumbatron-terraform-state-global` only. | `rhumbatron-r2-state-access-key-id`, `rhumbatron-r2-state-secret-access-key` |
 
 ## Rotation and changes

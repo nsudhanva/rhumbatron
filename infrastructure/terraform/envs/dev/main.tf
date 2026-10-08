@@ -162,6 +162,8 @@ module "coordinator_worker" {
       { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO" },
       { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO" },
       { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO" },
+      # Nudges the event router right after a publish (low-latency consume).
+      { type = "service", name = "EVENT_ROUTER", service = "rhumbatron-event-router-${local.environment}" },
     ],
     # Outbox publishers produce to EVENTS_00..EVENTS_07; a project hashes to one stream.
     [for i, name in local.k2_stream_names : {
@@ -171,6 +173,9 @@ module "coordinator_worker" {
     }],
   )
 
+  # The service binding target must exist before the coordinator uploads.
+  depends_on = [module.event_router_worker]
+
   # Durable Object migrations are a transition from the live tag (old_tag) to the target (new_tag).
   # v1 (ProjectRootDO, ResourceShardDO, ProjectViewDO as SQLite classes) is applied, so steady
   # state is v1 -> v1. To add a class: old_tag = "v1", new_tag = "v2", new_sqlite_classes = [...],
@@ -179,6 +184,37 @@ module "coordinator_worker" {
     old_tag = "v1"
     new_tag = "v1"
   }
+}
+
+# K2 consumer: pulls events, deduplicates, projects into ProjectViewDO (AGENTS.md section 12.5).
+# Fast path: the coordinator nudges it after each publish. Safety net: a 1-minute cron sweep.
+module "event_router_worker" {
+  source      = "../../modules/worker"
+  account_id  = var.account_id
+  component   = "event-router"
+  environment = local.environment
+
+  main_module         = local.bundles["event-router"].main_module
+  bundle_sha256       = local.bundles["event-router"].bundle_sha256
+  compatibility_date  = local.bundles["event-router"].compatibility_date
+  compatibility_flags = local.bundles["event-router"].compatibility_flags
+  modules = [for m in local.bundles["event-router"].modules : {
+    name         = m.name
+    content_file = "${local.repo_root}/${m.content_file}"
+    content_type = m.content_type
+  }]
+
+  bindings = [
+    { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
+    { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-event-router-${local.environment}" },
+    { type = "plain_text", name = "K2_STREAM_IDS", text = jsonencode([for n in local.k2_stream_names : data.external.k2_streams.result[n]]) },
+    { type = "secret_text", name = "K2_CONSUMER_TOKEN", text = var.k2_consumer_token },
+    module.state.bindings.DB,
+    # Literal name (not a module output) avoids a cycle: the coordinator binds back to this Worker.
+    { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = "rhumbatron-coordinator-${local.environment}" },
+  ]
+
+  cron_schedules = ["* * * * *"]
 }
 
 # D1 schema migrations (AGENTS.md section 11.6). Re-runs when any migration file changes.

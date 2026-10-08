@@ -11,6 +11,27 @@
   },
   "vars": {
     "ENVIRONMENT": "local",
-    "SERVICE_NAME": "rhumbatron-event-router"
+    "SERVICE_NAME": "rhumbatron-event-router",
+    // JSON array of K2 stream IDs in index order (EVENTS_00..07). Terraform sets the real IDs.
+    "K2_STREAM_IDS": "[]"
+  },
+  // Safety-net sweep: one stream per minute (AGENTS.md section 19). Nudges handle the fast path.
+  "triggers": { "crons": ["* * * * *"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rhumbatron-control-local",
+      "database_id": "local",
+      "migrations_dir": "../../migrations/d1"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PROJECT_VIEW",
+        "class_name": "ProjectViewDO",
+        "script_name": "rhumbatron-coordinator"
+      }
+    ]
   }
 }

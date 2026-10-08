@@ -15,6 +15,9 @@ export type K2Producer = {
 };
 type K2Env = Partial<Record<string, unknown>>;
 
+/** Service binding to the event router's `nudge` RPC (absent in local dev). */
+type EventRouterBinding = { nudge(streamIndex: number): Promise<unknown> };
+
 const K2_STREAM_COUNT = 8;
 export const MAX_PUBLISH_ATTEMPTS = 10;
 const BATCH_LIMIT = 100;
@@ -183,7 +186,21 @@ export class OutboxPublisher {
         );
       }
     }
+    if (result.success) await this.nudgeRouter(projectId);
     return { published: result.success ? rows.length : 0, pending: rows.length };
+  }
+
+  /** Asks the event router to consume this project's stream now. Best effort: cron is the backstop. */
+  private async nudgeRouter(projectId: string) {
+    const router = (this.env as unknown as K2Env).EVENT_ROUTER as EventRouterBinding | undefined;
+    if (!router) return;
+    try {
+      await router.nudge(streamIndex(projectId));
+    } catch (error) {
+      console.warn(
+        JSON.stringify({ event: "outbox.nudge_failed", error: String(error).slice(0, 200) }),
+      );
+    }
   }
 
   /** Unpublished rows (pending or failed), oldest first, for operators and tests. */

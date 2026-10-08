@@ -19,3 +19,9 @@ variable "clerk_secret_key" {
   type        = string
   sensitive   = true
 }
+
+variable "k2_consumer_token" {
+  description = "K2 Consume-only token for the event router. Loaded from the Keychain by `bun run tf dev`."
+  type        = string
+  sensitive   = true
+}

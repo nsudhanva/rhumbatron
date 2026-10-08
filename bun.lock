@@ -94,8 +94,14 @@
     "workers/event-router": {
       "name": "@rhumbatron/event-router",
       "version": "0.0.0",
+      "dependencies": {
+        "@rhumbatron/protocol": "workspace:*",
+        "zod": "4.6.5",
+      },
       "devDependencies": {
+        "@rhumbatron/coordinator": "workspace:*",
         "typescript": "7.0.2",
+        "vitest": "5.0.3",
         "wrangler": "4.149.0",
       },
     },

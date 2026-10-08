@@ -102,3 +102,9 @@ variable "extra_tags" {
   type        = set(string)
   default     = []
 }
+
+variable "cron_schedules" {
+  description = "Cron Trigger expressions. Keep equal to wrangler.jsonc triggers.crons."
+  type        = list(string)
+  default     = []
+}

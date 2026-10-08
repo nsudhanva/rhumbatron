@@ -23,6 +23,19 @@ enabled during the beta; Rhumbatron must still stay within free limits (rule 50)
 - K2 names allow only letters, digits, and underscores, so K2 is the one exception to the
   hyphenated naming pattern.
 
+## Consumers
+
+K2 has no push delivery to Workers; consumers pull over HTTP with leases and acknowledgements.
+
+- `rhumbatron-event-router` consumes `project-view-projector` and `causal-router`.
+- Fast path: after a successful publish, the coordinator calls the router's `nudge(streamIndex)`
+  RPC through a service binding, so the UI sees events within seconds.
+- Safety net: a 1-minute Cron Trigger sweeps one stream per tick (all 8 every 8 minutes).
+- Delivery is at least once. Consumers dedupe on `(consumer, event_id)` in D1
+  (`processed_events`).
+- Free-tier budget: about 1,440 cron runs per day plus one nudge per publish; each invocation stays
+  under the 50-subrequest limit.
+
 ## Deletion
 
 The adapter never deletes streams. A config change replaces `terraform_data`, and a destroy-time

@@ -22,7 +22,10 @@ const keychain: Record<string, string> = {
 
 // Per-root secrets, loaded only for the root that needs them.
 const rootKeychain: Record<string, Record<string, string>> = {
-  dev: { TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-dev" },
+  dev: {
+    TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-dev",
+    TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-dev",
+  },
 };
 
 const [root, ...args] = process.argv.slice(2);
