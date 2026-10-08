@@ -93,6 +93,10 @@ bun run tf:apply:dev                               # applies exactly that plan
 bun run tf:drift                                   # global and dev must report no changes
 ```
 
+## D1 migrations
+
+`terraform_data.d1_migrations` in each env root runs `scripts/d1-migrate.ts` when `migrations/d1` changes. See `migrations/d1/README.md`.
+
 ## Static checks
 
 `bun run tf:check` runs `terraform fmt -check`, `terraform init -backend=false`, `terraform validate`,

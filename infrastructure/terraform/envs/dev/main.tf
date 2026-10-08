@@ -98,3 +98,29 @@ module "web_worker" {
     zone_id  = module.dns.zone_id
   }]
 }
+
+# D1 schema migrations (AGENTS.md section 11.6). Re-runs when any migration file changes.
+# The script applies only unapplied files and is safe to run again.
+locals {
+  migrations_dir = "${local.repo_root}/migrations/d1"
+  migrations_hash = sha256(join(",", [
+    for f in sort(fileset(local.migrations_dir, "*.sql")) : "${f}:${filesha256("${local.migrations_dir}/${f}")}"
+  ]))
+}
+
+resource "terraform_data" "d1_migrations" {
+  triggers_replace = {
+    database_id     = module.state.d1_database_id
+    migrations_hash = local.migrations_hash
+  }
+
+  provisioner "local-exec" {
+    command = "bun ${local.repo_root}/scripts/d1-migrate.ts"
+    # CLOUDFLARE_API_TOKEN is inherited from `bun run tf`; it is never written to state.
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      D1_ACCOUNT_ID         = var.account_id
+      D1_DATABASE_ID        = module.state.d1_database_id
+    }
+  }
+}

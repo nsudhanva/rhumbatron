@@ -1,12 +1,13 @@
 # Build Status
 
 ## Current phase
-Phase 2 - Web shell and API shell (dev live)
+Phase 3 - Core project state and Durable Objects
 
 ## Completed
 - P0-01 through P0-10
 - P1-01 through P1-09, P1-11, P1-12
-- P2-01, P2-02, P2-04 through P2-11: web and API live on dev via Terraform
+- P2-01, P2-02, P2-04 through P2-11
+- P3-01 through P3-03: schemas, first migration, Terraform-run migrations (applied to dev): web and API live on dev via Terraform
   - https://dev.rhumbatron.com, https://api-dev.rhumbatron.com (`bun run smoke:dev`)
 - Clerk authentication in apps/web (local development instance)
 

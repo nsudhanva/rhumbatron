@@ -18,7 +18,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "test:critical": "turbo test:critical",
+    "test:critical": "turbo test:critical && vitest run --dir scripts",
     "cf:types": "turbo cf:types",
     "cf:bundle": "bun scripts/build-workers.ts",
     "check": "bun run lint && bun run typecheck && bun run check:guardrails && bun run check:deps && bun run check:secrets && bun run tf:check",
@@ -45,6 +45,7 @@
     "sherif": "1.13.0",
     "turbo": "2.11.7",
     "typescript": "7.0.2",
+    "vitest": "5.0.3",
     "wrangler": "4.149.0"
   }
 }

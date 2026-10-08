@@ -41,7 +41,12 @@
         "noUnusedVariables": "error"
       },
       "suspicious": {
-        "noConsole": { "level": "warn", "options": { "allow": ["warn", "error"] } }
+        "noConsole": {
+          "level": "warn",
+          "options": {
+            "allow": ["warn", "error"]
+          }
+        }
       },
       "style": {
         "noNonNullAssertion": "error",
@@ -77,7 +82,10 @@
       "includes": ["scripts/**"],
       "linter": {
         "rules": {
-          "suspicious": { "noConsole": "off" }
+          "suspicious": {
+            "noConsole": "off",
+            "noUndeclaredEnvVars": "off"
+          }
         }
       }
     }
