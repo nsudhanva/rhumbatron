@@ -1,6 +1,7 @@
 {
   "$schema": "https://turborepo.com/schema.json",
   "ui": "stream",
+  "agentGuidance": false,
   "tasks": {
     "cf:types": {
       "inputs": ["wrangler.jsonc"],
