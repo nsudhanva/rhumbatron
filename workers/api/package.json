@@ -7,13 +7,17 @@
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run --outdir dist",
     "cf:types": "wrangler types",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test:critical": "vitest run --dir src"
   },
   "dependencies": {
-    "hono": "4.13.13"
+    "@rhumbatron/protocol": "workspace:*",
+    "hono": "4.13.13",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "typescript": "7.0.2",
+    "vitest": "5.0.3",
     "wrangler": "4.149.0"
   }
 }

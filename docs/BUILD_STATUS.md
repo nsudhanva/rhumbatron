@@ -6,13 +6,12 @@ Phase 2 - Web shell and API shell (dev live)
 ## Completed
 - P0-01 through P0-10
 - P1-01 through P1-09, P1-11, P1-12
-- P2-01, P2-02, P2-04, P2-06 through P2-11: web and API live on dev via Terraform
+- P2-01, P2-02, P2-04 through P2-11: web and API live on dev via Terraform
   - https://dev.rhumbatron.com, https://api-dev.rhumbatron.com (`bun run smoke:dev`)
 - Clerk authentication in apps/web (local development instance)
 
 ## Active
-- P2-03 Zustand (TanStack Query done)
-- P2-05 Zod request and response wrapper
+- P2-03 Zustand (TanStack Query done; add with the first client-state page)
 
 ## Blocked
 - P1-10 Vectorize deferred to Phase 7 (ADR 0003).
@@ -35,5 +34,5 @@ Phase 2 - Web shell and API shell (dev live)
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 
 ## Next
-- Finish P2-05 and P2-03, then Phase 3 (Project and Change state, Durable Objects).
+- Phase 3 (Project and Change state, Durable Objects).
 - Tracking: Linear project Rhumbatron (AGENTS.md rule 49).
