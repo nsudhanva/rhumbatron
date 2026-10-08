@@ -1,9 +1,11 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { ProjectViewDO } from "@rhumbatron/coordinator";
 import type { EventEnvelope } from "@rhumbatron/protocol";
+import { buildArchive, writeArchive } from "./archive.ts";
 import { claimEvents, releaseEvents } from "./dedupe.ts";
 import {
   APPLY_DELTA_CAP,
+  ARCHIVE_SUBSCRIPTION,
   K2Client,
   K2Error,
   MAX_CONSUMES_PER_SUBSCRIPTION,
@@ -168,15 +170,60 @@ async function runSubscription(run: Run, sub: SubscriptionName): Promise<number>
   return processed;
 }
 
-async function processStream(env: Env, streamIndex: number): Promise<number> {
+/**
+ * Archives one batch from the audit-archiver subscription to R2. Budget: 1 resolve + 1 consume +
+ * 1 R2 put + 1 ack or nack. Invalid records are skipped; the batch is still archived and acked.
+ */
+async function runArchive(run: Run): Promise<number> {
+  const workerId = `${ARCHIVE_SUBSCRIPTION}-s${run.streamIndex}`;
+  try {
+    const subscriptionId = await run.k2.resolveSubscription(ARCHIVE_SUBSCRIPTION);
+    const batch = await run.k2.consume(subscriptionId, workerId);
+    if (!batch) return 0;
+    try {
+      const events = batch.records
+        .map((r) => decodeEnvelope(r.content))
+        .filter((e): e is EventEnvelope => e !== null);
+      const archive = await buildArchive(events, run.streamIndex);
+      if (archive) await writeArchive(run.env.EVIDENCE, archive);
+      await run.k2.ack(subscriptionId, batch.batchId, workerId);
+      log({
+        event: "router.archived",
+        stream: run.streamIndex,
+        count: events.length,
+        key: archive?.key,
+      });
+      return events.length;
+    } catch (error) {
+      log({ event: "router.archive_failed", stream: run.streamIndex, ...errorInfo(error) });
+      await run.k2.nack(subscriptionId, batch.batchId, workerId);
+      return 0;
+    }
+  } catch (error) {
+    log({
+      event: "router.k2_failed",
+      stream: run.streamIndex,
+      sub: ARCHIVE_SUBSCRIPTION,
+      ...errorInfo(error),
+    });
+    return 0;
+  }
+}
+
+function newRun(env: Env, streamIndex: number): Run | null {
   const streamId = parseStreamIds(env.K2_STREAM_IDS)[streamIndex];
-  if (!streamId || !env.K2_CONSUMER_TOKEN) return 0;
-  const run: Run = {
+  if (!streamId || !env.K2_CONSUMER_TOKEN) return null;
+  return {
     env,
     streamIndex,
     k2: new K2Client(streamId, env.K2_CONSUMER_TOKEN),
     applyBudget: { remaining: APPLY_DELTA_CAP },
   };
+}
+
+async function processStream(env: Env, streamIndex: number): Promise<number> {
+  const run = newRun(env, streamIndex);
+  if (!run) return 0;
   let processed = 0;
   for (const sub of SUBSCRIPTIONS) processed += await runSubscription(run, sub);
   return processed;
@@ -201,6 +248,8 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
     const index = sweepStreamIndex(controller.scheduledTime, count);
     if (index < 0) return;
     await processStream(this.env, index);
+    const run = newRun(this.env, index);
+    if (run) await runArchive(run);
   }
 
   /** Fast path: the coordinator calls this through a service binding after publishing. */

@@ -210,6 +210,8 @@ module "event_router_worker" {
     { type = "plain_text", name = "K2_STREAM_IDS", text = jsonencode([for n in local.k2_stream_names : data.external.k2_streams.result[n]]) },
     { type = "secret_text", name = "K2_CONSUMER_TOKEN", text = var.k2_consumer_token },
     module.state.bindings.DB,
+    # Audit archive target: events/ prefix, expired by the R2 lifecycle rule (30 days in dev).
+    module.state.bindings.EVIDENCE,
     # Literal name (not a module output) avoids a cycle: the coordinator binds back to this Worker.
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = "rhumbatron-coordinator-${local.environment}" },
   ]

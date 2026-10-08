@@ -3,5 +3,6 @@
   "compilerOptions": {
     "types": []
   },
-  "include": ["src", "worker-configuration.d.ts"]
+  "include": ["src", "worker-configuration.d.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }

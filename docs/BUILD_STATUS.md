@@ -1,15 +1,16 @@
 # Build Status
 
 ## Current phase
-Phase 4 - Event and command fabric
+Phase 4 complete; Phase 5 - Work Graph and causal scheduling next
 
 ## Completed
 - P0-01 through P0-10
 - P1-01 through P1-09, P1-11, P1-12
 - P2-01, P2-02, P2-04 through P2-11
 - P3-01 through P3-03: schemas, first migration, Terraform-run migrations (applied to dev)
-- P4-01 to P4-09: envelopes, outbox, K2 publisher, event router (nudge + 1-min cron), D1 dedupe, projector
-  - verified on dev: project.created reaches the live view in about 3 s
+- P4-01 to P4-12: envelopes, outbox, K2 publisher, event router (nudge + 1-min cron), D1 dedupe,
+  projector, R2 audit archive (gzipped NDJSON), duplicate-event and K2-outage critical tests
+  - verified on dev: project.created reaches the live view in about 3 s and is archived to R2
   - 8 K2 streams x 4 subscriptions on dev (ADR 0006)
 - P3-04, P3-06 to P3-12: Durable Objects, Clerk-authenticated Project and Change API, live on dev
   - `bun run smoke:dev`: 16 checks including the authenticated flow (Clerk smoke user): web and API live on dev via Terraform
@@ -42,6 +43,6 @@ Phase 4 - Event and command fabric
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 
 ## Next
-- P4-10 R2 event archive (audit-archiver), P4-11 duplicate-event test, P4-12 K2 outage test.
+- Phase 5: Work Graph schema, root planning contract, Task persistence, dependency scheduler, causal router.
 - Phase 3 (Project and Change state, Durable Objects).
 - Tracking: Linear project Rhumbatron (AGENTS.md rule 49).

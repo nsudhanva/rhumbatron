@@ -17,6 +17,7 @@
   },
   // Safety-net sweep: one stream per minute (AGENTS.md section 19). Nudges handle the fast path.
   "triggers": { "crons": ["* * * * *"] },
+  "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
   "d1_databases": [
     {
       "binding": "DB",
