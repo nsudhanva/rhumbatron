@@ -8,7 +8,8 @@
  * Each authenticated run writes about five D1 rows.
  * `--plan` also submits a real goal and waits for the Work Graph: 1 to 4 model calls (ADR 0007).
  * `--sandbox` seeds an Acme Shop project and runs its Bun tests in the Sandbox, then verifies the
- * canonical baseline Candidate (no model calls; a few minutes of the monthly Sandbox budget, ADR 0011).
+ * canonical baseline Candidate (no model calls; a few minutes of the monthly Sandbox budget, ADR 0011),
+ * promotes it S0 -> S1, retries the promotion, and checks that a Candidate on S0 is then stale.
  */
 
 const hosts: Record<string, { web: string; api: string }> = {
@@ -274,6 +275,20 @@ if (secretKey && smokeUserId) {
       })
     ).json()) as { data?: { id: string } };
     const baselineChange = baseline.data?.id ?? "missing";
+    // A second Change on S0, created before promotion. Its Candidate is created after promotion,
+    // so it is stale from the start and never uses the Sandbox (its workflow stops at step 1).
+    const behind = (await (
+      await fetch(`${target.api}/v1/projects/${demoId}/changes`, {
+        method: "POST",
+        headers: await fresh(),
+        body: JSON.stringify({
+          goal: "Stale baseline check. Created on S0 and promoted after S1.",
+          budgetUsd: 1,
+          startPlanning: false,
+        }),
+      })
+    ).json()) as { data?: { id: string; baseGeneration: number } };
+    report("second change starts on S0", behind.data?.baseGeneration === 0);
     const createdCandidate = await fetch(`${target.api}/v1/changes/${baselineChange}/candidates`, {
       method: "POST",
       headers: await fresh(),
@@ -284,6 +299,9 @@ if (secretKey && smokeUserId) {
       status: string;
       statusReason: string | null;
       gate: { promotable: boolean; gaps: { checkId: string; reason: string }[] } | null;
+      composedCommit: string | null;
+      approvalRequired: boolean;
+      promotedGeneration: number | null;
     };
     let read: CandidateRead | undefined;
     const verifyUntil = Date.now() + 10 * 60_000;
@@ -336,6 +354,101 @@ if (secretKey && smokeUserId) {
       "baseline Candidate is promotable",
       read?.status === "verified" && read.gate?.promotable === true,
       (read?.gate?.gaps ?? []).map((g) => `${g.checkId}:${g.reason}`).join(", ") || "no gaps",
+    );
+
+    // Promotion (P11). The human gate is policy: a medium-risk baseline has none, so an approval is
+    // refused; a gated Candidate would need it first (the gate itself is covered by critical tests).
+    const candidateId = candidate?.id ?? "missing";
+    type PromoteBody = {
+      data?: {
+        status: string;
+        generation: number;
+        fromGeneration: number;
+        alreadyPromoted: boolean;
+        sourceSynced: boolean;
+        sourceCommit: string | null;
+      };
+      error?: { message: string; details?: { status?: string; reason?: string } };
+    };
+    const approve = await fetch(`${target.api}/v1/changes/${baselineChange}/approve`, {
+      method: "POST",
+      headers: await fresh(),
+      body: JSON.stringify({ candidateId, decision: "approve" }),
+    });
+    if (read?.approvalRequired) {
+      report("gated baseline approval recorded", approve.status === 200, `got ${approve.status}`);
+    } else {
+      report("approval refused when policy has no gate", approve.status === 409);
+    }
+    const promote = async () => {
+      const response = await fetch(`${target.api}/v1/candidates/${candidateId}/promote`, {
+        method: "POST",
+        headers: await fresh(),
+      });
+      return { status: response.status, body: (await response.json()) as PromoteBody };
+    };
+    const first = await promote();
+    report(
+      "baseline promotes S0 -> S1",
+      first.status === 200 &&
+        first.body.data?.status === "promoted" &&
+        first.body.data.fromGeneration === 0 &&
+        first.body.data.generation === 1 &&
+        first.body.data.alreadyPromoted === false,
+      first.body.error?.message ?? JSON.stringify(first.body.data),
+    );
+    report(
+      "canonical source synced to the composed commit",
+      first.body.data?.sourceSynced === true &&
+        first.body.data.sourceCommit === (read?.composedCommit ?? "missing"),
+      first.body.data?.sourceCommit ?? "no commit",
+    );
+    const retry = await promote();
+    report(
+      "promotion retry is idempotent",
+      retry.status === 200 &&
+        retry.body.data?.alreadyPromoted === true &&
+        retry.body.data.generation === 1,
+      retry.body.error?.message ?? JSON.stringify(retry.body.data),
+    );
+    const promotedRead = (await (
+      await fetch(`${target.api}/v1/candidates/${candidateId}`, { headers: await fresh() })
+    ).json()) as { data?: CandidateRead };
+    report(
+      "candidate recorded as promoted",
+      promotedRead.data?.status === "promoted" && promotedRead.data.promotedGeneration === 1,
+    );
+
+    // Stale promotion (sections 36, 42.9): a Candidate whose base is S0 cannot promote at S1.
+    const staleCreated = await fetch(
+      `${target.api}/v1/changes/${behind.data?.id ?? "missing"}/candidates`,
+      { method: "POST", headers: await fresh() },
+    );
+    const staleId =
+      ((await staleCreated.json()) as { data?: { id: string } }).data?.id ?? "missing";
+    const stale = await (async () => {
+      const response = await fetch(`${target.api}/v1/candidates/${staleId}/promote`, {
+        method: "POST",
+        headers: await fresh(),
+      });
+      return { status: response.status, body: (await response.json()) as PromoteBody };
+    })();
+    report(
+      "stale promotion rejected",
+      stale.status === 409 && stale.body.error?.details?.status === "stale",
+      stale.body.error?.message ?? `got ${stale.status}`,
+    );
+    const staleRead = (await (
+      await fetch(`${target.api}/v1/candidates/${staleId}`, { headers: await fresh() })
+    ).json()) as { data?: CandidateRead };
+    report("stale candidate marked stale", staleRead.data?.status === "stale");
+    const project = (await (
+      await fetch(`${target.api}/v1/projects/${demoId}`, { headers: await fresh() })
+    ).json()) as { data?: { canonical: { generation: number } } };
+    report(
+      "canonical generation advanced exactly once",
+      project.data?.canonical.generation === 1,
+      `S${project.data?.canonical.generation ?? "?"}`,
     );
   }
 

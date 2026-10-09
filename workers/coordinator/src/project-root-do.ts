@@ -32,18 +32,25 @@ export type CanonicalSnapshot = {
   treeSha: string;
   policyVersion: string;
   lastPromotedChangeId: string | null;
+  /** Candidate that produced the current generation; lets a caller repair a lagging D1 mirror. */
+  lastPromotedCandidateId: string | null;
   updatedAt: string;
 };
 
 export type PromoteInput = PromotionAttempt & {
   changeId: string;
-  actorId: string;
+  actor: { kind: "user" | "system"; id: string };
   correlationId: string;
+  /** Evidence the caller gated on (section 36, rules 2 and 3). Recorded in the event for audit. */
+  requiredEvidenceIds: string[];
+  /** The recorded human approval when the gate applied (rule 4), else null. */
+  approvalId: string | null;
 };
 
 export type PromoteResult =
-  | { ok: true; generation: number; alreadyPromoted: boolean }
-  | { ok: false; reason: "stale"; detail: Extract<PromotionDecision, { kind: "stale" }> };
+  | { ok: true; generation: number; alreadyPromoted: boolean; artifactRef: string; treeSha: string }
+  | { ok: false; reason: "stale"; detail: Extract<PromotionDecision, { kind: "stale" }> }
+  | { ok: false; reason: "policy_mismatch"; activePolicyVersion: string };
 
 type RootRow = {
   project_id: string;
@@ -102,6 +109,7 @@ export class ProjectRootDO extends DurableObject<Env> {
       treeSha: row.canonical_tree_sha,
       policyVersion: row.active_policy_version,
       lastPromotedChangeId: row.last_promoted_change_id,
+      lastPromotedCandidateId: row.last_promoted_candidate_id,
       updatedAt: row.updated_at,
     };
   }
@@ -213,9 +221,11 @@ export class ProjectRootDO extends DurableObject<Env> {
   }
 
   /**
-   * Compare-and-swap promotion. The state update and the `canonical.advanced` outbox row
-   * commit in one transaction, so the event exists if and only if the generation advanced.
-   * Evidence, approval, and policy preconditions are added in Phase 11 (P11-03).
+   * Compare-and-swap promotion (section 36). The state update and the `canonical.advanced` outbox
+   * row commit in one transaction, so the event exists if and only if the generation advanced.
+   * This object decides rules 5 to 7 on its own state: policy version, generation, and tree. The
+   * caller (integration Worker, internal bindings only) has already checked status, Evidence,
+   * approval, and the Candidate artifact against D1 and Artifacts (ADR 0013).
    */
   async promote(input: PromoteInput): Promise<PromoteResult> {
     const row = this.requireRow();
@@ -224,12 +234,26 @@ export class ProjectRootDO extends DurableObject<Env> {
       artifactRef: row.canonical_artifact_ref,
       treeSha: row.canonical_tree_sha,
       lastPromotedCandidateId: row.last_promoted_candidate_id,
+      policyVersion: row.active_policy_version,
     };
     const decision = decidePromotion(current, input);
 
     if (decision.kind === "stale") return { ok: false, reason: "stale", detail: decision };
+    if (decision.kind === "policy_mismatch") {
+      return {
+        ok: false,
+        reason: "policy_mismatch",
+        activePolicyVersion: decision.activePolicyVersion,
+      };
+    }
     if (decision.kind === "already_promoted") {
-      return { ok: true, generation: decision.generation, alreadyPromoted: true };
+      return {
+        ok: true,
+        generation: decision.generation,
+        alreadyPromoted: true,
+        artifactRef: current.artifactRef,
+        treeSha: current.treeSha,
+      };
     }
 
     const now = new Date().toISOString();
@@ -239,6 +263,9 @@ export class ProjectRootDO extends DurableObject<Env> {
       candidateId: string;
       artifactRef: string;
       treeSha: string;
+      policyVersion: string;
+      requiredEvidenceIds: string[];
+      approvalId: string | null;
     }> = {
       eventId: crypto.randomUUID(),
       eventType: "canonical.advanced",
@@ -246,7 +273,7 @@ export class ProjectRootDO extends DurableObject<Env> {
       tenantId: row.org_id,
       projectId: row.project_id,
       changeId: input.changeId,
-      actor: { kind: "system", id: input.actorId },
+      actor: input.actor,
       canonicalGeneration: decision.next.generation,
       correlationId: input.correlationId,
       timestamp: now,
@@ -256,6 +283,9 @@ export class ProjectRootDO extends DurableObject<Env> {
         candidateId: input.candidateId,
         artifactRef: decision.next.artifactRef,
         treeSha: decision.next.treeSha,
+        policyVersion: input.policyVersion,
+        requiredEvidenceIds: input.requiredEvidenceIds,
+        approvalId: input.approvalId,
       },
     };
     AnyEventEnvelope.parse(event);
@@ -287,7 +317,13 @@ export class ProjectRootDO extends DurableObject<Env> {
     });
 
     await this.scheduleAlarm();
-    return { ok: true, generation: decision.next.generation, alreadyPromoted: false };
+    return {
+      ok: true,
+      generation: decision.next.generation,
+      alreadyPromoted: false,
+      artifactRef: decision.next.artifactRef,
+      treeSha: decision.next.treeSha,
+    };
   }
 
   /** Publishes due outbox rows to K2, then schedules the next attempt if any remain. */

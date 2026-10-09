@@ -43,6 +43,30 @@ async function indexTree(repo: ArtifactsRepo, treeSha: string): Promise<SourceIn
   return files.sort();
 }
 
+/**
+ * Writes the file index of one canonical tree once. Readers resolve the canonical commit from it
+ * (`source/<project>/<tree>/index.json`), so it must exist only once that commit is on `main`.
+ * Returns the number of indexed files, or 0 when the index already existed.
+ */
+export async function ensureSourceIndex(
+  env: Env,
+  repo: ArtifactsRepo,
+  projectId: string,
+  head: { commit: string; treeSha: string },
+): Promise<number> {
+  const key = `source/${projectId}/${head.treeSha}/index.json`;
+  if (await env.EVIDENCE.head(key)) return 0;
+  const index: SourceIndex = {
+    commit: head.commit,
+    treeSha: head.treeSha,
+    files: await indexTree(repo, head.treeSha),
+  };
+  await env.EVIDENCE.put(key, JSON.stringify(index), {
+    httpMetadata: { contentType: "application/json" },
+  });
+  return index.files.length;
+}
+
 function isNotFound(error: unknown) {
   const code = (error as { code?: string } | null)?.code;
   return code === "NOT_FOUND" || (error instanceof Error && /not.?found/i.test(error.message));
@@ -114,19 +138,10 @@ export async function provisionProject(
   }
   if (!head) throw new Error(`repo ${input.projectId} has no commits`);
 
-  const indexKey = `source/${input.projectId}/${head.treeHash}/index.json`;
-  let fileCount = 0;
-  if (!(await env.EVIDENCE.head(indexKey))) {
-    const index: SourceIndex = {
-      commit: head.hash,
-      treeSha: head.treeHash,
-      files: await indexTree(repo, head.treeHash),
-    };
-    fileCount = index.files.length;
-    await env.EVIDENCE.put(indexKey, JSON.stringify(index), {
-      httpMetadata: { contentType: "application/json" },
-    });
-  }
+  const fileCount = await ensureSourceIndex(env, repo, input.projectId, {
+    commit: head.hash,
+    treeSha: head.treeHash,
+  });
 
   const artifactRef = `artifacts://${input.projectId}@main`;
   const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;

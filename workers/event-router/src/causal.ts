@@ -128,11 +128,51 @@ async function decideAmbiguous(
   return wakes;
 }
 
+/**
+ * P11-06 (AGENTS.md sections 42.9, 59). After `canonical.advanced`, every other in-flight Candidate
+ * of the Project on an older base can never promote: mark it stale, so nobody verifies or approves
+ * it further. The promoted Candidate itself is marked promoted, which repairs the D1 mirror if the
+ * integration Worker stopped between the compare-and-swap and its own write. One D1 batch.
+ */
+async function settleCandidates(env: Env, events: EventEnvelope[]): Promise<number> {
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [];
+  for (const event of events) {
+    if (event.eventType !== "canonical.advanced") continue;
+    const payload = event.payload as { toGeneration?: unknown; candidateId?: unknown } | null;
+    const generation = payload?.toGeneration;
+    const candidateId = payload?.candidateId;
+    if (typeof generation !== "number" || typeof candidateId !== "string") continue;
+    statements.push(
+      env.DB.prepare(
+        `UPDATE candidates SET status = 'promoted', promoted_generation = ?, status_reason = NULL,
+           updated_at = ? WHERE id = ? AND status != 'promoted'`,
+      ).bind(generation, now, candidateId),
+      env.DB.prepare(
+        `UPDATE candidates SET status = 'stale', status_reason = ?, updated_at = ?
+         WHERE id != ? AND base_generation < ?
+           AND status IN ('composing', 'composed', 'verifying', 'verified')
+           AND change_id IN (SELECT id FROM changes WHERE project_id = ?)`,
+      ).bind(
+        `Canonical advanced to S${generation}; this Candidate's base is older.`,
+        now,
+        candidateId,
+        generation,
+        event.projectId,
+      ),
+    );
+  }
+  if (statements.length === 0) return 0;
+  const results = await env.DB.batch(statements);
+  // Every second statement is a stale sweep.
+  return results.reduce((n, r, i) => n + (i % 2 === 1 ? (r.meta.changes ?? 0) : 0), 0);
+}
+
 /** Routes one batch of fresh events. Throws on failure so the caller can release and redeliver. */
 export async function routeCausalBatch(
   env: Env,
   events: EventEnvelope[],
-): Promise<{ woke: number; dispatched: number }> {
+): Promise<{ woke: number; dispatched: number; staled: number }> {
   const relevant = events.filter((e) => e.eventType !== "task.ready");
   const changeIds = [
     ...new Set(relevant.map((e) => e.changeId).filter((id): id is string => !!id)),
@@ -221,5 +261,6 @@ export async function routeCausalBatch(
   if (commands.length > 0) {
     await env.AGENT_WAKEUPS.sendBatch(commands.map((body) => ({ body, contentType: "json" })));
   }
-  return { woke: commands.length, dispatched: dispatches.size };
+  const staled = await settleCandidates(env, relevant);
+  return { woke: commands.length, dispatched: dispatches.size, staled };
 }

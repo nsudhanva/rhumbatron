@@ -8,6 +8,7 @@ import {
 } from "@rhumbatron/evidence";
 import {
   ChangeSetIntent,
+  type EventEnvelope,
   type EvidenceRecord,
   RiskTier,
   type VerificationCheck,
@@ -38,6 +39,7 @@ import {
   settleSandbox,
 } from "./candidate-sandbox.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
+import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
 
 /**
  * CandidateVerificationWorkflow (AGENTS.md sections 21.2, 33, 34). One instance per Candidate
@@ -64,7 +66,7 @@ type Loaded = {
   invariants: string[];
   acceptanceCriteria: string[];
   touchesAuthorization: boolean;
-  canonical: { generation: number; commit: string | null } | null;
+  canonical: { generation: number; treeSha: string; commit: string | null } | null;
   changeSets: ChangeSetRow[];
   /** ChangeSet IDs the Candidate was created with. */
   changeSetIds: string[];
@@ -95,43 +97,6 @@ async function sha256(text: string) {
   return `sha256:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-type EvidenceRow = {
-  id: string;
-  candidate_id: string;
-  check_id: string | null;
-  kind: string;
-  status: EvidenceRecord["status"];
-  coverage: EvidenceRecord["coverage"];
-  summary: string;
-  r2_key: string | null;
-  content_hash: string;
-  started_at: string | null;
-  completed_at: string | null;
-  created_at: string;
-  metrics_json: string | null;
-  source_refs_json: string;
-};
-
-function toRecord(row: EvidenceRow): EvidenceRecord {
-  return {
-    evidenceId: row.id,
-    candidateId: row.candidate_id,
-    checkId: row.check_id ?? row.kind,
-    kind: row.kind,
-    status: row.status,
-    coverage: row.coverage,
-    startedAt: row.started_at ?? row.created_at,
-    completedAt: row.completed_at ?? row.created_at,
-    summary: row.summary,
-    contentHash: row.content_hash,
-    ...(row.r2_key ? { r2Key: row.r2_key } : {}),
-    ...(row.metrics_json
-      ? { metrics: JSON.parse(row.metrics_json) as Record<string, number> }
-      : {}),
-    sourceRefs: JSON.parse(row.source_refs_json) as string[],
-  };
-}
-
 export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   Env,
   CandidateVerificationParams
@@ -142,65 +107,82 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   ) {
     const { candidateId } = event.payload;
 
-    // Step 1: confirm the Candidate and its base generation (section 21.2).
-    const loaded = await step.do("load candidate", async (): Promise<Loaded | null> => {
-      const row = await this.env.DB.prepare(
-        `SELECT c.id, c.change_id, c.base_generation, c.status, c.change_set_ids_json, c.created_at,
+    // Step 1: confirm the Candidate and its base generation (section 21.2). Retries cover a
+    // promotion whose source sync has not landed yet (see below).
+    const loaded = await step.do(
+      "load candidate",
+      { retries: { limit: 5, delay: "15 seconds", backoff: "exponential" } },
+      async (): Promise<Loaded | null> => {
+        const row = await this.env.DB.prepare(
+          `SELECT c.id, c.change_id, c.base_generation, c.status, c.change_set_ids_json, c.created_at,
                 ch.project_id, ch.goal, ch.risk_tier, ch.invariants_json, ch.acceptance_criteria_json,
                 p.org_id, p.slug
          FROM candidates c JOIN changes ch ON ch.id = c.change_id
          JOIN projects p ON p.id = ch.project_id WHERE c.id = ?`,
-      )
-        .bind(candidateId)
-        .first<CandidateRow>();
-      if (!row) return null;
-      const ids = JSON.parse(row.change_set_ids_json) as string[];
-      const [sets, edges, routes] = await this.env.DB.batch([
-        this.env.DB.prepare(
-          `SELECT cs.id, cs.base_generation, cs.artifact_ref, cs.intent_json, cs.created_at, r.task_id
+        )
+          .bind(candidateId)
+          .first<CandidateRow>();
+        if (!row) return null;
+        const ids = JSON.parse(row.change_set_ids_json) as string[];
+        const [sets, edges, routes] = await this.env.DB.batch([
+          this.env.DB.prepare(
+            `SELECT cs.id, cs.base_generation, cs.artifact_ref, cs.intent_json, cs.created_at, r.task_id
            FROM changesets cs LEFT JOIN task_runs r ON r.id = 'run_' || substr(cs.id, 4)
            WHERE cs.change_id = ? AND cs.id IN (SELECT value FROM json_each(?))`,
-        ).bind(row.change_id, JSON.stringify(ids)),
-        this.env.DB.prepare(
-          `SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d
+          ).bind(row.change_id, JSON.stringify(ids)),
+          this.env.DB.prepare(
+            `SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d
            JOIN tasks t ON t.id = d.task_id WHERE t.change_id = ?`,
-        ).bind(row.change_id),
-        this.env.DB.prepare("SELECT route_json FROM tasks WHERE change_id = ?").bind(row.change_id),
-      ]);
-      const root = this.env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
-      const snapshot = await root.get(root.idFromName(row.project_id)).getCanonical();
-      let canonical: Loaded["canonical"] = null;
-      if (snapshot && snapshot.artifactRef !== "unassigned") {
-        const index = await this.env.EVIDENCE.get(
-          `source/${row.project_id}/${snapshot.treeSha}/index.json`,
-        );
-        const commit = index ? ((await index.json()) as { commit?: string }).commit : undefined;
-        canonical = { generation: snapshot.generation, commit: commit ?? null };
-      }
-      const touchesAuthorization = ((routes?.results ?? []) as { route_json: string | null }[])
-        .map((r) => (r.route_json ? (JSON.parse(r.route_json) as Record<string, unknown>) : {}))
-        .some((r) => r.touchesAuthorization === true);
-      return {
-        ctx: {
-          projectId: row.project_id,
-          orgId: row.org_id,
-          projectSlug: row.slug,
-          changeId: row.change_id,
-          baseGeneration: row.base_generation,
-        },
-        status: row.status,
-        createdAt: row.created_at,
-        goal: row.goal,
-        riskTier: RiskTier.catch("medium").parse(row.risk_tier ?? "medium"),
-        invariants: JSON.parse(row.invariants_json) as string[],
-        acceptanceCriteria: JSON.parse(row.acceptance_criteria_json) as string[],
-        touchesAuthorization,
-        canonical,
-        changeSets: (sets?.results ?? []) as ChangeSetRow[],
-        changeSetIds: ids,
-        edges: (edges?.results ?? []) as TaskEdge[],
-      };
-    });
+          ).bind(row.change_id),
+          this.env.DB.prepare("SELECT route_json FROM tasks WHERE change_id = ?").bind(
+            row.change_id,
+          ),
+        ]);
+        const root = this.env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
+        const snapshot = await root.get(root.idFromName(row.project_id)).getCanonical();
+        let canonical: Loaded["canonical"] = null;
+        if (snapshot && snapshot.artifactRef !== "unassigned") {
+          const index = await this.env.EVIDENCE.get(
+            `source/${row.project_id}/${snapshot.treeSha}/index.json`,
+          );
+          // A promoted generation writes its index after the canonical repo moves (ADR 0013).
+          // Until then a Candidate on it cannot resolve its base: wait instead of composing on a
+          // guess. A Candidate on an older base is stale below and needs no index.
+          if (!index && snapshot.generation > 0 && row.base_generation === snapshot.generation) {
+            throw new Error(`Canonical source of S${snapshot.generation} is not synced yet`);
+          }
+          const commit = index ? ((await index.json()) as { commit?: string }).commit : undefined;
+          canonical = {
+            generation: snapshot.generation,
+            treeSha: snapshot.treeSha,
+            commit: commit ?? null,
+          };
+        }
+        const touchesAuthorization = ((routes?.results ?? []) as { route_json: string | null }[])
+          .map((r) => (r.route_json ? (JSON.parse(r.route_json) as Record<string, unknown>) : {}))
+          .some((r) => r.touchesAuthorization === true);
+        return {
+          ctx: {
+            projectId: row.project_id,
+            orgId: row.org_id,
+            projectSlug: row.slug,
+            changeId: row.change_id,
+            baseGeneration: row.base_generation,
+          },
+          status: row.status,
+          createdAt: row.created_at,
+          goal: row.goal,
+          riskTier: RiskTier.catch("medium").parse(row.risk_tier ?? "medium"),
+          invariants: JSON.parse(row.invariants_json) as string[],
+          acceptanceCriteria: JSON.parse(row.acceptance_criteria_json) as string[],
+          touchesAuthorization,
+          canonical,
+          changeSets: (sets?.results ?? []) as ChangeSetRow[],
+          changeSetIds: ids,
+          edges: (edges?.results ?? []) as TaskEdge[],
+        };
+      },
+    );
     if (!loaded) return { skipped: "missing" };
     if (FINAL.has(loaded.status)) return { skipped: loaded.status };
     const { ctx } = loaded;
@@ -384,13 +366,14 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         });
         await this.env.DB.prepare(
           `UPDATE candidates SET status = 'verifying', artifact_ref = ?, composed_commit = ?,
-             composed_tree = ?, plan_json = ?, updated_at = ?
+             composed_tree = ?, base_tree = ?, plan_json = ?, updated_at = ?
            WHERE id = ? AND status IN ('composing', 'composed', 'verifying')`,
         )
           .bind(
             `artifacts://${fork}@${commit}`,
             commit,
             tree,
+            loaded.canonical?.treeSha ?? null,
             JSON.stringify(built),
             new Date().toISOString(),
             candidateId,
@@ -480,14 +463,26 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         )
           .bind(status, reason, JSON.stringify(score), new Date().toISOString(), candidateId)
           .run();
-        await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
+        const events: EventEnvelope[] = [
           await changeEvent(
             ctx,
             "verification.completed",
             { candidateId, status, ...score },
             { key: candidateId, actor: ACTOR },
           ),
-        ]);
+        ];
+        // Section 36 rule 4: a gated Candidate waits for a human decision before promotion.
+        if (gate.promotable && plan.humanApprovalRequired) {
+          events.push(
+            await changeEvent(
+              ctx,
+              "approval.requested",
+              { candidateId, riskTier: loaded.riskTier, policyVersion: plan.policyVersion },
+              { key: candidateId, actor: ACTOR },
+            ),
+          );
+        }
+        await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, events);
         return { status, promotable: gate.promotable, gaps: gate.gaps };
       });
     } finally {

@@ -51,6 +51,10 @@
   "queues": {
     "producers": [{ "binding": "INTEGRATION_COMMANDS", "queue": "rhumbatron-integration-local" }]
   },
-  // Sandbox smoke check RPC (AGENTS.md section 49.3).
-  "services": [{ "binding": "AGENTS", "service": "rhumbatron-agents" }]
+  "services": [
+    // Sandbox smoke check RPC (AGENTS.md section 49.3).
+    { "binding": "AGENTS", "service": "rhumbatron-agents" },
+    // Approval and promotion RPC (AGENTS.md section 36, ADR 0013).
+    { "binding": "INTEGRATION", "service": "rhumbatron-integration" }
+  ]
 }

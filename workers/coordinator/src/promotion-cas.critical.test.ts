@@ -6,6 +6,7 @@ const s1841: CanonicalState = {
   artifactRef: "acme-shop@main",
   treeSha: "tree-1841",
   lastPromotedCandidateId: "cand-prev",
+  policyVersion: "policy-1",
 };
 
 const attempt = (overrides: Partial<PromotionAttempt> = {}): PromotionAttempt => ({
@@ -14,6 +15,7 @@ const attempt = (overrides: Partial<PromotionAttempt> = {}): PromotionAttempt =>
   expectedTreeSha: "tree-1841",
   candidateArtifactRef: "acme-shop@cand-b",
   candidateTreeSha: "tree-cand-b",
+  policyVersion: "policy-1",
   ...overrides,
 });
 
@@ -46,6 +48,7 @@ describe("decidePromotion", () => {
       artifactRef: "acme-shop@cand-b",
       treeSha: "tree-cand-b",
       lastPromotedCandidateId: "cand-b",
+      policyVersion: "policy-1",
     };
     expect(decidePromotion(s1842, attempt())).toEqual({
       kind: "already_promoted",
@@ -59,8 +62,24 @@ describe("decidePromotion", () => {
       artifactRef: "acme-shop@cand-b",
       treeSha: "tree-cand-b",
       lastPromotedCandidateId: "cand-b",
+      policyVersion: "policy-1",
     };
     const decision = decidePromotion(s1842, attempt({ candidateId: "cand-a" }));
+    expect(decision).toMatchObject({ kind: "stale", reason: "generation_mismatch" });
+  });
+
+  it("rejects a candidate verified under another policy version", () => {
+    expect(decidePromotion(s1841, attempt({ policyVersion: "policy-0" }))).toEqual({
+      kind: "policy_mismatch",
+      activePolicyVersion: "policy-1",
+    });
+  });
+
+  it("reports staleness before a policy mismatch", () => {
+    const decision = decidePromotion(
+      s1841,
+      attempt({ expectedGeneration: 1840, policyVersion: "policy-0" }),
+    );
     expect(decision).toMatchObject({ kind: "stale", reason: "generation_mismatch" });
   });
 });

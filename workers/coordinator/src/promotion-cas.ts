@@ -9,6 +9,8 @@ export type CanonicalState = {
   treeSha: string;
   /** Candidate that produced the current generation, for idempotent retries. */
   lastPromotedCandidateId: string | null;
+  /** Active project policy version (section 36, rule 5). */
+  policyVersion: string;
 };
 
 export type PromotionAttempt = {
@@ -18,16 +20,23 @@ export type PromotionAttempt = {
   expectedTreeSha?: string;
   candidateArtifactRef: string;
   candidateTreeSha: string;
+  /** Policy version the Candidate was verified under. */
+  policyVersion: string;
 };
 
 export type PromotionDecision =
-  | { kind: "advance"; next: Omit<CanonicalState, "lastPromotedCandidateId"> }
+  | {
+      kind: "advance";
+      next: Omit<CanonicalState, "lastPromotedCandidateId" | "policyVersion">;
+    }
   | { kind: "already_promoted"; generation: number }
   | {
       kind: "stale";
       reason: "generation_mismatch" | "tree_mismatch";
       current: { generation: number; treeSha: string };
-    };
+    }
+  /** Not stale: the Candidate was verified under another policy and must be verified again. */
+  | { kind: "policy_mismatch"; activePolicyVersion: string };
 
 export function decidePromotion(
   current: CanonicalState,
@@ -50,6 +59,9 @@ export function decidePromotion(
   if (current.generation !== attempt.expectedGeneration) return stale("generation_mismatch");
   if (attempt.expectedTreeSha !== undefined && current.treeSha !== attempt.expectedTreeSha) {
     return stale("tree_mismatch");
+  }
+  if (attempt.policyVersion !== current.policyVersion) {
+    return { kind: "policy_mismatch", activePolicyVersion: current.policyVersion };
   }
 
   return {

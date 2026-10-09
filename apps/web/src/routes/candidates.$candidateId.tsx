@@ -3,6 +3,7 @@ import { Badge, LayerCard, Loader, Text } from "@cloudflare/kumo";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CandidateEvidence } from "../components/candidate-evidence";
+import { CandidatePromotion } from "../components/candidate-promotion";
 import {
   type CandidateDetail,
   getCandidate,
@@ -103,6 +104,17 @@ function CandidateView() {
           >
             Back to the Change
           </Link>
+        </LayerCard.Primary>
+      </LayerCard>
+
+      <LayerCard>
+        <LayerCard.Secondary className="px-5 py-2.5">
+          <Text as="h2" variant="heading3">
+            Approval and promotion
+          </Text>
+        </LayerCard.Secondary>
+        <LayerCard.Primary className="px-5 py-4">
+          <CandidatePromotion candidate={data} />
         </LayerCard.Primary>
       </LayerCard>
 

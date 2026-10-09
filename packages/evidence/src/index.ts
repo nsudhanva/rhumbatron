@@ -4,3 +4,4 @@ export * from "./compatibility.ts";
 export * from "./contract.ts";
 export * from "./gate.ts";
 export * from "./plan.ts";
+export * from "./promotion.ts";

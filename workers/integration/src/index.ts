@@ -1,6 +1,12 @@
-import { AnyCommandEnvelope } from "@rhumbatron/protocol";
+import { WorkerEntrypoint } from "cloudflare:workers";
+import {
+  AnyCommandEnvelope,
+  type ApprovalOutcome,
+  type PromotionOutcome,
+} from "@rhumbatron/protocol";
 import { z } from "zod";
 import { dispatchReadyTasks } from "./dispatch.ts";
+import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
 
 export { ChangeWorkflow } from "./change-workflow.ts";
@@ -75,19 +81,27 @@ async function handleCommand(env: Env, body: unknown) {
   );
 }
 
-export default {
-  async fetch(request, env): Promise<Response> {
+/**
+ * Queue consumer plus internal RPC for the API (service binding `INTEGRATION`). The Worker has no
+ * public route: callers authenticate users and check project membership before an RPC.
+ */
+export default class Integration extends WorkerEntrypoint<Env> {
+  override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
-      return Response.json({ ok: true, service: env.SERVICE_NAME, environment: env.ENVIRONMENT });
+      return Response.json({
+        ok: true,
+        service: this.env.SERVICE_NAME,
+        environment: this.env.ENVIRONMENT,
+      });
     }
     return new Response("Not Found", { status: 404 });
-  },
+  }
 
-  async queue(batch, env): Promise<void> {
+  override async queue(batch: MessageBatch): Promise<void> {
     for (const message of batch.messages) {
       try {
-        await handleCommand(env, message.body);
+        await handleCommand(this.env, message.body);
         message.ack();
       } catch (error) {
         console.error(
@@ -96,5 +110,23 @@ export default {
         message.retry({ delaySeconds: 30 });
       }
     }
-  },
-} satisfies ExportedHandler<Env>;
+  }
+
+  /** P11-03/P11-04: preconditions, then ProjectRootDO compare-and-swap (section 36). */
+  async promoteCandidate(input: {
+    candidateId: string;
+    actorUserId: string;
+  }): Promise<PromotionOutcome> {
+    return promoteCandidate(this.env, input);
+  }
+
+  /** P11-01: one human decision on a gated Candidate (section 40.2). */
+  async decideApproval(input: {
+    candidateId: string;
+    approverUserId: string;
+    decision: "granted" | "rejected";
+    reason: string | null;
+  }): Promise<ApprovalOutcome> {
+    return decideApproval(this.env, input);
+  }
+}

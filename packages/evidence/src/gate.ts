@@ -28,7 +28,7 @@ function isPass(e: EvidenceRecord): boolean {
 }
 
 /** Latest record by completion time. On a tie, a non-passing record wins. */
-function latest(records: readonly EvidenceRecord[]): EvidenceRecord | undefined {
+export function latestEvidence(records: readonly EvidenceRecord[]): EvidenceRecord | undefined {
   return [...records].sort(
     (a, b) =>
       Date.parse(b.completedAt) - Date.parse(a.completedAt) ||
@@ -41,7 +41,7 @@ function gapFor(
   checkId: string,
   records: readonly EvidenceRecord[],
 ): GapReason | null {
-  const record = latest(records);
+  const record = latestEvidence(records);
   if (!record) return "missing";
   const check = plan.checks.find((c) => c.checkId === checkId);
   const elapsed = durationMs(record);
@@ -60,14 +60,21 @@ function gapFor(
   return null;
 }
 
+/** Every check the plan requires, from either list: a check marked required cannot be dropped. */
+export function requiredChecks(plan: VerificationPlan): string[] {
+  return [
+    ...new Set([
+      ...plan.requiredCheckIds,
+      ...plan.checks.filter((c) => c.required).map((c) => c.checkId),
+    ]),
+  ];
+}
+
 export function gateRequiredChecks(
   plan: VerificationPlan,
   evidence: readonly EvidenceRecord[],
 ): GateResult {
-  const required = new Set([
-    ...plan.requiredCheckIds,
-    ...plan.checks.filter((c) => c.required).map((c) => c.checkId),
-  ]);
+  const required = requiredChecks(plan);
   const gaps: CheckGap[] = [];
   for (const checkId of required) {
     const records = evidence.filter(

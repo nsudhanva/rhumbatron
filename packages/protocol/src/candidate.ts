@@ -154,15 +154,96 @@ export const ProjectPolicy = z.object({
 });
 export type ProjectPolicy = z.infer<typeof ProjectPolicy>;
 
-/** Section 36. ProjectRootDO verifies every precondition before one atomic transition. */
+/**
+ * Section 36. Built by the integration Worker from authoritative rows, never from the browser.
+ * `expectedCanonicalTree` is absent only for Candidates verified before the base tree was recorded,
+ * which turns the optional tree check (rule 7) off for them.
+ */
 export const PromotionRequest = z.object({
   projectId: Id,
   changeId: Id,
   candidateId: Id,
   expectedCanonicalGeneration: CanonicalGeneration,
-  expectedCanonicalTree: z.string(),
-  candidateTree: z.string(),
-  requiredEvidenceIds: z.array(Id),
+  expectedCanonicalTree: z.string().min(1).optional(),
+  candidateTree: z.string().min(1),
+  requiredEvidenceIds: z.array(Id).min(1),
   policyVersion: z.string().min(1),
 });
 export type PromotionRequest = z.infer<typeof PromotionRequest>;
+
+/** Why a Candidate cannot be promoted now. `detail` is for humans. */
+export const PromotionBlockView = z.object({
+  kind: z.enum([
+    "not_verified",
+    "stale",
+    "missing_plan",
+    "evidence_gap",
+    "approval_pending",
+    "approval_rejected",
+    "policy_mismatch",
+    "artifact_missing",
+  ]),
+  detail: z.string(),
+});
+export type PromotionBlockView = z.infer<typeof PromotionBlockView>;
+
+/** Result of a promotion request (`POST /v1/candidates/:candidateId/promote`). */
+export const PromotionOutcome = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("promoted"),
+    candidateId: Id,
+    fromGeneration: CanonicalGeneration,
+    generation: CanonicalGeneration,
+    /** A retry of a promotion that already succeeded (idempotency key: Candidate + base). */
+    alreadyPromoted: z.boolean(),
+    treeSha: z.string(),
+    /** The canonical repo's `main` points at the composed commit and its file index exists. */
+    sourceSynced: z.boolean(),
+    sourceCommit: z.string().nullable(),
+  }),
+  z.object({
+    status: z.literal("stale"),
+    candidateId: Id,
+    baseGeneration: CanonicalGeneration,
+    canonicalGeneration: CanonicalGeneration,
+    reason: z.string(),
+  }),
+  z.object({
+    status: z.literal("blocked"),
+    candidateId: Id,
+    blocks: z.array(PromotionBlockView).min(1),
+  }),
+]);
+export type PromotionOutcome = z.infer<typeof PromotionOutcome>;
+
+/** `POST /v1/changes/:changeId/approve` request (section 16.1). */
+export const ApprovalRequest = z.object({
+  candidateId: z.string().regex(/^cand_[a-z0-9]+$/),
+  decision: z.enum(["approve", "reject"]),
+  reason: z.string().trim().max(1000).optional(),
+});
+export type ApprovalRequest = z.infer<typeof ApprovalRequest>;
+
+/** One recorded human decision on a Candidate (migration 0008). */
+export const ApprovalView = z.object({
+  id: Id,
+  candidateId: Id,
+  changeId: Id,
+  decision: z.enum(["granted", "rejected"]),
+  approverUserId: Id,
+  candidateTree: z.string(),
+  policyVersion: z.string(),
+  reason: z.string().nullable(),
+  createdAt: Timestamp,
+});
+export type ApprovalView = z.infer<typeof ApprovalView>;
+
+export const ApprovalOutcome = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("recorded"), approval: ApprovalView, repeated: z.boolean() }),
+  z.object({
+    status: z.literal("refused"),
+    reason: z.enum(["not_verified", "not_required", "already_decided"]),
+    approval: ApprovalView.nullable(),
+  }),
+]);
+export type ApprovalOutcome = z.infer<typeof ApprovalOutcome>;

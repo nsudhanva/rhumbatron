@@ -84,6 +84,8 @@ module "api_worker" {
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = module.coordinator_worker.name },
     # Sandbox smoke check RPC on the agents Worker (AGENTS.md section 49.3).
     { type = "service", name = "AGENTS", service = module.agents_worker.name, environment = "production" },
+    # Approval and promotion RPC on the integration Worker (AGENTS.md section 36, ADR 0013).
+    { type = "service", name = "INTEGRATION", service = module.integration_worker.name, environment = "production" },
     # Project source provisioning commands (ADR 0010).
     { type = "queue", name = "INTEGRATION_COMMANDS", queue_name = module.async.queues["integration"].name },
     # Starts one ChangeWorkflow per Change (AGENTS.md section 21.1).
@@ -381,9 +383,10 @@ locals {
   }
 }
 
+# Deploys on any config or bundle change (an in-place update of the Worker and container app).
+# No destroy provisioner here: a replacement must never delete the live Worker (ADR 0012).
 resource "terraform_data" "sandbox_worker" {
   triggers_replace = { config = jsonencode(local.sandbox_worker) }
-  # Kept on the resource so the destroy-time provisioner can read it.
   input = {
     account_id = var.account_id
     repo_root  = local.repo_root
@@ -399,6 +402,21 @@ resource "terraform_data" "sandbox_worker" {
       SANDBOX_REPO_ROOT     = self.input.repo_root
       SANDBOX_CONFIG        = self.input.config
     }
+  }
+
+  depends_on = [terraform_data.sandbox_worker_teardown]
+}
+
+# Deletes the container application and the Sandbox Worker on a real destroy only. Keyed by the
+# names alone, so bundle and size changes never replace it.
+resource "terraform_data" "sandbox_worker_teardown" {
+  input = {
+    account_id = var.account_id
+    repo_root  = local.repo_root
+    config = jsonencode({
+      script_name = local.sandbox_worker.script_name
+      app_name    = local.sandbox_worker.app_name
+    })
   }
 
   provisioner "local-exec" {

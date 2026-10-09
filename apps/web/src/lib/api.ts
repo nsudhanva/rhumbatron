@@ -264,8 +264,37 @@ export type CandidateDetail = {
     humanApprovalRequired?: boolean;
     p95Ms?: number;
   } | null;
+  /** The plan gates promotion on a human decision (AGENTS.md section 36, rule 4). */
+  approvalRequired: boolean;
+  approval: Approval | null;
+  baseTree: string | null;
+  promotedGeneration: number | null;
   createdAt: string;
   updatedAt: string;
+};
+
+/** One recorded human decision, bound to the composed tree the approver saw. */
+export type Approval = {
+  id: string;
+  candidateId: string;
+  changeId: string;
+  decision: "granted" | "rejected";
+  approverUserId: string;
+  candidateTree: string;
+  policyVersion: string;
+  reason: string | null;
+  createdAt: string;
+};
+
+export type PromotionOutcome = {
+  status: "promoted";
+  candidateId: string;
+  fromGeneration: number;
+  generation: number;
+  alreadyPromoted: boolean;
+  treeSha: string;
+  sourceSynced: boolean;
+  sourceCommit: string | null;
 };
 
 export type EvidenceRecord = {
@@ -301,4 +330,38 @@ export const createCandidate = createServerFn({ method: "POST" })
   .inputValidator((changeId: string) => changeId)
   .handler(({ data }) =>
     call<CandidateDetail>(`/v1/changes/${data}/candidates`, { method: "POST", body: {} }),
+  );
+
+/**
+ * Records the signed-in user's decision on a gated Candidate. The API takes the approver from the
+ * session; the browser cannot name one. A stale or refused request throws with the API message.
+ */
+export const decideApproval = createServerFn({ method: "POST" })
+  .inputValidator(
+    (input: {
+      changeId: string;
+      candidateId: string;
+      decision: "approve" | "reject";
+      reason?: string;
+    }) => input,
+  )
+  .handler(({ data }) =>
+    call<{ status: "recorded"; approval: Approval; repeated: boolean }>(
+      `/v1/changes/${data.changeId}/approve`,
+      {
+        method: "POST",
+        body: {
+          candidateId: data.candidateId,
+          decision: data.decision,
+          ...(data.reason ? { reason: data.reason } : {}),
+        },
+      },
+    ),
+  );
+
+/** Promotes a verified Candidate (compare-and-swap in ProjectRootDO). Safe to retry. */
+export const promoteCandidate = createServerFn({ method: "POST" })
+  .inputValidator((candidateId: string) => candidateId)
+  .handler(({ data }) =>
+    call<PromotionOutcome>(`/v1/candidates/${data}/promote`, { method: "POST", body: {} }),
   );

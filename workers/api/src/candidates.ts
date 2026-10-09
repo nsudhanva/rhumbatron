@@ -1,18 +1,39 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
-import { apiData, EvidenceRecord, VerificationPlan } from "@rhumbatron/protocol";
+import {
+  ApprovalOutcome,
+  ApprovalRequest,
+  ApprovalView,
+  apiData,
+  EvidenceRecord,
+  PromotionOutcome,
+  VerificationPlan,
+} from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
-import { fail, respond, validate } from "./http.ts";
+import { errorBody, fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
  * Candidates and their Evidence (AGENTS.md sections 15.5, 16.1, 33, 34). Creating a Candidate is
  * a command: the API records it and queues `candidate.verify`; the integration Worker runs
- * CandidateVerificationWorkflow. Reads come from D1 only.
+ * CandidateVerificationWorkflow. Reads come from D1 only. Approval and promotion (section 36) are
+ * RPCs to the integration Worker after this Worker authenticated the user and checked membership.
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
+
+/** Internal RPC on the integration Worker (service binding `INTEGRATION`, ADR 0013). */
+type IntegrationRpc = {
+  promoteCandidate(input: { candidateId: string; actorUserId: string }): Promise<unknown>;
+  decideApproval(input: {
+    candidateId: string;
+    approverUserId: string;
+    decision: "granted" | "rejected";
+    reason: string | null;
+  }): Promise<unknown>;
+};
+const integration = (env: Env) => env.INTEGRATION as unknown as IntegrationRpc;
 
 /** Policy `maxCandidates` (section 53). */
 const MAX_CANDIDATES = 3;
@@ -43,6 +64,11 @@ const CandidateView = z.object({
       p95Ms: z.number().optional(),
     })
     .nullable(),
+  /** The plan gates this Candidate on a human decision (section 36 rule 4). */
+  approvalRequired: z.boolean(),
+  approval: ApprovalView.nullable(),
+  baseTree: z.string().nullable(),
+  promotedGeneration: z.number().int().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -61,15 +87,31 @@ type CandidateRow = {
   change_set_ids_json: string;
   plan_json: string | null;
   score_json: string | null;
+  base_tree: string | null;
+  promoted_generation: number | null;
   created_at: string;
   updated_at: string;
+  approval_id: string | null;
+  approval_decision: "granted" | "rejected" | null;
+  approval_user_id: string | null;
+  approval_tree: string | null;
+  approval_policy: string | null;
+  approval_reason: string | null;
+  approval_at: string | null;
 };
 
 const CANDIDATE_COLUMNS = `c.id, c.change_id, ch.project_id, c.status, c.status_reason, c.base_generation,
   c.artifact_ref, c.composed_commit, c.composed_tree, c.change_set_ids_json, c.plan_json,
-  c.score_json, c.created_at, c.updated_at`;
+  c.score_json, c.base_tree, c.promoted_generation, c.created_at, c.updated_at,
+  a.id AS approval_id, a.decision AS approval_decision, a.approver_user_id AS approval_user_id,
+  a.candidate_tree AS approval_tree, a.policy_version AS approval_policy,
+  a.reason AS approval_reason, a.created_at AS approval_at`;
+
+const CANDIDATE_FROM = `candidates c JOIN changes ch ON ch.id = c.change_id
+  LEFT JOIN approvals a ON a.candidate_id = c.id`;
 
 function toView(row: CandidateRow): CandidateView {
+  const plan = row.plan_json ? (JSON.parse(row.plan_json) as VerificationPlan) : null;
   return {
     id: row.id,
     changeId: row.change_id,
@@ -81,8 +123,26 @@ function toView(row: CandidateRow): CandidateView {
     composedCommit: row.composed_commit,
     composedTree: row.composed_tree,
     changeSetIds: JSON.parse(row.change_set_ids_json) as string[],
-    plan: row.plan_json ? (JSON.parse(row.plan_json) as VerificationPlan) : null,
+    plan,
     gate: row.score_json ? (JSON.parse(row.score_json) as CandidateView["gate"]) : null,
+    // The plan already includes the policy's gated risk tiers (packages/evidence plan.ts).
+    approvalRequired: plan?.humanApprovalRequired ?? false,
+    approval:
+      row.approval_id && row.approval_decision && row.approval_user_id && row.approval_at
+        ? {
+            id: row.approval_id,
+            candidateId: row.id,
+            changeId: row.change_id,
+            decision: row.approval_decision,
+            approverUserId: row.approval_user_id,
+            candidateTree: row.approval_tree ?? "",
+            policyVersion: row.approval_policy ?? "",
+            reason: row.approval_reason,
+            createdAt: row.approval_at,
+          }
+        : null,
+    baseTree: row.base_tree,
+    promotedGeneration: row.promoted_generation,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -94,9 +154,7 @@ async function hex(text: string) {
 }
 
 async function loadCandidate(env: Env, candidateId: string) {
-  return env.DB.prepare(
-    `SELECT ${CANDIDATE_COLUMNS} FROM candidates c JOIN changes ch ON ch.id = c.change_id WHERE c.id = ?`,
-  )
+  return env.DB.prepare(`SELECT ${CANDIDATE_COLUMNS} FROM ${CANDIDATE_FROM} WHERE c.id = ?`)
     .bind(candidateId)
     .first<CandidateRow>();
 }
@@ -202,7 +260,7 @@ export const candidates = new Hono<AppEnv>()
         return fail(c, 404, "not_found", "Change not found");
       }
       const rows = await c.env.DB.prepare(
-        `SELECT ${CANDIDATE_COLUMNS} FROM candidates c JOIN changes ch ON ch.id = c.change_id
+        `SELECT ${CANDIDATE_COLUMNS} FROM ${CANDIDATE_FROM}
        WHERE c.change_id = ? ORDER BY c.created_at`,
       )
         .bind(changeId)
@@ -225,6 +283,77 @@ export const candidates = new Hono<AppEnv>()
         return fail(c, 404, "not_found", "Candidate not found");
       }
       return respond(c, apiData(CandidateView), { data: toView(row) });
+    },
+  )
+
+  /**
+   * P11-02: one human decision on a gated Candidate of this Change (section 16.1). The approver is
+   * the authenticated member; the body cannot name anyone else. The first decision is final.
+   */
+  .post(
+    "/v1/changes/:changeId/approve",
+    requireAuth,
+    validate("param", ChangeIdParam),
+    validate("json", ApprovalRequest),
+    async (c) => {
+      const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+      const { changeId } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const candidate = await loadCandidate(c.env, body.candidateId);
+      if (
+        !candidate ||
+        candidate.change_id !== changeId ||
+        !(await canAccessProject(c.env.DB, userId, candidate.project_id))
+      ) {
+        return fail(c, 404, "not_found", "Candidate not found");
+      }
+      const outcome = ApprovalOutcome.parse(
+        await integration(c.env).decideApproval({
+          candidateId: body.candidateId,
+          approverUserId: userId,
+          decision: body.decision === "approve" ? "granted" : "rejected",
+          reason: body.reason || null,
+        }),
+      );
+      if (outcome.status === "refused") {
+        const message = {
+          not_verified: "Only a verified Candidate can be approved or rejected",
+          not_required: "This Candidate does not require a human approval",
+          already_decided: "A decision is already recorded for this Candidate",
+        }[outcome.reason];
+        return c.json(errorBody("conflict", message, outcome), 409);
+      }
+      return respond(c, apiData(ApprovalOutcome), { data: outcome });
+    },
+  )
+
+  /**
+   * P11-03/P11-04: promote a verified Candidate (section 36). The integration Worker re-checks
+   * every precondition from authoritative rows; ProjectRootDO runs the compare-and-swap. Safe to
+   * retry: a repeat returns `alreadyPromoted`. Stale and blocked outcomes return 409 with details.
+   */
+  .post(
+    "/v1/candidates/:candidateId/promote",
+    requireAuth,
+    validate("param", CandidateIdParam),
+    async (c) => {
+      const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+      const { candidateId } = c.req.valid("param");
+      const candidate = await loadCandidate(c.env, candidateId);
+      if (!candidate || !(await canAccessProject(c.env.DB, userId, candidate.project_id))) {
+        return fail(c, 404, "not_found", "Candidate not found");
+      }
+      const outcome = PromotionOutcome.parse(
+        await integration(c.env).promoteCandidate({ candidateId, actorUserId: userId }),
+      );
+      if (outcome.status === "stale") {
+        return c.json(errorBody("conflict", outcome.reason, outcome), 409);
+      }
+      if (outcome.status === "blocked") {
+        const message = outcome.blocks.map((b) => b.detail).join(" ");
+        return c.json(errorBody("conflict", message, outcome), 409);
+      }
+      return respond(c, apiData(PromotionOutcome), { data: outcome });
     },
   )
 
