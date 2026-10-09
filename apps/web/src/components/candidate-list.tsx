@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type CandidateDetail, createCandidate } from "../lib/api";
 import { formatAge, formatMs, formatNumber, generation } from "../lib/format";
-import { candidateLetter } from "./agents/activity-model";
+import { candidateLabels } from "./candidate/model";
 import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "./ui/data-table";
 import { EmptyState } from "./ui/empty-state";
 import { Section } from "./ui/page";
@@ -28,8 +28,9 @@ export function CandidateList({
     mutationFn: () => createCandidate({ data: changeId }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["candidates", changeId] }),
   });
-  // A, B, C in creation order, the same letters the agent activity view uses.
+  // Creation order, with the names the Candidate pages and activity view use.
   const ordered = [...candidates].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const names = candidateLabels(candidates);
   const verified = candidates.filter((c) => c.status === "verified" || c.status === "promoted");
 
   return (
@@ -88,13 +89,13 @@ export function CandidateList({
             </tr>
           </thead>
           <tbody>
-            {ordered.map((c, index) => (
+            {ordered.map((c) => (
               <TRow key={c.id}>
                 <Td>
                   <TitleCell
                     title={
                       <RowLink to="/candidates/$candidateId" params={{ candidateId: c.id }}>
-                        Candidate {candidateLetter(index)}
+                        {names.get(c.id)}
                       </RowLink>
                     }
                     meta={`${c.id} · base ${generation(c.baseGeneration)}`}

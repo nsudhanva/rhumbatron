@@ -8,6 +8,7 @@ import type {
   TaskRun,
 } from "../../lib/api";
 import { generation, truncate } from "../../lib/format";
+import { candidateLabels } from "../candidate/model";
 
 /**
  * Agent activity as a sequence of facts (DESIGN.md 11.1, AGENTS.md sections 17 and 31-36).
@@ -46,6 +47,8 @@ export type CandidateSpec = {
   id: string;
   /** A, B, C in creation order. */
   letter: string;
+  /** Display name shared with the Candidate pages: "Baseline" or "Candidate A". */
+  name: string;
   status: CandidateDetail["status"];
   checks: CandidateCheckSpec[];
   baseGeneration: number;
@@ -170,7 +173,7 @@ function laneOfChangeSet(changeSetId: string, tasks: TaskDetail[]) {
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-export function candidateLetter(index: number) {
+function candidateLetter(index: number) {
   return LETTERS[index] ?? String(index + 1);
 }
 
@@ -329,6 +332,7 @@ export function deriveActivity(input: ActivityInput): ActivityModel {
   const sorted = [...input.candidates].sort(
     (a, b) => (time(a.createdAt) ?? 0) - (time(b.createdAt) ?? 0),
   );
+  const names = candidateLabels(sorted);
   const candidates: CandidateSpec[] = sorted.map((candidate, index) => {
     const letter = candidateLetter(index);
     const records = input.evidence[candidate.id];
@@ -348,7 +352,7 @@ export function deriveActivity(input: ActivityInput): ActivityModel {
           }));
 
     const created = time(candidate.createdAt);
-    const name = `Candidate ${letter}`;
+    const name = names.get(candidate.id) ?? `Candidate ${letter}`;
     if (created !== null) {
       push({
         id: `${candidate.id}:fork`,
@@ -454,6 +458,7 @@ export function deriveActivity(input: ActivityInput): ActivityModel {
     return {
       id: candidate.id,
       letter,
+      name,
       status: candidate.status,
       checks,
       baseGeneration: candidate.baseGeneration,

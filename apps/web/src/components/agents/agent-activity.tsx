@@ -475,7 +475,7 @@ function CandidateRow({
   arrivalInFlight: boolean;
   link: boolean;
 }) {
-  const name = `Candidate ${spec.letter}`;
+  const name = spec.name;
   if (!state.forked) {
     return <div aria-hidden className="h-full border-b border-kumo-rule" />;
   }

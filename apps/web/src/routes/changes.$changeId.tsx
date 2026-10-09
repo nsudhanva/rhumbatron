@@ -1,4 +1,5 @@
 import { Show } from "@clerk/tanstack-react-start";
+import { cn } from "@cloudflare/kumo";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
@@ -293,7 +294,13 @@ function ChangeView() {
           )}
         </Section>
         <Section label="Task details">
-          <div className="bg-kumo-elevated p-4 shadow-[inset_2px_0_0_var(--color-accent-500)]">
+          <div
+            className={cn(
+              "bg-kumo-elevated p-4",
+              // The accent bar pairs the inspector with the selected node; none when empty.
+              selectedTask && "shadow-[inset_2px_0_0_var(--color-accent-500)]",
+            )}
+          >
             <TaskPanel task={selectedTask} />
           </div>
         </Section>
