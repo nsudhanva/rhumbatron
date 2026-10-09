@@ -14,6 +14,17 @@ import {
   MIN_TTL_MS,
   nextAlarmAt,
 } from "./claims.ts";
+import {
+  type ChallengeView,
+  type CreateChallengeInput,
+  type CreateChallengeResult,
+  type DeclareIntentInput,
+  type DeclareIntentResult,
+  IntentStore,
+  migrateIntents,
+  type ResolveChallengeInput,
+  type ResolveChallengeResult,
+} from "./intents.ts";
 import { migrateOutbox, OutboxPublisher } from "./outbox.ts";
 
 /**
@@ -73,11 +84,13 @@ const SYSTEM_ACTOR_ID = "resource-shard-do";
 export class ResourceShardDO extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly outbox: OutboxPublisher;
+  private readonly intents: IntentStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.outbox = new OutboxPublisher(this.sql, env);
+    this.intents = new IntentStore(this.sql);
     // Schema setup runs before any request reaches this instance.
     ctx.blockConcurrencyWhile(async () => this.migrate());
   }
@@ -101,6 +114,7 @@ export class ResourceShardDO extends DurableObject<Env> {
       CREATE INDEX IF NOT EXISTS claims_status_expiry ON claims (status, lease_expires_at);
     `);
     migrateOutbox(this.sql);
+    migrateIntents(this.sql);
   }
 
   /**
@@ -232,6 +246,49 @@ export class ResourceShardDO extends DurableObject<Env> {
             )
             .toArray();
     return rows.map((r) => toClaim(fromRow(r)));
+  }
+
+  /**
+   * Records a typed Intent (section 26.1) and writes `intent.declared` in the same transaction.
+   * Idempotent on `intentId`: a retry returns `duplicate`; a reused ID with other content is
+   * rejected. Throws when the input is invalid.
+   */
+  async declareIntent(input: DeclareIntentInput): Promise<DeclareIntentResult> {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => this.intents.declare(input, now));
+    if (result.ok && result.status === "declared") await this.rescheduleAlarm();
+    return result;
+  }
+
+  /** Intents oldest first; with `resource`, those on it, its ancestors, or its descendants. */
+  async listIntents(resource?: string) {
+    return this.intents.list(resource);
+  }
+
+  /** Records a typed Challenge (section 26.2) and writes `challenge.created`. Idempotent on ID. */
+  async createChallenge(input: CreateChallengeInput): Promise<CreateChallengeResult> {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => this.intents.createChallenge(input, now));
+    if (result.ok && result.status === "created") await this.rescheduleAlarm();
+    return result;
+  }
+
+  /** Resolves an open Challenge and writes `challenge.resolved`. Repeating it is a no-op. */
+  async resolveChallenge(
+    challengeId: string,
+    resolution: ResolveChallengeInput["resolution"],
+  ): Promise<ResolveChallengeResult> {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() =>
+      this.intents.resolveChallenge({ challengeId, resolution }, now),
+    );
+    if (result.ok && result.status === "resolved") await this.rescheduleAlarm();
+    return result;
+  }
+
+  /** Challenges oldest first, optionally on one exact resource, with their resolution. */
+  async listChallenges(resource?: string): Promise<ChallengeView[]> {
+    return this.intents.listChallenges(resource);
   }
 
   /** Expires overdue claims, prunes old finished rows, publishes the outbox, sets the next alarm. */

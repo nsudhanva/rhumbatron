@@ -1,6 +1,7 @@
 import { HealthResponse, VersionResponse } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { errorBody, fail, respond } from "./http.ts";
+import { live } from "./live.ts";
 import { projects } from "./projects.ts";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -19,6 +20,8 @@ app.get("/v1/version", (c) =>
   }),
 );
 
+// Before `projects`: the live handler answers first, so its own requireAuth runs only once.
+app.route("/", live);
 app.route("/", projects);
 
 app.notFound((c) => fail(c, 404, "not_found", "Route not found"));

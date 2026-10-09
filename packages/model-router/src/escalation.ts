@@ -8,6 +8,7 @@ import type { ModelTier } from "@rhumbatron/protocol";
 
 export type FailureKind =
   | "no_outcome"
+  | "run_call_cap"
   | "invalid_output"
   | "verifier_rejected"
   | "agent_failed"

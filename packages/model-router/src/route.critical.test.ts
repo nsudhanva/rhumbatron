@@ -64,6 +64,8 @@ describe("nextStep", () => {
       ]).action,
     ).toBe("stop");
     expect(nextStep("haiku", [{ tier: "haiku", kind: "budget_exhausted" }]).action).toBe("stop");
+    // A run that hits its own call cap is an intelligence failure: retry, then escalate.
+    expect(nextStep("haiku", [{ tier: "haiku", kind: "run_call_cap" }]).action).toBe("retry");
   });
 });
 

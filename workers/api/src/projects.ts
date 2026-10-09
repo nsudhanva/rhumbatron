@@ -259,6 +259,19 @@ export const projects = new Hono<AppEnv>()
     },
   )
 
+  // Integration smoke check: the Project Sandbox runs the fixture's Bun tests (section 49.3).
+  .post("/v1/projects/:projectId/sandbox-smoke", validate("param", ProjectIdParam), async (c) => {
+    const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+    const { projectId } = c.req.valid("param");
+    if (!(await canAccessProject(c.env.DB, userId, projectId))) {
+      return fail(c, 404, "not_found", "Project not found");
+    }
+    const agents = c.env.AGENTS as unknown as {
+      sandboxSmoke(id: string): Promise<{ ok: boolean; steps: unknown[] }>;
+    };
+    return c.json({ data: await agents.sandboxSmoke(projectId) });
+  })
+
   .get("/v1/projects/:projectId", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");

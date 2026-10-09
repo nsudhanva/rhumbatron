@@ -25,12 +25,18 @@ export type ViewState = { sequence: number; snapshot: ProjectViewSnapshot };
 
 type ViewRow = { sequence: number; snapshot_json: string };
 
+/** Client keepalive frames. The web client sends LIVE_PING on an interval. */
+const LIVE_PING = "ping";
+const LIVE_PONG = "pong";
+
 export class ProjectViewDO extends DurableObject<Env> {
   private readonly sql: SqlStorage;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    // Keepalive: the runtime answers "ping" with "pong" without waking a hibernated object.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(LIVE_PING, LIVE_PONG));
     ctx.blockConcurrencyWhile(async () => this.migrate());
   }
 

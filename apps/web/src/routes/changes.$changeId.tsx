@@ -1,9 +1,9 @@
 import { Show } from "@clerk/tanstack-react-start";
 import { Badge, LayerCard, Loader, Meter, Text } from "@cloudflare/kumo";
 import { Robot, ShieldCheck } from "@phosphor-icons/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TaskPanel } from "../components/task-detail";
 import { WorkGraph } from "../components/work-graph";
 import { getChange, listTasks, type TaskDetail } from "../lib/api";
@@ -15,8 +15,12 @@ import {
   lastActiveTask,
   latestRun,
 } from "../lib/format";
+import { deltaTouchesChange, type LiveStatus, useProjectLive } from "../lib/live";
 
 export const Route = createFileRoute("/changes/$changeId")({ component: ChangePage });
+
+/** Safety net while the live socket is down (AGENTS.md section 39). */
+const FALLBACK_POLL_MS = 30_000;
 
 function ChangePage() {
   return (
@@ -34,19 +38,33 @@ function ChangePage() {
 function ChangeView() {
   const { changeId } = Route.useParams();
   const [selected, setSelected] = useState<string>();
+  const queryClient = useQueryClient();
+  const [socket, setSocket] = useState<LiveStatus>("closed");
+  // Push replaces polling. The slow poll runs only while the live socket is not open.
+  const fallback = socket === "open" ? false : FALLBACK_POLL_MS;
   const change = useQuery({
     queryKey: ["change", changeId],
     queryFn: () => getChange({ data: changeId }),
-    refetchInterval: (query) => (isLive(query.state.data, undefined) ? 2500 : false),
+    refetchInterval: (query) => (isLive(query.state.data, undefined) ? fallback : false),
     // A demo screen may sit in a background tab; polling still stops once the Change is idle.
     refetchIntervalInBackground: true,
   });
   const tasks = useQuery({
     queryKey: ["tasks", changeId],
     queryFn: () => listTasks({ data: changeId }),
-    refetchInterval: (query) => (isLive(change.data, query.state.data) ? 2500 : false),
+    refetchInterval: (query) => (isLive(change.data, query.state.data) ? fallback : false),
     refetchIntervalInBackground: true,
   });
+
+  const projectId = change.data?.projectId;
+  const status = useProjectLive(projectId, isLive(change.data, tasks.data), (signal) => {
+    const taskIds = new Set((tasks.data ?? []).map((t) => t.id));
+    if (signal.kind === "delta" && !deltaTouchesChange(signal.delta, changeId, taskIds)) return;
+    void queryClient.invalidateQueries({ queryKey: ["change", changeId] });
+    void queryClient.invalidateQueries({ queryKey: ["tasks", changeId] });
+    void queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
+  });
+  useEffect(() => setSocket(status), [status]);
 
   if (change.isError) return <Text variant="secondary">{change.error.message}</Text>;
   if (!change.data) return <Text variant="secondary">Loading Change…</Text>;
@@ -54,7 +72,7 @@ function ChangeView() {
   const data = change.data;
   const taskList = tasks.data ?? [];
   const completed = taskList.filter((t) => t.status === "completed").length;
-  const live = isLive(data, tasks.data);
+  const live = isLive(data, tasks.data) && socket === "open";
   const selectedTask = taskList.find((t) => t.id === selected) ?? lastActiveTask(taskList);
 
   return (

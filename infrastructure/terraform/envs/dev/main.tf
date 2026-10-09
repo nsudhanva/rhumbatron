@@ -73,6 +73,8 @@ module "api_worker" {
     module.state.bindings.DB,
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = module.coordinator_worker.name },
+    # Sandbox smoke check RPC on the agents Worker (AGENTS.md section 49.3).
+    { type = "service", name = "AGENTS", service = module.agents_worker.name, environment = "production" },
     # Project source provisioning commands (ADR 0010).
     { type = "queue", name = "INTEGRATION_COMMANDS", queue_name = module.async.queues["integration"].name },
     # Starts one ChangeWorkflow per Change (AGENTS.md section 21.1).
@@ -301,6 +303,8 @@ module "agents_worker" {
     { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-agents-${local.environment}" },
     module.state.bindings.DB,
     { type = "durable_object_namespace", name = "AGENT", class_name = "AgentDO" },
+    # One Sandbox container per Project; a directory per Task (ADR 0011).
+    { type = "durable_object_namespace", name = "SANDBOX", class_name = "Sandbox" },
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
     # Read-only canonical source for agent file tools (ADR 0010).
     { type = "artifacts", name = "ARTIFACTS", namespace = "rhumbatron-projects-${local.environment}" },
@@ -316,11 +320,65 @@ module "agents_worker" {
     { type = "ai", name = "AI" },
   ]
 
-  # v1 (AgentDO as a SQLite class) is applied, so steady state is v1 -> v1 (see coordinator).
+  # v1 added AgentDO; v2 added the Sandbox SQLite class (ADR 0011). v2 is applied, so steady
+  # state is v2 -> v2.
   migrations = {
-    old_tag = "v1"
-    new_tag = "v1"
+    old_tag = "v2"
+    new_tag = "v2"
   }
+}
+
+# Sandbox container (ADR 0011). Provider 5.27 has no container application resource and no
+# `containers` attribute on cloudflare_workers_script, so a temporary adapter (1) re-uploads the
+# agents bundle with upload metadata `containers = [{ class_name = "Sandbox" }]` when the deployed
+# version lacks it, then (2) creates the container application. Every Terraform upload of the
+# agents script drops (1), so the triggers include every input that makes Terraform re-upload.
+# Caps (Linear HOM-192): 1 instance, sleeps after 2 minutes idle (in code), and a 10-hour monthly
+# meter enforced by the agents Worker.
+locals {
+  sandbox_container = {
+    name          = "rhumbatron-sandbox-${local.environment}"
+    image         = "docker.io/cloudflare/sandbox:0.12.6"
+    instance_type = "basic"
+    max_instances = 1
+    class_name    = "Sandbox"
+    script_name   = module.agents_worker.name
+  }
+  # Repo-relative paths keep the trigger identical on every machine.
+  sandbox_script = {
+    main_module = local.bundles.agents.main_module
+    modules     = local.bundles.agents.modules
+  }
+}
+
+resource "terraform_data" "sandbox_container" {
+  triggers_replace = {
+    config = jsonencode(local.sandbox_container)
+    script = jsonencode(local.sandbox_script)
+    # Inputs that make Terraform re-upload the agents script. Update when its bindings gain an input.
+    upload = sha256(jsonencode([
+      local.bundles.agents.bundle_sha256,
+      local.bundles.agents.compatibility_date,
+      local.bundles.agents.compatibility_flags,
+      var.openrouter_api_key,
+      module.ai.gateway_id,
+      module.state.bindings.DB,
+      module.state.bindings.EVIDENCE,
+    ]))
+  }
+
+  provisioner "local-exec" {
+    command = "bun ${local.repo_root}/scripts/containers-sync.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      CONTAINERS_ACCOUNT_ID = var.account_id
+      CONTAINERS_REPO_ROOT  = local.repo_root
+      CONTAINERS_CONFIG     = jsonencode(local.sandbox_container)
+      CONTAINERS_SCRIPT     = jsonencode(local.sandbox_script)
+    }
+  }
+
+  depends_on = [module.agents_worker]
 }
 
 # One consumer for all wake commands. Poison commands go to the dead-letter Queue (section 42.7).

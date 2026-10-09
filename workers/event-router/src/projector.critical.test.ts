@@ -102,6 +102,66 @@ describe("toViewDelta", () => {
   });
 });
 
+describe("toViewDelta lifecycle", () => {
+  const at = (s: number) => `2026-10-08T00:00:0${s}.000Z`;
+
+  it("keeps the newest status per Task, removes completed Tasks, and sleeps their Agents", () => {
+    const delta = toViewDelta([
+      // Arrival order differs from time order: the newest event per Task must win.
+      event({
+        eventId: "s1",
+        eventType: "task.started",
+        taskId: "t1",
+        changeId: "c1",
+        timestamp: at(3),
+      }),
+      event({
+        eventId: "a1",
+        eventType: "task.assigned",
+        taskId: "t1",
+        changeId: "c1",
+        timestamp: at(2),
+      }),
+      event({
+        eventId: "r2",
+        eventType: "task.ready",
+        taskId: "t2",
+        changeId: "c1",
+        timestamp: at(1),
+        actor: { kind: "system", id: "wf" },
+      }),
+      event({
+        eventId: "d2",
+        eventType: "task.completed",
+        taskId: "t2",
+        changeId: "c1",
+        timestamp: at(4),
+        actor: { kind: "agent", id: "agent_2" },
+      }),
+      event({
+        eventId: "v1",
+        eventType: "verification.started",
+        changeId: "c1",
+        timestamp: at(5),
+        actor: { kind: "system", id: "wf" },
+      }),
+    ]);
+    expect(delta.upsert?.activeTasks).toEqual([{ id: "t1", status: "running", changeId: "c1" }]);
+    expect(delta.remove?.activeTasks).toEqual(["t2"]);
+    expect(delta.upsert?.activeAgents).toEqual([
+      { id: "agent_1", status: "working", changeId: "c1" },
+    ]);
+    expect(delta.remove?.activeAgents).toEqual(["agent_2"]);
+    expect(delta.upsert?.activeChanges).toEqual([{ id: "c1", status: "verifying" }]);
+  });
+
+  it("adds no list updates for events outside the lifecycle", () => {
+    const delta = toViewDelta([event({ eventId: "e1", changeId: "c1", taskId: "t1" })]);
+    expect(delta.upsert).toBeUndefined();
+    expect(delta.remove).toBeUndefined();
+  });
+});
+
 describe("planProjects (subrequest budget cap)", () => {
   const groups = Array.from({ length: 20 }, (_, i) => i);
 

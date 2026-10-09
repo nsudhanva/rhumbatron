@@ -9,11 +9,15 @@ export const MAX_RECENT_EVENTS = 50;
 
 const Id = z.string().min(1);
 
-/** A small list item: an id plus a status. `label` is optional display text. */
+/**
+ * A small list item: an id plus a status. `label` is optional display text. `changeId` links a
+ * Task or Agent item to its Change, so a client can tell which Change a delta touches.
+ */
 const ViewItem = z.object({
   id: Id,
   status: z.string().min(1),
   label: z.string().optional(),
+  changeId: Id.optional(),
 });
 type ViewItem = z.infer<typeof ViewItem>;
 
@@ -60,7 +64,7 @@ const Ids = z.array(Id).optional();
 export const ProjectViewDelta = z.object({
   canonicalGeneration: z.number().int().nonnegative().optional(),
   costSummary: CostSummary.partial().optional(),
-  /** Insert or replace items by id. */
+  /** Insert items by id, or merge into an existing item (omitted fields keep their value). */
   upsert: z
     .object({
       activeChanges: Items,
@@ -107,7 +111,8 @@ function upsertItems(list: ViewItem[], incoming: ViewItem[]): ViewItem[] {
   const next = [...list];
   for (const item of incoming) {
     const index = next.findIndex((existing) => existing.id === item.id);
-    if (index >= 0) next[index] = item;
+    const existing = next[index];
+    if (existing) next[index] = { ...existing, ...item };
     else next.push(item);
   }
   return next;
@@ -115,6 +120,7 @@ function upsertItems(list: ViewItem[], incoming: ViewItem[]): ViewItem[] {
 
 /**
  * Returns a new snapshot. Order within one delta: upsert, then remove, so a removal wins.
+ * An upsert merges into an existing item, so a status-only update keeps the item's label.
  * An event whose `eventId` is already in `recentEvents` is ignored (duplicate delivery).
  */
 export function applyDelta(

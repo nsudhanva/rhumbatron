@@ -7,7 +7,8 @@ import type { ModelTier } from "@rhumbatron/protocol";
  */
 
 /** Hard cap on model calls in one Task run, by tier. */
-export const MAX_CALLS_PER_RUN: Record<ModelTier, number> = { haiku: 6, sonnet: 10, opus: 10 };
+/** Coding Tasks read, write, and test, so sonnet and opus get more room than haiku. */
+export const MAX_CALLS_PER_RUN: Record<ModelTier, number> = { haiku: 8, sonnet: 16, opus: 16 };
 
 /** Daily cap on agent model calls, kept below the OpenRouter free limit for other callers. */
 export const AGENT_DAILY_CALL_CAP = 40;

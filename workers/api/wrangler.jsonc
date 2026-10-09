@@ -50,5 +50,7 @@
   // Project source provisioning commands for the integration Worker (ADR 0010).
   "queues": {
     "producers": [{ "binding": "INTEGRATION_COMMANDS", "queue": "rhumbatron-integration-local" }]
-  }
+  },
+  // Sandbox smoke check RPC (AGENTS.md section 49.3).
+  "services": [{ "binding": "AGENTS", "service": "rhumbatron-agents" }]
 }

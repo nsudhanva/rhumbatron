@@ -35,6 +35,8 @@
     "bindings": [
       // One AgentDO per logical agent identity (AGENTS.md section 13.4).
       { "name": "AGENT", "class_name": "AgentDO" },
+      // One Sandbox container per Project (ADR 0011).
+      { "name": "SANDBOX", "class_name": "Sandbox" },
       {
         "name": "PROJECT_ROOT",
         "class_name": "ProjectRootDO",
@@ -59,5 +61,17 @@
     ]
   },
   "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "rhumbatron_metrics_local" }],
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AgentDO"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AgentDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["Sandbox"] }
+  ],
+  // Local development only; Terraform creates the remote container application (ADR 0011).
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "docker.io/cloudflare/sandbox:0.12.6",
+      "instance_type": "basic",
+      "max_instances": 1
+    }
+  ]
 }

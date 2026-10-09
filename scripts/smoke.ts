@@ -7,6 +7,8 @@
  * create a Project and a Change, read them back, and check idempotency and the snapshot.
  * Each authenticated run writes about five D1 rows.
  * `--plan` also submits a real goal and waits for the Work Graph: 1 to 4 model calls (ADR 0007).
+ * `--sandbox` seeds an Acme Shop project and runs its Bun tests in the Sandbox (no model calls;
+ * a few minutes of the monthly Sandbox budget, ADR 0011).
  */
 
 const hosts: Record<string, { web: string; api: string }> = {
@@ -212,6 +214,51 @@ if (secretKey && smokeUserId) {
     );
     for (const t of tasks)
       console.log(`      ${t.key} ${t.status.padEnd(9)} ${t.title}  deps=${t.dependsOn.length}`);
+  }
+
+  if (process.argv.includes("--sandbox")) {
+    const fresh = async () => {
+      const { jwt: token } = await clerk<{ jwt: string }>(`/sessions/${session.id}/tokens`, {});
+      return { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    };
+    const demo = (await (
+      await fetch(`${target.api}/v1/projects`, {
+        method: "POST",
+        headers: await fresh(),
+        body: JSON.stringify({
+          name: "Sandbox Smoke",
+          slug: `sandbox-${Date.now()}`,
+          template: "acme-shop",
+        }),
+      })
+    ).json()) as { data?: { id: string } };
+    const demoId = demo.data?.id ?? "missing";
+    let source = "unassigned";
+    const until = Date.now() + 120_000;
+    while (source === "unassigned" && Date.now() < until) {
+      await Bun.sleep(5000);
+      const read = (await (
+        await fetch(`${target.api}/v1/projects/${demoId}`, { headers: await fresh() })
+      ).json()) as {
+        data?: { canonical: { artifactRef: string } };
+      };
+      source = read.data?.canonical.artifactRef ?? "unassigned";
+    }
+    report("acme source provisioned", source !== "unassigned", source);
+    const result = (await (
+      await fetch(`${target.api}/v1/projects/${demoId}/sandbox-smoke`, {
+        method: "POST",
+        headers: await fresh(),
+      })
+    ).json()) as {
+      data?: { ok: boolean; steps: { step: string; ok: boolean; ms: number; detail: string }[] };
+    };
+    for (const s of result.data?.steps ?? []) {
+      console.log(
+        `      ${s.ok ? "ok  " : "FAIL"} ${s.step} (${(s.ms / 1000).toFixed(1)} s) ${s.detail.split("\n").slice(-3).join(" | ").slice(0, 160)}`,
+      );
+    }
+    report("sandbox runs bun test", result.data?.ok === true);
   }
 
   await clerk(`/sessions/${session.id}/revoke`, {});

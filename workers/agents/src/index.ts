@@ -1,17 +1,30 @@
+import { WorkerEntrypoint } from "cloudflare:workers";
+import { type SandboxSmokeResult, sandboxSmoke } from "./sandbox-smoke.ts";
 import { handleWake } from "./wake-consumer.ts";
 
+export { Sandbox } from "@cloudflare/sandbox";
 export { AgentDO } from "./agent-do.ts";
 
-export default {
-  async fetch(request, env): Promise<Response> {
+export default class Agents extends WorkerEntrypoint<Env> {
+  override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
-      return Response.json({ ok: true, service: env.SERVICE_NAME, environment: env.ENVIRONMENT });
+      return Response.json({
+        ok: true,
+        service: this.env.SERVICE_NAME,
+        environment: this.env.ENVIRONMENT,
+      });
     }
     return new Response("Not Found", { status: 404 });
-  },
+  }
 
-  async queue(batch, env): Promise<void> {
+  /** Service-binding RPC for the API's Sandbox smoke check (no model calls). */
+  async sandboxSmoke(projectId: string): Promise<SandboxSmokeResult> {
+    return sandboxSmoke(this.env, projectId);
+  }
+
+  override async queue(batch: MessageBatch): Promise<void> {
+    const env = this.env;
     for (const message of batch.messages) {
       try {
         // Invalid and stale wakes are acknowledged: retrying them cannot succeed.
@@ -25,5 +38,5 @@ export default {
         message.retry({ delaySeconds: 30 });
       }
     }
-  },
-} satisfies ExportedHandler<Env>;
+  }
+}

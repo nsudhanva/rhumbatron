@@ -51,12 +51,88 @@ function generationOf(event: EventEnvelope): number | undefined {
     : undefined;
 }
 
+/** Status after each lifecycle event. `null` removes the item from the active list. */
+type StatusMap = Partial<Record<EventEnvelope["eventType"], string | null>>;
+
+const TASK_STATUS: StatusMap = {
+  "task.created": "pending",
+  "task.ready": "ready",
+  "task.assigned": "assigned",
+  "task.started": "running",
+  "task.completed": null,
+  "task.failed": "failed",
+};
+
+const CHANGE_STATUS: StatusMap = {
+  "change.created": "created",
+  "change.compiled": "running",
+  "verification.started": "verifying",
+  "change.cancelled": null,
+};
+
+/** An Agent sleeps when its Task ends (AGENTS.md section 13.4). */
+const AGENT_STATUS: StatusMap = {
+  "agent.woken": "awake",
+  "task.started": "working",
+  "task.completed": null,
+  "task.failed": null,
+  "agent.slept": null,
+};
+
+type ListName = "activeChanges" | "activeTasks" | "activeAgents";
+type Latest = Map<string, { status: string | null; changeId?: string }>;
+
+/** Last status per item id. Events must arrive in time order, so the newest event wins. */
+function latestStatuses(events: EventEnvelope[]): Record<ListName, Latest> {
+  const lists: Record<ListName, Latest> = {
+    activeChanges: new Map(),
+    activeTasks: new Map(),
+    activeAgents: new Map(),
+  };
+  const note = (
+    list: ListName,
+    id: string | undefined,
+    status: string | null | undefined,
+    changeId?: string,
+  ) => {
+    if (!id || status === undefined) return;
+    lists[list].set(id, { status, ...(changeId ? { changeId } : {}) });
+  };
+  for (const event of events) {
+    note("activeChanges", event.changeId, CHANGE_STATUS[event.eventType]);
+    note("activeTasks", event.taskId, TASK_STATUS[event.eventType], event.changeId);
+    if (event.actor.kind === "agent") {
+      note("activeAgents", event.actor.id, AGENT_STATUS[event.eventType], event.changeId);
+    }
+  }
+  return lists;
+}
+
+/** Adds upserts and removals for task, change, and agent lifecycle events to `delta`. */
+function addLifecycle(delta: ProjectViewDelta, events: EventEnvelope[]) {
+  const upsert: NonNullable<ProjectViewDelta["upsert"]> = {};
+  const remove: NonNullable<ProjectViewDelta["remove"]> = {};
+  for (const [list, latest] of Object.entries(latestStatuses(events)) as [ListName, Latest][]) {
+    const items = [];
+    const ids = [];
+    for (const [id, { status, changeId }] of latest) {
+      if (status === null) ids.push(id);
+      else items.push({ id, status, ...(changeId ? { changeId } : {}) });
+    }
+    if (items.length > 0) upsert[list] = items;
+    if (ids.length > 0) remove[list] = ids;
+  }
+  if (Object.keys(upsert).length > 0) delta.upsert = upsert;
+  if (Object.keys(remove).length > 0) delta.remove = remove;
+}
+
 /**
  * Builds ONE delta for all events of one project in one batch. The view accepts a single
  * `appendEvent` per delta, so the appended event is the newest `canonical.advanced` event when
  * the group has one, else the newest event. The summary notes how many other events it covers.
  * The generation is the highest `toGeneration` in the group, so out-of-order delivery cannot
- * move it backward within one batch.
+ * move it backward within one batch. Task, Change, and Agent lifecycle events also update the
+ * active lists; within one batch the newest event per item wins. Statuses never come from payloads.
  */
 export function toViewDelta(events: EventEnvelope[]): ProjectViewDelta {
   if (events.length === 0) return {};
@@ -77,6 +153,7 @@ export function toViewDelta(events: EventEnvelope[]): ProjectViewDelta {
   };
   const generations = advanced.map((event) => generationOf(event) ?? 0);
   if (generations.length > 0) delta.canonicalGeneration = Math.max(...generations);
+  addLifecycle(delta, byTime);
   return delta;
 }
 

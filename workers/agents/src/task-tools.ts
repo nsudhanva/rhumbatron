@@ -60,10 +60,32 @@ const ListFilesArgs = Type.Object({
   ),
 });
 
-/** Read-only view of the canonical source, capped per run (Artifacts operations). */
+const WriteFileArgs = Type.Object({
+  path: Type.String({
+    minLength: 1,
+    maxLength: 300,
+    description: "Repository-relative file path.",
+  }),
+  content: Type.String({ maxLength: 60_000, description: "The complete new file content." }),
+});
+const RunCommandArgs = Type.Object({
+  command: Type.String({
+    minLength: 2,
+    maxLength: 200,
+    description:
+      "One of: bun install, bun test [paths], bun run typecheck|test|bench, bunx tsc --noEmit, git status|diff|log, ls.",
+  }),
+});
+
+/**
+ * Source access for one run: reads come from the workspace when it is open, else from the
+ * canonical commit. Writes and commands open the Task's workspace (implementation Tasks only).
+ */
 export type SourceReader = {
   listFiles(prefix?: string): Promise<string>;
   readFile(path: string): Promise<string>;
+  writeFile(path: string, content: string): Promise<string>;
+  runCommand(command: string): Promise<string>;
 };
 
 export type TaskOutcomeSink = {
@@ -115,9 +137,28 @@ export function taskExtension(
       return { content: [{ type: "text", text: await sink.fail(args) }] };
     },
   };
+  const writeFile: ToolRegistration<typeof WriteFileArgs> = {
+    name: "write_file",
+    description: "Create or replace one file in your Task workspace. Write the complete content.",
+    parameters: WriteFileArgs,
+    replay: "safe",
+    async execute(args) {
+      return { content: [{ type: "text", text: await source.writeFile(args.path, args.content) }] };
+    },
+  };
+  const runCommand: ToolRegistration<typeof RunCommandArgs> = {
+    name: "run_command",
+    description:
+      "Run an allowed command in your Task workspace, for example bun test or bun run typecheck.",
+    parameters: RunCommandArgs,
+    replay: "safe",
+    async execute(args) {
+      return { content: [{ type: "text", text: await source.runCommand(args.command) }] };
+    },
+  };
   return {
     name: "rhumbatron-task",
     sections: [{ key: "task", render: prompt, tag: false }],
-    tools: [listFiles, readFile, complete, fail],
+    tools: [listFiles, readFile, writeFile, runCommand, complete, fail],
   } as unknown as Extension;
 }

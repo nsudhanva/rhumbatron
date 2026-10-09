@@ -14,6 +14,7 @@ import { Route as ChangesChangeIdRouteImport } from './routes/changes.$changeId'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
+import { Route as LiveProjectsProjectIdRouteImport } from './routes/live.projects.$projectId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,6 +41,11 @@ const SignUpSplatRoute = SignUpSplatRouteImport.update({
   path: '/sign-up/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LiveProjectsProjectIdRoute = LiveProjectsProjectIdRouteImport.update({
+  id: '/live/projects/$projectId',
+  path: '/live/projects/$projectId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,6 +70,7 @@ export interface FileRoutesById {
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -71,6 +80,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/live/projects/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -78,6 +88,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/live/projects/$projectId'
   id:
     | '__root__'
     | '/'
@@ -85,6 +96,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/live/projects/$projectId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -93,6 +105,7 @@ export interface RootRouteChildren {
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
+  LiveProjectsProjectIdRoute: typeof LiveProjectsProjectIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -132,6 +145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignUpSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/live/projects/$projectId': {
+      id: '/live/projects/$projectId'
+      path: '/live/projects/$projectId'
+      fullPath: '/live/projects/$projectId'
+      preLoaderRoute: typeof LiveProjectsProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -141,6 +161,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
+  LiveProjectsProjectIdRoute: LiveProjectsProjectIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

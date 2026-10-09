@@ -41,3 +41,23 @@ export async function cfApi<T>(token: string, url: string, init: RequestInit = {
   }
   return body.result;
 }
+
+/** Multipart variant of cfApi (script uploads). fetch sets the multipart boundary header. */
+export async function cfApiForm<T>(
+  token: string,
+  url: string,
+  form: FormData,
+  method = "PUT",
+): Promise<T> {
+  const response = await fetch(url, {
+    method,
+    headers: { authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const body = (await response.json()) as ApiEnvelope<T>;
+  if (!response.ok || !body.success) {
+    const message = body.errors?.map((e) => `${e.code ?? ""} ${e.message}`.trim()).join("; ");
+    throw new Error(`${method} ${new URL(url).pathname} failed: ${message || response.status}`);
+  }
+  return body.result;
+}
