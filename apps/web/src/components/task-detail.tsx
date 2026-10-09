@@ -1,18 +1,32 @@
-import { Badge, Text } from "@cloudflare/kumo";
 import type { Intent, TaskDetail, TaskRun } from "../lib/api";
-import { formatUsd, runDuration } from "../lib/format";
-import { STATUS_STYLE } from "./work-graph";
+import { formatNumber, formatUsd, runDuration } from "../lib/format";
+import { EmptyState } from "./ui/empty-state";
+import { KeyValue } from "./ui/key-value";
+import { StatusPill } from "./ui/status-pill";
+import { Tag } from "./ui/tag";
 
-function List({ title, items }: { title: string; items: string[] }) {
+/**
+ * Task inspector beside the Work Graph (DESIGN.md 9.13, 10): repeats the selected node as text.
+ * Rows under 1px rules; machine values in mono; status as a word.
+ */
+
+function Rows({ title, items, mono }: { title: string; items: string[]; mono?: boolean }) {
   if (items.length === 0) return null;
   return (
     <div className="grid gap-1">
-      <Text as="h4" variant="secondary">
-        {title}
-      </Text>
-      <ul className="list-disc pl-5 text-sm text-kumo-default">
+      <h4 className="type-label text-kumo-subtle">{title}</h4>
+      <ul className="grid">
         {items.map((item) => (
-          <li key={item}>{item}</li>
+          <li
+            key={item}
+            className={
+              mono
+                ? "border-b border-kumo-rule py-1.5 font-mono text-[11px] break-all"
+                : "border-b border-kumo-rule py-1.5 text-[13px]"
+            }
+          >
+            {item}
+          </li>
         ))}
       </ul>
     </div>
@@ -26,76 +40,83 @@ function isIntent(outcome: TaskRun["outcome"]): outcome is Intent {
 function Run({ run }: { run: TaskRun }) {
   const outcome = run.outcome;
   return (
-    <div className="grid gap-2 rounded-lg border border-kumo-line px-3 py-2">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Text bold>Attempt {run.attempt}</Text>
-        <Badge variant="info">{run.tier}</Badge>
-        <Badge
-          variant={
-            run.status === "completed" ? "success" : run.status === "failed" ? "error" : "warning"
-          }
-        >
-          {run.status}
-        </Badge>
-        {run.decidedBy && <Badge variant="secondary">routed by {run.decidedBy}</Badge>}
+    <li className="grid gap-2 border-b border-kumo-rule py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[13px] font-semibold">Attempt {run.attempt}</span>
+        <Tag className="font-mono">{run.tier}</Tag>
+        {run.decidedBy && (
+          <span className="font-mono text-[11px] text-kumo-subtle">routed by {run.decidedBy}</span>
+        )}
+        <StatusPill status={run.status} className="ml-auto" />
       </div>
-      <Text variant="secondary">
-        {run.modelCalls} model calls · {run.inputTokens.toLocaleString()} in /{" "}
-        {run.outputTokens.toLocaleString()} out tokens · {formatUsd(run.costUsd)} ·{" "}
-        {runDuration(run)}
-      </Text>
+      <p className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+        {formatNumber(run.modelCalls)} calls · {formatNumber(run.inputTokens)} in /{" "}
+        {formatNumber(run.outputTokens)} out · {formatUsd(run.costUsd)} · {runDuration(run)}
+      </p>
       {run.routeReasons.length > 0 && (
-        <Text variant="secondary">Route reasons: {run.routeReasons.join(", ")}</Text>
+        <p className="text-[12px] text-kumo-subtle">Route: {run.routeReasons.join(" · ")}</p>
       )}
       {run.status === "failed" && (
-        <div className="rounded-md bg-kumo-danger-tint px-2 py-1.5 text-sm text-kumo-danger">
-          {run.failureKind ?? "failure"}
+        <p className="text-[12px] text-kumo-danger">
+          <span className="font-semibold">FAIL</span> {run.failureKind ?? "failure"}
           {outcome && "reason" in outcome ? `: ${outcome.reason}` : ""}
-        </div>
+        </p>
       )}
       {run.status === "completed" && isIntent(outcome) && (
-        <div className="grid gap-2">
-          <Text as="h4" bold>
-            Intent
-          </Text>
-          <Text>{outcome.summary}</Text>
-          <List title="Expected files" items={outcome.expectedFiles} />
-          <List title="Contract changes" items={outcome.expectedContractChanges} />
-          <List title="Data changes" items={outcome.expectedDataChanges} />
-          <List title="Assumptions" items={outcome.assumptions} />
-          <List title="Acceptance evidence" items={outcome.acceptanceEvidence} />
+        <div className="grid gap-2 bg-kumo-base p-3">
+          <h4 className="type-label text-kumo-subtle">Intent</h4>
+          <p className="text-[13px]">{outcome.summary}</p>
+          <Rows title="Expected files" items={outcome.expectedFiles} mono />
+          <Rows title="Contract changes" items={outcome.expectedContractChanges} />
+          <Rows title="Data changes" items={outcome.expectedDataChanges} />
+          <Rows title="Assumptions" items={outcome.assumptions} />
+          <Rows title="Acceptance evidence" items={outcome.acceptanceEvidence} />
         </div>
       )}
-    </div>
+    </li>
   );
 }
 
 export function TaskPanel({ task }: { task: TaskDetail | undefined }) {
-  if (!task) return <Text variant="secondary">Select a Task to see its details.</Text>;
-  const style = STATUS_STYLE[task.status];
+  if (!task) {
+    return (
+      <EmptyState
+        what="No Task selected."
+        how="Select a node in the Work Graph to see its runs and Intent."
+      />
+    );
+  }
   return (
-    <div className="grid gap-3">
-      <div className="grid gap-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="font-mono text-xs text-kumo-subtle">{task.key}</span>
-          <Badge variant={style.variant}>{style.label}</Badge>
-          <Badge variant="secondary">{task.kind}</Badge>
+    <div className="grid gap-4">
+      <div className="grid gap-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-[11px] text-kumo-subtle">{task.key}</span>
+          <StatusPill status={task.status} />
+          <Tag>{task.kind}</Tag>
         </div>
-        <Text as="h3" variant="heading3">
-          {task.title}
-        </Text>
-        <Text variant="secondary">{task.objective}</Text>
+        <h3 className="type-h4">{task.title}</h3>
+        <p className="text-[13px] text-kumo-subtle">{task.objective}</p>
       </div>
-      <List title="Acceptance criteria" items={task.acceptanceCriteria} />
-      <List title="Semantic resources" items={task.semanticResources} />
-      <div className="grid gap-2">
-        <Text as="h4" variant="secondary">
-          Runs
-        </Text>
+      <KeyValue
+        items={[
+          { label: "Risk", value: task.riskTier },
+          { label: "Complexity", value: task.complexity },
+          { label: "Agent", value: task.assignedAgentId, mono: true },
+          { label: "Task", value: task.id, mono: true },
+        ]}
+      />
+      <Rows title="Semantic resources" items={task.semanticResources} mono />
+      <Rows title="Acceptance criteria" items={task.acceptanceCriteria} />
+      <div className="grid gap-1">
+        <h4 className="type-label text-kumo-subtle">Runs</h4>
         {task.runs.length === 0 ? (
-          <Text variant="secondary">No runs yet.</Text>
+          <p className="text-[13px] text-kumo-subtle">No runs yet. The agent has not woken.</p>
         ) : (
-          task.runs.map((run) => <Run key={run.attempt} run={run} />)
+          <ol className="grid">
+            {task.runs.map((run) => (
+              <Run key={run.attempt} run={run} />
+            ))}
+          </ol>
         )}
       </div>
     </div>

@@ -23,6 +23,7 @@
       "migrations_dir": "../../migrations/d1"
     }
   ],
+  "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
   // Durable Objects live in the coordinator Worker. Run both with multi-worker `wrangler dev`.
   "durable_objects": {
     "bindings": [

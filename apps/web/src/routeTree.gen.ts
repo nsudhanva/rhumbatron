@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as DesignRouteImport } from './routes/design'
 import { Route as CandidatesCandidateIdRouteImport } from './routes/candidates.$candidateId'
 import { Route as ChangesChangeIdRouteImport } from './routes/changes.$changeId'
+import { Route as CompareChangeIdRouteImport } from './routes/compare.$changeId'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
@@ -36,6 +37,11 @@ const CandidatesCandidateIdRoute = CandidatesCandidateIdRouteImport.update({
 const ChangesChangeIdRoute = ChangesChangeIdRouteImport.update({
   id: '/changes/$changeId',
   path: '/changes/$changeId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CompareChangeIdRoute = CompareChangeIdRouteImport.update({
+  id: '/compare/$changeId',
+  path: '/compare/$changeId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
@@ -64,6 +70,7 @@ export interface FileRoutesByFullPath {
   '/design': typeof DesignRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
+  '/compare/$changeId': typeof CompareChangeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
@@ -74,6 +81,7 @@ export interface FileRoutesByTo {
   '/design': typeof DesignRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
+  '/compare/$changeId': typeof CompareChangeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
@@ -85,6 +93,7 @@ export interface FileRoutesById {
   '/design': typeof DesignRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
+  '/compare/$changeId': typeof CompareChangeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/design'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
+    | '/compare/$changeId'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
@@ -107,6 +117,7 @@ export interface FileRouteTypes {
     | '/design'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
+    | '/compare/$changeId'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
@@ -117,6 +128,7 @@ export interface FileRouteTypes {
     | '/design'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
+    | '/compare/$changeId'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
@@ -128,6 +140,7 @@ export interface RootRouteChildren {
   DesignRoute: typeof DesignRoute
   CandidatesCandidateIdRoute: typeof CandidatesCandidateIdRoute
   ChangesChangeIdRoute: typeof ChangesChangeIdRoute
+  CompareChangeIdRoute: typeof CompareChangeIdRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
@@ -162,6 +175,13 @@ declare module '@tanstack/react-router' {
       path: '/changes/$changeId'
       fullPath: '/changes/$changeId'
       preLoaderRoute: typeof ChangesChangeIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compare/$changeId': {
+      id: '/compare/$changeId'
+      path: '/compare/$changeId'
+      fullPath: '/compare/$changeId'
+      preLoaderRoute: typeof CompareChangeIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/projects/$projectId': {
@@ -200,6 +220,7 @@ const rootRouteChildren: RootRouteChildren = {
   DesignRoute: DesignRoute,
   CandidatesCandidateIdRoute: CandidatesCandidateIdRoute,
   ChangesChangeIdRoute: ChangesChangeIdRoute,
+  CompareChangeIdRoute: CompareChangeIdRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,

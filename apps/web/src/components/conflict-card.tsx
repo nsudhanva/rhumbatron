@@ -1,24 +1,19 @@
-import { Badge, LayerCard, Text } from "@cloudflare/kumo";
 import { GitFork, Warning } from "@phosphor-icons/react";
 import type { ConflictDetail, ConflictIntent, ConflictSignal } from "../lib/api";
+import { StatusPill } from "./ui/status-pill";
+import { Tag, type TagVariant } from "./ui/tag";
 
 /**
  * One semantic conflict between two Intents (AGENTS.md sections 32 and 38.2): the shared
  * resource, both designs side by side, the incompatible signals (hard first), and what happens
- * next. Git would merge both designs; this card shows why Rhumbatron does not.
+ * next. Git would merge both designs; this block shows why Rhumbatron does not. An open conflict
+ * carries the accent bar because it needs a decision; a resolved one does not.
  */
 
-const STATE_VARIANT: Record<ConflictDetail["state"], "error" | "warning" | "success" | "info"> = {
-  confirmed: "error",
-  fork_required: "error",
-  suspected: "warning",
-  resolved: "success",
-};
-
-const SEVERITY_VARIANT: Record<ConflictSignal["severity"], "error" | "warning" | "secondary"> = {
-  hard: "error",
-  soft: "warning",
-  benign: "secondary",
+const SEVERITY_TAG: Record<ConflictSignal["severity"], TagVariant> = {
+  hard: "accent",
+  soft: "outline",
+  benign: "neutral",
 };
 
 const SIGNAL_LABEL: Record<ConflictSignal["kind"], string> = {
@@ -41,33 +36,33 @@ function nextStep(conflict: ConflictDetail): { label: string; detail: string } {
       detail: `A fork would pass the limit of ${fork.maxCandidates} Candidates per Change.`,
     };
   }
-  return {
-    label: "Needs review",
-    detail:
-      fork.reason === "needs_review"
-        ? "The overlap is not decisive. A reviewer must confirm or dismiss it."
-        : "No fork is needed.",
-  };
+  if (fork.reason === "needs_review") {
+    return {
+      label: "Review",
+      detail: "The overlap is not decisive. A reviewer must confirm or dismiss it.",
+    };
+  }
+  return { label: "No fork", detail: "No fork is needed." };
 }
 
 function IntentColumn({ intent }: { intent: ConflictIntent }) {
   return (
-    <div className="grid content-start gap-1.5 rounded-lg border border-kumo-line px-3 py-2.5">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="font-mono text-xs text-kumo-subtle">
-          {intent.taskKey || intent.taskId}
+    <div className="grid min-w-0 content-start gap-2 bg-kumo-base p-3">
+      <div className="grid gap-0.5">
+        <span className="font-mono text-[11px] text-kumo-subtle">
+          {intent.taskKey || intent.taskId} · Intent
         </span>
-        <Text bold>{intent.title || "Task"}</Text>
+        <span className="text-[14px] font-semibold">{intent.title || "Task"}</span>
       </div>
-      <Text>{intent.summary}</Text>
+      <p className="text-[13px]">{intent.summary}</p>
       {intent.assumptions.length > 0 && (
         <div className="grid gap-1">
-          <Text as="h4" variant="secondary">
-            Assumptions
-          </Text>
-          <ul className="list-disc pl-5 text-sm text-kumo-default">
+          <h4 className="type-label text-kumo-subtle">Assumptions</h4>
+          <ul className="grid">
             {intent.assumptions.map((item) => (
-              <li key={item}>{item}</li>
+              <li key={item} className="border-b border-kumo-rule py-1 text-[12px] last:border-b-0">
+                {item}
+              </li>
             ))}
           </ul>
         </div>
@@ -79,56 +74,61 @@ function IntentColumn({ intent }: { intent: ConflictIntent }) {
 export function ConflictCard({ conflict }: { conflict: ConflictDetail }) {
   const [left, right] = conflict.intents;
   const step = nextStep(conflict);
+  const open = conflict.state !== "resolved";
+  const strongest = conflict.signals[0];
   return (
-    <LayerCard>
-      <LayerCard.Secondary className="flex flex-wrap items-center gap-2 px-5 py-2.5">
-        <Warning size={18} weight="fill" className="shrink-0 text-kumo-danger" />
-        <Text as="h2" variant="heading3">
-          Semantic conflict
-        </Text>
-        <span className="font-mono text-xs text-kumo-default">{conflict.resource}</span>
-        <Badge variant={STATE_VARIANT[conflict.state]}>{conflict.state}</Badge>
-        <span className="ml-auto flex items-center gap-1.5">
-          {conflict.recommendedAction === "fork_candidates" && <GitFork size={16} />}
-          <Badge variant={conflict.forkDecision.kind === "fork" ? "info" : "warning"}>
-            {step.label}
-          </Badge>
-        </span>
-      </LayerCard.Secondary>
-      <LayerCard.Primary className="grid gap-4 px-5 py-4">
-        <div className="grid gap-3 min-[700px]:grid-cols-[1fr_auto_1fr]">
-          <IntentColumn intent={left} />
-          <span className="self-center justify-self-center text-sm text-kumo-subtle">vs</span>
-          <IntentColumn intent={right} />
-        </div>
-        <div className="grid gap-1.5">
-          <Text as="h3" bold>
-            Why the designs are incompatible
-          </Text>
-          <ul className="grid gap-1.5">
-            {conflict.signals.map((signal) => (
-              <li
-                key={`${signal.kind}:${signal.detail}`}
-                className="flex flex-wrap items-start gap-2 text-sm"
-              >
-                <Badge variant={SEVERITY_VARIANT[signal.severity]}>
-                  {SIGNAL_LABEL[signal.kind]}
-                </Badge>
-                <span className="min-w-0 flex-1 text-kumo-default">{signal.detail}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="grid gap-1">
-          <Text variant="secondary">
-            {step.label}: {step.detail}
-          </Text>
-          <Text variant="secondary">
-            Decided by {conflict.review.decidedBy}
-            {conflict.challengeId ? ` · Challenge ${conflict.challengeId}` : ""}
-          </Text>
-        </div>
-      </LayerCard.Primary>
-    </LayerCard>
+    <article
+      aria-label={`Semantic conflict on ${conflict.resource}`}
+      className={
+        open
+          ? "grid gap-4 bg-kumo-elevated p-4 shadow-[inset_2px_0_0_var(--color-accent-500)]"
+          : "grid gap-4 bg-kumo-elevated p-4"
+      }
+    >
+      <header className="flex flex-wrap items-center gap-2">
+        <Warning size={16} className={open ? "shrink-0 text-kumo-accent" : "shrink-0"} />
+        <h3 className="text-[14px] font-extrabold">Semantic conflict</h3>
+        <span className="font-mono text-[12px] break-all">{conflict.resource}</span>
+        {strongest && <Tag variant="outline">{SIGNAL_LABEL[strongest.kind]}</Tag>}
+        <StatusPill status={conflict.state} className="ml-auto" />
+      </header>
+
+      <div className="grid gap-3 min-[760px]:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+        <IntentColumn intent={left} />
+        <span className="self-center font-mono text-[11px] text-kumo-subtle">vs</span>
+        <IntentColumn intent={right} />
+      </div>
+
+      <div className="grid gap-1">
+        <h4 className="type-label text-kumo-subtle">Why the designs are incompatible</h4>
+        <ul className="grid">
+          {conflict.signals.map((signal) => (
+            <li
+              key={`${signal.kind}:${signal.detail}`}
+              className="flex flex-wrap items-start gap-2 border-b border-kumo-rule py-1.5 text-[13px]"
+            >
+              <Tag variant={SEVERITY_TAG[signal.severity]}>{SIGNAL_LABEL[signal.kind]}</Tag>
+              <span className="min-w-0 flex-1">{signal.detail}</span>
+              <span className="font-mono text-[11px] text-kumo-subtle">{signal.severity}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="grid gap-1 text-[13px]">
+        <p className="flex flex-wrap items-center gap-2">
+          {conflict.recommendedAction === "fork_candidates" && <GitFork size={14} />}
+          <span className="font-semibold">Recommended · {step.label}</span>
+          <span className="text-kumo-subtle">{step.detail}</span>
+        </p>
+        <p className="font-mono text-[11px] text-kumo-subtle">
+          decided by {conflict.review.decidedBy}
+          {conflict.challengeId ? ` · challenge ${conflict.challengeId}` : ""}
+        </p>
+        {conflict.review.rationale && (
+          <p className="text-[12px] text-kumo-subtle">{conflict.review.rationale}</p>
+        )}
+      </div>
+    </article>
   );
 }

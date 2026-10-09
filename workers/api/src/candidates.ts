@@ -408,4 +408,34 @@ export const candidates = new Hono<AppEnv>()
       }));
       return respond(c, apiData(z.array(EvidenceRecord)), { data });
     },
+  )
+
+  /**
+   * Stored output of one check (stdout and stderr), as plain text. Read-only; the R2 key is
+   * derived from the authoritative Evidence row, never from the request.
+   */
+  .get(
+    "/v1/candidates/:candidateId/evidence/:checkId/output",
+    requireAuth,
+    validate("param", CandidateIdParam.extend({ checkId: z.string().regex(/^[a-z0-9-]{1,64}$/) })),
+    async (c) => {
+      const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+      const { candidateId, checkId } = c.req.valid("param");
+      const candidate = await loadCandidate(c.env, candidateId);
+      if (!candidate || !(await canAccessProject(c.env.DB, userId, candidate.project_id))) {
+        return fail(c, 404, "not_found", "Candidate not found");
+      }
+      const row = await c.env.DB.prepare(
+        "SELECT r2_key FROM evidence_index WHERE candidate_id = ? AND check_id = ? ORDER BY created_at DESC LIMIT 1",
+      )
+        .bind(candidateId, checkId)
+        .first<{ r2_key: string | null }>();
+      if (!row?.r2_key) return fail(c, 404, "not_found", "No stored output for this check");
+      const prefix = row.r2_key.slice(0, row.r2_key.lastIndexOf("/"));
+      const object = await c.env.EVIDENCE.get(`${prefix}/stdout.txt`);
+      if (!object) return fail(c, 404, "not_found", "No stored output for this check");
+      // Check output is capped when stored; the cap here guards the response size.
+      const text = (await object.text()).slice(0, 200_000);
+      return c.text(text, 200, { "cache-control": "private, max-age=300" });
+    },
   );

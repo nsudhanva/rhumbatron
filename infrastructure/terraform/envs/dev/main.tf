@@ -80,6 +80,8 @@ module "api_worker" {
     # Dev only: accept backend-minted smoke-test tokens without azp. Prod must set "false".
     { type = "plain_text", name = "CLERK_ALLOW_MISSING_AZP", text = "true" },
     module.state.bindings.DB,
+    # Read-only: serves stored check output to the Candidate evidence view.
+    module.state.bindings.EVIDENCE,
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = module.coordinator_worker.name },
     # Sandbox smoke check RPC on the agents Worker (AGENTS.md section 49.3).
@@ -428,6 +430,29 @@ resource "terraform_data" "sandbox_worker_teardown" {
       SANDBOX_ACCOUNT_ID    = self.input.account_id
       SANDBOX_REPO_ROOT     = self.input.repo_root
       SANDBOX_CONFIG        = self.input.config
+    }
+  }
+}
+
+# Release target for the Acme Shop demo Project (AGENTS.md section 37, P11-07). Terraform owns the
+# Worker; Workers Builds owns its versions: each promotion pushes canonical main, and the build
+# deploys it (a Rhumbatron-triggered release is runtime data, section 2.1). The Builds connection
+# to the Artifacts repo is a one-time dashboard step (ADR 0014).
+resource "cloudflare_worker" "acme_shop" {
+  account_id = var.account_id
+  name       = "rhumbatron-acme-shop-${local.environment}"
+
+  subdomain = {
+    enabled          = true
+    previews_enabled = false
+  }
+
+  observability = {
+    enabled = true
+    logs = {
+      enabled            = true
+      invocation_logs    = true
+      head_sampling_rate = 1
     }
   }
 }

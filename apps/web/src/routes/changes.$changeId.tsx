@@ -1,21 +1,44 @@
 import { Show } from "@clerk/tanstack-react-start";
-import { Badge, LayerCard, Loader, Meter, Text } from "@cloudflare/kumo";
-import { Robot, ShieldCheck } from "@phosphor-icons/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { deriveActivity } from "../components/agents/activity-model";
+import { AgentActivity } from "../components/agents/agent-activity";
 import { CandidateList } from "../components/candidate-list";
+import {
+  ChangeStats,
+  CriteriaList,
+  changeSpend,
+  InvariantList,
+} from "../components/change/change-overview";
 import { ConflictCard } from "../components/conflict-card";
 import { TaskPanel } from "../components/task-detail";
+import { EmptyState } from "../components/ui/empty-state";
+import { Loader } from "../components/ui/loader";
+import { Mono } from "../components/ui/mono";
+import { Page, PageTitle, Section, TwoUp } from "../components/ui/page";
+import { StatusPill } from "../components/ui/status-pill";
+import { Tag } from "../components/ui/tag";
 import { WorkGraph } from "../components/work-graph";
-import { getChange, getConflicts, listCandidates, listTasks, type TaskDetail } from "../lib/api";
 import {
+  type CandidateDetail,
+  type EvidenceRecord,
+  getChange,
+  getConflicts,
+  listCandidateEvidence,
+  listCandidates,
+  listChanges,
+  listTasks,
+} from "../lib/api";
+import {
+  formatFraction,
+  formatNumber,
   formatUsd,
   generation,
   isCompiling,
   isLive,
   lastActiveTask,
-  latestRun,
+  timeAgo,
 } from "../lib/format";
 import { deltaTouchesChange, type LiveStatus, useProjectLive } from "../lib/live";
 
@@ -23,17 +46,25 @@ export const Route = createFileRoute("/changes/$changeId")({ component: ChangePa
 
 /** Safety net while the live socket is down (AGENTS.md section 39). */
 const FALLBACK_POLL_MS = 30_000;
+const IN_FLIGHT = new Set<CandidateDetail["status"]>(["composing", "composed", "verifying"]);
+
+/** Module-level so useQueries keeps the combined result stable between renders. */
+function combineEvidence(results: { data: EvidenceRecord[] | undefined; isPending: boolean }[]) {
+  return { data: results.map((r) => r.data), pending: results.some((r) => r.isPending) };
+}
 
 function ChangePage() {
   return (
-    <main className="mx-auto grid max-w-7xl gap-4 px-6 py-8">
+    <>
       <Show when="signed-in">
         <ChangeView />
       </Show>
       <Show when="signed-out">
-        <Text variant="secondary">Sign in to view this Change.</Text>
+        <Page>
+          <EmptyState what="Sign in to view this Change." />
+        </Page>
       </Show>
-    </main>
+    </>
   );
 }
 
@@ -68,13 +99,26 @@ function ChangeView() {
     queryFn: () => listCandidates({ data: changeId }),
     // Verification runs after the Change settles, so this polls while any Candidate is in flight.
     refetchInterval: (query) =>
-      query.state.data?.some((c) => ["composing", "composed", "verifying"].includes(c.status))
-        ? FALLBACK_POLL_MS
-        : false,
+      query.state.data?.some((c) => IN_FLIGHT.has(c.status)) ? FALLBACK_POLL_MS : false,
     refetchIntervalInBackground: true,
+  });
+  // Evidence drives the check segments in the activity view. Same key as the Candidate page.
+  const evidence = useQueries({
+    queries: (candidates.data ?? []).map((c) => ({
+      queryKey: ["candidate-evidence", c.id],
+      queryFn: () => listCandidateEvidence({ data: c.id }),
+      refetchInterval: IN_FLIGHT.has(c.status) ? FALLBACK_POLL_MS : (false as const),
+    })),
+    combine: combineEvidence,
   });
 
   const projectId = change.data?.projectId;
+  // Risk tier and creation time live on the Change summary, not on the detail.
+  const summaries = useQuery({
+    queryKey: ["changes", projectId],
+    queryFn: () => listChanges({ data: projectId ?? "" }),
+    enabled: !!projectId,
+  });
   const status = useProjectLive(projectId, isLive(change.data, tasks.data), (signal) => {
     const taskIds = new Set((tasks.data ?? []).map((t) => t.id));
     if (signal.kind === "delta" && !deltaTouchesChange(signal.delta, changeId, taskIds)) return;
@@ -83,143 +127,177 @@ function ChangeView() {
     void queryClient.invalidateQueries({ queryKey: ["conflicts", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["candidates", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
+    for (const c of candidates.data ?? []) {
+      void queryClient.invalidateQueries({ queryKey: ["candidate-evidence", c.id] });
+    }
   });
   useEffect(() => setSocket(status), [status]);
 
-  if (change.isError) return <Text variant="secondary">{change.error.message}</Text>;
-  if (!change.data) return <Text variant="secondary">Loading Change…</Text>;
+  const evidenceById = useMemo(() => {
+    const map: Record<string, EvidenceRecord[] | undefined> = {};
+    (candidates.data ?? []).forEach((c, i) => {
+      map[c.id] = evidence.data[i];
+    });
+    return map;
+  }, [candidates.data, evidence.data]);
+
+  const model = useMemo(
+    () =>
+      change.data
+        ? deriveActivity({
+            change: change.data,
+            tasks: tasks.data ?? [],
+            conflicts: conflicts.data ?? [],
+            candidates: candidates.data ?? [],
+            evidence: evidenceById,
+          })
+        : null,
+    [change.data, tasks.data, conflicts.data, candidates.data, evidenceById],
+  );
+  // Every source has answered once (or failed): later facts are new and animate.
+  const ready =
+    !tasks.isPending && !conflicts.isPending && !candidates.isPending && !evidence.pending;
+
+  if (change.isError) {
+    return (
+      <Page>
+        <p className="bg-accent-100 px-3 py-2 text-[13px] font-semibold text-kumo-danger">
+          {change.error.message}
+        </p>
+      </Page>
+    );
+  }
+  if (!change.data || !model) {
+    return (
+      <Page>
+        <p className="flex items-center gap-2 text-[13px]">
+          <Loader /> Loading Change
+        </p>
+      </Page>
+    );
+  }
 
   const data = change.data;
+  const summary = summaries.data?.find((c) => c.id === changeId);
   const taskList = tasks.data ?? [];
-  const completed = taskList.filter((t) => t.status === "completed").length;
+  const conflictList = conflicts.data ?? [];
+  const candidateList = candidates.data ?? [];
   const live = isLive(data, tasks.data) && socket === "open";
   const selectedTask = taskList.find((t) => t.id === selected) ?? lastActiveTask(taskList);
+  const spend = changeSpend(taskList);
+  const compiling = isCompiling(data.status) && taskList.length === 0;
 
   return (
-    <>
-      <LayerCard>
-        <LayerCard.Primary className="grid gap-3 px-5 py-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={data.status === "completed" ? "success" : "info"}>{data.status}</Badge>
-            <Badge variant="secondary">Base {generation(data.baseGeneration)}</Badge>
-            <Badge variant="secondary">Budget {formatUsd(data.budgetUsd)}</Badge>
-            {live && (
-              <span
-                className="ml-auto flex items-center gap-1.5 text-sm text-kumo-success"
-                role="status"
-              >
-                <span className="size-2 animate-pulse rounded-full bg-kumo-success" />
-                Live
-              </span>
+    <Page>
+      <PageTitle
+        size="detail"
+        kicker={
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <span>Change</span>
+            <StatusPill status={data.status} className="tracking-normal normal-case" />
+            {summary?.riskTier && (
+              <Tag variant="outline" className="tracking-normal normal-case">
+                Risk {summary.riskTier}
+              </Tag>
             )}
-          </div>
-          <Text as="h1" variant="heading3">
-            {data.goal}
-          </Text>
-          <Meter
-            label="Tasks completed"
-            value={taskList.length === 0 ? 0 : (completed / taskList.length) * 100}
-            customValue={`${completed}/${taskList.length}`}
-          />
-        </LayerCard.Primary>
-      </LayerCard>
+          </span>
+        }
+        title={data.goal}
+        meta={
+          <>
+            <span>
+              Base <Mono>{generation(data.baseGeneration)}</Mono>
+            </span>
+            <span aria-hidden>·</span>
+            <span>
+              Budget{" "}
+              <Mono>
+                {spend
+                  ? formatFraction(formatUsd(spend.costUsd), formatUsd(data.budgetUsd))
+                  : formatUsd(data.budgetUsd)}
+              </Mono>
+            </span>
+            {summary && (
+              <>
+                <span aria-hidden>·</span>
+                <span>created {timeAgo(summary.createdAt)}</span>
+              </>
+            )}
+            <span aria-hidden>·</span>
+            <Mono subtle>{data.id}</Mono>
+            {live && <StatusPill status="live" />}
+          </>
+        }
+      />
 
-      {conflicts.data?.map((conflict) => (
-        <ConflictCard key={conflict.id} conflict={conflict} />
-      ))}
+      <ChangeStats
+        tasks={taskList}
+        conflicts={conflictList}
+        candidates={candidateList}
+        budgetUsd={data.budgetUsd}
+      />
+
+      <AgentActivity model={model} ready={ready} compiling={compiling} />
+
+      <TwoUp>
+        <Section
+          label="Acceptance criteria"
+          meta={<Mono subtle>{formatNumber(data.acceptanceCriteria.length)}</Mono>}
+        >
+          <CriteriaList items={data.acceptanceCriteria} />
+        </Section>
+        <Section
+          label="Protected invariants"
+          meta={<Mono subtle>{formatNumber(data.invariants.length)}</Mono>}
+        >
+          <InvariantList items={data.invariants} />
+        </Section>
+      </TwoUp>
+
+      {conflictList.length > 0 && (
+        <Section
+          label="Conflicts"
+          meta={
+            <Mono subtle>
+              {formatNumber(conflictList.filter((c) => c.state !== "resolved").length)} open
+            </Mono>
+          }
+        >
+          <div className="grid gap-4">
+            {conflictList.map((conflict) => (
+              <ConflictCard key={conflict.id} conflict={conflict} />
+            ))}
+          </div>
+        </Section>
+      )}
 
       <CandidateList
         changeId={changeId}
-        candidates={candidates.data ?? []}
+        candidates={candidateList}
         canCompose={!["cancelled", "failed", "completed"].includes(data.status)}
       />
 
-      {isCompiling(data.status) && taskList.length === 0 ? (
-        <LayerCard>
-          <LayerCard.Primary className="flex items-center gap-3 px-5 py-6">
-            <Loader />
-            <Text>Root Planner is compiling the Work Graph…</Text>
-          </LayerCard.Primary>
-        </LayerCard>
-      ) : (
-        <div className="grid gap-4 min-[900px]:grid-cols-[18rem_1fr_24rem]">
-          <div className="grid content-start gap-4">
-            <LayerCard>
-              <LayerCard.Secondary className="px-5 py-2.5">
-                <Text as="h2" variant="heading3">
-                  Acceptance criteria
-                </Text>
-              </LayerCard.Secondary>
-              <LayerCard.Primary className="px-5 py-4">
-                <ul className="list-disc pl-5 text-sm text-kumo-default">
-                  {data.acceptanceCriteria.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </LayerCard.Primary>
-            </LayerCard>
-            <LayerCard>
-              <LayerCard.Secondary className="px-5 py-2.5">
-                <Text as="h2" variant="heading3">
-                  Protected invariants
-                </Text>
-              </LayerCard.Secondary>
-              <LayerCard.Primary className="grid gap-2 px-5 py-4">
-                {data.invariants.map((item) => (
-                  <div key={item} className="flex gap-2 text-sm text-kumo-default">
-                    <ShieldCheck
-                      size={18}
-                      weight="fill"
-                      className="mt-0.5 shrink-0 text-kumo-success"
-                    />
-                    <span>{item}</span>
-                  </div>
-                ))}
-              </LayerCard.Primary>
-            </LayerCard>
-          </div>
-          <div className="grid min-w-0 content-start gap-4">
-            <AgentsStrip tasks={taskList} />
+      <div className="grid gap-7 min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
+        <Section
+          label="Work graph"
+          meta={<Mono subtle>{formatNumber(taskList.length)} Tasks</Mono>}
+        >
+          {compiling ? (
+            <p className="flex items-center gap-2 text-[13px]">
+              <Loader /> Root Planner is compiling the Work Graph.
+            </p>
+          ) : taskList.length === 0 ? (
+            <EmptyState what="No Tasks." how="This Change has no Work Graph." />
+          ) : (
             <WorkGraph tasks={taskList} selectedId={selectedTask?.id} onSelect={setSelected} />
+          )}
+        </Section>
+        <Section label="Task details">
+          <div className="bg-kumo-elevated p-4 shadow-[inset_2px_0_0_var(--color-accent-500)]">
+            <TaskPanel task={selectedTask} />
           </div>
-          <LayerCard className="min-w-0 content-start">
-            <LayerCard.Secondary className="px-5 py-2.5">
-              <Text as="h2" variant="heading3">
-                Task details
-              </Text>
-            </LayerCard.Secondary>
-            <LayerCard.Primary className="px-5 py-4">
-              <TaskPanel task={selectedTask} />
-            </LayerCard.Primary>
-          </LayerCard>
-        </div>
-      )}
-    </>
-  );
-}
-
-function AgentsStrip({ tasks }: { tasks: TaskDetail[] }) {
-  const active = tasks.filter((t) => t.assignedAgentId && latestRun(t));
-  const sleeping = tasks.filter((t) => !t.assignedAgentId || !latestRun(t)).length;
-  return (
-    <ul className="flex flex-wrap items-center gap-2" aria-label="Agents">
-      {active.map((task) => {
-        const run = latestRun(task);
-        return (
-          <li
-            key={task.id}
-            className="flex items-center gap-1.5 rounded-full border border-kumo-line bg-kumo-base px-2.5 py-1 text-sm"
-          >
-            <Robot size={16} />
-            <span className="font-mono text-xs">agent {task.key}</span>
-            <Badge variant="info">{run?.tier}</Badge>
-            <span className="text-kumo-subtle">{run?.status}</span>
-          </li>
-        );
-      })}
-      <li>
-        <Text variant="secondary">{sleeping} sleeping or pending</Text>
-      </li>
-    </ul>
+        </Section>
+      </div>
+    </Page>
   );
 }

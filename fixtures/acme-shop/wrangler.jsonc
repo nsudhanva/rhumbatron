@@ -1,0 +1,10 @@
+// Release configuration. Workers Builds runs `npx wrangler@4.149.0 deploy` on each push to main.
+// The name must match the Worker that Rhumbatron's Terraform creates for this environment.
+{
+  "name": "rhumbatron-acme-shop-dev",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-08",
+  "assets": { "directory": "./public", "not_found_handling": "none" },
+  "workers_dev": true,
+  "observability": { "enabled": true }
+}

@@ -1,78 +1,120 @@
 import { Show, SignInButton } from "@clerk/tanstack-react-start";
-import { Badge, Button, Checkbox, Input, LayerCard, Text } from "@cloudflare/kumo";
+import { Button, Checkbox, Input } from "@cloudflare/kumo";
+import { SignIn } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { SectionError, SkeletonRows } from "../components/project/feedback";
+import { ProjectStatusPill } from "../components/project/status";
+import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../components/ui/data-table";
+import { EmptyState } from "../components/ui/empty-state";
+import { Mono } from "../components/ui/mono";
+import { Page, PageTitle, Section } from "../components/ui/page";
 import { createProject, listProjects } from "../lib/api";
-import { generation, timeAgo } from "../lib/format";
+import { formatAge, formatNumber, generation } from "../lib/format";
 
 export const Route = createFileRoute("/")({ component: Home });
 
 function Home() {
   return (
-    <main className="mx-auto grid max-w-5xl gap-6 px-6 py-8">
+    <Page>
+      <PageTitle kicker="Rhumbatron" title="Projects" />
       <Show when="signed-out">
-        <LayerCard>
-          <LayerCard.Primary className="grid gap-3 px-5 py-6">
-            <Text as="h1" variant="heading" size="lg">
-              Rhumbatron
-            </Text>
-            <Text variant="secondary">
-              Many Agents can propose many futures. Only verified evidence can advance the Canonical
-              State.
-            </Text>
-            <div>
-              <SignInButton>
-                <Button variant="primary">Sign in to open your projects</Button>
-              </SignInButton>
-            </div>
-          </LayerCard.Primary>
-        </LayerCard>
+        <SignedOut />
       </Show>
       <Show when="signed-in">
         <Projects />
+        <NewProject />
       </Show>
-    </main>
+    </Page>
+  );
+}
+
+function SignedOut() {
+  return (
+    <Section label="Projects">
+      <EmptyState
+        what="Sign in to see your projects."
+        how="Many agents can propose many futures. Only verified evidence can advance the canonical state."
+        action={
+          <SignInButton>
+            <Button variant="primary" icon={SignIn}>
+              Sign in
+            </Button>
+          </SignInButton>
+        }
+      />
+    </Section>
   );
 }
 
 function Projects() {
   const projects = useQuery({ queryKey: ["projects"], queryFn: () => listProjects() });
+  const count = projects.data?.length;
   return (
-    <>
-      <LayerCard>
-        <LayerCard.Secondary className="px-5 py-2.5">
-          <Text as="h1" variant="heading3">
-            Projects
-          </Text>
-        </LayerCard.Secondary>
-        <LayerCard.Primary className="grid gap-2 px-5 py-4">
-          {projects.isPending && <Text variant="secondary">Loading projects…</Text>}
-          {projects.isError && <Text variant="secondary">{projects.error.message}</Text>}
-          {projects.data?.length === 0 && (
-            <Text variant="secondary">No projects yet. Create one below.</Text>
-          )}
-          {projects.data?.map((project) => (
-            <Link
-              key={project.id}
-              to="/projects/$projectId"
-              params={{ projectId: project.id }}
-              className="flex items-center justify-between gap-3 rounded-lg border border-kumo-line px-3 py-2 hover:bg-kumo-tint"
-            >
-              <div className="grid">
-                <Text bold>{project.name}</Text>
-                <Text variant="mono-secondary">{project.slug}</Text>
-              </div>
-              <div className="flex items-center gap-3">
-                <Text variant="secondary">{timeAgo(project.createdAt)}</Text>
-                <Badge variant="info">{generation(project.canonicalGeneration)}</Badge>
-              </div>
-            </Link>
-          ))}
-        </LayerCard.Primary>
-      </LayerCard>
-      <NewProject />
-    </>
+    <Section
+      label="Projects"
+      meta={
+        projects.isPending ? (
+          <span role="status">Loading</span>
+        ) : count !== undefined ? (
+          <Mono subtle>{formatNumber(count)}</Mono>
+        ) : null
+      }
+    >
+      {projects.isError ? (
+        <SectionError
+          message={`Projects could not load. ${projects.error.message}`}
+          onRetry={() => projects.refetch()}
+          retrying={projects.isFetching}
+        />
+      ) : count === 0 ? (
+        <EmptyState
+          what="No projects yet."
+          how="Create one under New project, from an empty codebase or the Acme Shop demo."
+        />
+      ) : (
+        <DataTable label="Projects" minWidth={560}>
+          <thead>
+            <tr>
+              <Th>Project</Th>
+              <Th>Status</Th>
+              <Th numeric>Generation</Th>
+              <Th numeric>Created</Th>
+            </tr>
+          </thead>
+          <tbody aria-busy={projects.isPending || undefined}>
+            {projects.isPending ? (
+              <SkeletonRows cells={["title", 56, "numeric", "numeric"]} />
+            ) : (
+              projects.data?.map((project) => (
+                <TRow key={project.id}>
+                  <Td>
+                    <TitleCell
+                      title={
+                        <RowLink to="/projects/$projectId" params={{ projectId: project.id }}>
+                          {project.name}
+                        </RowLink>
+                      }
+                      meta={`${project.slug} · ${project.id}`}
+                    />
+                  </Td>
+                  <Td>
+                    <ProjectStatusPill status={project.status} />
+                  </Td>
+                  <Td numeric>{generation(project.canonicalGeneration)}</Td>
+                  <Td numeric className="text-kumo-subtle">
+                    <time dateTime={project.createdAt} title={project.createdAt}>
+                      {formatAge(project.createdAt)}
+                    </time>
+                  </Td>
+                </TRow>
+              ))
+            )}
+          </tbody>
+        </DataTable>
+      )}
+    </Section>
   );
 }
 
@@ -94,35 +136,47 @@ function NewProject() {
   });
   const slugInvalid = slug !== "" && !SLUG.test(slug);
   return (
-    <LayerCard>
-      <LayerCard.Secondary className="px-5 py-2.5">
-        <Text as="h2" variant="heading3">
-          New project
-        </Text>
-      </LayerCard.Secondary>
-      <LayerCard.Primary className="px-5 py-4">
-        <form
-          className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
-          onSubmit={(event) => {
-            event.preventDefault();
-            create.mutate();
-          }}
-        >
-          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+    <Section label="New project">
+      <form
+        className="grid max-w-[760px] gap-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          create.mutate();
+        }}
+      >
+        <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
           <Input
-            label="Slug"
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            {...(slugInvalid ? { error: "Use lowercase kebab-case" } : {})}
+            label="Name"
+            description="Shown in navigation and breadcrumbs."
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             required
           />
-          <div className="sm:col-span-3 sm:order-last">
-            <Checkbox
-              label="Start from the Acme Shop demo codebase"
-              checked={demo}
-              onCheckedChange={(checked) => setDemo(checked === true)}
-            />
-          </div>
+          <Input
+            label="Slug"
+            className="font-mono"
+            description="Lowercase letters, numbers and hyphens. Names the project's resources."
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            {...(slugInvalid ? { error: "Use lowercase kebab-case, for example acme-shop" } : {})}
+            required
+          />
+        </div>
+        <div className="grid gap-1">
+          <Checkbox
+            label="Start from the Acme Shop demo codebase"
+            checked={demo}
+            onCheckedChange={(checked) => setDemo(checked === true)}
+          />
+          <p className="pl-6 text-[12px] text-kumo-subtle">
+            Seeds the canonical source with a small shop: catalog, cart and a test identity. Leave
+            it off for an empty codebase.
+          </p>
+        </div>
+        {create.isError && (
+          <SectionError message={`The project was not created. ${create.error.message}`} />
+        )}
+        <div>
           <Button
             type="submit"
             variant="primary"
@@ -131,9 +185,8 @@ function NewProject() {
           >
             Create project
           </Button>
-        </form>
-        {create.isError && <Text variant="secondary">{create.error.message}</Text>}
-      </LayerCard.Primary>
-    </LayerCard>
+        </div>
+      </form>
+    </Section>
   );
 }

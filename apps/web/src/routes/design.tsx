@@ -12,6 +12,7 @@ import {
 import { Plus } from "@phosphor-icons/react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { AgentActivityPreview } from "../components/agents/agent-activity";
 import { usePageMeta } from "../components/shell/page-meta";
 import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../components/ui/data-table";
 import { EmptyState } from "../components/ui/empty-state";
@@ -88,6 +89,10 @@ function DesignReference() {
           </>
         }
       />
+
+      <Section label="Agent activity" meta="fixture replay of the Wishlist story (DESIGN §11.1)">
+        <AgentActivityPreview />
+      </Section>
 
       <StatStrip>
         <StatCell label="Canonical generation" value="S1841" mono footnote="tree 3f9c2a1b7d" />

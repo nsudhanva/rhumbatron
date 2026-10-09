@@ -365,3 +365,21 @@ export const promoteCandidate = createServerFn({ method: "POST" })
   .handler(({ data }) =>
     call<PromotionOutcome>(`/v1/candidates/${data}/promote`, { method: "POST", body: {} }),
   );
+
+/** Stored output (stdout and stderr) of one check, as plain text. Null when nothing was stored. */
+export const getCheckOutput = createServerFn()
+  .inputValidator((input: { candidateId: string; checkId: string }) => input)
+  .handler(async ({ data }) => {
+    const { getToken } = await auth();
+    const token = await getToken();
+    if (!token) throw new ApiError(401, "Sign in to continue");
+    const response = await env.API.fetch(
+      new Request(
+        `https://api.internal/v1/candidates/${data.candidateId}/evidence/${data.checkId}/output`,
+        { headers: { authorization: `Bearer ${token}` } },
+      ),
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) throw new ApiError(response.status, `API returned ${response.status}`);
+    return response.text();
+  });

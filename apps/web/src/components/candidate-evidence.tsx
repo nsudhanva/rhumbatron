@@ -1,231 +1,283 @@
-import { Badge, Text } from "@cloudflare/kumo";
-import { CheckCircle, Circle, MinusCircle, WarningCircle, XCircle } from "@phosphor-icons/react";
-import type { CandidateDetail, EvidenceRecord, VerificationCheck } from "../lib/api";
+import { Collapsible, cn, InlineCopyText } from "@cloudflare/kumo";
+import { CaretRight } from "@phosphor-icons/react";
+import { useQuery } from "@tanstack/react-query";
+import { type CandidateDetail, getCheckOutput, type VerificationCheck } from "../lib/api";
+import { EMPTY, formatClock, formatDuration, formatMs, formatNumber } from "../lib/format";
+import {
+  type CheckRow,
+  COVERAGE_WORDS,
+  durationMs,
+  isFinished,
+  REASON_WORDS,
+  VERDICT_STATUS,
+} from "./candidate/model";
+import { EmptyState } from "./ui/empty-state";
+import { KeyValue } from "./ui/key-value";
+import { type LogLine, LogWell } from "./ui/log-well";
+import { StatusPill } from "./ui/status-pill";
+import { Tag } from "./ui/tag";
 
 /**
- * Verification Evidence for one Candidate (AGENTS.md sections 34.3, 34.4.1). Only a
- * `checked_supported` pass is green. A check that did not run, timed out, or found no signal is a
- * gap and is drawn as one, never as a pass.
+ * Verification Evidence for one Candidate (AGENTS.md sections 34.3, 34.4, 34.4.1). Each check is a
+ * row that expands to its Evidence. Only a `checked_supported` pass is green; a check that did not
+ * run, timed out, errored or found no signal is an attention "Gap" and never counts as a pass.
  */
 
-type Verdict = "pass" | "fail" | "gap" | "pending";
-
-const COVERAGE_LABEL: Record<EvidenceRecord["coverage"], string> = {
-  checked_supported: "checked, evidence supports result",
-  checked_no_signal: "ran, no signal",
-  not_checked: "not checked",
-};
-
-function verdict(record: EvidenceRecord | undefined, finished: boolean): Verdict {
-  if (!record) return finished ? "gap" : "pending";
-  if (record.status === "pass" && record.coverage === "checked_supported") return "pass";
-  if (record.status === "fail" && record.coverage === "checked_supported") return "fail";
-  return "gap";
-}
-
-const VERDICT_STYLE: Record<
-  Verdict,
-  { label: string; variant: "success" | "error" | "warning" | "secondary"; row: string }
-> = {
-  pass: { label: "Pass", variant: "success", row: "border-kumo-success" },
-  fail: { label: "Fail", variant: "error", row: "border-kumo-danger" },
-  gap: { label: "Gap", variant: "warning", row: "border-dashed border-kumo-warning" },
-  pending: { label: "Pending", variant: "secondary", row: "border-kumo-line opacity-70" },
-};
-
-function VerdictIcon({ value }: { value: Verdict }) {
-  const props = { size: 20, weight: "fill" as const, className: "mt-0.5 shrink-0" };
-  if (value === "pass")
-    return <CheckCircle {...props} className={`${props.className} text-kumo-success`} />;
-  if (value === "fail")
-    return <XCircle {...props} className={`${props.className} text-kumo-danger`} />;
-  if (value === "gap")
-    return <WarningCircle {...props} className={`${props.className} text-kumo-warning`} />;
-  return <Circle {...props} weight="regular" className={`${props.className} text-kumo-subtle`} />;
-}
-
-function seconds(record: EvidenceRecord) {
-  const ms = Date.parse(record.completedAt) - Date.parse(record.startedAt);
-  return Number.isFinite(ms) && ms >= 0 ? `${(ms / 1000).toFixed(1)} s` : "";
-}
+const GRID =
+  "grid grid-cols-[16px_minmax(180px,1.4fr)_76px_72px_minmax(120px,1fr)_72px] items-center gap-x-3";
 
 function expectation(check: VerificationCheck) {
   const e = check.expected;
   if (e.kind === "exit_code") return `exit ${e.code}`;
-  if (e.kind === "metric_below") return `${e.metric} < ${e.threshold}`;
-  return "manual procedure";
+  if (e.kind === "metric_below") return `${e.metric} < ${formatNumber(e.threshold)}`;
+  return e.description;
 }
 
-function CheckRow({
-  check,
-  record,
-  required,
-  finished,
-}: {
-  check: VerificationCheck | undefined;
-  record: EvidenceRecord | undefined;
-  required: boolean;
-  finished: boolean;
-}) {
-  const value = verdict(record, finished);
-  const style = VERDICT_STYLE[value];
-  const id = check?.checkId ?? record?.checkId ?? "check";
+function coverageWord(row: CheckRow, finished: boolean) {
+  if (row.verdict === "pending") return "waiting for the Sandbox";
+  if (row.verdict === "gap" || row.verdict === "fail") {
+    if (row.reason && row.reason !== "failed") return REASON_WORDS[row.reason];
+  }
+  if (row.record) return COVERAGE_WORDS[row.record.coverage];
+  return finished ? "no evidence recorded" : "waiting";
+}
+
+/** Summary text as log lines: the command, then the summary split on the tail separator. */
+function logLines(row: CheckRow): LogLine[] {
+  const lines: LogLine[] = [];
+  if (row.check?.command) lines.push({ text: `$ ${row.check.command}`, role: "cmd" });
+  else if (row.check?.procedure)
+    lines.push({ text: `# procedure: ${row.check.procedure}`, role: "cmd" });
+  if (!row.record) {
+    lines.push({
+      text: "SKIPPED no Evidence recorded. A missing result is a gap, not a pass.",
+      role: "warn",
+    });
+    return lines;
+  }
+  const word = row.verdict === "pass" ? "PASS" : row.verdict === "fail" ? "FAIL" : "GAP";
+  const role = row.verdict === "pass" ? "pass" : row.verdict === "fail" ? "fail" : "warn";
+  const parts = row.record.summary.split(" | ");
+  parts.forEach((text, index) => {
+    lines.push(index === 0 ? { text: `${word} ${text}`, role } : { text, role: "info" });
+  });
+  return lines;
+}
+
+function CopyValue({ value }: { value: string }) {
   return (
-    <li className={`flex gap-3 rounded-lg border-2 bg-kumo-base px-3 py-2.5 ${style.row}`}>
-      <VerdictIcon value={value} />
-      <div className="grid min-w-0 flex-1 gap-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Text bold>{id}</Text>
-          <Badge variant={style.variant}>{style.label}</Badge>
-          <Badge variant="secondary">{check?.kind ?? record?.kind}</Badge>
-          {required ? (
-            <Badge variant="info">required</Badge>
-          ) : (
-            <Badge variant="secondary">optional</Badge>
-          )}
-          {record && (
-            <span className="ml-auto text-xs text-kumo-subtle">
-              {record.status} · {COVERAGE_LABEL[record.coverage]}{" "}
-              {seconds(record) && `· ${seconds(record)}`}
-            </span>
-          )}
-        </div>
-        {check && (
-          <Text variant="secondary">
-            {check.command ? (
-              <code className="font-mono text-xs">{check.command}</code>
-            ) : (
-              "Procedure, not automated yet"
-            )}{" "}
-            · expects {expectation(check)}
-          </Text>
-        )}
-        {record ? (
-          <Text>{record.summary}</Text>
-        ) : (
-          <Text variant="secondary">
-            {finished
-              ? "No Evidence recorded. This is a gap, not a pass."
-              : "Waiting for the Sandbox…"}
-          </Text>
-        )}
-        {record?.metrics && Object.keys(record.metrics).length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {Object.entries(record.metrics).map(([name, value]) => (
-              <Badge key={name} variant="secondary">
-                {name} {Number.isInteger(value) ? value : value.toFixed(3)}
-              </Badge>
-            ))}
-          </div>
-        )}
-        {record?.r2Key && (
-          <Text variant="secondary">
-            <span className="font-mono text-xs">
-              {record.r2Key} · {record.contentHash.slice(0, 19)}
-            </span>
-          </Text>
-        )}
-      </div>
-    </li>
+    <InlineCopyText value={value} variant="mono" className="max-w-full break-all text-[12px]">
+      {value}
+    </InlineCopyText>
   );
 }
 
-/** The gate result. Promotion needs every required check satisfied by executable Evidence. */
-function GateSummary({ candidate }: { candidate: CandidateDetail }) {
-  const gate = candidate.gate;
-  if (!gate) {
+function EvidenceDetail({ row }: { row: CheckRow }) {
+  const { check, record } = row;
+  const elapsed = record ? durationMs(record) : null;
+  const metrics = Object.entries(record?.metrics ?? {});
+  return (
+    <div className="grid gap-3 border-t border-kumo-rule py-3 pr-2 pl-7">
+      <KeyValue
+        items={[
+          {
+            label: check?.command ? "Command" : "Procedure",
+            value: check?.command ?? check?.procedure ?? null,
+            mono: !!check?.command,
+          },
+          { label: "Expects", value: check ? expectation(check) : null, mono: true },
+          { label: "Why it runs", value: check?.reason ?? null },
+          {
+            label: "Timeout",
+            value: check ? formatDuration(check.timeoutMs / 1000) : null,
+            mono: true,
+          },
+          {
+            label: "Ran",
+            value: record
+              ? `${formatClock(record.startedAt)} → ${formatClock(record.completedAt)} · ${
+                  elapsed === null ? EMPTY : formatMs(elapsed)
+                }`
+              : null,
+            mono: true,
+          },
+          {
+            label: "Metrics",
+            value:
+              metrics.length > 0
+                ? metrics
+                    .map(
+                      ([name, value]) =>
+                        `${name} ${formatNumber(value, Number.isInteger(value) ? 0 : 3)}`,
+                    )
+                    .join(" · ")
+                : null,
+            mono: true,
+          },
+          { label: "Evidence ID", value: record?.evidenceId ?? null, mono: true },
+          {
+            label: "Content hash",
+            value: record ? <CopyValue value={record.contentHash} /> : null,
+            mono: true,
+          },
+          {
+            label: "Report",
+            value: record?.r2Key ? <CopyValue value={record.r2Key} /> : null,
+            mono: true,
+          },
+          {
+            label: "Source refs",
+            value: record && record.sourceRefs.length > 0 ? record.sourceRefs.join(" · ") : null,
+            mono: true,
+          },
+        ]}
+      />
+      <CheckOutput row={row} />
+    </div>
+  );
+}
+
+/**
+ * The stored stdout of a check, fetched when its row opens. Falls back to the recorded summary
+ * when no output was stored (procedures and gaps).
+ */
+function CheckOutput({ row }: { row: CheckRow }) {
+  const { record } = row;
+  const output = useQuery({
+    queryKey: ["check-output", record?.candidateId, row.checkId],
+    queryFn: () =>
+      getCheckOutput({ data: { candidateId: record?.candidateId ?? "", checkId: row.checkId } }),
+    enabled: !!record?.r2Key,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  if (output.data) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-kumo-line px-3 py-2">
-        <MinusCircle size={20} className="text-kumo-subtle" />
-        <Text>Gate not computed yet: verification is {candidate.status}.</Text>
-      </div>
-    );
-  }
-  if (gate.promotable) {
-    return (
-      <div className="flex items-center gap-2 rounded-lg bg-kumo-success-tint px-3 py-2 text-kumo-success">
-        <CheckCircle size={20} weight="fill" />
-        <Text>
-          Every required check passed with executable Evidence.
-          {gate.humanApprovalRequired ? " Human approval is still required before promotion." : ""}
-        </Text>
-      </div>
+      <LogWell title={`${row.checkId} · stdout`} lines={outputLines(output.data)} maxHeight={300} />
     );
   }
   return (
-    <div className="grid gap-1.5 rounded-lg bg-kumo-danger-tint px-3 py-2 text-kumo-danger">
-      <div className="flex items-center gap-2">
-        <XCircle size={20} weight="fill" />
-        <Text bold>Not promotable</Text>
-      </div>
-      {candidate.statusReason && <Text>{candidate.statusReason}</Text>}
-      {gate.gaps.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {gate.gaps.map((g) => (
-            <Badge key={g.checkId} variant={g.reason === "failed" ? "error" : "warning"}>
-              {g.checkId}: {g.reason.replace(/_/g, " ")}
-            </Badge>
-          ))}
-        </div>
+    <>
+      <LogWell
+        title={record ? `${row.checkId} · summary` : row.checkId}
+        lines={logLines(row)}
+        maxHeight={220}
+      />
+      {output.isLoading && <p className="text-[11px] text-kumo-subtle">Loading stored output…</p>}
+      {output.isError && (
+        <p className="text-[11px] text-kumo-danger">Stored output could not be loaded.</p>
       )}
-    </div>
+    </>
+  );
+}
+
+/** Line roles for stored output: the `$ command` lines, pass and fail counts. */
+function outputLines(text: string): LogLine[] {
+  return text
+    .replace(/\n$/, "")
+    .split("\n")
+    .map((line) => ({
+      text: line,
+      role: line.startsWith("$ ")
+        ? "cmd"
+        : /\b[1-9]\d* fail\b|\berror\b|✗/i.test(line)
+          ? "fail"
+          : /\bpass\b|✓/i.test(line)
+            ? "pass"
+            : "info",
+    }));
+}
+
+function CheckItem({ row, finished }: { row: CheckRow; finished: boolean }) {
+  const elapsed = row.record ? durationMs(row.record) : null;
+  return (
+    <Collapsible.Root className="border-b border-kumo-rule">
+      <Collapsible.Trigger
+        className={cn(
+          GRID,
+          "group w-full cursor-pointer py-2 text-left text-[13px] transition-colors duration-(--rh-dur-ui) hover:bg-kumo-row-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent-500",
+        )}
+      >
+        <CaretRight
+          size={14}
+          aria-hidden
+          className="text-kumo-subtle transition-transform duration-(--rh-dur-ui) group-data-[panel-open]:rotate-90"
+        />
+        <span className="grid min-w-0 gap-0.5">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono text-[12px] font-semibold">{row.checkId}</span>
+            <Tag>{row.kind}</Tag>
+          </span>
+          <span
+            className="truncate text-[12px] text-kumo-subtle"
+            title={row.record?.summary ?? undefined}
+          >
+            {row.record?.summary ??
+              (finished
+                ? "No Evidence recorded. This is a gap, not a pass."
+                : "Waiting for the Sandbox")}
+          </span>
+        </span>
+        <span className="text-[12px] text-kumo-subtle">
+          {row.required ? "Required" : "Optional"}
+        </span>
+        <StatusPill status={VERDICT_STATUS[row.verdict]} />
+        <span className="truncate text-[12px]">{coverageWord(row, finished)}</span>
+        <span className="text-right font-mono text-[12px] tabular-nums">
+          {elapsed === null ? EMPTY : formatMs(elapsed)}
+        </span>
+      </Collapsible.Trigger>
+      <Collapsible.Panel>
+        <EvidenceDetail row={row} />
+      </Collapsible.Panel>
+    </Collapsible.Root>
   );
 }
 
 export function CandidateEvidence({
   candidate,
-  evidence,
+  rows,
 }: {
   candidate: CandidateDetail;
-  evidence: EvidenceRecord[];
+  rows: CheckRow[];
 }) {
-  const finished =
-    candidate.gate !== null || ["verified", "rejected", "stale"].includes(candidate.status);
-  const byCheck = new Map<string, EvidenceRecord>();
-  for (const e of evidence) {
-    const prior = byCheck.get(e.checkId);
-    if (!prior || Date.parse(e.completedAt) >= Date.parse(prior.completedAt))
-      byCheck.set(e.checkId, e);
-  }
-  const checks = candidate.plan?.checks ?? [];
-  const required = new Set(candidate.plan?.requiredCheckIds ?? []);
-  const planned = new Set(checks.map((c) => c.checkId));
-  // Evidence outside the plan, for example a composition failure before any check ran.
-  const extra = evidence.filter((e) => !planned.has(e.checkId));
-  const supported = checks.filter(
-    (c) => verdict(byCheck.get(c.checkId), finished) === "pass",
-  ).length;
-
-  return (
-    <div className="grid gap-3">
-      <GateSummary candidate={candidate} />
-      {checks.length > 0 && (
-        <Text variant="secondary">
-          {supported} of {checks.length} checks passed with supporting Evidence. Gaps are shown in
-          amber and never count as a pass.
-        </Text>
-      )}
-      <ul className="grid gap-2">
-        {extra.map((e) => (
-          <CheckRow key={e.evidenceId} check={undefined} record={e} required finished={finished} />
-        ))}
-        {checks.map((check) => (
-          <CheckRow
-            key={check.checkId}
-            check={check}
-            record={byCheck.get(check.checkId)}
-            required={required.has(check.checkId) || check.required}
-            finished={finished}
-          />
-        ))}
-      </ul>
-      {checks.length === 0 && extra.length === 0 && (
-        <Text variant="secondary">
-          {finished
+  const finished = isFinished(candidate);
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        what={
+          finished
             ? "No Verification Plan was built for this Candidate."
-            : "Composing the Candidate…"}
-        </Text>
-      )}
+            : "Composing the Candidate."
+        }
+        how={
+          finished
+            ? "Without a plan nothing was checked, so the Candidate cannot promote."
+            : "Checks appear here as the Sandbox records Evidence."
+        }
+      />
+    );
+  }
+  return (
+    <div className="min-w-0 overflow-x-auto">
+      <div className="min-w-[720px]">
+        <div
+          className={cn(GRID, "type-label border-b-2 border-kumo-divider pb-2 text-kumo-subtle")}
+          aria-hidden
+        >
+          <span />
+          <span>Check</span>
+          <span>Gate</span>
+          <span>Result</span>
+          <span>Coverage</span>
+          <span className="text-right">Duration</span>
+        </div>
+        {rows.map((row) => (
+          <CheckItem key={row.checkId} row={row} finished={finished} />
+        ))}
+        <p className="pt-2 text-[11px] text-kumo-subtle">
+          Only a supported pass satisfies a required check. A gap never counts as a pass.
+        </p>
+      </div>
     </div>
   );
 }

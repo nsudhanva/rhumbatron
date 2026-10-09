@@ -1,23 +1,19 @@
-import { Badge, Button, LayerCard, Text } from "@cloudflare/kumo";
+import { Button } from "@cloudflare/kumo";
 import { GitFork } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type CandidateDetail, createCandidate } from "../lib/api";
+import { formatAge, formatMs, formatNumber, generation } from "../lib/format";
+import { candidateLetter } from "./agents/activity-model";
+import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "./ui/data-table";
+import { EmptyState } from "./ui/empty-state";
+import { Section } from "./ui/page";
+import { StatusPill } from "./ui/status-pill";
 
-const STATUS: Record<
-  CandidateDetail["status"],
-  "success" | "error" | "warning" | "info" | "secondary"
-> = {
-  composing: "info",
-  composed: "info",
-  verifying: "info",
-  verified: "success",
-  promoted: "success",
-  rejected: "error",
-  stale: "warning",
-};
-
-/** Candidate futures of one Change (AGENTS.md section 38.2). Evidence lives on the Candidate page. */
+/**
+ * Candidate futures of one Change (AGENTS.md section 38.2). Evidence lives on the Candidate page.
+ * "Verify a Candidate" is the Change page's one primary action.
+ */
 export function CandidateList({
   changeId,
   candidates,
@@ -32,53 +28,128 @@ export function CandidateList({
     mutationFn: () => createCandidate({ data: changeId }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["candidates", changeId] }),
   });
+  // A, B, C in creation order, the same letters the agent activity view uses.
+  const ordered = [...candidates].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const verified = candidates.filter((c) => c.status === "verified" || c.status === "promoted");
+
   return (
-    <LayerCard>
-      <LayerCard.Secondary className="flex items-center gap-2 px-5 py-2.5">
-        <Text as="h2" variant="heading3">
-          Candidates
-        </Text>
-        {canCompose && (
-          <Button
-            className="ml-auto"
-            size="sm"
-            icon={GitFork}
-            loading={compose.isPending}
-            onClick={() => compose.mutate()}
-          >
-            Verify a Candidate
-          </Button>
-        )}
-      </LayerCard.Secondary>
-      <LayerCard.Primary className="grid gap-2 px-5 py-4">
-        {compose.isError && <Text variant="error">{compose.error.message}</Text>}
-        {candidates.length === 0 ? (
-          <Text variant="secondary">
-            No Candidate yet. A Candidate composes the proposed ChangeSets and runs the required
-            checks in the Sandbox.
-          </Text>
-        ) : (
-          candidates.map((c) => (
+    <Section
+      label="Candidates"
+      meta={
+        <>
+          {candidates.length > 0 && (
+            <span className="font-mono tabular-nums">
+              {formatNumber(verified.length)} / {formatNumber(candidates.length)} verified
+            </span>
+          )}
+          {candidates.length >= 2 && (
             <Link
-              key={c.id}
-              to="/candidates/$candidateId"
-              params={{ candidateId: c.id }}
-              className="flex flex-wrap items-center gap-2 rounded-md border border-kumo-line px-3 py-2 text-sm hover:bg-kumo-tint"
+              to="/compare/$changeId"
+              params={{ changeId }}
+              className="font-semibold text-kumo-link hover:underline"
             >
-              <span className="font-mono text-xs">{c.id}</span>
-              <Badge variant={STATUS[c.status]}>{c.status}</Badge>
-              <span className="text-kumo-subtle">
-                {c.changeSetIds.length} ChangeSet{c.changeSetIds.length === 1 ? "" : "s"}
-              </span>
-              {c.gate && (
-                <span className="ml-auto text-kumo-subtle">
-                  {c.gate.promotable ? "promotable" : `${c.gate.gaps.length} gap(s)`}
-                </span>
-              )}
+              Compare candidates
             </Link>
-          ))
-        )}
-      </LayerCard.Primary>
-    </LayerCard>
+          )}
+          {canCompose && (
+            <Button
+              size="sm"
+              variant="primary"
+              icon={GitFork}
+              loading={compose.isPending}
+              onClick={() => compose.mutate()}
+            >
+              Verify a Candidate
+            </Button>
+          )}
+        </>
+      }
+    >
+      {compose.isError && (
+        <p className="bg-accent-100 px-3 py-2 text-[13px] font-semibold text-kumo-danger">
+          {compose.error.message}
+        </p>
+      )}
+      {ordered.length === 0 ? (
+        <EmptyState
+          what="No Candidate yet."
+          how="A Candidate composes the proposed ChangeSets and runs the required checks in the Sandbox."
+        />
+      ) : (
+        <DataTable label="Candidates" minWidth={720}>
+          <thead>
+            <tr>
+              <Th>Candidate</Th>
+              <Th>Status</Th>
+              <Th numeric>ChangeSets</Th>
+              <Th numeric>p95</Th>
+              <Th>Gate</Th>
+              <Th numeric>Updated</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordered.map((c, index) => (
+              <TRow key={c.id}>
+                <Td>
+                  <TitleCell
+                    title={
+                      <RowLink to="/candidates/$candidateId" params={{ candidateId: c.id }}>
+                        Candidate {candidateLetter(index)}
+                      </RowLink>
+                    }
+                    meta={`${c.id} · base ${generation(c.baseGeneration)}`}
+                  />
+                </Td>
+                <Td>
+                  <StatusPill status={c.status} />
+                </Td>
+                <Td numeric>{formatNumber(c.changeSetIds.length)}</Td>
+                <Td numeric>{formatMs(c.gate?.p95Ms, 1)}</Td>
+                <Td className="max-w-[320px]">
+                  <Gate candidate={c} />
+                </Td>
+                <Td numeric className="text-kumo-subtle">
+                  {formatAge(c.updatedAt)}
+                </Td>
+              </TRow>
+            ))}
+          </tbody>
+        </DataTable>
+      )}
+    </Section>
+  );
+}
+
+function Gate({ candidate }: { candidate: CandidateDetail }) {
+  if (candidate.status === "promoted" && candidate.promotedGeneration !== null) {
+    return (
+      <span className="text-[12px]">
+        Promoted to <span className="font-mono">{generation(candidate.promotedGeneration)}</span>
+      </span>
+    );
+  }
+  if (candidate.status === "rejected") {
+    return (
+      <span
+        className="block truncate text-[12px] text-kumo-danger"
+        title={candidate.statusReason ?? undefined}
+      >
+        {candidate.statusReason ?? "Rejected"}
+      </span>
+    );
+  }
+  if (!candidate.gate) return <span className="text-[12px] text-kumo-subtle">Verifying</span>;
+  if (candidate.gate.promotable) {
+    return <span className="text-[12px] font-semibold text-kumo-success">Promotable</span>;
+  }
+  const gaps = candidate.gate.gaps;
+  return (
+    <span
+      className="block truncate text-[12px] text-kumo-warning"
+      title={gaps.map((g) => `${g.checkId}: ${g.reason}`).join("\n")}
+    >
+      {formatNumber(gaps.length)} {gaps.length === 1 ? "gap" : "gaps"}
+      {gaps[0] ? ` · ${gaps[0].checkId}` : ""}
+    </span>
   );
 }

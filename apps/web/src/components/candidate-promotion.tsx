@@ -1,35 +1,41 @@
-import { Badge, Button, Input, Text } from "@cloudflare/kumo";
-import { ArrowRight, CheckCircle, Prohibit, RocketLaunch } from "@phosphor-icons/react";
+import { Button } from "@cloudflare/kumo";
+import { ArrowRight, CheckCircle, RocketLaunch } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { type CandidateDetail, decideApproval, promoteCandidate } from "../lib/api";
+import { type CandidateDetail, promoteCandidate } from "../lib/api";
 import { generation, timeAgo } from "../lib/format";
+import { ApprovalDialog } from "./candidate/approval-dialog";
+import { Banner } from "./candidate/banner";
+import { type CheckRow, gateRule, shortHash } from "./candidate/model";
+import { Mono } from "./ui/mono";
+import { StatusPill } from "./ui/status-pill";
 
 /**
  * Human gate and promotion for one Candidate (AGENTS.md sections 36, 38.4). The buttons only send
  * a request: the API takes the approver from the session, and the integration Worker plus
  * ProjectRootDO re-check every precondition. A disabled button here is a hint, not the gate.
+ * Feedback is optimistic but honest (DESIGN.md 10): progress while the request runs, success only
+ * after the compare-and-swap returns.
  */
-export function CandidatePromotion({ candidate }: { candidate: CandidateDetail }) {
+export function CandidatePromotion({
+  candidate,
+  label,
+  rows,
+  riskTier,
+}: {
+  candidate: CandidateDetail;
+  label: string;
+  rows: CheckRow[];
+  riskTier: string | null | undefined;
+}) {
   const queryClient = useQueryClient();
-  const [reason, setReason] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [decided, setDecided] = useState<"approve" | "reject" | null>(null);
   const refresh = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["candidate", candidate.id] }),
       queryClient.invalidateQueries({ queryKey: ["candidates", candidate.changeId] }),
     ]);
-  const decide = useMutation({
-    mutationFn: (decision: "approve" | "reject") =>
-      decideApproval({
-        data: {
-          changeId: candidate.changeId,
-          candidateId: candidate.id,
-          decision,
-          ...(reason.trim() ? { reason: reason.trim() } : {}),
-        },
-      }),
-    onSettled: refresh,
-  });
   const promote = useMutation({
     mutationFn: () => promoteCandidate({ data: candidate.id }),
     onSettled: refresh,
@@ -39,100 +45,156 @@ export function CandidatePromotion({ candidate }: { candidate: CandidateDetail }
   const verified = candidate.status === "verified" && candidate.gate?.promotable === true;
   const awaitingApproval = verified && candidate.approvalRequired && !approval;
   const canPromote = verified && (!candidate.approvalRequired || approval?.decision === "granted");
-  const next = generation(candidate.baseGeneration + 1);
+  const from = generation(candidate.baseGeneration);
+  const to = generation(candidate.promotedGeneration ?? candidate.baseGeneration + 1);
+  const rule = gateRule(candidate, riskTier);
+  const promoted = promote.data;
 
   return (
-    <div className="grid gap-3">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge variant="secondary">{generation(candidate.baseGeneration)}</Badge>
-        <ArrowRight size={14} className="text-kumo-subtle" />
-        <Badge variant={candidate.status === "promoted" ? "success" : "secondary"}>
-          {candidate.promotedGeneration === null ? next : generation(candidate.promotedGeneration)}
-        </Badge>
-        <span className="text-kumo-subtle">
-          {candidate.approvalRequired ? "Human approval required by policy" : "No human gate"}
-        </span>
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <div className="grid gap-1">
+          <p className="flex items-center gap-2 font-mono text-[20px] font-semibold tabular-nums">
+            <span>{from}</span>
+            <ArrowRight size={16} aria-label="to" className="text-kumo-subtle" />
+            <span className={candidate.status === "promoted" ? "" : "text-kumo-subtle"}>{to}</span>
+          </p>
+          <p className="max-w-[760px] text-[13px] text-pretty">{rule}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {awaitingApproval && (
+            <>
+              <Button variant="primary" icon={CheckCircle} onClick={() => setDialogOpen(true)}>
+                Review and approve
+              </Button>
+              <Button variant="secondary" onClick={() => setDialogOpen(true)}>
+                Reject
+              </Button>
+            </>
+          )}
+          {canPromote && !promoted && (
+            <Button
+              variant="primary"
+              icon={RocketLaunch}
+              loading={promote.isPending}
+              onClick={() => promote.mutate()}
+            >
+              Promote {from} → {to}
+            </Button>
+          )}
+        </div>
       </div>
 
       {approval && (
-        <Text variant="secondary">
-          {approval.decision === "granted" ? (
-            <CheckCircle size={16} weight="fill" className="mr-1 inline text-kumo-success" />
-          ) : (
-            <Prohibit size={16} weight="fill" className="mr-1 inline text-kumo-danger" />
-          )}
-          {approval.decision === "granted" ? "Approved" : "Rejected"} by{" "}
-          <span className="font-mono text-xs">{approval.approverUserId}</span>{" "}
-          {timeAgo(approval.createdAt)} for tree{" "}
-          <span className="font-mono text-xs">{approval.candidateTree.slice(0, 12)}</span>
-          {approval.reason ? `: ${approval.reason}` : ""}
-        </Text>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y border-kumo-rule py-2 text-[13px]">
+          <StatusPill status={approval.decision === "granted" ? "approved" : "rejected"} />
+          <span>
+            {approval.decision === "granted" ? "Approved" : "Rejected"} by{" "}
+            <Mono>{approval.approverUserId}</Mono> {timeAgo(approval.createdAt)} for tree{" "}
+            <Mono>{shortHash(approval.candidateTree)}</Mono> under{" "}
+            <Mono>{approval.policyVersion}</Mono>
+          </span>
+          {approval.reason && <span className="text-kumo-subtle">· {approval.reason}</span>}
+        </div>
       )}
 
-      {candidate.status === "promoted" && (
-        <Text>
-          Promoted. Canonical Generation advanced {generation(candidate.baseGeneration)} →{" "}
-          {generation(candidate.promotedGeneration ?? 0)}.
-        </Text>
+      {decided && !approval && (
+        <Banner family="progress" title="Recording the decision">
+          The decision was accepted. Refreshing the Candidate to show it.
+        </Banner>
+      )}
+
+      {promote.isPending && (
+        <Banner family="progress" title={`Promoting ${from} → ${to}`}>
+          ProjectRootDO checks every precondition, runs the compare-and-swap, then syncs the
+          canonical source. Waiting for the result.
+        </Banner>
+      )}
+      {promote.isError && (
+        <Banner
+          family="danger"
+          title="Promotion did not happen"
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              className="ring-current"
+              onClick={() => promote.mutate()}
+            >
+              Retry
+            </Button>
+          }
+        >
+          {promote.error.message} The Canonical Generation did not change.
+        </Banner>
+      )}
+      {promoted && (
+        <Banner
+          family="success"
+          title={`Promoted · ${generation(promoted.fromGeneration)} → ${generation(promoted.generation)}`}
+        >
+          {promoted.alreadyPromoted
+            ? "This Candidate was already promoted; the generation did not advance twice."
+            : "The compare-and-swap succeeded. The Canonical Generation advanced once."}{" "}
+          Tree <Mono>{shortHash(promoted.treeSha)}</Mono>.
+        </Banner>
+      )}
+      {promoted && !promoted.sourceSynced && (
+        <Banner
+          family="attention"
+          title="Source sync did not finish"
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              className="ring-current"
+              loading={promote.isPending}
+              onClick={() => promote.mutate()}
+            >
+              Retry sync
+            </Button>
+          }
+        >
+          {generation(promoted.generation)} is canonical, but the canonical source was not updated.
+          Retry is safe: the generation does not advance twice.
+        </Banner>
+      )}
+
+      {!promoted && candidate.status === "promoted" && (
+        <p className="text-[13px]">
+          Canonical Generation advanced {from} → {to}. The decision and Evidence stay on record.
+        </p>
       )}
       {candidate.status === "stale" && (
-        <Text variant="secondary">
-          Stale: {candidate.statusReason ?? "the canonical state moved."} Verify a new Candidate on
-          the current generation.
-        </Text>
+        <p className="text-[13px] text-pretty">
+          {candidate.statusReason ?? "The canonical state moved."} A stale Candidate cannot promote.
+          Compose a new Candidate on the current generation.
+        </p>
       )}
       {!verified && !["promoted", "stale"].includes(candidate.status) && !approval && (
-        <Text variant="secondary">Promotion opens after every required check passes.</Text>
+        <p className="text-[13px] text-kumo-subtle">
+          Promotion opens after every required check passes with supporting Evidence.
+        </p>
+      )}
+      {verified && candidate.approvalRequired && approval?.decision === "rejected" && (
+        <p className="text-[13px] text-kumo-subtle">
+          A rejected Candidate cannot promote. The first decision is final.
+        </p>
       )}
 
       {awaitingApproval && (
-        <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto] sm:items-end">
-          <Input
-            label="Reason (optional)"
-            value={reason}
-            maxLength={1000}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          <Button
-            variant="primary"
-            icon={CheckCircle}
-            loading={decide.isPending && decide.variables === "approve"}
-            disabled={decide.isPending}
-            onClick={() => decide.mutate("approve")}
-          >
-            Approve
-          </Button>
-          <Button
-            variant="destructive"
-            icon={Prohibit}
-            loading={decide.isPending && decide.variables === "reject"}
-            disabled={decide.isPending}
-            onClick={() => decide.mutate("reject")}
-          >
-            Reject
-          </Button>
-        </div>
-      )}
-      {decide.isError && <Text variant="error">{decide.error.message}</Text>}
-
-      {canPromote && (
-        <div>
-          <Button
-            variant="primary"
-            icon={RocketLaunch}
-            loading={promote.isPending}
-            onClick={() => promote.mutate()}
-          >
-            Promote to {next}
-          </Button>
-        </div>
-      )}
-      {promote.isError && <Text variant="error">{promote.error.message}</Text>}
-      {promote.data && !promote.data.sourceSynced && (
-        <Text variant="secondary">
-          {generation(promote.data.generation)} is canonical, but the source sync did not finish.
-          Promote again to retry it; the generation does not advance twice.
-        </Text>
+        <ApprovalDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          candidate={candidate}
+          label={label}
+          rows={rows}
+          rule={rule}
+          onDecided={(decision) => {
+            setDecided(decision);
+            void refresh();
+          }}
+        />
       )}
     </div>
   );

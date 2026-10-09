@@ -1,61 +1,95 @@
-import { Badge } from "@cloudflare/kumo";
-import {
-  Background,
-  type Edge,
-  Handle,
-  type Node,
-  type NodeProps,
-  Position,
-  ReactFlow,
-} from "@xyflow/react";
+import { cn } from "@cloudflare/kumo";
+import { type Edge, Handle, type Node, type NodeProps, Position, ReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useMemo } from "react";
+import { type CSSProperties, useMemo } from "react";
 import type { TaskDetail } from "../lib/api";
 import { latestRun, layoutTasks, truncate } from "../lib/format";
+import { StatusPill } from "./ui/status-pill";
 
-export const STATUS_STYLE: Record<
-  TaskDetail["status"],
-  { label: string; card: string; variant: "secondary" | "info" | "warning" | "success" | "error" }
-> = {
-  pending: { label: "Pending", card: "border-kumo-line opacity-70", variant: "secondary" },
-  ready: { label: "Ready", card: "border-kumo-info", variant: "info" },
-  assigned: { label: "Assigned", card: "border-kumo-brand animate-pulse", variant: "warning" },
-  running: { label: "Running", card: "border-kumo-brand animate-pulse", variant: "warning" },
-  completed: { label: "Completed", card: "border-kumo-success", variant: "success" },
-  failed: { label: "Failed", card: "border-kumo-danger", variant: "error" },
-  blocked: { label: "Blocked", card: "border-kumo-danger", variant: "error" },
-  cancelled: { label: "Cancelled", card: "border-kumo-line opacity-60", variant: "secondary" },
+/**
+ * Work Graph (DESIGN.md 9.13): square nodes on an elevated canvas with a 2px ink rule on top.
+ * The node border encodes the Task state (see LEGEND); the selected node carries the overlay
+ * shadow and a 2px accent bar, the same bar the Task inspector beside it uses.
+ */
+
+type Border = "active" | "ready" | "attention" | "done" | "idle";
+
+const BORDER_OF: Record<TaskDetail["status"], Border> = {
+  running: "active",
+  assigned: "active",
+  ready: "ready",
+  failed: "attention",
+  blocked: "attention",
+  completed: "done",
+  pending: "idle",
+  cancelled: "idle",
 };
 
-type TaskNodeData = { task: TaskDetail; selected: boolean };
+const BORDER_CLASS: Record<Border, string> = {
+  active: "border-2 border-kumo-ink",
+  ready: "border-2 border-dashed border-kumo-ink",
+  attention: "border-2 border-accent-500",
+  done: "border border-kumo-divider",
+  idle: "border border-dashed border-kumo-divider",
+};
+
+const LEGEND: { border: Border; label: string }[] = [
+  { border: "active", label: "Running" },
+  { border: "ready", label: "Ready" },
+  { border: "attention", label: "Failed or blocked" },
+  { border: "done", label: "Done" },
+  { border: "idle", label: "Waiting or cancelled" },
+];
+
+type TaskNodeData = { task: TaskDetail; selected: boolean; onSelect: (id: string) => void };
 type TaskFlowNode = Node<TaskNodeData, "task">;
 
 function TaskNode({ data }: NodeProps<TaskFlowNode>) {
-  const { task, selected } = data;
-  const style = STATUS_STYLE[task.status];
+  const { task, selected, onSelect } = data;
   const run = latestRun(task);
   return (
-    <div
-      className={`w-60 rounded-lg border-2 bg-kumo-base px-3 py-2 text-left ${style.card} ${selected ? "ring-2 ring-kumo-focus" : ""}`}
+    <button
+      type="button"
+      aria-pressed={selected}
+      aria-label={`${task.key} ${task.title}`}
+      onClick={() => onSelect(task.id)}
+      className={cn(
+        "grid w-60 cursor-pointer gap-1.5 bg-kumo-base px-3 py-2.5 text-left transition-shadow duration-(--rh-dur-ui) hover:bg-kumo-row-hover",
+        BORDER_CLASS[BORDER_OF[task.status]],
+      )}
+      style={selected ? SELECTED : undefined}
     >
       <Handle type="target" position={Position.Left} className="opacity-0!" />
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-xs text-kumo-subtle">{task.key}</span>
-        <Badge variant={style.variant}>{style.label}</Badge>
+        <span className="truncate font-mono text-[10px] tracking-[0.08em] text-kumo-subtle uppercase">
+          {task.key} · {task.kind}
+        </span>
+        <StatusPill status={task.status} />
       </div>
-      <p className="mt-1 line-clamp-2 text-sm font-medium text-kumo-default">
+      <p className="line-clamp-2 text-[14px] leading-tight font-extrabold tracking-[-0.01em]">
         {truncate(task.title, 70)}
       </p>
-      <div className="mt-1.5 flex items-center gap-1.5">
-        <Badge variant="secondary">{task.kind}</Badge>
-        {run && <Badge variant="info">{run.tier}</Badge>}
-      </div>
+      <p className="truncate font-mono text-[11px] text-kumo-subtle">
+        {run ? `${run.tier} · attempt ${run.attempt}` : "no run yet"}
+      </p>
       <Handle type="source" position={Position.Right} className="opacity-0!" />
-    </div>
+    </button>
   );
 }
 
+/** Selected node: the overlay shadow plus the 2px accent bar the inspector repeats. */
+const SELECTED: CSSProperties = {
+  boxShadow: "inset 2px 0 0 var(--color-accent-500), var(--rh-shadow-overlay)",
+};
+
 const nodeTypes = { task: TaskNode };
+
+const EDGE_RELEVANT: CSSProperties = { stroke: "var(--color-kumo-ink)", strokeWidth: 2 };
+const EDGE_QUIET: CSSProperties = {
+  stroke: "var(--color-kumo-divider)",
+  strokeWidth: 1,
+  strokeDasharray: "4 3",
+};
 
 export function WorkGraph({
   tasks,
@@ -73,43 +107,73 @@ export function WorkGraph({
       id: task.id,
       type: "task",
       position: positions.get(task.id) ?? { x: 0, y: 0 },
-      data: { task, selected: task.id === selectedId },
+      data: { task, selected: task.id === selectedId, onSelect },
       draggable: false,
     }));
     const edges: Edge[] = tasks.flatMap((task) =>
       task.dependsOn
         .filter((dep) => byId.has(dep))
-        .map((dep) => ({
-          id: `${dep}->${task.id}`,
-          source: dep,
-          target: task.id,
-          animated: task.status === "running" || task.status === "assigned",
-        })),
+        .map((dep) => {
+          // Relevant: touches the selected Task, or feeds a Task that is working now.
+          const relevant =
+            dep === selectedId ||
+            task.id === selectedId ||
+            task.status === "running" ||
+            task.status === "assigned";
+          return {
+            id: `${dep}->${task.id}`,
+            source: dep,
+            target: task.id,
+            style: relevant ? EDGE_RELEVANT : EDGE_QUIET,
+          };
+        }),
     );
     return { nodes, edges };
-  }, [tasks, selectedId]);
+  }, [tasks, selectedId, onSelect]);
 
   return (
-    <div className="h-[480px] w-full rounded-lg border border-kumo-line bg-kumo-recessed">
-      <ReactFlow
-        // Remount when the graph first fills in, so fitView frames every Task.
-        key={nodes.length}
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.1, minZoom: 0.2 }}
-        minZoom={0.2}
-        style={{ background: "transparent" }}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        proOptions={{ hideAttribution: true }}
-        colorMode="light"
-        onNodeClick={(_, node) => onSelect(node.id)}
+    <figure className="grid min-w-0 gap-2">
+      <div
+        className="w-full rule-ink bg-kumo-elevated"
+        style={{ height: "clamp(340px, 48vw, 520px)" }}
       >
-        <Background />
-      </ReactFlow>
-    </div>
+        <ReactFlow
+          // Remount when the graph first fills in, so fitView frames every Task.
+          key={nodes.length}
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          fitView
+          fitViewOptions={{ padding: 0.12, minZoom: 0.2 }}
+          minZoom={0.2}
+          style={{ background: "transparent" }}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          proOptions={{ hideAttribution: true }}
+          colorMode="light"
+          nodesFocusable={false}
+          aria-label="Work Graph"
+        />
+      </div>
+      <figcaption className="grid gap-1.5">
+        <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-[12px]" aria-label="Legend">
+          {LEGEND.map((item) => (
+            <li key={item.border} className="flex items-center gap-1.5">
+              <span aria-hidden className={cn("size-3 bg-kumo-base", BORDER_CLASS[item.border])} />
+              {item.label}
+            </li>
+          ))}
+          <li className="flex items-center gap-1.5">
+            <span aria-hidden className="h-0.5 w-4 bg-kumo-ink" />
+            Relevant dependency
+          </li>
+        </ul>
+        <p className="text-[11px] text-kumo-subtle">
+          Shows the {tasks.length} Tasks of this Change and their dependencies. Other Changes and
+          file-level dependencies are hidden. Select a Task to inspect it.
+        </p>
+      </figcaption>
+    </figure>
   );
 }
