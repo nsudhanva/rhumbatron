@@ -296,6 +296,8 @@ module "agents_worker" {
     { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-agents-${local.environment}" },
     module.state.bindings.DB,
     { type = "durable_object_namespace", name = "AGENT", class_name = "AgentDO" },
+    # Context Packet snapshots under context/ (AGENTS.md section 27.5).
+    module.state.bindings.EVIDENCE,
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
     # Analytics Engine datasets are created on first write. Wakeups, model calls, run outcomes.
     { type = "analytics_engine", name = "METRICS", dataset = "rhumbatron_metrics_${local.environment}" },

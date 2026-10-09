@@ -38,11 +38,14 @@ function ChangeView() {
     queryKey: ["change", changeId],
     queryFn: () => getChange({ data: changeId }),
     refetchInterval: (query) => (isLive(query.state.data, undefined) ? 2500 : false),
+    // A demo screen may sit in a background tab; polling still stops once the Change is idle.
+    refetchIntervalInBackground: true,
   });
   const tasks = useQuery({
     queryKey: ["tasks", changeId],
     queryFn: () => listTasks({ data: changeId }),
     refetchInterval: (query) => (isLive(change.data, query.state.data) ? 2500 : false),
+    refetchIntervalInBackground: true,
   });
 
   if (change.isError) return <Text variant="secondary">{change.error.message}</Text>;

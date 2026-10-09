@@ -19,6 +19,8 @@
   },
   // Workers AI: Clef-flash routing decisions only, capped per day (rule 50).
   "ai": { "binding": "AI" },
+  // Context Packet snapshots: context/<project>/<change>/<task>/<hash>.json (AGENTS.md 27.5).
+  "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
   "d1_databases": [
     {
       "binding": "DB",

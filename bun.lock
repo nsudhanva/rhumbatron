@@ -57,6 +57,17 @@
         "vitest": "5.0.3",
       },
     },
+    "packages/context-compiler": {
+      "name": "@rhumbatron/context-compiler",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rhumbatron/protocol": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "7.0.2",
+        "vitest": "5.0.3",
+      },
+    },
     "packages/model-router": {
       "name": "@rhumbatron/model-router",
       "version": "0.0.0",
@@ -87,7 +98,9 @@
         "@earendil-works/pi-ai": "1.1.0",
         "@earendil-works/pi-durable": "1.1.0",
         "@rhumbatron/causal-router": "workspace:*",
+        "@rhumbatron/context-compiler": "workspace:*",
         "@rhumbatron/integration": "workspace:*",
+        "@rhumbatron/model-router": "workspace:*",
         "@rhumbatron/protocol": "workspace:*",
         "agents": "0.27.0",
       },
@@ -624,6 +637,8 @@
     "@rhumbatron/api": ["@rhumbatron/api@workspace:workers/api"],
 
     "@rhumbatron/causal-router": ["@rhumbatron/causal-router@workspace:packages/causal-router"],
+
+    "@rhumbatron/context-compiler": ["@rhumbatron/context-compiler@workspace:packages/context-compiler"],
 
     "@rhumbatron/coordinator": ["@rhumbatron/coordinator@workspace:workers/coordinator"],
 
