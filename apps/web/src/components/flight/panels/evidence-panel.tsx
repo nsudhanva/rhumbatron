@@ -158,7 +158,8 @@ function CheckRow({
     >
       <RefButton
         entity={{ kind: "check", id: `${candidate.id}:${check.checkId}` }}
-        label={`${candidate.name} ${check.checkId}: ${view.word}, ${view.coverage}${check.required ? ", required" : ", optional"}`}
+        title={`${candidate.name} ${check.checkId}: ${view.word}, ${view.coverage}${check.required ? ", required" : ", optional"}`}
+        context={`${candidate.name}${check.required ? ", required" : ""}`}
         className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-2 px-3 py-1"
       >
         <span aria-hidden className="font-mono text-[12px] whitespace-pre text-kumo-subtle">

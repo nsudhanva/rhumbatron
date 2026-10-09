@@ -160,7 +160,8 @@ function DecisionRow({
           <RefButton
             entity={decision.subject}
             mode="select"
-            label={`Select ${subject.kicker}: ${subject.title}`}
+            title={`Select ${subject.kicker}: ${subject.title}`}
+            context={`select ${subject.kicker}: ${subject.title}`}
             className="max-w-[120px] truncate px-1 font-mono text-[11px]"
           >
             {subjectText}

@@ -70,9 +70,23 @@ type ChildProps = {
   onFocus?: (e: FocusEvent<Element>) => void;
   onBlur?: (e: FocusEvent<Element>) => void;
   "aria-describedby"?: string | undefined;
+  id?: string;
 };
 
-export function EntityHover({ entity, children }: { entity: EntityRef; children: ReactNode }) {
+/**
+ * `show` makes the preview controlled, for items of a one-tab-stop composite (use-roving-focus):
+ * the composite owns pointer and focus and says which item is pointer-near (`pointer`: the usual
+ * 400ms delay) or keyboard-active (`focus`: at once). The child needs an `id` to anchor the card.
+ */
+export function EntityHover({
+  entity,
+  show,
+  children,
+}: {
+  entity: EntityRef;
+  show?: "focus" | "pointer" | null;
+  children: ReactNode;
+}) {
   const [anchor, setAnchor] = useState<Element | null>(null);
   const tooltipId = useId();
   const entityRef = useRef(entity);
@@ -118,6 +132,40 @@ export function EntityHover({ entity, children }: { entity: EntityRef; children:
     },
     [],
   );
+
+  // Controlled mode: follow the composite's pointer-near or keyboard-active item.
+  const controlled = show !== undefined;
+  const childId =
+    isValidElement<ChildProps>(children) && typeof children.props.id === "string"
+      ? children.props.id
+      : null;
+  const shown = useRef<"focus" | "pointer" | null>(null);
+  useEffect(() => {
+    if (!controlled) return;
+    const prev = shown.current;
+    shown.current = show ?? null;
+    if (show === prev) return;
+    const el = childId ? document.getElementById(childId) : null;
+    if (show && el) {
+      if (show === "focus" || active === owner.current) {
+        open(el);
+        return;
+      }
+      clearShow();
+      const warm = active !== null || performance.now() - lastClosedAt < SKIP_DELAY_MS;
+      if (warm) open(el);
+      else {
+        pending = owner.current;
+        showTimer = setTimeout(() => open(el), SHOW_DELAY_MS);
+      }
+      return;
+    }
+    if (pending === owner.current) clearShow();
+    if (active === owner.current) {
+      if (prev === "pointer") scheduleClose();
+      else close();
+    }
+  }, [controlled, show, childId, open, close, scheduleClose]);
 
   const handlers = {
     onPointerEnter: (e: PointerEvent<Element>) => {
@@ -167,6 +215,19 @@ export function EntityHover({ entity, children }: { entity: EntityRef; children:
       )
     : null;
 
+  if (controlled && isValidElement<ChildProps>(children)) {
+    const props = children.props;
+    return (
+      <>
+        {cloneElement(children as ReactElement<ChildProps>, {
+          "aria-describedby": anchor
+            ? [props["aria-describedby"], tooltipId].filter(Boolean).join(" ")
+            : props["aria-describedby"],
+        })}
+        {card}
+      </>
+    );
+  }
   if (isValidElement<ChildProps>(children)) {
     const props = children.props;
     const merged: ChildProps = {

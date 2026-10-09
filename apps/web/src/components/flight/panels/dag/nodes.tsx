@@ -1,3 +1,5 @@
+// biome-ignore-all lint/a11y/useFocusableInteractive: grid and listbox items here are aria-activedescendant items of a one-tab-stop composite (use-roving-focus.ts); they are not focusable by design
+// biome-ignore-all lint/a11y/useSemanticElements: an ARIA grid of absolutely positioned cells, not a layout table; native table elements cannot hold this layout
 import { cn } from "@cloudflare/kumo";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import {
@@ -10,20 +12,26 @@ import {
   type NodeProps,
   Position,
 } from "@xyflow/react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { formatNumber, formatUsd } from "../../../../lib/format";
 import { CALLS_PER_RUN } from "../../../agents/activity-model";
 import { FAMILY_FILL, FAMILY_TEXT, statusView } from "../../../ui/status-pill";
 import { Tag } from "../../../ui/tag";
 import { providerName, type TaskState } from "../../flight-model";
-import { type EntityRef, useFlightStore } from "../../flight-store";
+import { type EntityRef, useFlightStore, useIsHighlighted } from "../../flight-store";
 import { EntityHover } from "../../hover-preview";
+import { ROVING_CONTAINER, ROVING_ITEM, type Roving, useRovingFocus } from "../../use-roving-focus";
 import { DETAIL_ROW, type DetailRow, NODE_H, shownRun } from "./layout";
 
 /**
  * Execution DAG node and edge renderers (DESIGN.md 9.13 in Flight Control dress): square nodes
  * on `base`, the border encodes the Task state, the selected node carries the overlay shadow and
  * the 2px accent bar the inspector repeats. Motion only replays recorded facts (11.1).
+ *
+ * The whole node header is ONE target (DESIGN.md 5.2): it selects the Task and discloses its
+ * detail rows, so no 24px expander shrinks below 24px when the canvas zooms out (the panel's
+ * minimum zoom keeps the 88px header at least 24px tall). The detail chips are one tab stop,
+ * a grid walked with the arrow keys (use-roving-focus.ts).
  */
 
 type Border = "active" | "ready" | "attention" | "done" | "idle";
@@ -78,19 +86,20 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
   const progress = running && cap ? Math.min(1, running.modelCalls / cap) : null;
   const risky = task.riskTier === "high" || task.riskTier === "critical";
   const conflicted = task.conflictIds.length > 0;
-  const label = [
-    `${task.key} ${task.title}`,
-    `status ${view.label}`,
-    run ? `attempt ${run.attempt} on ${run.tier}${provider ? ` via ${provider}` : ""}` : "no run",
+  // Words for screen readers after the visible header text (the name starts with what is shown).
+  const extra = [
     running && cap ? `${running.modelCalls} of ${cap} model calls` : null,
-    run?.escalatedFrom ? `escalated from ${run.escalatedFrom}` : null,
-    task.source === "fixture" ? "fixture work" : null,
-    risky ? `risk ${task.riskTier}` : null,
-    conflicted ? "in a conflict" : null,
     current ? "latest fact" : null,
   ]
     .filter(Boolean)
     .join(", ");
+  const ref: EntityRef = { kind: "task", id: task.id };
+  const expanded = rows !== null;
+  // One click selects and opens the details; on the selected Task it clears and closes them.
+  const onHeader = () => {
+    useFlightStore.getState().toggle(ref);
+    if (selected === expanded) onToggleExpand(task.id);
+  };
 
   return (
     <div
@@ -117,13 +126,14 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
         />
       )}
       <div className="relative flex shrink-0 items-stretch" style={{ height: NODE_H - 4 }}>
-        <EntityHover entity={{ kind: "task", id: task.id }}>
+        <EntityHover entity={ref}>
           <button
             type="button"
             aria-pressed={selected}
-            aria-label={label}
-            onClick={() => select({ kind: "task", id: task.id })}
-            className="nopan nodrag grid min-w-0 flex-1 cursor-pointer grid-rows-[14px_17px_16px_16px] content-start gap-[3px] py-2 pr-1 pl-2.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500"
+            aria-expanded={expanded}
+            title={expanded ? "Hide details" : "Select and show details"}
+            onClick={onHeader}
+            className="nopan nodrag grid min-w-0 flex-1 cursor-pointer grid-rows-[14px_17px_16px_16px] content-start gap-[3px] py-2 pr-2 pl-2.5 text-left hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500"
           >
             <span className="flex items-center justify-between gap-2">
               <span className="truncate font-mono text-[10px] tracking-[0.08em] text-kumo-subtle uppercase">
@@ -138,6 +148,9 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
                   )}
                 />
                 <span className={FAMILY_TEXT[view.family]}>{view.label}</span>
+                <span aria-hidden className="text-kumo-subtle">
+                  {expanded ? <CaretDown size={12} /> : <CaretRight size={12} />}
+                </span>
               </span>
             </span>
             <span className="truncate text-[13px] leading-tight font-bold" title={task.title}>
@@ -168,18 +181,9 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
                 </span>
               )}
             </span>
+            {extra && <span className="sr-only">, {extra}</span>}
           </button>
         </EntityHover>
-        <button
-          type="button"
-          aria-expanded={rows !== null}
-          aria-label={`${rows ? "Hide" : "Show"} details of ${task.key}`}
-          title={rows ? "Hide details" : "Show details"}
-          onClick={() => onToggleExpand(task.id)}
-          className="nopan nodrag flex w-6 shrink-0 cursor-pointer items-start justify-center pt-2 text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-500"
-        >
-          {rows ? <CaretDown size={12} /> : <CaretRight size={12} />}
-        </button>
         {progress !== null && (
           <span
             aria-hidden
@@ -188,19 +192,7 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
           />
         )}
       </div>
-      {rows && (
-        <ul className="nopan nodrag grid border-t border-kumo-rule px-2.5 pt-1 text-[11px]">
-          {rows.map((row) => (
-            <li
-              key={rowKey(row)}
-              className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap"
-              style={{ height: DETAIL_ROW }}
-            >
-              <DetailLine row={row} task={task} />
-            </li>
-          ))}
-        </ul>
-      )}
+      {rows && <DetailGrid rows={rows} task={task} />}
       <Handle
         type="source"
         position={Position.Right}
@@ -216,10 +208,95 @@ const rowKey = (row: DetailRow) =>
   row.kind === "attempt" ? `attempt-${row.run.attempt}` : row.kind;
 
 const ROW_LABEL = "w-[60px] shrink-0 text-kumo-subtle";
-const CHIP =
-  "nopan nodrag min-h-5 cursor-pointer px-1 font-mono text-[11px] hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-500";
+const CHIP = cn(
+  "nopan nodrag min-h-5 cursor-pointer px-1 font-mono text-[11px] data-[hot]:bg-kumo-tint data-[hot]:outline-0!",
+  ROVING_ITEM,
+);
 
-function DetailLine({ row, task }: { row: DetailRow; task: TaskState }) {
+type ChipItem = { key: string; ref: EntityRef };
+
+/** The selectable chips of one detail row, in order (the grid's items). */
+function chipsOf(row: DetailRow): ChipItem[] {
+  switch (row.kind) {
+    case "claims":
+      return row.resources.map((r) => ({ key: `res:${r}`, ref: { kind: "resource", id: r } }));
+    case "changesets":
+      return row.ids.map((id) => ({ key: `cs:${id}`, ref: { kind: "changeset", id } }));
+    case "candidates":
+      return row.items.map((c) => ({ key: `cand:${c.id}`, ref: { kind: "candidate", id: c.id } }));
+    case "waits":
+      return row.deps.map((d) => ({
+        key: `dep:${d.edgeId}`,
+        ref: { kind: "dependency", id: d.edgeId },
+      }));
+    default:
+      return [];
+  }
+}
+
+/**
+ * Detail rows of an open node as one grid: a row header (Attempt 1, Claims, ...) and the row's
+ * value or chips. The chips are the grid's items: one tab stop, arrows, Enter selects.
+ */
+function DetailGrid({ rows, task }: { rows: DetailRow[]; task: TaskState }) {
+  const chips = rows.map(chipsOf);
+  const keyRows = chips.map((list) => list.map((c) => c.key));
+  const roving = useRovingFocus({
+    rows: keyRows,
+    snap: 4,
+    onActivate: (key) => {
+      const ref = chips.flat().find((c) => c.key === key)?.ref;
+      if (ref) select(ref);
+    },
+  });
+  const hasChips = keyRows.some((r) => r.length > 0);
+  return (
+    <div
+      role="grid"
+      aria-label={`Details of ${task.key}`}
+      {...(hasChips ? roving.containerProps : {})}
+      className={cn(
+        "nopan nodrag grid border-t border-kumo-rule px-2.5 pt-1 text-[11px]",
+        hasChips && ROVING_CONTAINER,
+      )}
+    >
+      {rows.map((row) => (
+        <div
+          key={rowKey(row)}
+          role="row"
+          className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap"
+          style={{ height: DETAIL_ROW }}
+        >
+          <DetailLine row={row} task={task} roving={roving} />
+        </div>
+      ))}
+    </div>
+  );
+}
+DetailGrid.displayName = "DetailGrid";
+
+/** One chip: a grid cell item of the detail grid. */
+function Chip({
+  item,
+  entity,
+  roving,
+  children,
+}: {
+  item: string;
+  entity: EntityRef;
+  roving: Roving;
+  children: ReactNode;
+}) {
+  const { selected } = useIsHighlighted(entity);
+  return (
+    <span role="gridcell" aria-selected={selected} {...roving.itemProps(item)} className={CHIP}>
+      {children}
+    </span>
+  );
+}
+Chip.displayName = "Chip";
+
+function DetailLine({ row, task, roving }: { row: DetailRow; task: TaskState; roving: Roving }) {
   switch (row.kind) {
     case "attempt": {
       const r = row.run;
@@ -234,8 +311,14 @@ function DetailLine({ row, task }: { row: DetailRow; task: TaskState }) {
         .join(" · ");
       return (
         <>
-          <span className={ROW_LABEL}>Attempt {r.attempt}</span>
-          <span className="flex min-w-0 items-center gap-1.5 overflow-hidden" title={detail}>
+          <span role="rowheader" className={ROW_LABEL}>
+            Attempt {r.attempt}
+          </span>
+          <span
+            role="gridcell"
+            className="flex min-w-0 items-center gap-1.5 overflow-hidden"
+            title={detail}
+          >
             <span className="shrink-0 font-mono">{r.tier}</span>
             <span className={cn("shrink-0 font-semibold", FAMILY_TEXT[v.family])}>{v.label}</span>
             <span className="truncate font-mono text-kumo-subtle tabular-nums">
@@ -249,15 +332,21 @@ function DetailLine({ row, task }: { row: DetailRow; task: TaskState }) {
     case "no-attempt":
       return (
         <>
-          <span className={ROW_LABEL}>Attempts</span>
-          <span className="text-kumo-subtle">None started</span>
+          <span role="rowheader" className={ROW_LABEL}>
+            Attempts
+          </span>
+          <span role="gridcell" className="text-kumo-subtle">
+            None started
+          </span>
         </>
       );
     case "files":
       return (
         <>
-          <span className={ROW_LABEL}>Files</span>
-          <span className="truncate tabular-nums">
+          <span role="rowheader" className={ROW_LABEL}>
+            Files
+          </span>
+          <span role="gridcell" className="truncate tabular-nums">
             {formatNumber(row.expected)} expected · {formatNumber(row.changed)} changed
           </span>
         </>
@@ -265,19 +354,18 @@ function DetailLine({ row, task }: { row: DetailRow; task: TaskState }) {
     case "claims":
       return (
         <>
-          <span className={ROW_LABEL}>Claims</span>
+          <span role="rowheader" className={ROW_LABEL}>
+            Claims
+          </span>
           {row.resources.length === 0 ? (
-            <span className="text-kumo-subtle">—</span>
+            <span role="gridcell" className="text-kumo-subtle">
+              —
+            </span>
           ) : (
             row.resources.map((r) => (
-              <button
-                key={r}
-                type="button"
-                className={CHIP}
-                onClick={() => select({ kind: "resource", id: r })}
-              >
+              <Chip key={r} item={`res:${r}`} entity={{ kind: "resource", id: r }} roving={roving}>
                 {r}
-              </button>
+              </Chip>
             ))
           )}
         </>
@@ -285,19 +373,18 @@ function DetailLine({ row, task }: { row: DetailRow; task: TaskState }) {
     case "changesets":
       return (
         <>
-          <span className={ROW_LABEL}>ChangeSets</span>
+          <span role="rowheader" className={ROW_LABEL}>
+            ChangeSets
+          </span>
           {row.ids.length === 0 ? (
-            <span className="text-kumo-subtle">—</span>
+            <span role="gridcell" className="text-kumo-subtle">
+              —
+            </span>
           ) : (
             row.ids.map((id) => (
-              <button
-                key={id}
-                type="button"
-                className={CHIP}
-                onClick={() => select({ kind: "changeset", id })}
-              >
+              <Chip key={id} item={`cs:${id}`} entity={{ kind: "changeset", id }} roving={roving}>
                 {id}
-              </button>
+              </Chip>
             ))
           )}
         </>
@@ -305,20 +392,24 @@ function DetailLine({ row, task }: { row: DetailRow; task: TaskState }) {
     case "candidates":
       return (
         <>
-          <span className={ROW_LABEL}>Candidates</span>
+          <span role="rowheader" className={ROW_LABEL}>
+            Candidates
+          </span>
           {row.items.length === 0 ? (
-            <span className="text-kumo-subtle">—</span>
+            <span role="gridcell" className="text-kumo-subtle">
+              —
+            </span>
           ) : (
             row.items.map((c) => (
-              <button
+              <Chip
                 key={c.id}
-                type="button"
-                aria-label={`Candidate ${c.letter}`}
-                className={CHIP}
-                onClick={() => select({ kind: "candidate", id: c.id })}
+                item={`cand:${c.id}`}
+                entity={{ kind: "candidate", id: c.id }}
+                roving={roving}
               >
                 {c.letter}
-              </button>
+                <span className="sr-only">, Candidate {c.letter}</span>
+              </Chip>
             ))
           )}
         </>
@@ -326,20 +417,22 @@ function DetailLine({ row, task }: { row: DetailRow; task: TaskState }) {
     case "waits":
       return (
         <>
-          <span className={ROW_LABEL}>Waits on</span>
+          <span role="rowheader" className={ROW_LABEL}>
+            Waits on
+          </span>
           {row.deps.map((d) => (
-            <button
+            <Chip
               key={d.id}
-              type="button"
-              aria-label={`Dependency ${d.key} to ${task.key}, ${statusView(d.status).label}`}
-              className={CHIP}
-              onClick={() => select({ kind: "dependency", id: d.edgeId })}
+              item={`dep:${d.edgeId}`}
+              entity={{ kind: "dependency", id: d.edgeId }}
+              roving={roving}
             >
               {d.key}
               <span className={cn("ml-1", FAMILY_TEXT[statusView(d.status).family])}>
                 {statusView(d.status).label}
               </span>
-            </button>
+              <span className="sr-only">, dependency of {task.key}</span>
+            </Chip>
           ))}
         </>
       );

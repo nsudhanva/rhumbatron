@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useFocusableInteractive: listbox options here are aria-activedescendant items of a one-tab-stop composite (use-roving-focus.ts); they are not focusable by design
 import { cn } from "@cloudflare/kumo";
 import {
   type ReactNode,
@@ -11,8 +12,9 @@ import {
 import { create } from "zustand";
 import { usePrefersReducedMotion } from "../../../../lib/motion";
 import { useFlight } from "../../flight-context";
-import { type EntityRef, useFlightStore } from "../../flight-store";
+import { type EntityRef, useFlightStore, useSelection } from "../../flight-store";
 import { EntityHover } from "../../hover-preview";
+import { ROVING_CONTAINER, ROVING_ITEM, useRovingFocus } from "../../use-roving-focus";
 
 /**
  * Shared time axis of the agent swimlanes and the workspace lanes (DESIGN.md 9.8, 11.1). Both
@@ -276,8 +278,10 @@ const MARK_TEXT: Record<AxisMark["tone"], string> = {
 export const labelWidth = (text: string) => Math.ceil(text.length * 6.1) + 6;
 
 /**
- * Sticky axis row: a corner cell over the left column, milestone labels in the top band (each a
- * button) and mono ticks (T+mm:ss over the clock) in the bottom band, plus the cursor label.
+ * Sticky axis row: a corner cell over the left column, milestone labels in the top band and mono
+ * ticks (T+mm:ss over the clock) in the bottom band, plus the cursor label. The milestones are one
+ * tab stop (a listbox over the whole axis, use-roving-focus.ts): arrows walk them in time order,
+ * Down enters the lanes, and a pointer anywhere on the axis picks the nearest milestone.
  */
 export function TimeAxis({
   scale,
@@ -291,7 +295,6 @@ export function TimeAxis({
   live: boolean;
 }) {
   const clockOf = useClock();
-  const select = (ref: EntityRef) => () => useFlightStore.getState().toggle(ref);
   // Label placement by priority (promotion, then verdicts, then the rest): a label sits right of
   // its rule, or left of it when that collides; a label with no room becomes an 8px square
   // button (same name in its title and accessible label), so no milestone is ever dropped.
@@ -314,6 +317,17 @@ export function TimeAxis({
         return { ...m, x, left: Math.min(Math.max(0, x - 5), scale.width - 12), compact: true };
       });
   }, [marks, scale]);
+  const selection = useSelection();
+  const ordered = useMemo(() => [...placed].sort((a, b) => a.x - b.x), [placed]);
+  const rows = useMemo(() => [ordered.map((m) => m.key)], [ordered]);
+  const roving = useRovingFocus({
+    rows,
+    group: "agent-lanes",
+    onActivate: (key) => {
+      const ref = marks.find((m) => m.key === key)?.ref;
+      if (ref) useFlightStore.getState().toggle(ref);
+    },
+  });
   const cursorX = scale.x(scale.cursor);
   return (
     <div
@@ -338,40 +352,56 @@ export function TimeAxis({
             <div>{clockOf(tick.t)}</div>
           </div>
         ))}
-        {placed.map((m) => (
+        {ordered.length > 0 && (
           <div
-            key={m.key}
-            className="absolute"
-            // A compact mark sits on its rule at the foot of the axis, clear of the labels.
-            style={{ left: m.left, top: m.compact ? AXIS_H - 16 : 2 }}
+            role="listbox"
+            aria-orientation="horizontal"
+            aria-label="Candidate milestones"
+            {...roving.containerProps}
+            className={cn("absolute inset-0", ROVING_CONTAINER)}
           >
-            <EntityHover entity={m.ref}>
-              <button
-                type="button"
-                onClick={select(m.ref)}
-                aria-label={m.compact ? m.label : undefined}
-                title={`${m.label} · ${clockOf(m.t)} · ${relTime(m.t - scale.start)}`}
-                className={cn(
-                  "block truncate px-0.5 font-mono text-[10px] leading-[14px] font-semibold whitespace-nowrap hover:bg-kumo-tint",
-                  MARK_TEXT[m.tone],
-                )}
-              >
-                {m.compact ? (
-                  <span aria-hidden className="my-[3px] block size-2 bg-current" />
-                ) : (
-                  m.label
-                )}
-              </button>
-            </EntityHover>
+            {ordered.map((m) => (
+              <EntityHover key={m.key} entity={m.ref} show={roving.show(m.key)}>
+                <div
+                  role="option"
+                  aria-selected={
+                    selection !== null && selection.kind === m.ref.kind && selection.id === m.ref.id
+                  }
+                  {...roving.itemProps(m.key)}
+                  title={`${m.label} · ${clockOf(m.t)} · ${relTime(m.t - scale.start)}`}
+                  className={cn(
+                    "absolute block truncate px-0.5 font-mono text-[10px] leading-[14px] font-semibold whitespace-nowrap data-[hot]:bg-kumo-tint",
+                    ROVING_ITEM,
+                    MARK_TEXT[m.tone],
+                  )}
+                  // A compact mark sits on its rule at the foot of the axis, clear of the labels.
+                  style={{
+                    left: m.left,
+                    top: m.compact ? AXIS_H - 16 : 2,
+                    scrollMarginLeft: LEFT + 8,
+                  }}
+                >
+                  {m.compact ? (
+                    <>
+                      <span aria-hidden className="my-[3px] block size-2 bg-current" />
+                      <span className="sr-only">{m.label}</span>
+                    </>
+                  ) : (
+                    m.label
+                  )}
+                  <span className="sr-only">, {clockOf(m.t)}</span>
+                </div>
+              </EntityHover>
+            ))}
           </div>
-        ))}
+        )}
         <div
           aria-hidden
-          className="absolute bottom-0 h-3 w-0.5 bg-kumo-ink"
+          className="pointer-events-none absolute bottom-0 h-3 w-0.5 bg-kumo-ink"
           style={{ left: cursorX - 1 }}
         />
         <span
-          className="absolute bottom-3 bg-kumo-ink px-1 font-mono text-[10px] leading-[12px] whitespace-nowrap text-kumo-inverse tabular-nums"
+          className="pointer-events-none absolute bottom-3 bg-kumo-ink px-1 font-mono text-[10px] leading-[12px] whitespace-nowrap text-kumo-inverse tabular-nums"
           style={{ left: Math.max(0, Math.min(cursorX - 1, scale.width - 64)) }}
         >
           {live ? "now" : clockOf(scale.cursor)}

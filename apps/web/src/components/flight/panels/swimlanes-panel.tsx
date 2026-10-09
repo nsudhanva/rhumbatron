@@ -1,13 +1,26 @@
+// biome-ignore-all lint/a11y/useFocusableInteractive: listbox options here are aria-activedescendant items of a one-tab-stop composite (use-roving-focus.ts); they are not focusable by design
 import { cn } from "@cloudflare/kumo";
 import { type CSSProperties, useId, useMemo } from "react";
 import { formatDuration, formatNumber, truncate } from "../../../lib/format";
 import { CALLS_PER_RUN } from "../../agents/activity-model";
 import { FAMILY_FILL, statusView } from "../../ui/status-pill";
 import { useFlight } from "../flight-context";
-import { type FlightState, providerName, type RunState, type TaskState } from "../flight-model";
-import { type EntityRef, useFlightStore, useIsHighlighted } from "../flight-store";
+import {
+  type FlightState,
+  providerName,
+  type RunState,
+  refKey,
+  type TaskState,
+} from "../flight-model";
+import { type EntityRef, useFlightStore, useIsHighlighted, useSelection } from "../flight-store";
 import { EntityHover } from "../hover-preview";
 import type { PanelProps } from "../panel-types";
+import {
+  ROVING_CONTAINER,
+  ROVING_ITEM,
+  type RovingShow,
+  useRovingFocus,
+} from "../use-roving-focus";
 import { TIER_FILL, TIER_LETTER, useDimmed, useVisibleLanes } from "./lanes/lanes";
 import {
   AXIS_H,
@@ -34,6 +47,11 @@ import {
  * kind; an escalation is a step-up glyph. Typed facts of the lane (Ready, Claim, Intent,
  * ChangeSet, Challenge, Done, Fail) are square markers above the bar. An open conflict holds an
  * accent connector between the two lanes. Candidate milestones are full-height rules.
+ *
+ * Each lane plot is ONE tab stop (use-roving-focus.ts): a listbox whose options are the attempt
+ * bars and fact markers in time order. Arrows walk them, Up/Down move to the lane above or below,
+ * Enter selects. A pointer anywhere on the lane picks the nearest item (ringed in ink), so the
+ * 8px markers are never the pointer target on their own (DESIGN.md 5.2).
  *
  * Every mark is a recorded fact at its recorded time (flight-model.ts). The progress line on a
  * running bar is real model calls over the per-run call budget, not a timer.
@@ -467,6 +485,64 @@ function Lane({
     });
   }, [marks, scale]);
 
+  // Lane items in time order: attempt bars (by start) and fact markers, one composite.
+  const items = useMemo(
+    () =>
+      [
+        ...task.runs.map((run) => ({
+          key: `run:${run.attempt}`,
+          x: scale.x(run.startedAt),
+          ref: { kind: "decision", id: `route:${task.id}:${run.attempt}` } as EntityRef,
+        })),
+        ...placed.map((m) => ({ key: m.key, x: m.x, ref: m.ref })),
+      ].sort((a, b) => a.x - b.x),
+    [task, placed, scale],
+  );
+  const rows = useMemo(() => [items.map((i) => i.key)], [items]);
+  const selection = useSelection();
+  const initial = selection
+    ? (items.find((i) => refKey(i.ref) === refKey(selection))?.key ?? null)
+    : null;
+  const roving = useRovingFocus({
+    rows,
+    initial,
+    group: "agent-lanes",
+    onActivate: (key) => {
+      const ref = items.find((i) => i.key === key)?.ref;
+      if (ref) useFlightStore.getState().toggle(ref);
+    },
+  });
+
+  const content = (
+    <>
+      {flash && (
+        <div key={flash} aria-hidden className="rh-arrive pointer-events-none absolute inset-0" />
+      )}
+      {task.runs.map((run, i) => (
+        <AttemptBar
+          key={run.attempt}
+          task={task}
+          run={run}
+          next={task.runs[i + 1] ?? null}
+          scale={scale}
+          hatchId={hatchId}
+          item={roving.itemProps(`run:${run.attempt}`)}
+          show={roving.show(`run:${run.attempt}`)}
+        />
+      ))}
+      {placed.map((m) => (
+        <Marker
+          key={m.key}
+          mark={m}
+          x={m.x}
+          showLabel={m.showLabel}
+          item={roving.itemProps(m.key)}
+          show={roving.show(m.key)}
+        />
+      ))}
+    </>
+  );
+
   return (
     <div
       className={cn(
@@ -476,28 +552,29 @@ function Lane({
       style={{ height: ROW_H }}
     >
       <LaneHeader task={task} note={note} live={live} />
-      <div className="relative shrink-0 overflow-hidden" style={{ width: scale.width }}>
-        {flash && (
-          <div key={flash} aria-hidden className="rh-arrive pointer-events-none absolute inset-0" />
-        )}
-        {task.runs.map((run, i) => (
-          <AttemptBar
-            key={run.attempt}
-            task={task}
-            run={run}
-            next={task.runs[i + 1] ?? null}
-            scale={scale}
-            hatchId={hatchId}
-          />
-        ))}
-        {placed.map((m) => (
-          <Marker key={m.key} mark={m} x={m.x} showLabel={m.showLabel} />
-        ))}
-      </div>
+      {items.length > 0 ? (
+        <div
+          role="listbox"
+          aria-orientation="horizontal"
+          aria-label={`${task.key} attempts and facts`}
+          {...roving.containerProps}
+          className={cn("relative shrink-0 overflow-hidden", ROVING_CONTAINER)}
+          style={{ width: scale.width }}
+        >
+          {content}
+        </div>
+      ) : (
+        <div className="relative shrink-0 overflow-hidden" style={{ width: scale.width }}>
+          {content}
+        </div>
+      )}
     </div>
   );
 }
 Lane.displayName = "Lane";
+
+/** Props a lane hands each of its items (use-roving-focus `itemProps`). */
+type ItemProps = ReturnType<ReturnType<typeof useRovingFocus>["itemProps"]>;
 
 function LaneHeader({ task, note, live }: { task: TaskState; note: string[]; live: boolean }) {
   const instant = useLiveInstant();
@@ -524,7 +601,6 @@ function LaneHeader({ task, note, live }: { task: TaskState; note: string[]; liv
       <button
         type="button"
         aria-pressed={selected}
-        aria-label={`${task.key}, ${view.label}${tier ? `, ${tier}` : ""}. ${task.title}`}
         title={title}
         onClick={() => useFlightStore.getState().toggle(ref)}
         className={cn(
@@ -571,6 +647,7 @@ function LaneHeader({ task, note, live }: { task: TaskState; note: string[]; liv
             </span>
           )}
         </span>
+        <span className="sr-only">, {task.title}</span>
       </button>
     </EntityHover>
   );
@@ -583,12 +660,16 @@ function AttemptBar({
   next,
   scale,
   hatchId,
+  item,
+  show,
 }: {
   task: TaskState;
   run: RunState;
   next: RunState | null;
   scale: TimeScale;
   hatchId: string;
+  item: ItemProps;
+  show: RovingShow;
 }) {
   const { animated } = useFlight();
   const clockOf = useClock();
@@ -598,7 +679,7 @@ function AttemptBar({
   const failed = run.status === "failed";
   const running = run.status === "running";
   const progress = running ? Math.min(1, run.modelCalls / CALLS_PER_RUN[run.tier]) : 0;
-  const enterRef = useEnter<HTMLButtonElement>(
+  const enterRef = useEnter<HTMLDivElement>(
     animated.has(run.attempt === 1 ? `${task.id}:fork` : `${task.id}:run${run.attempt}:start`),
   );
   const label = `${task.key} attempt ${run.attempt} on ${run.tier}, ${statusView(run.status).label}${
@@ -614,30 +695,38 @@ function AttemptBar({
   const room = (next ? scale.x(next.startedAt) : scale.width) - x0;
   const under = failed && run.failureKind && width < 90 ? run.failureKind : null;
   const ref: EntityRef = { kind: "decision", id: `route:${task.id}:${run.attempt}` };
+  const { selected } = useIsHighlighted(ref);
   return (
     <>
-      <button
-        ref={enterRef}
-        type="button"
-        aria-label={`${label}. Show the route decision.`}
-        title={`${label}\n${clockOf(run.startedAt)} → ${run.endedAt ? clockOf(run.endedAt) : "running"}${
-          run.failureReason ? `\n${run.failureReason}` : ""
-        }`}
-        onClick={() => useFlightStore.getState().toggle(ref)}
-        className={cn(
-          "absolute flex origin-left items-center overflow-hidden px-1 font-mono text-[10px] leading-none font-semibold whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-500",
-          TIER_FILL[run.tier],
-          failed && "border border-accent-500",
-        )}
-        style={{ left: x0, top: BAR_Y, width, height: BAR_H }}
-      >
-        {failed && (
-          <svg aria-hidden className="pointer-events-none absolute inset-0 size-full">
-            <rect width="100%" height="100%" fill={`url(#${hatchId})`} opacity="0.55" />
-          </svg>
-        )}
-        <span className="relative">{inner}</span>
-      </button>
+      <EntityHover entity={ref} show={show}>
+        <div
+          ref={enterRef}
+          role="option"
+          aria-selected={selected}
+          {...item}
+          title={`${label}\n${clockOf(run.startedAt)} → ${run.endedAt ? clockOf(run.endedAt) : "running"}${
+            run.failureReason ? `\n${run.failureReason}` : ""
+          }`}
+          className={cn(
+            "absolute flex origin-left items-center overflow-hidden px-1 font-mono text-[10px] leading-none font-semibold whitespace-nowrap",
+            ROVING_ITEM,
+            TIER_FILL[run.tier],
+            failed && "border border-accent-500",
+          )}
+          style={{ left: x0, top: BAR_Y, width, height: BAR_H, scrollMarginLeft: LEFT + 8 }}
+        >
+          {failed && (
+            <svg aria-hidden className="pointer-events-none absolute inset-0 size-full">
+              <rect width="100%" height="100%" fill={`url(#${hatchId})`} opacity="0.55" />
+            </svg>
+          )}
+          <span className="relative">{inner}</span>
+          <span className="sr-only">
+            {inner ? ", " : ""}
+            {label}. Shows the route decision.
+          </span>
+        </div>
+      </EntityHover>
       {running && (
         <div
           aria-hidden
@@ -667,6 +756,7 @@ function AttemptBar({
       )}
       {under && room > 24 && (
         <span
+          aria-hidden
           className="pointer-events-none absolute truncate font-mono text-[10px] leading-none text-kumo-danger"
           style={{
             left: x0 + (run.escalatedFrom ? 34 : 0),
@@ -682,20 +772,36 @@ function AttemptBar({
 }
 AttemptBar.displayName = "AttemptBar";
 
-function Marker({ mark, x, showLabel }: { mark: Mark; x: number; showLabel: boolean }) {
+function Marker({
+  mark,
+  x,
+  showLabel,
+  item,
+  show,
+}: {
+  mark: Mark;
+  x: number;
+  showLabel: boolean;
+  item: ItemProps;
+  show: RovingShow;
+}) {
   const { animated } = useFlight();
   const { selected } = useIsHighlighted(mark.ref);
   const enterRef = useEnter<HTMLSpanElement>(mark.eventId !== null && animated.has(mark.eventId));
-  const style: CSSProperties = { left: x, top: 0, height: MARK_Y * 2 + MARK };
+  const style: CSSProperties = {
+    left: x,
+    top: 0,
+    height: MARK_Y * 2 + MARK,
+    scrollMarginLeft: LEFT + 8,
+  };
   return (
-    <EntityHover entity={mark.ref}>
-      <button
-        type="button"
-        aria-pressed={selected}
-        aria-label={mark.title}
+    <EntityHover entity={mark.ref} show={show}>
+      <div
+        role="option"
+        aria-selected={selected}
+        {...item}
         title={mark.title}
-        onClick={() => useFlightStore.getState().toggle(mark.ref)}
-        className="absolute z-[6] flex items-center gap-[3px] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-500"
+        className={cn("absolute z-[6] flex items-center gap-[3px]", ROVING_ITEM)}
         style={style}
       >
         <span
@@ -710,7 +816,6 @@ function Marker({ mark, x, showLabel }: { mark: Mark; x: number; showLabel: bool
         />
         {showLabel && (
           <span
-            aria-hidden
             className={cn(
               "font-mono text-[10px] leading-none whitespace-nowrap text-kumo-default",
               MARK_TEXT[mark.kind],
@@ -719,7 +824,11 @@ function Marker({ mark, x, showLabel }: { mark: Mark; x: number; showLabel: bool
             {mark.label}
           </span>
         )}
-      </button>
+        <span className="sr-only">
+          {showLabel ? ": " : ""}
+          {mark.title}
+        </span>
+      </div>
     </EntityHover>
   );
 }
@@ -776,15 +885,24 @@ function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number>
               type="button"
               onClick={() => useFlightStore.getState().toggle(ref)}
               title={`Conflict on ${c.resource}\n“${c.statements[0]}”\nvs “${c.statements[1]}”`}
-              aria-label={`Conflict on ${c.resource}, ${c.open ? "open" : "resolved"}`}
-              className={cn(
-                "pointer-events-auto absolute border bg-kumo-elevated px-1 font-mono text-[10px] leading-[14px] whitespace-nowrap focus-visible:outline-2 focus-visible:outline-accent-500",
-                c.open ? "border-accent-500 text-kumo-accent" : "border-kumo-rule text-kumo-subtle",
-              )}
-              style={{ left: x + 4, top: (y1 + y2) / 2 - 8 }}
+              // 24px tall target around the 16px chip (DESIGN.md 5.2).
+              className="pointer-events-auto absolute flex h-6 items-center font-mono text-[10px] leading-[14px] whitespace-nowrap focus-visible:outline-2 focus-visible:outline-accent-500"
+              style={{ left: x + 4, top: (y1 + y2) / 2 - 12 }}
             >
-              {c.open ? "⇄ " : ""}
-              {text}
+              <span
+                className={cn(
+                  "border bg-kumo-elevated px-1",
+                  c.open
+                    ? "border-accent-500 text-kumo-accent"
+                    : "border-kumo-rule text-kumo-subtle",
+                )}
+              >
+                {c.open && <span aria-hidden>⇄ </span>}
+                {text}
+              </span>
+              <span className="sr-only">
+                , conflict on {c.resource}, {c.open ? "open" : "resolved"}
+              </span>
             </button>
           </EntityHover>
         );

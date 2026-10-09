@@ -375,7 +375,7 @@ function ColumnHeader({
       <div className="grid min-w-0 gap-1">
         <RefButton
           entity={ref}
-          label={`${candidate.name}, ${candidate.status}`}
+          title={`${candidate.name}, ${candidate.status}`}
           className="-mx-1 px-1"
         >
           <span className="flex min-w-0 items-center gap-2">
@@ -431,7 +431,8 @@ function ColumnHeader({
               <li key={k.id}>
                 <RefButton
                   entity={{ kind: "changeset", id: k.id }}
-                  label={`ChangeSet ${k.id} from ${k.taskKey}${k.commit ? ` at ${k.commit.slice(0, 8)}` : ""}`}
+                  title={`ChangeSet ${k.id} from ${k.taskKey}${k.commit ? ` at ${k.commit.slice(0, 8)}` : ""}`}
+                  context={`ChangeSet ${k.id}${k.commit ? ` at ${k.commit.slice(0, 8)}` : ""}`}
                   className="bg-tone-100 px-1 font-mono text-[10px] tabular-nums"
                 >
                   {k.taskKey}
@@ -554,7 +555,8 @@ function CheckCell({
     <td data-state={isLoser(candidate) ? "rejected" : undefined} className={cellClass}>
       <RefButton
         entity={{ kind: "check", id }}
-        label={`${candidate.name} ${check.checkId}: ${view.word}, ${view.coverage}${check.required ? ", required" : ""}`}
+        title={`${candidate.name} ${check.checkId}: ${view.word}, ${view.coverage}${check.required ? ", required" : ""}`}
+        context={`${candidate.name} ${check.checkId}${check.required ? ", required" : ""}`}
         className="grid w-full gap-1 px-2 py-1"
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -655,7 +657,8 @@ function ConflictRow({
       >
         <RefButton
           entity={{ kind: "conflict", id: conflict.id }}
-          label={`Conflict on ${conflict.resource}: ${a} vs ${b}`}
+          title={`Conflict on ${conflict.resource}: ${a} vs ${b}`}
+          context={`${a} vs ${b}`}
           className="grid w-full gap-0.5 py-1 pr-2 pl-3"
         >
           <span className="text-[12px] font-semibold text-kumo-accent">Conflict</span>

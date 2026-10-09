@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useFocusableInteractive: listbox options here are aria-activedescendant items of a one-tab-stop composite (use-roving-focus.ts); they are not focusable by design
 import { cn } from "@cloudflare/kumo";
 import { useMemo } from "react";
 import type { WorkspaceChangeSet } from "../../../lib/api";
@@ -5,9 +6,15 @@ import { formatNumber, generation, truncate } from "../../../lib/format";
 import { StatusPill, statusView } from "../../ui/status-pill";
 import { useFlight } from "../flight-context";
 import type { CandidateState, FlightState, TaskState } from "../flight-model";
-import { type EntityRef, useFlightStore, useIsHighlighted } from "../flight-store";
+import { type EntityRef, useFlightStore, useIsHighlighted, useSelection } from "../flight-store";
 import { EntityHover } from "../hover-preview";
 import type { PanelProps } from "../panel-types";
+import {
+  ROVING_CONTAINER,
+  ROVING_ITEM,
+  type RovingShow,
+  useRovingFocus,
+} from "../use-roving-focus";
 import { useDimmed, useVisibleLanes } from "./lanes/lanes";
 import {
   AXIS_H,
@@ -29,6 +36,8 @@ import {
  * canonical trunk on top, one branch per Task workspace fork with its ChangeSet commits, and one
  * merge row per Candidate where the composing branches join. A promoted Candidate merges back
  * into the trunk with the new generation; a rejected one greys out with its reason in words.
+ *
+ * Each fork lane's commits are one tab stop (a listbox, use-roving-focus.ts), like the agent lanes.
  *
  * Same time axis and zoom as the agent swimlanes. Data: Workspace view (`/v1/projects/:id/
  * workspace`: forks, ChangeSets, file stats) folded at the time-machine instant by flight-model.
@@ -301,6 +310,26 @@ function ForkLane({
     if (show) labelEnd = x + SQ / 2 + 4 + labelWidth(text);
     return { ...c, x, show };
   });
+  const rows = [commits.map((c) => c.cs.id)];
+  const selection = useSelection();
+  const roving = useRovingFocus({
+    rows,
+    initial: selection?.kind === "changeset" ? selection.id : null,
+    group: "workspace-lanes",
+    onActivate: (id) => useFlightStore.getState().toggle({ kind: "changeset", id }),
+  });
+  const commitMarks = commits.map((c) => (
+    <Commit
+      key={c.cs.id}
+      cs={c.cs}
+      x={c.x}
+      showLabel={c.show}
+      eventId={proposed.get(c.cs.id) ?? null}
+      dim={!dim && dimmed({ kind: "changeset", id: c.cs.id })}
+      item={roving.itemProps(c.cs.id)}
+      show={roving.show(c.cs.id)}
+    />
+  ));
   return (
     <div
       className={cn(
@@ -313,7 +342,6 @@ function ForkLane({
         <button
           type="button"
           aria-pressed={selected}
-          aria-label={`${task.key} workspace ${forkName ?? "not listed"}, ${view.label}, ${files} files changed`}
           title={forkName ?? "The Workspace view does not list a fork for this Task."}
           onClick={() => useFlightStore.getState().toggle(ref)}
           className={cn(
@@ -334,20 +362,23 @@ function ForkLane({
               {formatNumber(files)} {files === 1 ? "file" : "files"}
             </span>
           </span>
+          <span className="sr-only">, workspace fork of {task.key}</span>
         </button>
       </EntityHover>
-      <div className="relative shrink-0 overflow-hidden" style={{ width: scale.width }}>
-        {commits.map((c) => (
-          <Commit
-            key={c.cs.id}
-            cs={c.cs}
-            x={c.x}
-            showLabel={c.show}
-            eventId={proposed.get(c.cs.id) ?? null}
-            dim={!dim && dimmed({ kind: "changeset", id: c.cs.id })}
-          />
-        ))}
-      </div>
+      {commits.length > 0 ? (
+        <div
+          role="listbox"
+          aria-orientation="horizontal"
+          aria-label={`${task.key} ChangeSets`}
+          {...roving.containerProps}
+          className={cn("relative shrink-0 overflow-hidden", ROVING_CONTAINER)}
+          style={{ width: scale.width }}
+        >
+          {commitMarks}
+        </div>
+      ) : (
+        <div className="relative shrink-0 overflow-hidden" style={{ width: scale.width }} />
+      )}
     </div>
   );
 }
@@ -359,12 +390,16 @@ function Commit({
   showLabel,
   eventId,
   dim,
+  item,
+  show,
 }: {
   cs: WorkspaceChangeSet;
   x: number;
   showLabel: boolean;
   eventId: string | null;
   dim: boolean;
+  item: ReturnType<ReturnType<typeof useRovingFocus>["itemProps"]>;
+  show: RovingShow;
 }) {
   const { animated } = useFlight();
   const clockOf = useClock();
@@ -373,18 +408,18 @@ function Commit({
   const enterRef = useEnter<HTMLSpanElement>(eventId !== null && animated.has(eventId));
   const title = `ChangeSet ${cs.id}\ncommit ${cs.commit} · ${cs.files.length} files · +${cs.insertions} −${cs.deletions}\n${clockOf(Date.parse(cs.createdAt))}`;
   return (
-    <EntityHover entity={ref}>
-      <button
-        type="button"
-        aria-pressed={selected}
-        aria-label={`ChangeSet ${cs.id}, commit ${cs.commit.slice(0, 7)}, ${cs.insertions} insertions, ${cs.deletions} deletions`}
+    <EntityHover entity={ref} show={show}>
+      <div
+        role="option"
+        aria-selected={selected}
+        {...item}
         title={title}
-        onClick={() => useFlightStore.getState().toggle(ref)}
         className={cn(
-          "absolute z-[6] flex h-6 items-center gap-1 pr-1 transition-opacity duration-(--rh-dur-ui) focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent-500",
+          "absolute z-[6] flex h-6 items-center gap-1 pr-1 transition-opacity duration-(--rh-dur-ui)",
+          ROVING_ITEM,
           dim && "opacity-45",
         )}
-        style={{ left: x - SQ / 2, top: ROW_H / 2 - 12 }}
+        style={{ left: x - SQ / 2, top: ROW_H / 2 - 12, scrollMarginLeft: LEFT + 8 }}
       >
         <span
           ref={enterRef}
@@ -396,15 +431,16 @@ function Commit({
           style={{ width: SQ, height: SQ }}
         />
         {showLabel && (
-          <span
-            aria-hidden
-            className="bg-kumo-elevated font-mono text-[10px] leading-none whitespace-nowrap tabular-nums"
-          >
+          <span className="bg-kumo-elevated font-mono text-[10px] leading-none whitespace-nowrap tabular-nums">
             {cs.commit.slice(0, 7)} <span className="text-kumo-success">+{cs.insertions}</span>{" "}
             <span className="text-kumo-danger">−{cs.deletions}</span>
           </span>
         )}
-      </button>
+        <span className="sr-only">
+          {showLabel ? ", " : `${cs.commit.slice(0, 7)}, `}ChangeSet {cs.id}, {cs.insertions}{" "}
+          insertions, {cs.deletions} deletions
+        </span>
+      </div>
     </EntityHover>
   );
 }
@@ -432,7 +468,6 @@ function CandidateLane({ row, scale, dim }: { row: CandidateRow; scale: TimeScal
         <button
           type="button"
           aria-pressed={selected}
-          aria-label={`${cand.name}, ${view.label}${reason ? `: ${reason}` : ""}`}
           title={reason ? `${cand.name} rejected: ${reason}` : cand.name}
           onClick={() => useFlightStore.getState().toggle(ref)}
           className={cn(

@@ -39,6 +39,7 @@ function RefButton({
 }: {
   entity: EntityRef;
   children: ReactNode;
+  /** Screen-reader-only words after the visible text (the name starts with what is shown). */
   label?: string;
   className?: string;
 }) {
@@ -48,7 +49,6 @@ function RefButton({
       <button
         type="button"
         aria-pressed={selected}
-        aria-label={label}
         onClick={() => useFlightStore.getState().toggle(entity)}
         className={cn(
           "inline-flex min-h-6 max-w-full items-center gap-1.5 px-1 text-left text-[12px] transition-colors duration-(--rh-dur-ui) hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-accent-500 pointer-coarse:min-h-11",
@@ -57,6 +57,7 @@ function RefButton({
         )}
       >
         {children}
+        {label && <span className="sr-only">, {label}</span>}
       </button>
     </EntityHover>
   );

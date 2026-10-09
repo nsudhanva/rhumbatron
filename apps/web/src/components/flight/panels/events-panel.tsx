@@ -187,7 +187,8 @@ function EventRow({
           {aboutEntity && (
             <RefButton
               entity={aboutEntity}
-              label={`Select ${entityLabel(state, aboutEntity).kicker}: ${entityLabel(state, aboutEntity).title}`}
+              title={`Select ${entityLabel(state, aboutEntity).kicker}: ${entityLabel(state, aboutEntity).title}`}
+              context={`select ${entityLabel(state, aboutEntity).kicker}: ${entityLabel(state, aboutEntity).title}`}
               className="max-w-[120px] truncate px-1 font-mono text-[11px]"
             >
               {entityText(state, aboutEntity)}

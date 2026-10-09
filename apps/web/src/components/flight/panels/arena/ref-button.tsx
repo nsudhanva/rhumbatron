@@ -7,19 +7,25 @@ import { EntityHover } from "../../hover-preview";
  * A button that stands for one entity: click selects it (panels toggle, inspectors navigate),
  * hover previews it, and the selection shows as faint ink with a 2px accent left bar
  * (DESIGN.md 10). 24px minimum target, 44px on coarse pointers.
+ *
+ * The accessible name is the visible text, then `context` for screen readers only, so the name
+ * always starts with what is on screen (WCAG 2.5.3 label in name). `title` is the tooltip.
  */
 export function RefButton({
   entity,
   mode = "toggle",
-  label,
+  context,
+  title,
   className,
   children,
 }: {
   entity: EntityRef;
   /** `toggle` in panels (click again clears); `select` in inspectors (always navigates). */
   mode?: "toggle" | "select";
-  /** Accessible name when the visible text is not enough. */
-  label?: string;
+  /** Screen-reader-only words after the visible text, when the visible text is not enough. */
+  context?: string;
+  /** Tooltip. */
+  title?: string;
   className?: string;
   children: ReactNode;
 }) {
@@ -29,8 +35,7 @@ export function RefButton({
       <button
         type="button"
         aria-pressed={selected}
-        aria-label={label}
-        title={label}
+        title={title}
         onClick={() => {
           const store = useFlightStore.getState();
           if (mode === "toggle") store.toggle(entity);
@@ -44,6 +49,7 @@ export function RefButton({
         )}
       >
         {children}
+        {context && <span className="sr-only">, {context}</span>}
       </button>
     </EntityHover>
   );

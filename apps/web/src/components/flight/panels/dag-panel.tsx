@@ -105,7 +105,9 @@ export function DagPanel({ focused }: PanelProps) {
   }
 
   return (
-    <section aria-label="Execution DAG" className="flex h-full min-h-[320px] min-w-0 flex-col">
+    // The panel frame is the "Execution DAG" region; a second landmark of the same name would
+    // only repeat it.
+    <div className="flex h-full min-h-[320px] min-w-0 flex-col">
       {/* Remounting on a new node count or grouping refits the view once, never mid-run. */}
       <ReactFlowProvider key={`${grouped ? "grouped" : "flat"}:${state.taskOrder.length}`}>
         <DagCanvas
@@ -116,13 +118,19 @@ export function DagPanel({ focused }: PanelProps) {
           toggles={{ grouped, criticalOnly, setGrouped, setCriticalOnly }}
         />
       </ReactFlowProvider>
-    </section>
+    </div>
   );
 }
 DagPanel.displayName = "DagPanel";
 
+/**
+ * Smallest zoom at which a node header (the node's one pointer target, NODE_H - 4 px tall) is
+ * still 24px tall on screen (DESIGN.md 5.2): 24 / 88, rounded up to 0.28.
+ */
+const MIN_ZOOM = Math.ceil((24 / (NODE_H - 4)) * 100) / 100;
+
 /** One fit for the first render, the Fit button and a resize refit. */
-const FIT = { padding: 0.12, minZoom: 0.2, maxZoom: 1 } as const;
+const FIT = { padding: 0.12, minZoom: MIN_ZOOM, maxZoom: 1 } as const;
 
 const EVENT_KINDS_OF_TASK = new Set(["lane.fork", "run.start", "run.end"]);
 
@@ -389,7 +397,7 @@ function DagCanvas({
             // `event` is null for programmatic moves (fitView, the toolbar), set for the viewer's.
             if (event) manualView.current = true;
           }}
-          minZoom={0.2}
+          minZoom={MIN_ZOOM}
           maxZoom={1.6}
           style={{ background: "transparent" }}
           nodesDraggable={false}
@@ -546,7 +554,7 @@ function DagLegend() {
   return (
     <ul
       aria-label="Legend"
-      className="flex shrink-0 items-center gap-x-3 overflow-x-auto border-t border-kumo-rule px-2 py-1 text-[11px] whitespace-nowrap text-kumo-subtle"
+      className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-kumo-rule px-2 py-1 text-[11px] whitespace-nowrap text-kumo-subtle"
     >
       {NODE_LEGEND.map((item) => (
         <li key={item.border} className="flex items-center gap-1.5">
