@@ -5,7 +5,7 @@ Phase 7 completion (indexer, stored Product Graph, Vectorize) and the production
 
 ## Completed
 - P0 through P6: Monorepo skeleton, base Cloudflare infrastructure, Workers, Durable Objects, D1, K2 event plane, workflows, and agent runtime with AI Gateway.
-- P7: Exact retrieval Context Packets per agent run.
+- P7: Exact retrieval Context Packets per agent run. P7-07 cached Haiku retry-log compaction is verified locally; deployment is pending.
 - P8: Artifacts canonical source and workspace forks, and capped Sandbox Worker.
 - P9: Intents, Challenges, deterministic semantic conflict detection, model conflict review (Sonnet and Opus escalation), and Candidate forks.
 - P10: Sandbox Candidate composition and verification (build, unit, contract, Cart invariant, p95, security), coverage states, D1 and R2 Evidence.

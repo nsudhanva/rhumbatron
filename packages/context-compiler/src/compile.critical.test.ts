@@ -1,5 +1,7 @@
 // The packet decides what an agent may see. Order and trimming must be deterministic and keep the
 // Task's own scope, or two agents with the same snapshot could get different inputs.
+
+import { ContextPacket } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
 import { type CompileInput, compilePacket, packetHash } from "./compile.ts";
 
@@ -100,5 +102,53 @@ describe("compilePacket", () => {
 
   it("hashes identical inputs identically", async () => {
     expect(await packetHash(compilePacket(base))).toBe(await packetHash(compilePacket(base)));
+  });
+
+  it("uses compact prior logs with their source hash and keeps every source reference when trimming", () => {
+    const sourceHash = "b".repeat(64);
+    const sourceRefs = [
+      "task_runs:run_9_1:outcome_json",
+      "context/proj_1/chg_1/tsk_9/original.json",
+      "evidence/proj_1/chg_1/tsk_9/attempt-1.json",
+    ];
+    const r2Key = `context/proj_1/chg_1/tsk_9/compact-${sourceHash}.json`;
+    const packet = compilePacket({
+      ...base,
+      compaction: {
+        sourceHash,
+        summary: "Tried adding wishlist storage. The build failed.",
+        errors: ["src/wishlist.ts:1: TS2304: Cannot find name 'Wishlist'."],
+        files: ["src/wishlist.ts"],
+        sourceRefs,
+        r2Key,
+      },
+      maxTokens: 1,
+    });
+    expect(ContextPacket.safeParse(packet).success).toBe(true);
+    const item = packet.items.find((i) => i.source === "compaction");
+    expect(item?.sourceVersion).toBe(sourceHash);
+    expect(item?.body).toContain("TS2304: Cannot find name 'Wishlist'.");
+    expect(item?.body).toContain("src/wishlist.ts");
+    expect(item?.body).toContain(r2Key);
+    for (const ref of sourceRefs) expect(item?.body).toContain(ref);
+    expect(packet.items.some((i) => i.source === "prior_failure")).toBe(false);
+    expect(packet.items.map((i) => i.source)).toEqual(["change", "task", "compaction"]);
+  });
+
+  it("keeps original failure references when compaction is unavailable and failure text is trimmed", () => {
+    const sourceRefs = [
+      "task_runs:run_9_1:outcome_json",
+      "context/proj_1/chg_1/tsk_9/original.json",
+    ];
+    const packet = compilePacket({
+      ...base,
+      priorFailures: base.priorFailures.map((failure) => ({ ...failure, sourceRefs })),
+      maxTokens: 1,
+    });
+    const provenance = packet.items.find((item) => item.itemId === "failure-evidence:run_9_1");
+    expect(provenance?.source).toBe("prior_failure");
+    expect(provenance?.sourceVersion).toBe("run_9_1");
+    for (const ref of sourceRefs) expect(provenance?.body).toContain(ref);
+    expect(packet.items.some((item) => item.itemId === "failure:run_9_1")).toBe(false);
   });
 });

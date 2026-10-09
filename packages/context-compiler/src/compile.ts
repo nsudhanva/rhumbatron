@@ -53,7 +53,18 @@ export type CompileInput = {
     kind: string;
     reason: string;
     endedAt: string;
+    /** Original evidence retained even if the optional failure text is dropped. */
+    sourceRefs?: string[];
   }[];
+  /** Validated prior-log summary. The source references are required provenance, never trimmed. */
+  compaction?: {
+    sourceHash: string;
+    summary: string;
+    errors: string[];
+    files: string[];
+    sourceRefs: string[];
+    r2Key: string;
+  };
   /** Canonical source files (paths only). Agents read contents with tools, not from the packet. */
   repository?: { commit: string; files: string[] };
   /**
@@ -146,6 +157,35 @@ export function compilePacket(input: CompileInput): ContextPacket {
       ].join("\n\n"),
     });
   }
+  if (input.compaction) {
+    const compact = input.compaction;
+    required.push({
+      itemId: `compaction:${compact.sourceHash}`,
+      source: "compaction",
+      sourceVersion: compact.sourceHash,
+      capturedAt: now,
+      title: "Prior attempts and tool logs (compact summary)",
+      body: [
+        compact.summary,
+        `Exact errors:\n${bullets(compact.errors)}`,
+        `Files touched:\n${bullets(compact.files)}`,
+        `Original source references (retained):\n${bullets(compact.sourceRefs)}`,
+        `Stored summary: ${compact.r2Key}`,
+      ].join("\n\n"),
+    });
+  } else {
+    for (const failure of input.priorFailures) {
+      if (!failure.sourceRefs?.length) continue;
+      required.push({
+        itemId: `failure-evidence:${failure.runId}`,
+        source: "prior_failure",
+        sourceVersion: failure.runId,
+        capturedAt: now,
+        title: `Original evidence for earlier attempt ${failure.attempt}`,
+        body: bullets(failure.sourceRefs),
+      });
+    }
+  }
   const retrieval = input.retrieval ?? null;
   const fileItem =
     (prefix: string, label: string) =>
@@ -183,7 +223,7 @@ export function compilePacket(input: CompileInput): ContextPacket {
         body: intentBody(i),
       }),
     ),
-    ...input.priorFailures.map(
+    ...(input.compaction ? [] : input.priorFailures).map(
       (f): ContextItem => ({
         itemId: `failure:${f.runId}`,
         source: "prior_failure",

@@ -41,6 +41,24 @@ export type LimitKey =
 /** The minimum of D1 this module uses; D1Database satisfies it. */
 type Db = Pick<D1Database, "prepare">;
 
+/** Atomically admits one daily model request; shared by Pi and context compaction. */
+export async function takeQuota(
+  db: Db,
+  day: string,
+  counter: string,
+  cap: number,
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `INSERT INTO usage_counters (day, counter, count) VALUES (?, ?, 1)
+       ON CONFLICT (day, counter) DO UPDATE SET count = count + 1 WHERE count < ?
+       RETURNING count`,
+    )
+    .bind(day, counter, cap)
+    .first<{ count: number }>();
+  return row !== null;
+}
+
 const TRANSPORT = new Set<FailureKind>(["rate_limited", "timeout", "transient"]);
 const NEXT_TIER: Record<ModelTier, ModelTier | null> = {
   haiku: "sonnet",

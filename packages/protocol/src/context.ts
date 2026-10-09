@@ -14,6 +14,7 @@ export const ContextSource = z.enum([
   "dependency_changeset",
   "nearby_intent",
   "prior_failure",
+  "compaction",
   "policy",
   "file",
   "symbol",
@@ -25,6 +26,16 @@ export const ContextSource = z.enum([
   "conflict_review",
 ]);
 export type ContextSource = z.infer<typeof ContextSource>;
+
+/** Haiku's factual summary of prior logs. References are attached by application code. */
+export const ContextCompaction = z
+  .object({
+    summary: z.string().trim().min(1).max(3200),
+    errors: z.array(z.string().max(1000)).max(32),
+    files: z.array(z.string().max(300)).max(60),
+  })
+  .strict();
+export type ContextCompaction = z.infer<typeof ContextCompaction>;
 
 export const ContextItem = z.object({
   itemId: Id,

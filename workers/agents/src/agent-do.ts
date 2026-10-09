@@ -1,6 +1,7 @@
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import { blockedByFailure } from "@rhumbatron/causal-router";
 import {
+  type CompileInput,
   compilePacket,
   type IntentInput,
   packetHash,
@@ -17,9 +18,11 @@ import {
   CLEF_ROUTE_ABSTAIN_BELOW,
   checkRunBudget,
   classifyProviderFailure,
+  complete,
   type Failure,
   type FailureKind,
   MAX_CALLS_PER_RUN,
+  ModelCallError,
   type ModelProvider,
   nextStep,
   OPENROUTER_DAILY_CALL_CAP,
@@ -50,7 +53,8 @@ import {
   runConflictReviews,
 } from "./conflict-review.ts";
 import { declareIntentAndDetect } from "./conflicts.ts";
-import { chooseProvider, limitAttempts, limitStop, markProviderFlag } from "./limits.ts";
+import { compactPriorLogs } from "./context-compaction.ts";
+import { chooseProvider, limitAttempts, limitStop, markProviderFlag, takeQuota } from "./limits.ts";
 import { createTierModels, modelIdFor, PROVIDER_ID } from "./models.ts";
 import { taskRetrieval } from "./retrieval.ts";
 import type {
@@ -131,18 +135,6 @@ const log = (line: Record<string, unknown>) => console.warn(JSON.stringify(line)
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-async function takeQuota(db: D1Database, counter: string, cap: number): Promise<boolean> {
-  const row = await db
-    .prepare(
-      `INSERT INTO usage_counters (day, counter, count) VALUES (?, ?, 1)
-       ON CONFLICT (day, counter) DO UPDATE SET count = count + 1 WHERE count < ?
-       RETURNING count`,
-    )
-    .bind(today(), counter, cap)
-    .first<{ count: number }>();
-  return row !== null;
-}
-
 export class AgentDO extends Agent<Env> implements AgentRuntime {
   private readonly registry = createRegistry();
   private prompt = "";
@@ -203,6 +195,13 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     );
     ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS run_workspaces (run_id TEXT PRIMARY KEY, ws_json TEXT NOT NULL)",
+    );
+    ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS run_tool_logs (
+        ordinal INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL,
+        tool TEXT NOT NULL, target TEXT NOT NULL, output TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_run_tool_logs_run ON run_tool_logs (run_id);`,
     );
     this.runClaims = sqlRunClaimStore(ctx.storage.sql);
     const active = this.activeRun();
@@ -273,7 +272,12 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     if (
       budget.ok &&
       provider === "openrouter" &&
-      !(await takeQuota(this.env.DB, USAGE_COUNTER.openrouterCalls, OPENROUTER_DAILY_CALL_CAP))
+      !(await takeQuota(
+        this.env.DB,
+        today(),
+        USAGE_COUNTER.openrouterCalls,
+        OPENROUTER_DAILY_CALL_CAP,
+      ))
     ) {
       await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.openrouterExhausted);
       this.ctx.storage.sql.exec(
@@ -284,7 +288,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     }
     // The run's own cap is a Task failure (retry or escalate); the daily cap stops the Change.
     const daily =
-      budget.ok && (await takeQuota(this.env.DB, USAGE_COUNTER.agentCalls, AGENT_DAILY_CALL_CAP));
+      budget.ok &&
+      (await takeQuota(this.env.DB, today(), USAGE_COUNTER.agentCalls, AGENT_DAILY_CALL_CAP));
     if (!budget.ok || !daily) {
       this.ctx.storage.sql.exec(
         "UPDATE agent_runs SET outcome = ? WHERE run_id = ?",
@@ -347,10 +352,32 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   }
 
   /** Records the tool step the agent is taking, then returns its result unchanged. */
-  private noteStep(tool: string, target: string, result: Promise<string>): Promise<string> {
+  private async noteStep(tool: string, target: string, result: Promise<string>): Promise<string> {
     const clean = target.replace(/\s+/g, " ").trim();
     this.lastStep = (clean ? `${tool} ${clean}` : tool).slice(0, 120);
-    return result;
+    const run = this.activeRun();
+    try {
+      const output = await result;
+      if (run)
+        this.ctx.storage.sql.exec(
+          "INSERT INTO run_tool_logs (run_id, tool, target, output) VALUES (?, ?, ?, ?)",
+          run.run_id,
+          tool,
+          target,
+          output,
+        );
+      return output;
+    } catch (error) {
+      if (run)
+        this.ctx.storage.sql.exec(
+          "INSERT INTO run_tool_logs (run_id, tool, target, output) VALUES (?, ?, ?, ?)",
+          run.run_id,
+          tool,
+          target,
+          String(error),
+        );
+      throw error;
+    }
   }
 
   /**
@@ -433,7 +460,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     ]);
     // Recorded spend (Gemini overflow is paid, ADR 0016) comes off the Change budget first.
     const changeSpentUsd = (spent?.results?.[0]?.n ?? 0) + (reviewSpent?.results?.[0]?.n ?? 0);
-    const budgetUsd = taskBudgetUsd(
+    let budgetUsd = taskBudgetUsd(
       task.budget_usd,
       changeSpentUsd,
       Math.max(1, openTasks?.results?.[0]?.n ?? 1),
@@ -483,14 +510,26 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       const clef = new WorkersAiDecisionModel({
         ai: this.env.AI,
         abstainBelow: CLEF_ROUTE_ABSTAIN_BELOW,
-        allowCall: () => takeQuota(this.env.DB, "clef-flash", 200),
+        allowCall: () => takeQuota(this.env.DB, today(), "clef-flash", 200),
       });
       const routed = await routeStep(req, clef);
       tier = routed.decision.selectedTier;
       receipt = routed.receipt;
     }
 
-    // Provider per run (ADR 0016): OpenRouter until it is used up today, then Gemini on Vertex.
+    // Retry evidence is preserved before compaction and before Pi resets its session. The
+    // compiler receives a validated summary or keeps its existing failure-text trimming.
+    const priorFailures = await this.priorFailures(input);
+    const compacted = await this.compactFailures(input, attempt, priorFailures, budgetUsd);
+    budgetUsd = Math.max(0, budgetUsd - compacted.costUsd);
+    if (compacted.costUsd > 0 && budgetUsd <= 0) {
+      await this.failTask(input, task, "change_budget_exhausted");
+      return { runId: "", accepted: false, state: { status: "idle" } };
+    }
+    const latestFailure = priorFailures.at(-1);
+    if (latestFailure) latestFailure.sourceRefs = compacted.sourceRefs;
+
+    // Provider per run (ADR 0016): re-read after compaction consumes quota or hits a spend cap.
     const choice = await chooseProvider(this.env.DB, {
       day: today(),
       vertexConfigured: Boolean(this.env.VERTEX_SERVICE_ACCOUNT),
@@ -577,7 +616,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         updatedAt: task.updated_at,
       },
       ...intents,
-      priorFailures: await this.priorFailures(input.taskId),
+      priorFailures,
+      ...(compacted.compaction ? { compaction: compacted.compaction } : {}),
       ...(source ? { repository: { commit: source.commit, files: source.files } } : {}),
       inheritedChangeSets: stack.map((s) => ({
         changeSetId: s.changeSetId,
@@ -787,6 +827,18 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
 
     const now = new Date().toISOString();
     const usage = await this.usage();
+    // Preserve tool inputs (names/targets) and outputs only, never assistant reasoning. R2
+    // retains this evidence after session.reset() clears Pi's previous transcript.
+    const toolLogs = this.ctx.storage.sql
+      .exec<{ tool: string; target: string; output: string }>(
+        "SELECT tool, target, output FROM run_tool_logs WHERE run_id = ? ORDER BY ordinal",
+        run.run_id,
+      )
+      .toArray();
+    const toolLogsRef = `context/${input.projectId}/${input.changeId}/${input.taskId}/tools-${run.run_id}.json`;
+    await this.env.EVIDENCE.put(toolLogsRef, JSON.stringify(toolLogs), {
+      httpMetadata: { contentType: "application/json" },
+    });
     this.ctx.storage.sql.exec(
       "UPDATE agent_runs SET status = ?, outcome = ? WHERE run_id = ?",
       result.ok ? "completed" : "failed",
@@ -807,7 +859,9 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     ).bind(
       result.ok ? "completed" : "failed",
       result.ok ? null : result.kind,
-      JSON.stringify(result.ok ? result.intent : { reason: result.reason }),
+      JSON.stringify(
+        result.ok ? { ...result.intent, toolLogsRef } : { reason: result.reason, toolLogsRef },
+      ),
       run.calls,
       usage.input,
       usage.output,
@@ -1159,11 +1213,11 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     return { dependencyIntents, nearbyIntents };
   }
 
-  private async priorFailures(taskId: string) {
+  private async priorFailures(input: AgentRunInput) {
     const rows = await this.env.DB.prepare(
-      "SELECT id, attempt, tier, failure_kind, outcome_json, ended_at FROM task_runs WHERE task_id = ? AND status = 'failed' ORDER BY attempt",
+      "SELECT id, attempt, tier, failure_kind, outcome_json, ended_at, context_hash FROM task_runs WHERE task_id = ? AND status = 'failed' ORDER BY attempt",
     )
-      .bind(taskId)
+      .bind(input.taskId)
       .all<{
         id: string;
         attempt: number;
@@ -1171,17 +1225,122 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         failure_kind: string;
         outcome_json: string | null;
         ended_at: string | null;
+        context_hash: string | null;
       }>();
-    return (rows.results ?? []).map((r) => ({
-      runId: r.id,
-      attempt: r.attempt,
-      tier: r.tier,
-      kind: r.failure_kind,
-      reason: r.outcome_json
-        ? String((JSON.parse(r.outcome_json) as { reason?: string }).reason ?? "")
-        : "",
-      endedAt: r.ended_at ?? "",
-    }));
+    const prefix = `context/${input.projectId}/${input.changeId}/${input.taskId}`;
+    return (rows.results ?? []).map((r) => {
+      const outcome = JSON.parse(r.outcome_json ?? "{}") as {
+        reason?: string;
+        toolLogsRef?: string;
+      };
+      return {
+        runId: r.id,
+        attempt: r.attempt,
+        tier: r.tier,
+        kind: r.failure_kind,
+        reason: String(outcome.reason ?? ""),
+        endedAt: r.ended_at ?? "",
+        sourceRefs: [
+          `d1:task_runs/${r.id}/outcome_json`,
+          ...(r.context_hash ? [`${prefix}/${r.context_hash}.json`] : []),
+          ...(outcome.toolLogsRef?.startsWith(`${prefix}/tools-`) ? [outcome.toolLogsRef] : []),
+        ],
+      };
+    });
+  }
+
+  private async compactFailures(
+    input: AgentRunInput,
+    attempt: number,
+    failures: CompileInput["priorFailures"],
+    budgetUsd: number,
+  ) {
+    const prefix = `context/${input.projectId}/${input.changeId}/${input.taskId}`;
+    const logs = [];
+    for (const failure of failures) {
+      const sourceRefs = failure.sourceRefs ?? [];
+      const toolKey = sourceRefs.find((ref) => ref.startsWith(`${prefix}/tools-`));
+      let toolLogs: unknown = null;
+      if (toolKey) {
+        try {
+          const object = await this.env.EVIDENCE.get(toolKey);
+          // Oversized source remains available by reference; keep Worker memory bounded.
+          if (object && object.size <= 2_000_000) toolLogs = await object.json();
+        } catch {
+          // The recorded failure reason and source references remain usable.
+        }
+      }
+      logs.push({ sourceRefs, body: JSON.stringify({ ...failure, toolLogs }) });
+    }
+    const sourceRunId = failures.at(-1)?.runId;
+    return compactPriorLogs(
+      {
+        readJson: async (key) => (await this.env.EVIDENCE.get(key))?.json() ?? null,
+        writeJson: async (key, value) => {
+          await this.env.EVIDENCE.put(key, JSON.stringify(value), {
+            httpMetadata: { contentType: "application/json" },
+          });
+        },
+        chooseProvider: async () =>
+          (
+            await chooseProvider(this.env.DB, {
+              day: today(),
+              vertexConfigured: Boolean(this.env.VERTEX_SERVICE_ACCOUNT),
+              preferVertex: this.env.MODEL_PROVIDER === "vertex",
+            })
+          ).provider,
+        takeQuota: (counter, cap) => takeQuota(this.env.DB, today(), counter, cap),
+        callModel: async (provider, req) => {
+          try {
+            // One admitted provider per request. A fallback must go through admission too.
+            return await complete(
+              {
+                accountId: this.env.AI_ACCOUNT_ID,
+                gatewayId: this.env.AI_GATEWAY_ID,
+                apiKey: this.env.OPENROUTER_API_KEY,
+                ...(provider === "google-vertex-ai" && this.env.VERTEX_SERVICE_ACCOUNT
+                  ? { vertexServiceAccount: this.env.VERTEX_SERVICE_ACCOUNT, preferVertex: true }
+                  : {}),
+                timeoutMs: 45_000,
+              },
+              req,
+            );
+          } catch (error) {
+            if (error instanceof ModelCallError) {
+              if (error.kind === "spend_limited")
+                await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.vertexSpendLimited);
+              if (provider === "openrouter" && error.kind === "rate_limited")
+                await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.openrouterExhausted);
+            }
+            throw error;
+          }
+        },
+        recordCall: async (sourceHash, result) => {
+          // Charge the source attempt's existing usage ledger. Later Change spend queries and
+          // reviews already sum task_runs; no separate budget table or migration is needed.
+          await this.env.DB.prepare(
+            `UPDATE task_runs SET model_calls = model_calls + 1, input_tokens = input_tokens + ?,
+             output_tokens = output_tokens + ?, cost_usd = cost_usd + ?,
+             outcome_json = json_set(COALESCE(outcome_json, '{}'), '$.compaction', json(?))
+           WHERE id = ? AND status = 'failed'`,
+          )
+            .bind(
+              result?.inputTokens ?? 0,
+              result?.outputTokens ?? 0,
+              result?.costUsd ?? 0,
+              JSON.stringify({ sourceHash, tier: "haiku", provider: result?.provider ?? null }),
+              sourceRunId ?? "",
+            )
+            .run();
+          this.env.METRICS.writeDataPoint({
+            blobs: ["model_call", "haiku", input.taskId, "context_compaction"],
+            doubles: [1, result?.inputTokens ?? 0, result?.outputTokens ?? 0, result?.costUsd ?? 0],
+            indexes: [input.projectId],
+          });
+        },
+      },
+      { prefix, attempt, logs, budgetUsd },
+    );
   }
 
   private workspaceRef(runId: string): WorkspaceRef | null {
