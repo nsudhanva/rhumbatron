@@ -7,7 +7,8 @@ export const commandEnvelope = <T extends z.ZodType>(payload: T) =>
     commandId: Id,
     commandType: z.string().regex(/^[a-z]+(\.[a-z]+)+$/),
     projectId: Id,
-    changeId: Id,
+    /** Absent for project-level commands such as `project.provision`. */
+    changeId: Id.optional(),
     taskId: Id.optional(),
     attempt: z.number().int().nonnegative(),
     createdAt: Timestamp,

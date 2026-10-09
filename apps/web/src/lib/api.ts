@@ -123,8 +123,17 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
 export const listProjects = createServerFn().handler(() => call<ProjectSummary[]>("/v1/projects"));
 
 export const createProject = createServerFn({ method: "POST" })
-  .inputValidator((input: { name: string; slug: string }) => input)
+  .inputValidator((input: { name: string; slug: string; template: "empty" | "acme-shop" }) => input)
   .handler(({ data }) => call<{ id: string }>("/v1/projects", { method: "POST", body: data }));
+
+export const provisionProject = createServerFn({ method: "POST" })
+  .inputValidator((input: { projectId: string; template: "acme-shop" }) => input)
+  .handler(({ data }) =>
+    call<{ queued: boolean }>(`/v1/projects/${data.projectId}/provision`, {
+      method: "POST",
+      body: { template: data.template },
+    }),
+  );
 
 export const listChanges = createServerFn()
   .inputValidator((projectId: string) => projectId)
@@ -137,7 +146,7 @@ export const getProject = createServerFn()
       id: string;
       name: string;
       slug: string;
-      canonical: { generation: number; artifactRef: string };
+      canonical: { generation: number; artifactRef: string; treeSha: string };
     }>(`/v1/projects/${data}`),
   );
 

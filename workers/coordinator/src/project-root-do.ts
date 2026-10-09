@@ -158,6 +158,55 @@ export class ProjectRootDO extends DurableObject<Env> {
     return this.snapshot(this.requireRow());
   }
 
+  /**
+   * Binds the first canonical source (an Artifacts commit) to a Project at generation 0. Allowed
+   * once, while the source is still unassigned; a repeat with the same ref is a no-op success.
+   */
+  async assignSource(input: { artifactRef: string; treeSha: string }): Promise<CanonicalSnapshot> {
+    const row = this.requireRow();
+    if (
+      row.canonical_artifact_ref === input.artifactRef &&
+      row.canonical_tree_sha === input.treeSha
+    ) {
+      return this.snapshot(row);
+    }
+    if (row.canonical_artifact_ref !== "unassigned" || row.canonical_generation !== 0) {
+      throw new Error("Canonical source is already assigned");
+    }
+    const now = new Date().toISOString();
+    const event: EventEnvelope<{ artifactRef: string; treeSha: string }> = {
+      eventId: crypto.randomUUID(),
+      eventType: "artifact.promoted",
+      eventVersion: 1,
+      tenantId: row.org_id,
+      projectId: row.project_id,
+      actor: { kind: "system", id: "project-root-do" },
+      canonicalGeneration: 0,
+      correlationId: row.project_id,
+      timestamp: now,
+      payload: input,
+    };
+    AnyEventEnvelope.parse(event);
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        `UPDATE project_root SET canonical_artifact_ref = ?, canonical_tree_sha = ?, updated_at = ?
+         WHERE id = 1 AND canonical_artifact_ref = 'unassigned' AND canonical_generation = 0`,
+        input.artifactRef,
+        input.treeSha,
+        now,
+      );
+      this.sql.exec(
+        "INSERT INTO outbox (event_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
+        event.eventId,
+        event.eventType,
+        JSON.stringify(event),
+        now,
+      );
+    });
+    await this.scheduleAlarm();
+    return this.snapshot(this.requireRow());
+  }
+
   async getCanonical(): Promise<CanonicalSnapshot | null> {
     const row = this.row();
     return row ? this.snapshot(row) : null;

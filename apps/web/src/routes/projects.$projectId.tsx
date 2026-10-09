@@ -3,7 +3,7 @@ import { Badge, Button, Input, InputArea, LayerCard, Meter, Text } from "@cloudf
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { createChange, getProject, listChanges } from "../lib/api";
+import { createChange, getProject, listChanges, provisionProject } from "../lib/api";
 import { DEMO_GOAL, generation, timeAgo, truncate } from "../lib/format";
 
 export const Route = createFileRoute("/projects/$projectId")({ component: ProjectPage });
@@ -23,10 +23,19 @@ function ProjectPage() {
 
 function Overview() {
   const { projectId } = Route.useParams();
+  const [seeding, setSeeding] = useState(false);
   const project = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => getProject({ data: projectId }),
+    // Provisioning is asynchronous: poll until the canonical source is assigned.
+    refetchInterval: (query) =>
+      seeding && query.state.data?.canonical.artifactRef === "unassigned" ? 2000 : false,
   });
+  const seed = useMutation({
+    mutationFn: () => provisionProject({ data: { projectId, template: "acme-shop" } }),
+    onSuccess: () => setSeeding(true),
+  });
+  const source = project.data?.canonical;
   const changes = useQuery({
     queryKey: ["changes", projectId],
     queryFn: () => listChanges({ data: projectId }),
@@ -50,6 +59,21 @@ function Overview() {
             <span className="font-mono text-3xl font-semibold text-kumo-default">
               {project.data ? generation(project.data.canonical.generation) : "—"}
             </span>
+            {source && source.artifactRef !== "unassigned" && (
+              <Text variant="mono-secondary">
+                {source.artifactRef} · tree {source.treeSha.slice(0, 10)}
+              </Text>
+            )}
+            {source?.artifactRef === "unassigned" && (
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={seed.isPending || seeding}
+                onClick={() => seed.mutate()}
+              >
+                Seed Acme Shop source
+              </Button>
+            )}
           </div>
         </LayerCard.Primary>
       </LayerCard>

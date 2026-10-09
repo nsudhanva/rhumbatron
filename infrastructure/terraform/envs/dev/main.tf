@@ -73,6 +73,8 @@ module "api_worker" {
     module.state.bindings.DB,
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = module.coordinator_worker.name },
+    # Project source provisioning commands (ADR 0010).
+    { type = "queue", name = "INTEGRATION_COMMANDS", queue_name = module.async.queues["integration"].name },
     # Starts one ChangeWorkflow per Change (AGENTS.md section 21.1).
     { type = "workflow", name = "CHANGE_WORKFLOW", workflow_name = cloudflare_workflow.change.workflow_name, class_name = "ChangeWorkflow", script_name = module.integration_worker.name },
   ]
@@ -259,6 +261,9 @@ module "integration_worker" {
     module.state.bindings.EVIDENCE,
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
+    { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
+    # One Artifacts repo per Project; the namespace is created on first use (ADR 0010).
+    { type = "artifacts", name = "ARTIFACTS", namespace = "rhumbatron-projects-${local.environment}" },
     # Models go through the AI Gateway (ADR 0007): OpenRouter free models, Vertex AI backup.
     { type = "plain_text", name = "AI_ACCOUNT_ID", text = var.account_id },
     { type = "plain_text", name = "AI_GATEWAY_ID", text = module.ai.gateway_id },

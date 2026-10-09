@@ -6,6 +6,7 @@ import {
   CreateProjectRequest,
   Project,
   type ProjectPolicies,
+  ProjectTemplate,
   Task,
 } from "@rhumbatron/protocol";
 import { Hono } from "hono";
@@ -108,6 +109,27 @@ async function loadProject(env: Env, projectId: string): Promise<Project | null>
   };
 }
 
+const ProvisionRequest = z.object({ template: ProjectTemplate });
+
+/** Queues source provisioning. The command ID is stable per Project, so a retry is harmless. */
+async function sendProvision(
+  env: Env,
+  projectId: string,
+  template: z.infer<typeof ProjectTemplate>,
+) {
+  await env.INTEGRATION_COMMANDS.send(
+    {
+      commandId: `cmd_${projectId.slice(5)}_provision`,
+      commandType: "project.provision",
+      projectId,
+      attempt: 0,
+      createdAt: new Date().toISOString(),
+      payload: { template },
+    },
+    { contentType: "json" },
+  );
+}
+
 export const projects = new Hono<AppEnv>()
   .use("/v1/projects", requireAuth)
   .use("/v1/projects/*", requireAuth)
@@ -145,6 +167,8 @@ export const projects = new Hono<AppEnv>()
       generation: 0,
       policyVersion: DEFAULT_POLICIES.modelPolicyVersion,
     });
+    // The integration Worker creates the Artifacts repo and seeds the template (ADR 0010).
+    await sendProvision(c.env, projectId, body.template);
     const project = await loadProject(c.env, projectId);
     if (!project || !(await canAccessProject(c.env.DB, userId, projectId))) {
       throw new Error("Project was not readable after creation");
@@ -218,6 +242,22 @@ export const projects = new Hono<AppEnv>()
       })),
     });
   })
+
+  // Seeds the source of a Project that has none yet, for example the Acme Shop demo (P12-12).
+  .post(
+    "/v1/projects/:projectId/provision",
+    validate("param", ProjectIdParam),
+    validate("json", ProvisionRequest),
+    async (c) => {
+      const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+      const { projectId } = c.req.valid("param");
+      if (!(await canAccessProject(c.env.DB, userId, projectId))) {
+        return fail(c, 404, "not_found", "Project not found");
+      }
+      await sendProvision(c.env, projectId, c.req.valid("json").template);
+      return c.json({ data: { queued: true } }, 202);
+    },
+  )
 
   .get("/v1/projects/:projectId", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));

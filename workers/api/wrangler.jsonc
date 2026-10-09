@@ -46,5 +46,9 @@
       "class_name": "ChangeWorkflow",
       "script_name": "rhumbatron-integration"
     }
-  ]
+  ],
+  // Project source provisioning commands for the integration Worker (ADR 0010).
+  "queues": {
+    "producers": [{ "binding": "INTEGRATION_COMMANDS", "queue": "rhumbatron-integration-local" }]
+  }
 }

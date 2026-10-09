@@ -17,5 +17,6 @@
   "ignoreExportsUsedInFile": {
     "interface": true,
     "type": true
-  }
+  },
+  "ignore": ["fixtures/**"]
 }

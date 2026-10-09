@@ -78,9 +78,14 @@ export const Change = z.object({
 export type Change = z.infer<typeof Change>;
 
 /** `POST /v1/projects` request. */
+/** Source templates a Project can start from (AGENTS.md section 54). */
+export const ProjectTemplate = z.enum(["empty", "acme-shop"]);
+export type ProjectTemplate = z.infer<typeof ProjectTemplate>;
+
 export const CreateProjectRequest = z.object({
   name: Project.shape.name,
   slug: Slug,
+  template: ProjectTemplate.default("empty"),
 });
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequest>;
 

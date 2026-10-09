@@ -20,6 +20,8 @@
     "@rhumbatron/coordinator": "workspace:*",
     "@rhumbatron/model-router": "workspace:*",
     "@rhumbatron/protocol": "workspace:*",
+    "isomorphic-git": "1.43.2",
+    "memfs": "4.80.0",
     "zod": "4.6.5"
   },
   "exports": {

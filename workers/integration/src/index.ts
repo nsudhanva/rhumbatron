@@ -1,5 +1,6 @@
 import { AnyCommandEnvelope } from "@rhumbatron/protocol";
 import { dispatchReadyTasks } from "./dispatch.ts";
+import { provisionProject } from "./provision.ts";
 
 export { ChangeWorkflow } from "./change-workflow.ts";
 
@@ -11,10 +12,23 @@ type ChangeRow = {
   budget_usd: number;
 };
 
-/** Handles one `change.dispatch` command. Unknown commands and Changes are acknowledged and dropped. */
+/** Handles one command. Unknown commands and Changes are acknowledged and dropped. */
 async function handleCommand(env: Env, body: unknown) {
   const command = AnyCommandEnvelope.safeParse(body);
-  if (!command.success || command.data.commandType !== "change.dispatch") return;
+  if (!command.success) return;
+  if (command.data.commandType === "project.provision") {
+    const template = (command.data.payload as { template?: string } | null)?.template ?? "empty";
+    const result = await provisionProject(env, { projectId: command.data.projectId, template });
+    console.warn(
+      JSON.stringify({
+        event: "project.provisioned",
+        projectId: command.data.projectId,
+        ...result,
+      }),
+    );
+    return;
+  }
+  if (command.data.commandType !== "change.dispatch" || !command.data.changeId) return;
   const { changeId } = command.data;
   const row = await env.DB.prepare(
     `SELECT c.project_id, p.org_id, p.slug, c.base_generation, c.budget_usd

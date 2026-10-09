@@ -1,7 +1,7 @@
 import { Show, SignInButton } from "@clerk/tanstack-react-start";
-import { Badge, Button, Input, LayerCard, Text } from "@cloudflare/kumo";
+import { Badge, Button, Checkbox, Input, LayerCard, Text } from "@cloudflare/kumo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { createProject, listProjects } from "../lib/api";
 import { generation, timeAgo } from "../lib/format";
@@ -80,14 +80,16 @@ const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 function NewProject() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [demo, setDemo] = useState(true);
   const create = useMutation({
-    mutationFn: () => createProject({ data: { name: name.trim(), slug } }),
-    onSuccess: async () => {
-      setName("");
-      setSlug("");
+    mutationFn: () =>
+      createProject({ data: { name: name.trim(), slug, template: demo ? "acme-shop" : "empty" } }),
+    onSuccess: async (project) => {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
     },
   });
   const slugInvalid = slug !== "" && !SLUG.test(slug);
@@ -114,6 +116,13 @@ function NewProject() {
             {...(slugInvalid ? { error: "Use lowercase kebab-case" } : {})}
             required
           />
+          <div className="sm:col-span-3 sm:order-last">
+            <Checkbox
+              label="Start from the Acme Shop demo codebase"
+              checked={demo}
+              onCheckedChange={(checked) => setDemo(checked === true)}
+            />
+          </div>
           <Button
             type="submit"
             variant="primary"

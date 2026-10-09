@@ -5,6 +5,8 @@
   "name": "rhumbatron-integration",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-08",
+  // isomorphic-git and memfs need Node.js APIs (Buffer, path).
+  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "observability": {
     "enabled": true
@@ -42,6 +44,11 @@
         "name": "RESOURCE_SHARD",
         "class_name": "ResourceShardDO",
         "script_name": "rhumbatron-coordinator"
+      },
+      {
+        "name": "PROJECT_ROOT",
+        "class_name": "ProjectRootDO",
+        "script_name": "rhumbatron-coordinator"
       }
     ]
   },
@@ -52,5 +59,7 @@
       "binding": "CHANGE_WORKFLOW",
       "class_name": "ChangeWorkflow"
     }
-  ]
+  ],
+  // Canonical source for managed Projects (AGENTS.md section 29). One repo per Project.
+  "artifacts": [{ "binding": "ARTIFACTS", "namespace": "rhumbatron-projects-local" }]
 }
