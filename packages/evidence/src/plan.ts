@@ -119,6 +119,8 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
   }
 
   touches.protectedInvariants.forEach((invariant, index) => {
+    // A latency invariant is what the performance check measures; a procedure would only be a gap.
+    if (touches.performanceConstraint && /\bp9[59]\b|\blatency\b/i.test(invariant)) return;
     const isCart = /\bcart\b/i.test(invariant);
     // One Cart invariant check covers every invariant that names the Cart.
     if (isCart && checks.some((c) => c.checkId === "protected-invariant-cart")) return;

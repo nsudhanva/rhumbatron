@@ -46,7 +46,8 @@ export type CompatibilityOptions = {
   dismissedContractKeys?: readonly string[];
 };
 
-const HTTP_ROUTE = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)/i;
+// The path stops before trailing punctuation: "POST /api/wishlists: creates…" names /api/wishlists.
+const HTTP_ROUTE = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+([^\s,;]+?)[:.,;]*(?=\s|$)/i;
 
 /** Words that describe the kind of change, not the contract it applies to. */
 const STOPWORDS = new Set(
@@ -169,7 +170,7 @@ function migrationNumbers(cs: ComposableChangeSet): number[] {
  * contract, migration, or file conflict with it; a ChangeSet whose stacked ancestor is missing from
  * the composition is an unsatisfied dependency; overlap uses the files a ChangeSet itself changed.
  */
-export const COMPOSITION_RULES_VERSION = 4;
+export const COMPOSITION_RULES_VERSION = 5;
 
 /**
  * Transitive `stackedOn` ancestors of each ChangeSet. A pair where one is an ancestor of the other

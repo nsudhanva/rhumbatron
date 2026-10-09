@@ -4,7 +4,7 @@ import type { EvidenceRecord, ProjectPolicy } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
 import { parseBenchOutput } from "./bench.ts";
 import { canAffectCandidate, type EvidenceSnapshot, validateCitations } from "./citations.ts";
-import { type ComposableChangeSet, checkCompatibility } from "./compatibility.ts";
+import { type ComposableChangeSet, checkCompatibility, contractKey } from "./compatibility.ts";
 import { diffContract, parseRouteTable } from "./contract.ts";
 import { gateRequiredChecks } from "./gate.ts";
 import { buildVerificationPlan } from "./plan.ts";
@@ -432,6 +432,21 @@ describe("parseBenchOutput", () => {
     for (const out of ["", "error: crash", '{"p95Ms": "fast"}', '{"p95Ms": -1}', "{oops"]) {
       expect(parseBenchOutput(out)).toBeNull();
     }
+  });
+});
+
+describe("contract route parsing", () => {
+  it("reads the route before trailing punctuation in a declaration", () => {
+    expect(contractKey("POST /api/wishlists: Creates a new wishlist")).toBe(
+      contractKey("POST /api/wishlists"),
+    );
+    expect(
+      diffContract(
+        [],
+        ["POST /api/wishlists/:id/items"],
+        ["POST /api/wishlists/:id/items: Add product."],
+      ).undeclared,
+    ).toEqual([]);
   });
 });
 
