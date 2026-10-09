@@ -8,6 +8,7 @@
         "@biomejs/biome": "2.5.15",
         "@commitlint/cli": "21.2.3",
         "@commitlint/config-conventional": "21.2.3",
+        "@rhumbatron/model-router": "workspace:*",
         "@types/bun": "1.4.2",
         "knip": "6.40.0",
         "lefthook": "2.2.1",
@@ -42,6 +43,18 @@
         "typescript": "7.0.2",
         "vite": "8.3.4",
         "wrangler": "4.149.0",
+      },
+    },
+    "packages/model-router": {
+      "name": "@rhumbatron/model-router",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rhumbatron/protocol": "workspace:*",
+        "zod": "4.6.5",
+      },
+      "devDependencies": {
+        "typescript": "7.0.2",
+        "vitest": "5.0.3",
       },
     },
     "packages/protocol": {
@@ -486,6 +499,8 @@
     "@rhumbatron/indexer": ["@rhumbatron/indexer@workspace:workers/indexer"],
 
     "@rhumbatron/integration": ["@rhumbatron/integration@workspace:workers/integration"],
+
+    "@rhumbatron/model-router": ["@rhumbatron/model-router@workspace:packages/model-router"],
 
     "@rhumbatron/protocol": ["@rhumbatron/protocol@workspace:packages/protocol"],
 

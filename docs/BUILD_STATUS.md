@@ -16,6 +16,9 @@ Phase 4 complete; Phase 5 - Work Graph and causal scheduling next
   - `bun run smoke:dev`: 16 checks including the authenticated flow (Clerk smoke user): web and API live on dev via Terraform
   - https://dev.rhumbatron.com, https://api-dev.rhumbatron.com (`bun run smoke:dev`)
 - Clerk authentication in apps/web (local development instance)
+- Model access (pulled forward from Phase 6 for P5-02): P6-04 AI Gateway `rhumbatron-models-dev`,
+  P6-05 OpenRouter free-model client, P6-06 deterministic routing rules (`packages/model-router`)
+  - `bun run smoke:models`: one tool call per tier through the gateway, $0
 
 ## Active
 - P3-05 ResourceShardDO in review: deployed, first live use is Phase 9 claims
@@ -29,7 +32,7 @@ Phase 4 complete; Phase 5 - Work Graph and causal scheduling next
 - Rhumbatron monthly cost target: $0
 - Remote resources: state bucket (global); 4 zone settings (global); dev D1, KV, R2 + lifecycle, 6 Queues; dev web and API Workers with custom domains
 - Prod: planned, not applied
-- Current Change model spend: $0.00
+- Current Change model spend: $0.00 (OpenRouter `:free` models only; 50 requests/day until $10 lifetime credits)
 
 ## Decisions
 - Terraform owns remote control-plane changes.
@@ -40,9 +43,9 @@ Phase 4 complete; Phase 5 - Work Graph and causal scheduling next
 - Provider cloudflare 5.27 has no Vectorize, Artifacts, K2, Containers, or resource-tagging resource. Section 11.4 applies.
 - Durable Object Workers deploy via cloudflare_workers_script: docs/adr/0005.
 - envs/global owns zone-wide settings. Prod is planned only until the first E2E Change.
+- Models: OpenRouter free models through AI Gateway, tiers haiku/sonnet/opus kept: docs/adr/0007.
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 
 ## Next
 - Phase 5: Work Graph schema, root planning contract, Task persistence, dependency scheduler, causal router.
-- Phase 3 (Project and Change state, Durable Objects).
 - Tracking: Linear project Rhumbatron (AGENTS.md rule 49).

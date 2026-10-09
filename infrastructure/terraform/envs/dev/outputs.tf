@@ -43,3 +43,8 @@ output "coordinator_worker" {
   description = "Coordinator Worker name."
   value       = module.coordinator_worker.name
 }
+
+output "ai_gateway_id" {
+  description = "AI Gateway that proxies OpenRouter (ADR 0007)."
+  value       = module.ai.gateway_id
+}

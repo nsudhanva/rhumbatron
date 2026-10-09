@@ -33,12 +33,14 @@
     "tf": "bun scripts/tf.ts",
     "tf:plan:prod": "bun scripts/tf.ts prod plan -out=prod.tfplan",
     "tf:drift": "bun scripts/tf.ts global plan -detailed-exitcode && bun scripts/tf.ts dev plan -detailed-exitcode",
-    "smoke:dev": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/smoke.ts dev"
+    "smoke:dev": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/smoke.ts dev",
+    "smoke:models": "OPENROUTER_API_KEY=$(security find-generic-password -s rhumbatron-openrouter-api-key -w) CLOUDFLARE_ACCOUNT_ID=$(security find-generic-password -s rhumbatron-cloudflare-account-id -w) bun scripts/smoke-models.ts dev"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@commitlint/cli": "21.2.3",
     "@commitlint/config-conventional": "21.2.3",
+    "@rhumbatron/model-router": "workspace:*",
     "@types/bun": "1.4.2",
     "knip": "6.40.0",
     "lefthook": "2.2.1",

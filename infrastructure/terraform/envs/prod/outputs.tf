@@ -22,3 +22,8 @@ output "queues" {
   description = "Queue names and IDs."
   value       = module.async.queues
 }
+
+output "ai_gateway_id" {
+  description = "AI Gateway that proxies OpenRouter (ADR 0007)."
+  value       = module.ai.gateway_id
+}

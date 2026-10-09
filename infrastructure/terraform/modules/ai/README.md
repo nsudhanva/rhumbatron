@@ -1,9 +1,8 @@
 # Module: ai
 
-Status: placeholder. Add resources when the owning phase starts.
-
 Owns:
 
-- AI Gateway configuration when supported.
-- Workers AI bindings.
+- The AI Gateway (`rhumbatron-models-<env>`) that proxies OpenRouter. See ADR 0007.
 - Model-related non-secret configuration.
+
+The OpenRouter key is a Worker secret, never a gateway setting.

@@ -33,4 +33,10 @@ module "async" {
   environment = local.environment
 }
 
+module "ai" {
+  source      = "../../modules/ai"
+  account_id  = var.account_id
+  environment = local.environment
+}
+
 # Vectorize (P1-10) is deferred: provider 5.27 has no resource. See docs/adr/0003.
