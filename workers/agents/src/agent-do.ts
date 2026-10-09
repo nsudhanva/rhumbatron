@@ -26,6 +26,7 @@ import {
 import type { ModelTier, RouteRequest, TaskStatus } from "@rhumbatron/protocol";
 import { Agent } from "agents";
 import { PiHarness } from "agents/harness/pi";
+import { declareIntentAndDetect } from "./conflicts.ts";
 import { createTierModels, modelIdFor, PROVIDER_ID } from "./models.ts";
 import type {
   AgentResumeEvent,
@@ -604,18 +605,30 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
           ),
         ]);
       }
-      const resources = (result.intent.semanticResources as string[] | undefined) ?? [];
-      await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
-        await changeEvent(
-          ctx,
-          "intent.declared",
-          { runId: run.run_id, intent: result.intent },
-          {
+      // The typed Intent goes to the Change's shard, which records `intent.declared`. Conflict
+      // detection runs before `task.completed`, so the next live delta already shows its result.
+      try {
+        const { conflicts } = await declareIntentAndDetect(this.env, ctx, result.intent, {
+          intentId: `int_${run.run_id.slice(4)}`,
+          taskId: input.taskId,
+          agentId: input.agentId,
+          createdAt: now,
+        });
+        if (conflicts.length > 0)
+          log({
+            event: "agent.conflicts_detected",
             taskId: input.taskId,
-            actor,
-            ...(resources[0] ? { resource: `project:${input.projectSlug}:${resources[0]}` } : {}),
-          },
-        ),
+            conflicts: conflicts.map((c) => `${c.id}:${c.review.state}`),
+          });
+      } catch (error) {
+        log({
+          event: "agent.intent_declare_failed",
+          taskId: input.taskId,
+          runId: run.run_id,
+          message: String(error).slice(0, 200),
+        });
+      }
+      await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
         await changeEvent(
           ctx,
           "task.completed",

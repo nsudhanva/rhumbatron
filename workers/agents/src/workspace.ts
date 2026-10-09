@@ -86,6 +86,10 @@ const sandboxFor = (env: WorkspaceEnv, projectId: string) =>
     },
   );
 
+/** The Sandbox drops stdout's trailing newline; keep stderr on its own line so line parsers work. */
+const joinOutput = (stdout: string, stderr: string) =>
+  stdout && stderr && !stdout.endsWith("\n") ? `${stdout}\n${stderr}` : `${stdout}${stderr}`;
+
 const clip = (text: string) =>
   text.length > MAX_OUTPUT_CHARS
     ? `${text.slice(-MAX_OUTPUT_CHARS)}\n… (earlier output cut)`
@@ -100,7 +104,7 @@ async function run(sandbox: Sandbox, command: string, dir: string, env?: Record<
   return {
     ok: result.exitCode === 0,
     exitCode: result.exitCode,
-    output: clip(`${result.stdout}${result.stderr}`),
+    output: clip(joinOutput(result.stdout, result.stderr)),
   };
 }
 

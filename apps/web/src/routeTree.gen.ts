@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CandidatesCandidateIdRouteImport } from './routes/candidates.$candidateId'
 import { Route as ChangesChangeIdRouteImport } from './routes/changes.$changeId'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
@@ -19,6 +20,11 @@ import { Route as LiveProjectsProjectIdRouteImport } from './routes/live.project
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CandidatesCandidateIdRoute = CandidatesCandidateIdRouteImport.update({
+  id: '/candidates/$candidateId',
+  path: '/candidates/$candidateId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChangesChangeIdRoute = ChangesChangeIdRouteImport.update({
@@ -49,6 +55,7 @@ const LiveProjectsProjectIdRoute = LiveProjectsProjectIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
@@ -57,6 +64,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
@@ -66,6 +74,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
@@ -76,6 +85,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/projects/$projectId'
     | '/sign-in/$'
@@ -84,6 +94,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/projects/$projectId'
     | '/sign-in/$'
@@ -92,6 +103,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/projects/$projectId'
     | '/sign-in/$'
@@ -101,6 +113,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CandidatesCandidateIdRoute: typeof CandidatesCandidateIdRoute
   ChangesChangeIdRoute: typeof ChangesChangeIdRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   SignInSplatRoute: typeof SignInSplatRoute
@@ -115,6 +128,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/candidates/$candidateId': {
+      id: '/candidates/$candidateId'
+      path: '/candidates/$candidateId'
+      fullPath: '/candidates/$candidateId'
+      preLoaderRoute: typeof CandidatesCandidateIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/changes/$changeId': {
@@ -157,6 +177,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CandidatesCandidateIdRoute: CandidatesCandidateIdRoute,
   ChangesChangeIdRoute: ChangesChangeIdRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   SignInSplatRoute: SignInSplatRoute,

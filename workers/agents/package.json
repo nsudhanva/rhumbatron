@@ -7,11 +7,12 @@
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run --outdir dist",
     "cf:types": "wrangler types",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test:critical": "vitest run --dir src"
   },
   "devDependencies": {
-    "@rhumbatron/coordinator": "workspace:*",
     "typescript": "7.0.2",
+    "vitest": "5.0.3",
     "wrangler": "4.149.0"
   },
   "dependencies": {
@@ -19,7 +20,9 @@
     "@earendil-works/pi-ai": "1.1.0",
     "@earendil-works/pi-durable": "1.1.0",
     "@rhumbatron/causal-router": "workspace:*",
+    "@rhumbatron/conflict": "workspace:*",
     "@rhumbatron/context-compiler": "workspace:*",
+    "@rhumbatron/coordinator": "workspace:*",
     "@rhumbatron/integration": "workspace:*",
     "@rhumbatron/model-router": "workspace:*",
     "@rhumbatron/protocol": "workspace:*",

@@ -1,8 +1,10 @@
 import { AnyCommandEnvelope } from "@rhumbatron/protocol";
+import { z } from "zod";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { provisionProject } from "./provision.ts";
 
 export { ChangeWorkflow } from "./change-workflow.ts";
+export { CandidateVerificationWorkflow } from "./verification-workflow.ts";
 
 type ChangeRow = {
   project_id: string;
@@ -11,6 +13,25 @@ type ChangeRow = {
   base_generation: number;
   budget_usd: number;
 };
+
+const CandidateVerifyPayload = z.object({ candidateId: z.string().regex(/^cand_[a-z0-9]+$/) });
+
+/**
+ * Starts CandidateVerificationWorkflow for a Candidate the API created (AGENTS.md section 21.2).
+ * The instance ID is the Candidate ID, so a duplicate command finds the running instance.
+ */
+async function startCandidateVerification(env: Env, payload: unknown) {
+  const parsed = CandidateVerifyPayload.safeParse(payload);
+  if (!parsed.success) return;
+  const { candidateId } = parsed.data;
+  try {
+    await env.CANDIDATE_WORKFLOW.create({ id: candidateId, params: { candidateId } });
+  } catch (error) {
+    // Already started by an earlier delivery: nothing to do. Anything else is retried.
+    const existing = await env.CANDIDATE_WORKFLOW.get(candidateId).catch(() => null);
+    if (!existing) throw error;
+  }
+}
 
 /** Handles one command. Unknown commands and Changes are acknowledged and dropped. */
 async function handleCommand(env: Env, body: unknown) {
@@ -26,6 +47,10 @@ async function handleCommand(env: Env, body: unknown) {
         ...result,
       }),
     );
+    return;
+  }
+  if (command.data.commandType === "candidate.verify") {
+    await startCandidateVerification(env, command.data.payload);
     return;
   }
   if (command.data.commandType !== "change.dispatch" || !command.data.changeId) return;

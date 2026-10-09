@@ -7,8 +7,8 @@
  * create a Project and a Change, read them back, and check idempotency and the snapshot.
  * Each authenticated run writes about five D1 rows.
  * `--plan` also submits a real goal and waits for the Work Graph: 1 to 4 model calls (ADR 0007).
- * `--sandbox` seeds an Acme Shop project and runs its Bun tests in the Sandbox (no model calls;
- * a few minutes of the monthly Sandbox budget, ADR 0011).
+ * `--sandbox` seeds an Acme Shop project and runs its Bun tests in the Sandbox, then verifies the
+ * canonical baseline Candidate (no model calls; a few minutes of the monthly Sandbox budget, ADR 0011).
  */
 
 const hosts: Record<string, { web: string; api: string }> = {
@@ -259,6 +259,80 @@ if (secretKey && smokeUserId) {
       );
     }
     report("sandbox runs bun test", result.data?.ok === true);
+
+    // Candidate verification (P10): a Change with no ChangeSets is the canonical baseline, which
+    // must pass its executable checks. No planner, no model calls; one Sandbox session.
+    const baseline = (await (
+      await fetch(`${target.api}/v1/projects/${demoId}/changes`, {
+        method: "POST",
+        headers: await fresh(),
+        body: JSON.stringify({
+          goal: "Baseline check. Keep existing cart behavior unchanged. Keep API p95 below 200 ms.",
+          budgetUsd: 1,
+          startPlanning: false,
+        }),
+      })
+    ).json()) as { data?: { id: string } };
+    const baselineChange = baseline.data?.id ?? "missing";
+    const createdCandidate = await fetch(`${target.api}/v1/changes/${baselineChange}/candidates`, {
+      method: "POST",
+      headers: await fresh(),
+    });
+    const candidate = ((await createdCandidate.json()) as { data?: { id: string } }).data;
+    report("candidate created", createdCandidate.status === 202 && !!candidate?.id, candidate?.id);
+    type CandidateRead = {
+      status: string;
+      statusReason: string | null;
+      gate: { promotable: boolean; gaps: { checkId: string; reason: string }[] } | null;
+    };
+    let read: CandidateRead | undefined;
+    const verifyUntil = Date.now() + 10 * 60_000;
+    while (Date.now() < verifyUntil) {
+      await Bun.sleep(10_000);
+      const response = await fetch(`${target.api}/v1/candidates/${candidate?.id ?? "missing"}`, {
+        headers: await fresh(),
+      });
+      read = ((await response.json()) as { data?: CandidateRead }).data;
+      if (read && !["composing", "composed", "verifying"].includes(read.status)) break;
+    }
+    const evidence =
+      (
+        (await (
+          await fetch(`${target.api}/v1/candidates/${candidate?.id ?? "missing"}/evidence`, {
+            headers: await fresh(),
+          })
+        ).json()) as {
+          data?: { checkId: string; status: string; coverage: string; summary: string }[];
+        }
+      ).data ?? [];
+    for (const e of evidence) {
+      console.log(
+        `      ${e.checkId.padEnd(26)} ${e.status.padEnd(7)} ${e.coverage.padEnd(18)} ${e.summary.slice(0, 90)}`,
+      );
+    }
+    report(
+      "candidate verification finished",
+      !!read && ["verified", "rejected"].includes(read.status),
+      `${read?.status ?? "missing"}${read?.statusReason ? `: ${read.statusReason.slice(0, 120)}` : ""}`,
+    );
+    for (const checkId of ["build", "unit", "protected-invariant-cart", "performance"]) {
+      const e = evidence.find((x) => x.checkId === checkId);
+      report(
+        `baseline ${checkId} passes with evidence`,
+        e?.status === "pass" && e.coverage === "checked_supported",
+        e ? `${e.status}/${e.coverage}` : "no evidence",
+      );
+    }
+    // The gate is computed, and a check that cannot run yet (contract) is a gap, never green.
+    report("gate computed", read?.gate !== null && read?.gate !== undefined);
+    report(
+      "unautomated checks are gaps",
+      evidence
+        .filter((e) => ["contract", "browser"].includes(e.checkId))
+        .every((e) => e.status !== "pass" && e.coverage === "not_checked") &&
+        (read?.gate?.gaps ?? []).every((g) => ["contract", "browser"].includes(g.checkId)),
+      (read?.gate?.gaps ?? []).map((g) => `${g.checkId}:${g.reason}`).join(", ") || "no gaps",
+    );
   }
 
   await clerk(`/sessions/${session.id}/revoke`, {});

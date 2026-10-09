@@ -279,6 +279,10 @@ module "integration_worker" {
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
+    # Candidate composition and checks run in the Project Sandbox (ADR 0012).
+    { type = "durable_object_namespace", name = "SANDBOX", class_name = "Sandbox", script_name = local.sandbox_worker.script_name },
+    # Self-binding to CandidateVerificationWorkflow (literal name avoids a cycle with the resource).
+    { type = "workflow", name = "CANDIDATE_WORKFLOW", workflow_name = "rhumbatron-candidate-verification-${local.environment}", class_name = "CandidateVerificationWorkflow" },
     # One Artifacts repo per Project; the namespace is created on first use (ADR 0010).
     { type = "artifacts", name = "ARTIFACTS", namespace = "rhumbatron-projects-${local.environment}" },
     # Models go through the AI Gateway (ADR 0007): OpenRouter free models, Vertex AI backup.
@@ -287,6 +291,8 @@ module "integration_worker" {
     { type = "secret_text", name = "OPENROUTER_API_KEY", text = var.openrouter_api_key },
     { type = "secret_text", name = "VERTEX_SERVICE_ACCOUNT", text = var.vertex_service_account },
   ]
+
+  depends_on = [terraform_data.sandbox_worker]
 }
 
 # Workflows free plan: 3,000 steps per day. A Change uses about 7 steps.
@@ -294,6 +300,14 @@ resource "cloudflare_workflow" "change" {
   account_id    = var.account_id
   workflow_name = "rhumbatron-change-workflow-${local.environment}"
   class_name    = "ChangeWorkflow"
+  script_name   = module.integration_worker.name
+}
+
+# AGENTS.md section 21.2. One instance per Candidate; about 10 to 14 steps per Candidate.
+resource "cloudflare_workflow" "candidate_verification" {
+  account_id    = var.account_id
+  workflow_name = "rhumbatron-candidate-verification-${local.environment}"
+  class_name    = "CandidateVerificationWorkflow"
   script_name   = module.integration_worker.name
 }
 

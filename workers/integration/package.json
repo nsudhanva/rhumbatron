@@ -16,8 +16,10 @@
     "wrangler": "4.149.0"
   },
   "dependencies": {
+    "@cloudflare/sandbox": "0.12.6",
     "@rhumbatron/causal-router": "workspace:*",
     "@rhumbatron/coordinator": "workspace:*",
+    "@rhumbatron/evidence": "workspace:*",
     "@rhumbatron/model-router": "workspace:*",
     "@rhumbatron/protocol": "workspace:*",
     "isomorphic-git": "1.43.2",

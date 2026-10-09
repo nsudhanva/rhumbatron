@@ -4,9 +4,11 @@ import { Robot, ShieldCheck } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { CandidateList } from "../components/candidate-list";
+import { ConflictCard } from "../components/conflict-card";
 import { TaskPanel } from "../components/task-detail";
 import { WorkGraph } from "../components/work-graph";
-import { getChange, listTasks, type TaskDetail } from "../lib/api";
+import { getChange, getConflicts, listCandidates, listTasks, type TaskDetail } from "../lib/api";
 import {
   formatUsd,
   generation,
@@ -55,6 +57,22 @@ function ChangeView() {
     refetchInterval: (query) => (isLive(change.data, query.state.data) ? fallback : false),
     refetchIntervalInBackground: true,
   });
+  const conflicts = useQuery({
+    queryKey: ["conflicts", changeId],
+    queryFn: () => getConflicts({ data: changeId }),
+    refetchInterval: () => (isLive(change.data, tasks.data) ? fallback : false),
+    refetchIntervalInBackground: true,
+  });
+  const candidates = useQuery({
+    queryKey: ["candidates", changeId],
+    queryFn: () => listCandidates({ data: changeId }),
+    // Verification runs after the Change settles, so this polls while any Candidate is in flight.
+    refetchInterval: (query) =>
+      query.state.data?.some((c) => ["composing", "composed", "verifying"].includes(c.status))
+        ? FALLBACK_POLL_MS
+        : false,
+    refetchIntervalInBackground: true,
+  });
 
   const projectId = change.data?.projectId;
   const status = useProjectLive(projectId, isLive(change.data, tasks.data), (signal) => {
@@ -62,6 +80,8 @@ function ChangeView() {
     if (signal.kind === "delta" && !deltaTouchesChange(signal.delta, changeId, taskIds)) return;
     void queryClient.invalidateQueries({ queryKey: ["change", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["tasks", changeId] });
+    void queryClient.invalidateQueries({ queryKey: ["conflicts", changeId] });
+    void queryClient.invalidateQueries({ queryKey: ["candidates", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
   });
   useEffect(() => setSocket(status), [status]);
@@ -103,6 +123,16 @@ function ChangeView() {
           />
         </LayerCard.Primary>
       </LayerCard>
+
+      {conflicts.data?.map((conflict) => (
+        <ConflictCard key={conflict.id} conflict={conflict} />
+      ))}
+
+      <CandidateList
+        changeId={changeId}
+        candidates={candidates.data ?? []}
+        canCompose={!["cancelled", "failed", "completed"].includes(data.status)}
+      />
 
       {isCompiling(data.status) && taskList.length === 0 ? (
         <LayerCard>

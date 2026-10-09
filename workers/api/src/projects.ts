@@ -167,8 +167,9 @@ export const projects = new Hono<AppEnv>()
       generation: 0,
       policyVersion: DEFAULT_POLICIES.modelPolicyVersion,
     });
-    // The integration Worker creates the Artifacts repo and seeds the template (ADR 0010).
-    await sendProvision(c.env, projectId, body.template);
+    // The integration Worker creates the Artifacts repo and seeds the template (ADR 0010). An empty
+    // Project gets its repo only when seeded, so smoke and scratch Projects leave no repos behind.
+    if (body.template !== "empty") await sendProvision(c.env, projectId, body.template);
     const project = await loadProject(c.env, projectId);
     if (!project || !(await canAccessProject(c.env.DB, userId, projectId))) {
       throw new Error("Project was not readable after creation");

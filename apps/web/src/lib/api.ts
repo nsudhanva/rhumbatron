@@ -90,6 +90,55 @@ export type TaskDetail = {
   runs: TaskRun[];
 };
 
+export type ConflictIntent = {
+  intentId: string;
+  taskId: string;
+  taskKey: string;
+  title: string;
+  agentId: string;
+  summary: string;
+  semanticResources: string[];
+  assumptions: string[];
+  createdAt: string;
+};
+
+export type ConflictSignal = {
+  kind:
+    | "resource_overlap"
+    | "file_overlap"
+    | "contract_conflict"
+    | "contract_overlap"
+    | "data_model_conflict"
+    | "data_overlap"
+    | "assumption_conflict"
+    | "invariant_reference";
+  severity: "benign" | "soft" | "hard";
+  detail: string;
+  evidenceRefs: string[];
+};
+
+export type ForkDecision =
+  | { kind: "fork"; candidateIntentIds: [string, string]; reason: string }
+  | { kind: "no_fork"; reason: "benign_overlap" | "needs_review" | "already_resolved" }
+  | { kind: "blocked"; reason: "candidate_limit"; maxCandidates: number };
+
+/** A semantic conflict between two Intents of one Change (AGENTS.md section 32). */
+export type ConflictDetail = {
+  id: string;
+  changeId: string;
+  resource: string;
+  state: "suspected" | "confirmed" | "fork_required" | "resolved";
+  recommendedAction: "dismiss" | "review" | "fork_candidates";
+  intents: [ConflictIntent, ConflictIntent];
+  /** Hard signals first. */
+  signals: ConflictSignal[];
+  review: { decidedBy: "rules" | "sonnet" | "opus"; rationale?: string };
+  forkDecision: ForkDecision;
+  challengeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -170,3 +219,86 @@ export const getChange = createServerFn()
 export const listTasks = createServerFn()
   .inputValidator((changeId: string) => changeId)
   .handler(({ data }) => call<TaskDetail[]>(`/v1/changes/${data}/tasks`));
+
+export const getConflicts = createServerFn()
+  .inputValidator((changeId: string) => changeId)
+  .handler(({ data }) => call<ConflictDetail[]>(`/v1/changes/${data}/conflicts`));
+
+export type CheckGap = { checkId: string; reason: string };
+
+export type VerificationCheck = {
+  checkId: string;
+  kind: string;
+  reason: string;
+  command?: string;
+  procedure?: string;
+  timeoutMs: number;
+  required: boolean;
+  expected:
+    | { kind: "exit_code"; code: number }
+    | { kind: "metric_below"; metric: string; threshold: number }
+    | { kind: "procedure"; description: string };
+};
+
+export type CandidateDetail = {
+  id: string;
+  changeId: string;
+  projectId: string;
+  status: "composing" | "composed" | "verifying" | "verified" | "rejected" | "stale" | "promoted";
+  statusReason: string | null;
+  baseGeneration: number;
+  artifactRef: string | null;
+  composedCommit: string | null;
+  composedTree: string | null;
+  changeSetIds: string[];
+  plan: {
+    checks: VerificationCheck[];
+    requiredCheckIds: string[];
+    humanApprovalRequired: boolean;
+    policyVersion: string;
+  } | null;
+  /** Null until verification finishes. Only `promotable` Candidates can be promoted. */
+  gate: {
+    promotable: boolean;
+    gaps: CheckGap[];
+    humanApprovalRequired?: boolean;
+    p95Ms?: number;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EvidenceRecord = {
+  evidenceId: string;
+  candidateId: string;
+  checkId: string;
+  kind: string;
+  status: "pass" | "fail" | "error" | "skipped";
+  coverage: "not_checked" | "checked_no_signal" | "checked_supported";
+  startedAt: string;
+  completedAt: string;
+  summary: string;
+  contentHash: string;
+  r2Key?: string;
+  metrics?: Record<string, number>;
+  sourceRefs: string[];
+};
+
+export const listCandidates = createServerFn()
+  .inputValidator((changeId: string) => changeId)
+  .handler(({ data }) => call<CandidateDetail[]>(`/v1/changes/${data}/candidates`));
+
+export const getCandidate = createServerFn()
+  .inputValidator((candidateId: string) => candidateId)
+  .handler(({ data }) => call<CandidateDetail>(`/v1/candidates/${data}`));
+
+export const listCandidateEvidence = createServerFn()
+  .inputValidator((candidateId: string) => candidateId)
+  .handler(({ data }) => call<EvidenceRecord[]>(`/v1/candidates/${data}/evidence`));
+
+/** Composes the Change's proposed ChangeSets into a Candidate and queues its verification. */
+export const createCandidate = createServerFn({ method: "POST" })
+  .inputValidator((changeId: string) => changeId)
+  .handler(({ data }) =>
+    call<CandidateDetail>(`/v1/changes/${data}/candidates`, { method: "POST", body: {} }),
+  );

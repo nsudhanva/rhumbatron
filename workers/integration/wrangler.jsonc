@@ -28,7 +28,7 @@
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
   "queues": {
     "producers": [{ "binding": "AGENT_WAKEUPS", "queue": "rhumbatron-agent-wakeups-local" }],
-    // `change.dispatch` commands from the Causal Router.
+    // `change.dispatch` from the Causal Router, `project.provision` and `candidate.verify` from the API.
     "consumers": [
       {
         "queue": "rhumbatron-integration-local",
@@ -49,7 +49,9 @@
         "name": "PROJECT_ROOT",
         "class_name": "ProjectRootDO",
         "script_name": "rhumbatron-coordinator"
-      }
+      },
+      // Candidate composition and checks run in the Project Sandbox (ADR 0012).
+      { "name": "SANDBOX", "class_name": "Sandbox", "script_name": "rhumbatron-sandbox" }
     ]
   },
   // AGENTS.md section 21.1. The API starts one instance per Change (instance ID = Change ID).
@@ -58,6 +60,12 @@
       "name": "rhumbatron-change-workflow-local",
       "binding": "CHANGE_WORKFLOW",
       "class_name": "ChangeWorkflow"
+    },
+    // AGENTS.md section 21.2. One instance per Candidate (instance ID = Candidate ID).
+    {
+      "name": "rhumbatron-candidate-verification-local",
+      "binding": "CANDIDATE_WORKFLOW",
+      "class_name": "CandidateVerificationWorkflow"
     }
   ],
   // Canonical source for managed Projects (AGENTS.md section 29). One repo per Project.
