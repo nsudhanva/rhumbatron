@@ -26,6 +26,18 @@ import {
 import type { ModelTier, RouteRequest, TaskStatus } from "@rhumbatron/protocol";
 import { Agent } from "agents";
 import { PiHarness } from "agents/harness/pi";
+import {
+  acquireRunClaims,
+  type ClaimScope,
+  claimResources,
+  claimShardFor,
+  contentionsOf,
+  type RunClaim,
+  type RunClaimStore,
+  releaseRunClaims,
+  renewRunClaims,
+  sqlRunClaimStore,
+} from "./claims-client.ts";
 import { declareIntentAndDetect } from "./conflicts.ts";
 import { createTierModels, modelIdFor, PROVIDER_ID } from "./models.ts";
 import type {
@@ -117,6 +129,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   private prompt = "";
   /** The last tool step of the active run, for live progress. In memory: losing it is harmless. */
   private lastStep: string | null = null;
+  /** Advisory Claims of the active run (ADR 0015). */
+  private readonly runClaims: RunClaimStore;
 
   readonly harness = new PiHarness({
     harness: ({ storage, context }) =>
@@ -161,6 +175,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS run_workspaces (run_id TEXT PRIMARY KEY, ws_json TEXT NOT NULL)",
     );
+    this.runClaims = sqlRunClaimStore(ctx.storage.sql);
     const active = this.activeRun();
     this.prompt = active
       ? (ctx.storage.sql
@@ -237,6 +252,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     });
     // Live progress: one D1 write per model call, off the model request path.
     this.ctx.waitUntil(this.writeProgress(run.run_id, run.calls + 1));
+    // Claim renewal rides on model calls too; it makes a request only at lease half-life.
+    this.ctx.waitUntil(this.renewClaims(run.run_id, input));
   }
 
   /** Records the tool step the agent is taking, then returns its result unchanged. */
@@ -488,6 +505,20 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         : []),
     ]);
 
+    // Advisory Claims (ADR 0015): one per Task resource. A resource held by another agent does not
+    // block the run; the shard records `claim.contended` and conflict detection gets the signal.
+    const resources = JSON.parse(task.semantic_resources_json) as string[];
+    const claimed = await acquireRunClaims(
+      this.runClaims,
+      claimShardFor(this.env.RESOURCE_SHARD, input.projectId),
+      this.claimScope(runId, input),
+      claimResources(
+        ctx,
+        task.semantic_resource ? [...resources, task.semantic_resource] : resources,
+      ),
+    );
+    this.countContention(input, claimed.contended);
+
     // Fresh context for every attempt (section 23.3), then the run itself.
     this.lastStep = null;
     const session = this.harness.session();
@@ -525,6 +556,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         run.run_id,
       );
       await this.schedule(60, "checkRun", payload);
+      // The one-minute run check is the main renewal tick: the lease is two minutes.
+      await this.renewClaims(run.run_id, JSON.parse(run.input_json) as AgentRunInput);
       return;
     }
     if (stillRunning) await this.harness.session().abort();
@@ -580,6 +613,14 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       result.ok ? "completed" : "failed",
       JSON.stringify(result),
       run.run_id,
+    );
+    // Every run end (success, failure, cancel, timeout) releases its Claims. Keep the contention
+    // first: it goes to conflict detection with the Intent.
+    const contentions = contentionsOf(this.runClaims.list(run.run_id), input.agentId);
+    await releaseRunClaims(
+      this.runClaims,
+      claimShardFor(this.env.RESOURCE_SHARD, input.projectId),
+      this.claimScope(run.run_id, input),
     );
     const runUpdate = this.env.DB.prepare(
       `UPDATE task_runs SET status = ?, failure_kind = ?, outcome_json = ?, model_calls = ?, input_tokens = ?,
@@ -653,12 +694,18 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       // The typed Intent goes to the Change's shard, which records `intent.declared`. Conflict
       // detection runs before `task.completed`, so the next live delta already shows its result.
       try {
-        const { conflicts } = await declareIntentAndDetect(this.env, ctx, result.intent, {
-          intentId: `int_${run.run_id.slice(4)}`,
-          taskId: input.taskId,
-          agentId: input.agentId,
-          createdAt: now,
-        });
+        const { conflicts } = await declareIntentAndDetect(
+          this.env,
+          ctx,
+          result.intent,
+          {
+            intentId: `int_${run.run_id.slice(4)}`,
+            taskId: input.taskId,
+            agentId: input.agentId,
+            createdAt: now,
+          },
+          contentions,
+        );
         if (conflicts.length > 0)
           log({
             event: "agent.conflicts_detected",
@@ -714,6 +761,38 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       await this.failTask(input, null, step.reason);
     }
     return "Recorded. Stop now.";
+  }
+
+  /** Claim scope of a run. `intentHash` names the Intent the run will declare. */
+  private claimScope(runId: string, input: AgentRunInput): ClaimScope {
+    return {
+      projectId: input.projectId,
+      changeId: input.changeId,
+      agentId: input.agentId,
+      runId,
+      intentHash: `int_${runId.slice(4)}`,
+    };
+  }
+
+  /** Renews due Claims of a running run; no request unless a lease is at half-life. Never throws. */
+  private async renewClaims(runId: string, input: AgentRunInput) {
+    const renewed = await renewRunClaims(
+      this.runClaims,
+      claimShardFor(this.env.RESOURCE_SHARD, input.projectId),
+      this.claimScope(runId, input),
+    );
+    this.countContention(input, renewed.contended);
+  }
+
+  /** `claim_contention` data points (section 41.1). The event itself is on the shard outbox. */
+  private countContention(input: AgentRunInput, contended: readonly RunClaim[]) {
+    for (const row of contended) {
+      this.env.METRICS.writeDataPoint({
+        blobs: ["claim_contention", row.resource, input.taskId],
+        doubles: [1],
+        indexes: [input.projectId],
+      });
+    }
   }
 
   async retryTask(input: AgentRunInput) {

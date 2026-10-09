@@ -181,6 +181,57 @@ describe("detectConflicts", () => {
     expect(report?.signals.map((s) => s.kind)).toContain("invariant_reference");
   });
 
+  it("raises a contended pair to at least suspected, and leaves confirmation to the Intents", () => {
+    const addField = (id: string, column: string) =>
+      intent({
+        intentId: `int-${id}`,
+        taskId: `task-${id}`,
+        semanticResources: ["wishlist"],
+        expectedDataChanges: [
+          { entity: "wishlists", kind: "add", model: "mutable_table", description: column },
+        ],
+      });
+    const contention = {
+      resource: "project:acme:wishlist",
+      agentId: "agent-task-b",
+      holderAgentId: "agent-task-a",
+      holderClaimId: "claim-1",
+    };
+    // Additive overlap alone is dismissed; the same pair under Claim contention needs review.
+    const [report] = detectConflicts([addField("a", "note"), addField("b", "color")], {
+      contentions: [contention],
+    });
+    expect(report).toMatchObject({ state: "suspected", recommendedAction: "review" });
+    expect(report?.signals).toContainEqual(
+      expect.objectContaining({ severity: "soft", evidenceRefs: ["claim:claim-1"] }),
+    );
+    // Contention between agents that declared no shared resource is still a signal.
+    const apart = detectConflicts(
+      [
+        intent({ intentId: "int-a", taskId: "task-a", semanticResources: ["cart"] }),
+        intent({ intentId: "int-b", taskId: "task-b", semanticResources: ["catalog"] }),
+      ],
+      { contentions: [contention] },
+    );
+    expect(apart).toHaveLength(1);
+    expect(apart[0]).toMatchObject({ state: "suspected", resource: "wishlist" });
+    // A hard Intent conflict stays confirmed; contention of other agents changes nothing.
+    const hard = detectConflicts(
+      [
+        { ...relational, agentId: "agent-task-a" },
+        { ...appendOnly, agentId: "agent-task-b" },
+      ],
+      { contentions: [contention] },
+    );
+    expect(hard[0]).toMatchObject({ state: "confirmed", recommendedAction: "fork_candidates" });
+    expect(
+      detectConflicts([addField("a", "note"), addField("b", "color")], {
+        includeDismissed: false,
+        contentions: [{ ...contention, holderAgentId: "agent-task-z" }],
+      }),
+    ).toEqual([]);
+  });
+
   it("produces nothing for unrelated resources", () => {
     const wishlist = intent({
       intentId: "int-a",

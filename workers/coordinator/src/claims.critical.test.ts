@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type AcquireRequest,
   type ClaimRecord,
+  contendedEventId,
   decideAcquire,
   decideRelease,
   decideRenew,
@@ -49,7 +50,12 @@ describe("decideAcquire", () => {
     const holder = claim({ agentId: "agent-b", claimId: "claim-b" });
     expect(decideAcquire(holder, request(), NOW)).toEqual({
       kind: "held",
-      heldBy: { agentId: "agent-b", claimId: "claim-b", leaseExpiresAt: NOW + 30_000 },
+      heldBy: {
+        agentId: "agent-b",
+        changeId: "change-1",
+        claimId: "claim-b",
+        leaseExpiresAt: NOW + 30_000,
+      },
     });
   });
 
@@ -116,6 +122,42 @@ describe("decideRelease", () => {
   it("rejects a non-owner and an unknown claim", () => {
     expect(decideRelease(claim(), "agent-b")).toEqual({ kind: "rejected", reason: "not_owner" });
     expect(decideRelease(null, "agent-a")).toEqual({ kind: "rejected", reason: "not_found" });
+  });
+});
+
+describe("advisory leases (ADR 0015)", () => {
+  it("never extends another agent's Claim: renew and release by a non-owner change nothing", () => {
+    const held = claim({ agentId: "agent-b", claimId: "claim-b" });
+    expect(decideRenew(held, "agent-a", 120_000, NOW)).toEqual({
+      kind: "rejected",
+      reason: "not_owner",
+    });
+    expect(decideRelease(held, "agent-a")).toEqual({ kind: "rejected", reason: "not_owner" });
+    // A contender that asks again is told who holds it; it is never granted the holder's lease.
+    const again = decideAcquire(held, request({ ttlMs: 120_000 }), NOW + 1_000);
+    expect(again).toMatchObject({ kind: "held", heldBy: { leaseExpiresAt: NOW + 30_000 } });
+  });
+
+  it("expires a Claim that is not renewed, and then grants the resource to the contender", () => {
+    const t0 = NOW;
+    const holder = claim({ agentId: "agent-b", leaseExpiresAt: t0 + 120_000 });
+    expect(decideAcquire(holder, request(), t0 + 119_999).kind).toBe("held");
+    expect(findOverdue([holder], t0 + 119_999)).toEqual([]);
+    // No renewal arrived: at the lease end the shard marks it expired and the resource is free.
+    expect(findOverdue([holder], t0 + 120_000)).toEqual([holder]);
+    expect(decideAcquire(holder, request(), t0 + 120_000).kind).toBe("grant");
+    expect(decideRenew(holder, "agent-b", 120_000, t0 + 120_000)).toMatchObject({
+      reason: "expired",
+    });
+  });
+
+  it("gives one stable contention event ID per holder Claim, contender, and Change", () => {
+    const id = contendedEventId("claim-b", "agt_1", "chg_1");
+    expect(contendedEventId("claim-b", "agt_1", "chg_1")).toBe(id);
+    expect(contendedEventId("claim-c", "agt_1", "chg_1")).not.toBe(id);
+    expect(contendedEventId("claim-b", "agt_2", "chg_1")).not.toBe(id);
+    const long = contendedEventId(crypto.randomUUID(), "a".repeat(120), "c".repeat(120));
+    expect(long.length).toBeLessThanOrEqual(128);
   });
 });
 

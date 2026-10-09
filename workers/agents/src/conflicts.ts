@@ -1,4 +1,5 @@
 import {
+  type ClaimContention,
   type DeclaredIntent,
   detectConflicts,
   type ForkDecision,
@@ -76,6 +77,9 @@ export type PlannedConflict = {
   challenge: Challenge | null;
 };
 
+/** A contention as the Change shard stores it (ResourceShardDO `ClaimContention`). */
+export type RecordedContention = ClaimContention & { holderChangeId: string };
+
 const hex = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 /** Stable conflict ID: the same pair and resource always map to the same ID, in any order. */
@@ -136,6 +140,8 @@ export async function planConflicts(input: {
   /** Conflict IDs already fully recorded. */
   done: ReadonlySet<string>;
   activeCandidates: number;
+  /** Advisory Claim contention of the Change (ADR 0015). A contended pair is at least suspected. */
+  contentions?: readonly ClaimContention[];
   review?: ConflictReviewer;
 }): Promise<PlannedConflict[]> {
   const byId = new Map(input.intents.map((i) => [i.intentId, i]));
@@ -143,6 +149,7 @@ export async function planConflicts(input: {
     protectedResources: input.protectedResources,
     dependsOn: input.dependsOn,
     includeDismissed: false,
+    ...(input.contentions ? { contentions: input.contentions } : {}),
   });
   const side = (intent: Intent): IntentSide => ({
     intentId: intent.intentId,
@@ -206,12 +213,15 @@ function declaredFrom(raw: Record<string, unknown>): DeclaredIntent {
  * deterministic conflict pass over every Intent of the Change. New suspected and confirmed
  * conflicts go to D1; a confirmed conflict also records a Challenge on the shard. Safe to repeat:
  * the Intent, the Challenge, and the conflict row are idempotent on their IDs.
+ * `contentions` are the advisory Claim contentions the run saw (ADR 0015). They are stored with
+ * the Intent, so a later run of the other agent also sees them.
  */
 export async function declareIntentAndDetect(
   env: Env,
   ctx: ChangeContext,
   raw: Record<string, unknown>,
   meta: IntentMeta,
+  contentions: readonly RecordedContention[] = [],
 ): Promise<{ intentId: string; conflicts: PlannedConflict[] }> {
   const intent = intentFromDeclaration(declaredFrom(raw), meta);
   const ns = env.RESOURCE_SHARD as DurableObjectNamespace<ResourceShardDO>;
@@ -222,7 +232,7 @@ export async function declareIntentAndDetect(
     projectSlug: ctx.projectSlug,
     canonicalGeneration: ctx.baseGeneration,
   };
-  const declared = await shard.declareIntent({ ...scope, intent });
+  const declared = await shard.declareIntent({ ...scope, intent }, contentions);
   if (!declared.ok) throw new Error(`intent ${intent.intentId}: ${declared.reason}`);
 
   const [tasks, deps, recorded, candidates] = await env.DB.batch([
@@ -265,8 +275,11 @@ export async function declareIntentAndDetect(
   ).length;
   const active = (candidates?.results?.[0] as { n: number } | undefined)?.n ?? 0;
 
-  // The shard can hold other Changes' Intents; keep this Change's Tasks only.
-  const intents = (await shard.listIntents()).filter((i) => taskMap.has(i.taskId));
+  // The shard can hold other Changes' Intents; keep this Change's Tasks only. Contention with an
+  // agent of another Change stays an event signal: that agent's Intent is not compared here.
+  const inputs = await shard.detectionInputs(ctx.changeId);
+  const intents = inputs.intents.filter((i) => taskMap.has(i.taskId));
+  const changeContentions = inputs.contentions.filter((c) => c.holderChangeId === ctx.changeId);
   const planned = await planConflicts({
     intents,
     tasks: taskMap,
@@ -274,6 +287,7 @@ export async function declareIntentAndDetect(
     protectedResources: DEFAULT_PROTECTED_RESOURCES,
     done,
     activeCandidates: Math.max(active, plannedForks * 2),
+    contentions: changeContentions,
   });
   if (planned.length === 0) return { intentId: intent.intentId, conflicts: [] };
 

@@ -28,6 +28,7 @@ const INFORMATIONAL = new Set([
   "model.route.decided",
   "claim.acquired",
   "claim.renewed",
+  "claim.contended",
   "project.created",
   "change.created",
   "verification.check.completed",
