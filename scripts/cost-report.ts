@@ -89,9 +89,15 @@ await section("containers", async () => {
 });
 
 await section("workers", async () => {
-  const expected = ["api", "web", "coordinator", "event-router", "integration", "agents"].map(
-    (c) => `rhumbatron-${c}-${env}`,
-  );
+  const expected = [
+    "api",
+    "web",
+    "coordinator",
+    "event-router",
+    "integration",
+    "agents",
+    "sandbox",
+  ].map((c) => `rhumbatron-${c}-${env}`);
   const scripts = await get<{ id: string }[]>("/workers/scripts");
   const ours = scripts.map((s) => s.id).filter((id) => id.startsWith("rhumbatron-"));
   const orphans = ours.filter((id) => !expected.includes(id) && !id.endsWith("-prod"));

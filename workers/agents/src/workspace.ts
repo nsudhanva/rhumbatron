@@ -71,13 +71,20 @@ export type Published = {
 };
 
 type WorkspaceEnv = {
-  SANDBOX: DurableObjectNamespace<Sandbox>;
+  SANDBOX: DurableObjectNamespace;
   ARTIFACTS: Artifacts;
   DB: D1Database;
 };
 
 const sandboxFor = (env: WorkspaceEnv, projectId: string) =>
-  getSandbox(env.SANDBOX, `proj-${projectId.slice(5)}`, { sleepAfter: "2m" });
+  // Cross-script binding to the Sandbox Worker's class (ADR 0012).
+  getSandbox(
+    env.SANDBOX as unknown as DurableObjectNamespace<Sandbox>,
+    `proj-${projectId.slice(5)}`,
+    {
+      sleepAfter: "2m",
+    },
+  );
 
 const clip = (text: string) =>
   text.length > MAX_OUTPUT_CHARS

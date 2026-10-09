@@ -1,6 +1,6 @@
 # ADR 0011: Sandbox workspaces with a prebuilt image and a Terraform-run adapter
 
-- Status: Accepted
+- Status: Accepted; the container attach mechanism is superseded by ADR 0012
 - Date: 2026-10-08
 - Decider: Project owner (HOM-192 cap; option A of the Sandbox deploy question)
 

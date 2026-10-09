@@ -1,0 +1,21 @@
+// Local development configuration only. A Terraform-run adapter deploys the remote Worker in one
+// upload with its migration and container metadata, as Wrangler does (ADR 0012).
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "rhumbatron-sandbox",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "durable_objects": { "bindings": [{ "name": "SANDBOX", "class_name": "Sandbox" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Sandbox"] }],
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "docker.io/cloudflare/sandbox:0.12.6",
+      "instance_type": "basic",
+      "max_instances": 1
+    }
+  ]
+}

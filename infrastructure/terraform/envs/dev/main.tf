@@ -44,7 +44,10 @@ module "ai" {
 # Pause switch: true stops everything that can run on its own (cron sweep, Sandbox starts) while
 # keeping all data. Set to false to resume.
 locals {
-  paused = true
+  paused = false
+  # Fresh environment only: true breaks the coordinator <-> event router binding cycle for the first
+  # apply (the cron sweep still delivers events); set false and apply again to add the nudge.
+  bootstrap = false
 }
 
 # Worker bundles come from `bun run cf:bundle`. Run it before plan.
@@ -182,7 +185,10 @@ module "coordinator_worker" {
       { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO" },
       { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO" },
       { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO" },
-      # Nudges the event router right after a publish (low-latency consume).
+    ],
+    # Nudges the event router right after a publish (low-latency consume). Omitted while
+    # bootstrapping: the router binds this Worker's class, so it can only exist after this Worker.
+    local.bootstrap ? [] : [
       { type = "service", name = "EVENT_ROUTER", service = "rhumbatron-event-router-${local.environment}" },
     ],
     # Outbox publishers produce to EVENTS_00..EVENTS_07; a project hashes to one stream.
@@ -193,13 +199,12 @@ module "coordinator_worker" {
     }],
   )
 
-  # The service binding target must exist before the coordinator uploads.
-  depends_on = [module.event_router_worker]
 
   # Durable Object migrations are a transition from the live tag (old_tag) to the target (new_tag).
   # v1 (ProjectRootDO, ResourceShardDO, ProjectViewDO as SQLite classes) is applied, so steady
   # state is v1 -> v1. To add a class: old_tag = "v1", new_tag = "v2", new_sqlite_classes = [...],
-  # and add the same v2 entry to wrangler.jsonc.
+  # and add the same v2 entry to wrangler.jsonc. A fresh environment starts from
+  # { new_tag = "v1", new_sqlite_classes = [...] } (ADR 0005).
   migrations = {
     old_tag = "v1"
     new_tag = "v1"
@@ -242,6 +247,9 @@ module "event_router_worker" {
   ]
 
   # Paused: no safety-net sweep; publish nudges still deliver events.
+  # Binds the coordinator's ProjectViewDO class, which must exist first.
+  depends_on = [module.coordinator_worker]
+
   cron_schedules = local.paused ? [] : ["* * * * *"]
 }
 
@@ -311,7 +319,7 @@ module "agents_worker" {
     module.state.bindings.DB,
     { type = "durable_object_namespace", name = "AGENT", class_name = "AgentDO" },
     # One Sandbox container per Project; a directory per Task (ADR 0011).
-    { type = "durable_object_namespace", name = "SANDBOX", class_name = "Sandbox" },
+    { type = "durable_object_namespace", name = "SANDBOX", class_name = "Sandbox", script_name = local.sandbox_worker.script_name },
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
     # Read-only canonical source for agent file tools (ADR 0010).
     { type = "artifacts", name = "ARTIFACTS", namespace = "rhumbatron-projects-${local.environment}" },
@@ -327,66 +335,69 @@ module "agents_worker" {
     { type = "ai", name = "AI" },
   ]
 
-  # v1 added AgentDO; v2 added the Sandbox SQLite class (ADR 0011). v2 is applied, so steady
-  # state is v2 -> v2.
+  # v1 (AgentDO) is applied, so steady state is v1 -> v1. The Sandbox class lives in its own
+  # Worker (ADR 0012).
   migrations = {
-    old_tag = "v2"
-    new_tag = "v2"
+    old_tag = "v1"
+    new_tag = "v1"
   }
+
+  # The SANDBOX binding needs the Sandbox Worker and its class to exist first.
+  depends_on = [terraform_data.sandbox_worker]
 }
 
-# Sandbox container (ADR 0011). Provider 5.27 has no container application resource and no
-# `containers` attribute on cloudflare_workers_script, so a temporary adapter (1) re-uploads the
-# agents bundle with upload metadata `containers = [{ class_name = "Sandbox" }]` when the deployed
-# version lacks it, then (2) creates the container application. Every Terraform upload of the
-# agents script drops (1), so the triggers include every input that makes Terraform re-upload.
-# Caps (Linear HOM-192): 1 instance, sleeps after 2 minutes idle (in code), and a 10-hour monthly
-# meter enforced by the agents Worker.
+# Sandbox Worker (ADR 0012): hosts the Sandbox container class. Provider 5.27 cannot attach a
+# container to a Durable Object class, so a temporary adapter deploys it in one upload (code,
+# migration, container metadata) and creates the container application, as Wrangler does. It
+# changes only when the Sandbox SDK bundle or its settings change. Caps (HOM-192): 1 instance,
+# sleeps after 2 minutes idle (in code), 10-hour monthly meter in the agents Worker.
 locals {
-  sandbox_container = {
-    name          = "rhumbatron-sandbox-${local.environment}"
-    image         = "docker.io/cloudflare/sandbox:0.12.6"
-    instance_type = "basic"
-    # Paused: no Sandbox can start.
-    max_instances = local.paused ? 0 : 1
-    class_name    = "Sandbox"
-    script_name   = module.agents_worker.name
-  }
-  # Repo-relative paths keep the trigger identical on every machine.
-  sandbox_script = {
-    main_module = local.bundles.agents.main_module
-    modules     = local.bundles.agents.modules
+  sandbox_worker = {
+    script_name         = "rhumbatron-sandbox-${local.environment}"
+    app_name            = "rhumbatron-sandbox-${local.environment}"
+    class_name          = "Sandbox"
+    image               = "docker.io/cloudflare/sandbox:0.12.6"
+    instance_type       = "basic"
+    max_instances       = local.paused ? 0 : 1
+    compatibility_date  = local.bundles.sandbox.compatibility_date
+    compatibility_flags = local.bundles.sandbox.compatibility_flags
+    main_module         = local.bundles.sandbox.main_module
+    modules             = local.bundles.sandbox.modules
+    bundle_sha256       = local.bundles.sandbox.bundle_sha256
   }
 }
 
-resource "terraform_data" "sandbox_container" {
-  triggers_replace = {
-    config = jsonencode(local.sandbox_container)
-    script = jsonencode(local.sandbox_script)
-    # Inputs that make Terraform re-upload the agents script. Update when its bindings gain an input.
-    upload = sha256(jsonencode([
-      local.bundles.agents.bundle_sha256,
-      local.bundles.agents.compatibility_date,
-      local.bundles.agents.compatibility_flags,
-      var.openrouter_api_key,
-      module.ai.gateway_id,
-      module.state.bindings.DB,
-      module.state.bindings.EVIDENCE,
-    ]))
+resource "terraform_data" "sandbox_worker" {
+  triggers_replace = { config = jsonencode(local.sandbox_worker) }
+  # Kept on the resource so the destroy-time provisioner can read it.
+  input = {
+    account_id = var.account_id
+    repo_root  = local.repo_root
+    config     = jsonencode(local.sandbox_worker)
   }
 
   provisioner "local-exec" {
-    command = "bun ${local.repo_root}/scripts/containers-sync.ts"
+    command = "bun ${self.input.repo_root}/scripts/sandbox-deploy.ts"
     environment = {
       RHUMBATRON_INVOKED_BY = "terraform"
-      CONTAINERS_ACCOUNT_ID = var.account_id
-      CONTAINERS_REPO_ROOT  = local.repo_root
-      CONTAINERS_CONFIG     = jsonencode(local.sandbox_container)
-      CONTAINERS_SCRIPT     = jsonencode(local.sandbox_script)
+      SANDBOX_MODE          = "deploy"
+      SANDBOX_ACCOUNT_ID    = self.input.account_id
+      SANDBOX_REPO_ROOT     = self.input.repo_root
+      SANDBOX_CONFIG        = self.input.config
     }
   }
 
-  depends_on = [module.agents_worker]
+  provisioner "local-exec" {
+    when    = destroy
+    command = "bun ${self.input.repo_root}/scripts/sandbox-deploy.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      SANDBOX_MODE          = "destroy"
+      SANDBOX_ACCOUNT_ID    = self.input.account_id
+      SANDBOX_REPO_ROOT     = self.input.repo_root
+      SANDBOX_CONFIG        = self.input.config
+    }
+  }
 }
 
 # One consumer for all wake commands. Poison commands go to the dead-letter Queue (section 42.7).

@@ -2,7 +2,6 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { type SandboxSmokeResult, sandboxSmoke } from "./sandbox-smoke.ts";
 import { handleWake } from "./wake-consumer.ts";
 
-export { Sandbox } from "@cloudflare/sandbox";
 export { AgentDO } from "./agent-do.ts";
 
 export default class Agents extends WorkerEntrypoint<Env> {

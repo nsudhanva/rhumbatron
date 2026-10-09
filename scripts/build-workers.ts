@@ -26,12 +26,14 @@ const deployables: Deployable[] = [
     mainModule: "index.js",
     assetsDir: "apps/web/dist/client",
   },
-  ...["api", "coordinator", "agents", "event-router", "integration", "indexer"].map((name) => ({
-    name,
-    dir: `workers/${name}`,
-    outDir: `workers/${name}/dist`,
-    mainModule: "index.js",
-  })),
+  ...["api", "coordinator", "agents", "event-router", "integration", "indexer", "sandbox"].map(
+    (name) => ({
+      name,
+      dir: `workers/${name}`,
+      outDir: `workers/${name}/dist`,
+      mainModule: "index.js",
+    }),
+  ),
 ];
 
 async function listFiles(dir: string): Promise<string[]> {
