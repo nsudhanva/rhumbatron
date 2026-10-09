@@ -24,7 +24,18 @@ export const ChangeSetIntent = z.object({
       commit: z.string(),
       baseCommit: z.string(),
       diffStat: z.string(),
+      /** Every file that differs from `baseCommit`, inherited dependency changes included. */
       files: z.array(z.string()),
+      /**
+       * Stacked workspace lineage: ChangeSets of the Task's dependencies (transitive, in merge
+       * order) merged onto `baseCommit` before the agent's first edit. This commit descends from
+       * theirs, so composition merges them as shared history, not as concurrent edits.
+       */
+      stackedOn: z.array(z.string()).default([]),
+      /** HEAD after the stacked merges: the agent's starting point. Absent when nothing stacked. */
+      startCommit: z.string().optional(),
+      /** Files this Task itself changed (diff from `startCommit`). Absent when nothing stacked. */
+      ownFiles: z.array(z.string()).optional(),
     })
     .optional(),
 });

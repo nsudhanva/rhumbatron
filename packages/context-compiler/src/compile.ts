@@ -55,11 +55,25 @@ export type CompileInput = {
   }[];
   /** Canonical source files (paths only). Agents read contents with tools, not from the packet. */
   repository?: { commit: string; files: string[] };
+  /**
+   * Dependency ChangeSets merged, in this order, onto the canonical commit before the agent's first
+   * edit (stacked workspace). Facts from stored ChangeSets only: IDs, commits, and changed files.
+   */
+  inheritedChangeSets?: {
+    changeSetId: string;
+    taskKey: string;
+    title: string;
+    commit: string;
+    files: string[];
+  }[];
   allowedTools: string[];
   budget: { maxModelCalls: number; budgetUsd: number };
   /** Hard ceiling for the rendered items. Lower-priority items are dropped first. */
   maxTokens: number;
 };
+
+/** Files listed per inherited ChangeSet; the rest are counted. */
+const MAX_INHERITED_FILES = 40;
 
 const bullets = (items: readonly string[]) => items.map((s) => `- ${s}`).join("\n") || "- none";
 
@@ -106,6 +120,24 @@ export function compilePacket(input: CompileInput): ContextPacket {
       capturedAt: now,
       title: `Repository at commit ${input.repository.commit.slice(0, 12)} (${input.repository.files.length} files)`,
       body: `${shown.join("\n")}${input.repository.files.length > shown.length ? "\n…" : ""}\n\nRead files with read_file before declaring changes to them.`,
+    });
+  }
+  const inherited = input.inheritedChangeSets ?? [];
+  if (inherited.length > 0) {
+    required.push({
+      itemId: `stack:${task.id}`,
+      source: "dependency_changeset",
+      sourceVersion: inherited.map((c) => c.commit).join(","),
+      capturedAt: now,
+      title: `Inherited upstream work (${inherited.length} ChangeSet${inherited.length === 1 ? "" : "s"})`,
+      body: [
+        "These upstream ChangeSets are merged, in this order, on top of the repository commit above. read_file and list_files show the merged result. Extend these files; do not re-create them.",
+        ...inherited.map((c) => {
+          const shown = c.files.slice(0, MAX_INHERITED_FILES);
+          const more = c.files.length - shown.length;
+          return `${c.taskKey || c.changeSetId} (${c.title}): ChangeSet ${c.changeSetId} at commit ${c.commit.slice(0, 12)}, files changed from the repository commit:\n${bullets(shown)}${more > 0 ? `\n- … ${more} more` : ""}`;
+        }),
+      ].join("\n\n"),
     });
   }
   const optional: ContextItem[] = [

@@ -12,7 +12,15 @@ export type ComposableChangeSet = {
   /** ChangeSet IDs this one needs in the same composition. */
   dependsOn?: readonly string[];
   intent: Pick<ChangeSetIntent, "expectedContractChanges" | "expectedDataChanges"> & {
-    changeSet?: { files: readonly string[] } | undefined;
+    changeSet?:
+      | {
+          files: readonly string[];
+          /** Dependency ChangeSets this one was built on (stacked workspace). */
+          stackedOn?: readonly string[] | undefined;
+          /** Files this ChangeSet itself changed; `files` also holds inherited ones. */
+          ownFiles?: readonly string[] | undefined;
+        }
+      | undefined;
   };
 };
 
@@ -138,8 +146,13 @@ function touchesProtected(change: string, resource: string): boolean {
 /** Numbered migration files, for example `migrations/0003_wishlists.sql`. */
 const MIGRATION_FILE = /(?:^|\/)migrations\/(?:.*\/)?(\d+)_[^/]+\.sql$/;
 
+/** Files the ChangeSet itself changed: inherited files of a stacked ChangeSet are not its edits. */
+function ownFiles(cs: ComposableChangeSet): readonly string[] {
+  return cs.intent.changeSet?.ownFiles ?? cs.intent.changeSet?.files ?? [];
+}
+
 function migrationNumbers(cs: ComposableChangeSet): number[] {
-  return (cs.intent.changeSet?.files ?? []).flatMap((f) => {
+  return ownFiles(cs).flatMap((f) => {
     const m = MIGRATION_FILE.exec(f);
     return m?.[1] ? [Number(m[1])] : [];
   });
@@ -152,8 +165,34 @@ function migrationNumbers(cs: ComposableChangeSet): number[] {
  * Bump it whenever `checkCompatibility` accepts or rejects a different set of compositions.
  * 2: two declarations of one contract conflict only on removal vs not, disjoint status codes, or
  * append-only vs mutable data model, not on wording.
+ * 4: stacked workspaces. A ChangeSet stacked on another (it descends from that commit) is never in
+ * contract, migration, or file conflict with it; a ChangeSet whose stacked ancestor is missing from
+ * the composition is an unsatisfied dependency; overlap uses the files a ChangeSet itself changed.
  */
-export const COMPOSITION_RULES_VERSION = 3;
+export const COMPOSITION_RULES_VERSION = 4;
+
+/**
+ * Transitive `stackedOn` ancestors of each ChangeSet. A pair where one is an ancestor of the other
+ * shares history: the later one already merged and extended the earlier one's source.
+ */
+function stackAncestors(sets: readonly ComposableChangeSet[]): Map<string, Set<string>> {
+  const direct = new Map(sets.map((cs) => [cs.id, cs.intent.changeSet?.stackedOn ?? []]));
+  const memo = new Map<string, Set<string>>();
+  const visit = (id: string, path: Set<string>): Set<string> => {
+    const known = memo.get(id);
+    if (known) return known;
+    const out = new Set<string>();
+    for (const parent of direct.get(id) ?? []) {
+      if (path.has(parent)) continue; // A cycle cannot come from real commits; do not loop.
+      out.add(parent);
+      for (const a of visit(parent, new Set([...path, parent]))) out.add(a);
+    }
+    memo.set(id, out);
+    return out;
+  };
+  for (const cs of sets) visit(cs.id, new Set([cs.id]));
+  return memo;
+}
 
 /**
  * Returns the first incompatibility, checked in this order: base generation, dependencies, protected
@@ -190,6 +229,23 @@ export function checkCompatibility(
     }
   }
 
+  // A stacked ChangeSet's commit already contains its ancestors' source: composing it without
+  // them would ship their changes unselected (for example the losing side of a design fork).
+  for (const cs of sets) {
+    const missing = (cs.intent.changeSet?.stackedOn ?? []).filter((dep) => !ids.has(dep));
+    if (missing.length > 0) {
+      return {
+        ok: false,
+        kind: "unsatisfied_dependency",
+        detail: `${cs.id} is stacked on ${missing.join(", ")}, which is not in the composition; its commit already carries that source`,
+      };
+    }
+  }
+
+  const ancestors = stackAncestors(sets);
+  const stacked = (a: string, b: string) =>
+    (ancestors.get(a)?.has(b) ?? false) || (ancestors.get(b)?.has(a) ?? false);
+
   for (const cs of sets) {
     for (const change of [...cs.intent.expectedContractChanges, ...cs.intent.expectedDataChanges]) {
       const hit = options.protectedResources?.find((r) => touchesProtected(change, r));
@@ -205,37 +261,43 @@ export function checkCompatibility(
 
   const dismissed = new Set(options.dismissedContractKeys ?? []);
   for (const field of ["expectedContractChanges", "expectedDataChanges"] as const) {
-    const seen = new Map<string, { id: string; text: string }>();
+    const seen = new Map<string, { id: string; text: string }[]>();
     for (const cs of sets) {
       for (const change of cs.intent[field]) {
         const key = contractKey(change);
         if (dismissed.has(key)) continue;
-        const prior = seen.get(key);
-        const disagreement = prior && prior.id !== cs.id && disagree(prior.text, normalize(change));
-        if (prior && disagreement) {
-          return {
-            ok: false,
-            kind: "contract_conflict",
-            detail: `${prior.id} and ${cs.id} change ${key} incompatibly (${disagreement}): "${prior.text}" vs "${normalize(change)}"`,
-          };
+        const text = normalize(change);
+        const priors = seen.get(key) ?? [];
+        // A stacked descendant may redefine its ancestor's contract: it built on it knowingly.
+        for (const prior of priors) {
+          if (prior.id === cs.id || stacked(prior.id, cs.id)) continue;
+          const disagreement = disagree(prior.text, text);
+          if (disagreement) {
+            return {
+              ok: false,
+              kind: "contract_conflict",
+              detail: `${prior.id} and ${cs.id} change ${key} incompatibly (${disagreement}): "${prior.text}" vs "${text}"`,
+            };
+          }
         }
-        if (!prior) seen.set(key, { id: cs.id, text: normalize(change) });
+        seen.set(key, [...priors, { id: cs.id, text }]);
       }
     }
   }
 
-  const migrationOwner = new Map<number, string>();
+  const migrationOwners = new Map<number, string[]>();
   for (const cs of sets) {
-    for (const n of migrationNumbers(cs)) {
-      const owner = migrationOwner.get(n);
-      if (owner && owner !== cs.id) {
+    for (const n of new Set(migrationNumbers(cs))) {
+      const owners = migrationOwners.get(n) ?? [];
+      const owner = owners.find((o) => o !== cs.id && !stacked(o, cs.id));
+      if (owner) {
         return {
           ok: false,
           kind: "migration_order",
           detail: `${owner} and ${cs.id} both add migration number ${n}`,
         };
       }
-      migrationOwner.set(n, cs.id);
+      migrationOwners.set(n, [...owners, cs.id]);
     }
   }
   const byId = new Map(sets.map((cs) => [cs.id, cs]));
@@ -244,6 +306,7 @@ export function checkCompatibility(
     for (const dep of cs.dependsOn ?? []) {
       const depSet = byId.get(dep);
       if (!depSet) continue;
+      if (stacked(dep, cs.id)) continue; // Inherited migrations are already in order.
       const depMax = Math.max(...migrationNumbers(depSet));
       const early = own.find((n) => n < depMax);
       if (early !== undefined) {
@@ -256,18 +319,21 @@ export function checkCompatibility(
     }
   }
 
-  const fileOwner = new Map<string, string>();
+  // Shared files between a ChangeSet and its stacked ancestor are inherited, not concurrent
+  // edits. Siblings (neither stacked on the other) that both change a file are still reported.
+  const fileOwners = new Map<string, string[]>();
   for (const cs of sets) {
-    for (const file of new Set(cs.intent.changeSet?.files ?? [])) {
-      const owner = fileOwner.get(file);
-      if (owner && owner !== cs.id) {
+    for (const file of new Set(ownFiles(cs))) {
+      const owners = fileOwners.get(file) ?? [];
+      const owner = owners.find((o) => o !== cs.id && !stacked(o, cs.id));
+      if (owner) {
         return {
           ok: false,
           kind: "file_conflict",
           detail: `source conflict: ${owner} and ${cs.id} both change ${file}`,
         };
       }
-      fileOwner.set(file, cs.id);
+      fileOwners.set(file, [...owners, cs.id]);
     }
   }
 

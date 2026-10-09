@@ -105,6 +105,38 @@ describe("composition scope and order", () => {
     expect(ordered.map((r) => r.id)).toEqual(["cs_db", "cs_api"]);
   });
 
+  it("merges a stacked ChangeSet after its ancestors, even with no direct Work Graph edge", () => {
+    const sha = (c: string) => c.repeat(40);
+    const stacked = (id: string, task: string, at: string, on: string[]): ChangeSetRow => ({
+      id,
+      base_generation: 1,
+      artifact_ref: null,
+      intent_json: JSON.stringify({
+        summary: id,
+        changeSet: {
+          fork: `ws-${id}`,
+          commit: sha("a"),
+          baseCommit: sha("b"),
+          diffStat: "",
+          files: [],
+          stackedOn: on,
+        },
+      }),
+      created_at: at,
+      task_id: task,
+    });
+    // t5 was created first (clock skew) and depends on t3 only through an intent-only t4.
+    const { ordered } = orderChangeSets(
+      [
+        stacked("cs_t5", "t5", "2026-10-09T10:00:00Z", ["cs_t3"]),
+        stacked("cs_t3", "t3", "2026-10-09T10:05:00Z", []),
+        { ...stacked("cs_bad", "t9", "2026-10-09T09:00:00Z", []), intent_json: "{oops" },
+      ],
+      [],
+    );
+    expect(ordered.map((r) => r.id)).toEqual(["cs_bad", "cs_t3", "cs_t5"]);
+  });
+
   it("an unplanned goal still protects what the user asked to keep", () => {
     const scope = verificationTouches({
       goal: "Add shared wishlists. Keep existing cart behavior unchanged. Keep API p95 below 150 ms.",

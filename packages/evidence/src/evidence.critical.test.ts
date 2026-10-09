@@ -220,6 +220,8 @@ const cs = (
     contracts?: string[];
     data?: string[];
     dependsOn?: string[];
+    stackedOn?: string[];
+    ownFiles?: string[];
   } = {},
 ): ComposableChangeSet => ({
   id,
@@ -228,7 +230,11 @@ const cs = (
   intent: {
     expectedContractChanges: over.contracts ?? [],
     expectedDataChanges: over.data ?? [],
-    changeSet: { files: over.files ?? [] },
+    changeSet: {
+      files: over.files ?? [],
+      ...(over.stackedOn ? { stackedOn: over.stackedOn } : {}),
+      ...(over.ownFiles ? { ownFiles: over.ownFiles } : {}),
+    },
   },
 });
 
@@ -338,6 +344,81 @@ describe("checkCompatibility", () => {
       cs("b", { files: ["migrations/0004_share.sql"], dependsOn: ["a"] }),
     ]);
     expect(r).toMatchObject({ ok: false, kind: "migration_order" });
+  });
+});
+
+describe("checkCompatibility with stacked workspaces", () => {
+  // The live t3 -> t4 shape: t4 started from t3's commit, so it lists t3's files too and edits them.
+  const t3Files = ["src/wishlist.ts", "src/app.ts", "migrations/0004_wishlists.sql"];
+  const t3 = cs("t3", {
+    files: t3Files,
+    contracts: ["POST /api/wishlists - returns 201"],
+  });
+  const t4 = cs("t4", {
+    files: ["src/wishlist.ts", "src/app.ts", "src/share.ts", "migrations/0004_wishlists.sql"],
+    ownFiles: ["src/wishlist.ts", "src/share.ts"],
+    contracts: ["POST /api/wishlists - returns 200"],
+    stackedOn: ["t3"],
+    dependsOn: ["t3"],
+  });
+
+  it("never reports a stacked ChangeSet as conflicting with its own ancestors", () => {
+    expect(checkCompatibility(1841, [t3, t4])).toEqual({ ok: true });
+    // Transitive: t5 is stacked on t4 (and so on t3) and edits t3's file again.
+    const t5 = cs("t5", {
+      files: ["src/wishlist.ts", "src/app.ts", "src/share.ts", "migrations/0004_wishlists.sql"],
+      ownFiles: ["src/wishlist.ts", "migrations/0004_wishlists.sql"],
+      stackedOn: ["t3", "t4"],
+    });
+    expect(checkCompatibility(1841, [t3, t4, t5])).toEqual({ ok: true });
+  });
+
+  it("still checks siblings stacked on one ancestor against each other", () => {
+    const sibling = (id: string, own: string[], contracts: string[] = []) =>
+      cs(id, {
+        files: [...t3Files, ...own],
+        ownFiles: own,
+        stackedOn: ["t3"],
+        contracts,
+      });
+    // Both inherit t3's files: no conflict from inheritance alone.
+    expect(
+      checkCompatibility(1841, [
+        t3,
+        sibling("a", ["src/share.ts"]),
+        sibling("b", ["src/collab.ts"]),
+      ]),
+    ).toEqual({ ok: true });
+    // Both edit the same file themselves: a real concurrent edit.
+    expect(
+      checkCompatibility(1841, [
+        t3,
+        sibling("a", ["src/wishlist.ts"]),
+        sibling("b", ["src/wishlist.ts"]),
+      ]),
+    ).toMatchObject({
+      ok: false,
+      kind: "file_conflict",
+      detail: expect.stringContaining("a and b"),
+    });
+    // Disagreeing contracts between siblings are still a contract conflict.
+    expect(
+      checkCompatibility(1841, [
+        t3,
+        sibling("a", ["src/a.ts"], ["GET /api/wishlists/:id - returns 200"]),
+        sibling("b", ["src/b.ts"], ["GET /api/wishlists/:id - returns 404"]),
+      ]),
+    ).toMatchObject({ ok: false, kind: "contract_conflict" });
+  });
+
+  it("rejects a stacked ChangeSet composed without its ancestor", () => {
+    // No Work Graph edge in the composition (an intent-only Task between them): the stack decides.
+    const alone = cs("t4", { files: ["src/share.ts"], stackedOn: ["t3"] });
+    expect(checkCompatibility(1841, [alone])).toMatchObject({
+      ok: false,
+      kind: "unsatisfied_dependency",
+      detail: expect.stringContaining("stacked on t3"),
+    });
   });
 });
 

@@ -76,6 +76,28 @@ describe("compilePacket", () => {
     expect(packet.tokenEstimate).toBeLessThanOrEqual(500);
   });
 
+  it("tells a stacked Task which upstream ChangeSets its workspace already contains", () => {
+    const packet = compilePacket({
+      ...base,
+      inheritedChangeSets: [
+        {
+          changeSetId: "cs_x_t3_1",
+          taskKey: "t3",
+          title: "Wishlist CRUD",
+          commit: "a".repeat(40),
+          files: ["src/wishlist.ts", "src/app.ts"],
+        },
+      ],
+      maxTokens: 10,
+    });
+    // Required, like the Task itself: never trimmed for budget.
+    const item = packet.items.find((i) => i.source === "dependency_changeset");
+    expect(item?.sourceVersion).toBe("a".repeat(40));
+    expect(item?.body).toContain("cs_x_t3_1");
+    expect(item?.body).toContain("- src/wishlist.ts");
+    expect(compilePacket(base).items.some((i) => i.source === "dependency_changeset")).toBe(false);
+  });
+
   it("hashes identical inputs identically", async () => {
     expect(await packetHash(compilePacket(base))).toBe(await packetHash(compilePacket(base)));
   });

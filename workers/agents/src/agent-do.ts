@@ -54,6 +54,7 @@ import type {
   AgentRunState,
   AgentRuntime,
 } from "./runtime.ts";
+import { type ChangeSetRowForStack, type StackSource, stackFor } from "./stack.ts";
 import { taskExtension } from "./task-tools.ts";
 import {
   closeWorkspace,
@@ -510,6 +511,23 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     // Canonical source (ADR 0010): the file index is read from R2, never by walking the repo here.
     const source = await this.canonicalSource(input.projectId);
 
+    // Stacked workspace: the dependencies' published ChangeSets this Task builds on, fixed for the
+    // whole run so a Sandbox restore repeats the same merges (section 42.5).
+    let stack: StackSource[] = [];
+    let stackTasks = new Map<string, { key: string; title: string }>();
+    if (source) {
+      try {
+        ({ stack, tasks: stackTasks } = await this.dependencyStack(input));
+      } catch (error) {
+        await this.failTask(
+          input,
+          task,
+          `dependency_stack_invalid: ${String(error).slice(0, 200)}`,
+        );
+        return { runId: "", accepted: false, state: { status: "idle" } };
+      }
+    }
+
     // Context Packet (P7-01, P7-09): deterministic, stored in R2 by hash before the model runs.
     const packet = compilePacket({
       projectId: input.projectId,
@@ -536,6 +554,13 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       ...(await this.intentsFor(input.changeId, task)),
       priorFailures: await this.priorFailures(input.taskId),
       ...(source ? { repository: { commit: source.commit, files: source.files } } : {}),
+      inheritedChangeSets: stack.map((s) => ({
+        changeSetId: s.changeSetId,
+        taskKey: stackTasks.get(s.taskId)?.key ?? "",
+        title: stackTasks.get(s.taskId)?.title ?? "",
+        commit: s.commit,
+        files: s.files,
+      })),
       allowedTools: !source
         ? ["complete_task", "fail_task"]
         : WORKSPACE_KINDS.has(task.kind)
@@ -569,6 +594,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         budgetUsd,
         provider,
         source: source ? { commit: source.commit, files: source.files } : null,
+        stack,
       }),
       this.prompt,
       now,
@@ -701,7 +727,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   private async finishRun(
     result:
       | { ok: true; intent: Record<string, unknown> }
-      | { ok: false; kind: FailureKind; reason: string },
+      | { ok: false; kind: FailureKind | "dependency_merge_conflict"; reason: string },
   ): Promise<string> {
     const run = this.activeRun();
     if (!run) return "No active run. Stop.";
@@ -813,7 +839,13 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
           await changeEvent(
             ctx,
             "changeset.proposed",
-            { changeSetId, fork: published.fork, commit: published.commit, files: published.files },
+            {
+              changeSetId,
+              fork: published.fork,
+              commit: published.commit,
+              files: published.files,
+              stackedOn: published.stackedOn,
+            },
             { taskId: input.taskId, actor },
           ),
         ]);
@@ -862,6 +894,17 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     }
 
     await this.env.DB.batch([runUpdate]);
+    // Conflicting dependency ChangeSets do not merge on any retry or tier: fail the Task now.
+    if (result.kind === "dependency_merge_conflict") {
+      log({
+        event: "agent.run_failed",
+        taskId: input.taskId,
+        runId: run.run_id,
+        kind: result.kind,
+      });
+      await this.failTask(input, null, result.reason);
+      return "Recorded. Stop now.";
+    }
     const failures: Failure[] = [{ tier: run.tier, kind: result.kind }];
     const step = nextStep(run.tier, failures);
     log({
@@ -1131,9 +1174,17 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       change: { changeId: input.changeId, taskId: input.taskId },
       runId: source.run.run_id,
       baseCommit: source.commit,
+      stack: source.stack,
     });
-    // Monthly Sandbox meter or the per-Change Sandbox limit (section 44): no Sandbox opened.
-    if ("refused" in ws) return ws.message;
+    if ("refused" in ws) {
+      // Dependencies that do not merge: no fork, no Sandbox time left behind; the Task fails.
+      if (ws.refused === "dependency_merge_conflict") {
+        await this.finishRun({ ok: false, kind: "dependency_merge_conflict", reason: ws.message });
+        return `${ws.message} The Task has failed. Stop now.`;
+      }
+      // Monthly Sandbox meter or the per-Change Sandbox limit (section 44): no Sandbox opened.
+      return ws.message;
+    }
     this.ctx.storage.sql.exec(
       "INSERT OR REPLACE INTO run_workspaces (run_id, ws_json) VALUES (?, ?)",
       source.run.run_id,
@@ -1176,19 +1227,69 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     return { commit: parsed.commit, files: parsed.files };
   }
 
-  private runSource(): { run: RunRow; projectId: string; commit: string; files: string[] } | null {
+  private runSource(): {
+    run: RunRow;
+    projectId: string;
+    commit: string;
+    files: string[];
+    stack: StackSource[];
+    taskKind: string;
+  } | null {
     const run = this.activeRun();
     if (!run) return null;
     const input = JSON.parse(run.input_json) as AgentRunInput & {
       source: { commit: string; files: string[] } | null;
+      stack?: StackSource[];
+      taskKind?: string;
     };
-    return input.source ? { run, projectId: input.projectId, ...input.source } : null;
+    return input.source
+      ? {
+          run,
+          projectId: input.projectId,
+          ...input.source,
+          stack: input.stack ?? [],
+          taskKind: input.taskKind ?? "",
+        }
+      : null;
   }
 
+  /**
+   * Dependency ChangeSets of the Task (transitive, merge order) and the keys and titles of their
+   * Tasks. Three small reads, scoped to the Change and its base generation.
+   */
+  private async dependencyStack(input: AgentRunInput) {
+    const [edges, rows, tasks] = await this.env.DB.batch([
+      this.env.DB.prepare(
+        "SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d JOIN tasks t ON t.id = d.task_id WHERE t.change_id = ?",
+      ).bind(input.changeId),
+      this.env.DB.prepare(
+        `SELECT cs.id, r.task_id, cs.intent_json, cs.created_at FROM changesets cs
+         JOIN task_runs r ON r.id = 'run_' || substr(cs.id, 4)
+         WHERE cs.change_id = ? AND cs.base_generation = ? AND cs.status != 'rejected'`,
+      ).bind(input.changeId, input.baseGeneration),
+      this.env.DB.prepare("SELECT id, task_key, title FROM tasks WHERE change_id = ?").bind(
+        input.changeId,
+      ),
+    ]);
+    const stack = stackFor(
+      input.taskId,
+      (edges?.results ?? []) as { task_id: string; depends_on_task_id: string }[],
+      (rows?.results ?? []) as ChangeSetRowForStack[],
+    );
+    const names = new Map(
+      (
+        (tasks?.results ?? []) as { id: string; task_key: string | null; title: string | null }[]
+      ).map((t) => [t.id, { key: t.task_key ?? "", title: t.title ?? "" }]),
+    );
+    return { stack, tasks: names };
+  }
+
+  /** Canonical files plus files the stacked dependency ChangeSets added or changed. */
   private async listFiles(prefix?: string): Promise<string> {
     const source = this.runSource();
     if (!source) return "No source repository for this Project yet.";
-    const files = source.files.filter((f) => !prefix || f.startsWith(prefix.replace(/^\.?\//, "")));
+    const all = [...new Set([...source.files, ...source.stack.flatMap((s) => s.files)])].sort();
+    const files = all.filter((f) => !prefix || f.startsWith(prefix.replace(/^\.?\//, "")));
     return files.join("\n") || "No files match.";
   }
 
@@ -1196,13 +1297,22 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   private async readSourceFile(path: string): Promise<string> {
     const source = this.runSource();
     if (!source) return "No source repository for this Project yet.";
-    const ws = this.workspaceRef(source.run.run_id);
+    let ws = this.workspaceRef(source.run.run_id);
+    // A stacked coding Task reads the merged workspace, which holds its dependencies' changes.
+    if (!ws && source.stack.length > 0 && WORKSPACE_KINDS.has(source.taskKind)) {
+      const opened = await this.workspace();
+      if (typeof opened === "string") return opened;
+      ws = opened;
+    }
     if (ws)
       return readWorkspaceFile(this.env, ws, path).catch(
         (e) => `Cannot read ${path}: ${String(e).slice(0, 120)}`,
       );
     const clean = path.replace(/^\.?\//, "");
-    if (!source.files.includes(clean)) return `No such file: ${clean}. Use list_files.`;
+    // A read-only Task reads an inherited file at the last dependency commit that changed it.
+    const inherited = source.stack.findLast((s) => s.files.includes(clean));
+    if (!inherited && !source.files.includes(clean))
+      return `No such file: ${clean}. Use list_files.`;
     const used =
       this.ctx.storage.sql
         .exec<{ n: number }>(
@@ -1212,9 +1322,10 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         .one().n ?? 0;
     if (used > MAX_READS_PER_RUN)
       return `Read limit reached (${MAX_READS_PER_RUN} files per run). Declare your Intent now.`;
-    using repo = await this.env.ARTIFACTS.get(source.projectId);
-    const blob = await repo.readFile({ ref: source.commit, path: clean });
-    if (!blob) return `No such file at ${source.commit.slice(0, 12)}: ${clean}`;
+    const at = inherited ?? { fork: source.projectId, commit: source.commit };
+    using repo = await this.env.ARTIFACTS.get(at.fork);
+    const blob = await repo.readFile({ ref: at.commit, path: clean });
+    if (!blob) return `No such file at ${at.commit.slice(0, 12)}: ${clean}`;
     const text = await blob.text();
     return text.length > MAX_FILE_CHARS ? `${text.slice(0, MAX_FILE_CHARS)}\n… (truncated)` : text;
   }

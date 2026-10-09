@@ -57,15 +57,36 @@ export type TaskEdge = { task_id: string; depends_on_task_id: string };
 const SHA = /^[0-9a-f]{40}$/;
 const REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/;
 
-/** Work Graph order: a ChangeSet merges after the ChangeSets of the Tasks it depends on. */
+/** `stackedOn` of a stored ChangeSet, or none for a row that does not parse (rejected later). */
+function stackedOn(row: ChangeSetRow): string[] {
+  try {
+    const parsed = ChangeSetIntent.safeParse(JSON.parse(row.intent_json));
+    return parsed.success ? (parsed.data.changeSet?.stackedOn ?? []) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Work Graph order: a ChangeSet merges after the ChangeSets of the Tasks it depends on, and after
+ * every ChangeSet it is stacked on (transitive, so an intent-only Task between them keeps the
+ * order). Merging an ancestor after its descendant would be a no-op, but this order keeps every
+ * merge meaningful in the composition report.
+ */
 export function orderChangeSets(rows: readonly ChangeSetRow[], edges: readonly TaskEdge[]) {
   const byTask = new Map(rows.filter((r) => r.task_id).map((r) => [r.task_id as string, r.id]));
+  const ids = new Set(rows.map((r) => r.id));
   const deps = new Map<string, Set<string>>();
   for (const row of rows) deps.set(row.id, new Set());
   for (const e of edges) {
     const from = byTask.get(e.task_id);
     const to = byTask.get(e.depends_on_task_id);
     if (from && to && from !== to) deps.get(from)?.add(to);
+  }
+  for (const row of rows) {
+    for (const ancestor of stackedOn(row)) {
+      if (ids.has(ancestor) && ancestor !== row.id) deps.get(row.id)?.add(ancestor);
+    }
   }
   const pending = [...rows].sort(
     (a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id),

@@ -11,6 +11,7 @@ export const ContextSource = z.enum([
   "change",
   "task",
   "dependency_intent",
+  "dependency_changeset",
   "nearby_intent",
   "prior_failure",
   "policy",
