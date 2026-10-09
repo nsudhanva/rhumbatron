@@ -36,7 +36,8 @@
     "tf:drift": "bun scripts/tf.ts global plan -detailed-exitcode && bun scripts/tf.ts dev plan -detailed-exitcode",
     "smoke:dev": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/smoke.ts dev",
     "smoke:plan": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/smoke.ts dev --plan",
-    "smoke:models": "OPENROUTER_API_KEY=$(security find-generic-password -s rhumbatron-openrouter-api-key -w) VERTEX_SERVICE_ACCOUNT=$(security find-generic-password -s rhumbatron-vertex-sa-dev -w) CLOUDFLARE_ACCOUNT_ID=$(security find-generic-password -s rhumbatron-cloudflare-account-id -w) bun scripts/smoke-models.ts dev"
+    "smoke:models": "OPENROUTER_API_KEY=$(security find-generic-password -s rhumbatron-openrouter-api-key -w) VERTEX_SERVICE_ACCOUNT=$(security find-generic-password -s rhumbatron-vertex-sa-dev -w) CLOUDFLARE_ACCOUNT_ID=$(security find-generic-password -s rhumbatron-cloudflare-account-id -w) bun scripts/smoke-models.ts dev",
+    "cost:report": "CLOUDFLARE_MONITOR_TOKEN=$(security find-generic-password -s rhumbatron-cloudflare-monitor-token -w) CLOUDFLARE_D1_TOKEN=$(security find-generic-password -s rhumbatron-cloudflare-api-token -w) CLOUDFLARE_ACCOUNT_ID=$(security find-generic-password -s rhumbatron-cloudflare-account-id -w) bun scripts/cost-report.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
