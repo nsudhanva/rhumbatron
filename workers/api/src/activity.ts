@@ -45,7 +45,7 @@ const PROGRESS_LIMIT = 50;
 
 /** Must match the WHERE term of idx_project_events_change_claims exactly to use that index. */
 const CLAIM_TYPES_SQL =
-  "event_type IN ('claim.acquired', 'claim.renewed', 'claim.released', 'claim.expired')";
+  "event_type IN ('claim.acquired', 'claim.renewed', 'claim.released', 'claim.expired', 'claim.contended')";
 
 const ACTIVE_CHANGE_SQL =
   "status IN ('created', 'compiling', 'running', 'verifying', 'awaiting_approval', 'promoting', 'releasing')";
@@ -128,13 +128,16 @@ const toClaimFact = (row: {
   const data = JSON.parse(row.data_json) as Record<string, unknown>;
   const action = row.event_type.slice("claim.".length);
   if (typeof data.claimId !== "string" || typeof data.agentId !== "string") return null;
-  if (!["acquired", "renewed", "released", "expired"].includes(action)) return null;
+  if (!["acquired", "renewed", "released", "expired", "contended"].includes(action)) return null;
   return {
     seq: row.seq,
     eventId: row.event_id,
     action: action as ClaimFact["action"],
     claimId: data.claimId,
     agentId: data.agentId,
+    ...(action === "contended" && typeof data.heldByAgentId === "string"
+      ? { heldByAgentId: data.heldByAgentId }
+      : {}),
     resource: row.resource ?? "",
     leaseExpiresAt: typeof data.leaseExpiresAt === "string" ? data.leaseExpiresAt : null,
     occurredAt: row.occurred_at,
@@ -278,11 +281,20 @@ export const activity = new Hono<AppEnv>()
         data_json: string;
       }>();
     const all = rows.results ?? [];
-    const facts = all
+    const recordedFacts = all
       .slice(0, CLAIM_FEED_LIMIT)
       .reverse()
       .map(toClaimFact)
       .filter((f): f is ClaimFact => f !== null);
+    // Older projections omitted heldByAgentId. A lifecycle fact with the same immutable
+    // Claim ID records its owner; use that evidence when it exists in this bounded feed.
+    const holderByClaim = new Map(
+      recordedFacts.filter((f) => f.action !== "contended").map((f) => [f.claimId, f.agentId]),
+    );
+    const facts = recordedFacts.map((fact) => {
+      const holder = fact.heldByAgentId ?? holderByClaim.get(fact.claimId);
+      return fact.action === "contended" && holder ? { ...fact, heldByAgentId: holder } : fact;
+    });
     return respond(c, apiData(ChangeClaims), {
       data: {
         facts,

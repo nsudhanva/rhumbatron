@@ -45,7 +45,9 @@
     "producers": [
       { "binding": "AGENT_WAKEUPS", "queue": "rhumbatron-agent-wakeups-local" },
       // The Causal Router hands newly ready Tasks to the integration Worker's dispatcher.
-      { "binding": "INTEGRATION_COMMANDS", "queue": "rhumbatron-integration-local" }
+      { "binding": "INTEGRATION_COMMANDS", "queue": "rhumbatron-integration-local" },
+      // `index.build` on a new canonical tree, `index.purge` for archived Projects (indexer).
+      { "binding": "INDEXING", "queue": "rhumbatron-indexing-local" }
     ],
     // Poison commands (AGENTS.md section 42.7). This consumer has no dead-letter Queue of its own:
     // a storage failure retries a bounded number of times, then the message is dropped and logged.

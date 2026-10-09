@@ -39,7 +39,7 @@ Every Worker uses the same binding names in `wrangler.jsonc` (local) and Terrafo
 | `DB` | D1 | `rhumbatron-control-dev` |
 | `CONFIG` | KV | `rhumbatron-config-dev` |
 | `EVIDENCE` | R2 | `rhumbatron-evidence-dev` |
-| `MEMORY` | Vectorize (deferred, ADR 0003) | `rhumbatron-memory-dev` |
+| `MEMORY` | Vectorize (temporary adapter, ADR 0003) | `rhumbatron-memory-dev` |
 | Queue producers | Queues | `rhumbatron-<purpose>-dev` for agent-wakeups, integration, verification, indexing, release, dead-letter |
 
 R2 lifecycle rules are prefix-based. Write objects under `events/`, `evidence/`, or `tmp/`.
@@ -110,5 +110,5 @@ and `tflint` for every root. It does not contact the state backend and does not 
 ## Provider coverage gaps (cloudflare 5.27)
 
 No first-party resource exists yet for Vectorize, Artifacts, K2, or Sandboxes/Containers. K2 uses a
-temporary adapter (ADR 0006). Follow AGENTS.md
+temporary adapter (ADR 0006); the Vectorize index uses one too (ADR 0003). Follow AGENTS.md
 section 11.4 when a phase needs them: write an ADR first. Never call the API directly.

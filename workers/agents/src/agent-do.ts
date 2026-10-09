@@ -52,6 +52,7 @@ import {
 import { declareIntentAndDetect } from "./conflicts.ts";
 import { chooseProvider, limitAttempts, limitStop, markProviderFlag } from "./limits.ts";
 import { createTierModels, modelIdFor, PROVIDER_ID } from "./models.ts";
+import { taskRetrieval } from "./retrieval.ts";
 import type {
   AgentResumeEvent,
   AgentRunInput,
@@ -536,6 +537,23 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     }
 
     // Context Packet (P7-01, P7-09): deterministic, stored in R2 by hash before the model runs.
+    // Indexed retrieval (P7-06): exact indexes of the canonical tree first, Vectorize last.
+    const intents = await this.intentsFor(input.changeId, task);
+    const retrieval = source
+      ? await taskRetrieval(this.env, {
+          projectId: input.projectId,
+          commit: source.commit,
+          taskId: task.id,
+          texts: [
+            task.title ?? "",
+            task.objective ?? "",
+            ...(JSON.parse(task.acceptance_criteria_json) as string[]),
+          ],
+          resources: JSON.parse(task.semantic_resources_json) as string[],
+          dependencyIntents: intents.dependencyIntents,
+          inheritedFiles: stack.flatMap((s) => s.files),
+        })
+      : null;
     const packet = compilePacket({
       projectId: input.projectId,
       canonicalGeneration: input.baseGeneration,
@@ -558,7 +576,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         semanticResources: JSON.parse(task.semantic_resources_json) as string[],
         updatedAt: task.updated_at,
       },
-      ...(await this.intentsFor(input.changeId, task)),
+      ...intents,
       priorFailures: await this.priorFailures(input.taskId),
       ...(source ? { repository: { commit: source.commit, files: source.files } } : {}),
       inheritedChangeSets: stack.map((s) => ({
@@ -568,6 +586,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         commit: s.commit,
         files: s.files,
       })),
+      retrieval,
       allowedTools: !source
         ? ["complete_task", "fail_task"]
         : WORKSPACE_KINDS.has(task.kind)
@@ -1003,7 +1022,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const ctx = this.changeContext(input);
     const now = new Date().toISOString();
     // Section 44 budget stop: the Task and Change name the exact limit that was reached.
-    const stop = limitStop(reason);
+    const stop = limitStop(reason, this.env.VERTEX_SPEND_LIMIT_USD);
     const budget = stop !== null;
     const graph = await this.env.DB.batch([
       this.env.DB.prepare("SELECT id, status FROM tasks WHERE change_id = ?").bind(input.changeId),

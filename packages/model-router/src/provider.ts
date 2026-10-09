@@ -4,7 +4,7 @@ import { VERTEX_PRICES } from "./models.ts";
 /**
  * Provider choice for agent runs (ADR 0016). OpenRouter free models first; Gemini on Vertex AI is
  * the paid overflow once OpenRouter is used up for the UTC day. The AI Gateway spend limit
- * ($9 per 30 days on `google-vertex-ai`, Terraform `modules/ai`) is the hard money ceiling.
+ * (per environment on `google-vertex-ai`, Terraform `modules/ai`, ADR 0017) is the hard money ceiling.
  * Pure logic only: callers read and write the `usage_counters` rows.
  */
 

@@ -61,5 +61,7 @@
     ]
   },
   "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "rhumbatron_metrics_local" }],
+  // Semantic memory, read-only: one top-k query per run after the exact indexes (P7-06).
+  "vectorize": [{ "binding": "MEMORY", "index_name": "rhumbatron-memory-local" }],
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AgentDO"] }]
 }

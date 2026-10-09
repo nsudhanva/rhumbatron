@@ -1,3 +1,4 @@
+import { indexKeys, type ProductGraphStore } from "@rhumbatron/context-compiler";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -6,20 +7,24 @@ import { fail, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Product Graph read model (AGENTS.md sections 28 and 38.3). No Product Graph is stored yet
- * (P7-04), so this route derives one deterministically, on each read, from data that exists:
+ * Product Graph read model (AGENTS.md sections 28 and 38.3). Deterministic, no model call:
  *
+ * - Source areas and imports: the stored Product Graph of the canonical tree (P7-04), written by
+ *   rhumbatron-indexer to R2 `index/<project>/<tree>/product-graph.json` and pointed at by D1
+ *   `project_indexes`. When the canonical tree has no index yet, the newest indexed tree is used
+ *   and marked not current. With no index at all, the seeded Acme Shop import table below is the
+ *   fallback (only for Projects with source).
  * - Task semantic resources and the Intents of completed Task runs (`project:<slug>:` stripped).
  *   The area of a resource is its first segment: `wishlist:membership` and `identity.auth` belong
  *   to `wishlist` and `identity`.
  * - Exact Task dependency edges between Tasks of different areas, and areas that one Task touches
  *   together (its first resource depends on the others).
  * - ChangeSet resources and semantic conflicts of each Change.
- * - Policy `protectedResources` (section 53), the same default the integration Worker applies.
- * - The import graph of the Acme Shop fixture (`fixtures/acme-shop/src`), the only template a
- *   Project can be seeded with today. It applies only when the Project has canonical source.
+ * - Policy `protectedResources` (section 53). Project policies are not stored yet (migration 0001
+ *   has no policy table), so the default that the integration Worker applies is used.
  *
- * No model call, no Artifacts read. Reads are capped: the newest 20 Changes and their rows.
+ * No Artifacts read. Reads are capped: the newest 20 Changes and their rows, one index pointer
+ * row, and one R2 object.
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -41,8 +46,10 @@ const POLICY = { version: "policy-1", protectedResources: ["cart", "checkout", "
 const UNASSIGNED = "unassigned";
 
 /**
- * Areas and imports of `fixtures/acme-shop/src` at seed time. `store.ts`, `server.ts` and
- * `worker.ts` are runtime wiring, not product areas. Update this table with the fixture.
+ * Fallback only, for a Project whose source has no index yet: areas and imports of
+ * `fixtures/acme-shop/src` at seed time. `store.ts`, `server.ts` and `worker.ts` are runtime
+ * wiring, not product areas. The indexer derives the same areas from paths (workers/indexer
+ * build.ts), so an indexed tree never uses this table.
  */
 const FIXTURE = {
   source: "fixtures/acme-shop/src",
@@ -95,6 +102,8 @@ function edgeKind(target: string): EdgeKind {
 
 export type EdgeOrigin =
   | { kind: "fixture_import"; file: string; detail: string }
+  /** An import in the indexed canonical tree. */
+  | { kind: "source_import"; file: string; detail: string }
   | {
       kind: "task_dependency";
       changeId: string;
@@ -107,9 +116,13 @@ export type ProductGraphNode = {
   /** Area key, for example `wishlist`. */
   id: string;
   name: string;
-  /** Present in the seeded fixture source. */
+  /** Present in the canonical source (indexed tree, or the seeded fixture as fallback). */
   baseline: boolean;
   baselineFile: string | null;
+  /** Every source file of the area in the indexed tree; empty for the fixture fallback. */
+  sourceFiles: string[];
+  /** Semantic resources that promoted ChangeSets declared on this area (indexed tree). */
+  sourceResources: string[];
   /** Policy protected resources in this area, for example `identity.auth`. */
   protectedResources: string[];
   /** One entry per Change that touches the area. */
@@ -141,6 +154,12 @@ export type ProductGraph = {
   canonicalGeneration: number | null;
   policyVersion: string;
   protectedResources: string[];
+  /** Where source areas and imports came from. */
+  source:
+    | { kind: "index"; treeSha: string; commit: string | null; builtAt: string; current: boolean }
+    | { kind: "fixture" }
+    | { kind: "none" };
+  /** Fixture fallback only: `applied` is false when the graph comes from an index. */
   fixture: { applied: boolean; source: string; hiddenFiles: readonly string[] };
   changes: { id: string; goal: string; status: string; createdAt: string }[];
   nodes: ProductGraphNode[];
@@ -215,10 +234,20 @@ function intentResources(json: string | null): string[] {
 
 const unique = <T>(items: Iterable<T>) => [...new Set(items)];
 
+export type StoredGraph = {
+  graph: ProductGraphStore;
+  treeSha: string;
+  commit: string | null;
+  builtAt: string;
+  /** False when the canonical tree has moved past the newest index. */
+  current: boolean;
+};
+
 export type DeriveInput = {
   projectId: string;
   canonicalGeneration: number | null;
   hasSource: boolean;
+  stored: StoredGraph | null;
   changes: ChangeRow[];
   tasks: TaskRow[];
   dependencies: DependencyRow[];
@@ -239,6 +268,8 @@ function deriveProductGraph(input: DeriveInput): ProductGraph {
         name: areaName(area),
         baseline: false,
         baselineFile: null,
+        sourceFiles: [],
+        sourceResources: [],
         protectedResources: [],
         touches: [],
         conflicts: [],
@@ -281,8 +312,22 @@ function deriveProductGraph(input: DeriveInput): ProductGraph {
     else e.moreOrigins += 1;
   };
 
-  // 1. Seeded fixture source.
-  if (input.hasSource) {
+  // 1. Source areas: the indexed canonical tree, else the seeded fixture.
+  const stored = input.stored;
+  if (stored) {
+    for (const area of stored.graph.areas) {
+      const n = node(area.id);
+      n.baseline = true;
+      n.baselineFile = area.files[0] ?? null;
+      n.sourceFiles = [...area.files];
+      n.sourceResources = [...area.resources];
+    }
+    for (const edge of stored.graph.edges) {
+      for (const imp of edge.imports) {
+        addEdge(edge.from, edge.to, { kind: "source_import", file: imp.file, detail: imp.detail });
+      }
+    }
+  } else if (input.hasSource) {
     for (const { area, file } of FIXTURE.areas) {
       const n = node(area);
       n.baseline = true;
@@ -407,7 +452,20 @@ function deriveProductGraph(input: DeriveInput): ProductGraph {
     canonicalGeneration: input.canonicalGeneration,
     policyVersion: POLICY.version,
     protectedResources: [...POLICY.protectedResources],
-    fixture: { applied: input.hasSource, source: FIXTURE.source, hiddenFiles: FIXTURE.hiddenFiles },
+    source: stored
+      ? {
+          kind: "index",
+          treeSha: stored.treeSha,
+          commit: stored.commit,
+          builtAt: stored.builtAt,
+          current: stored.current,
+        }
+      : input.hasSource
+        ? { kind: "fixture" }
+        : { kind: "none" },
+    fixture: stored
+      ? { applied: false, source: "", hiddenFiles: stored.graph.wiringFiles }
+      : { applied: input.hasSource, source: FIXTURE.source, hiddenFiles: FIXTURE.hiddenFiles },
     changes: input.changes.map((c) => ({
       id: c.id,
       goal: c.goal,
@@ -424,6 +482,38 @@ function deriveProductGraph(input: DeriveInput): ProductGraph {
       conflicts: input.conflicts.length,
     },
     truncated: input.truncated,
+  };
+}
+
+type IndexRow = { tree_sha: string; commit_sha: string | null; built_at: string };
+
+/**
+ * The stored Product Graph of the canonical tree, else of the newest indexed tree. One D1 row and
+ * one R2 read. A missing or foreign object falls back to the derivation without it.
+ */
+async function readStoredGraph(
+  env: Env,
+  projectId: string,
+  canonicalTree: string,
+): Promise<StoredGraph | null> {
+  const row = await env.DB.prepare(
+    `SELECT tree_sha, commit_sha, built_at FROM project_indexes
+     WHERE project_id = ? AND status = 'ready'
+     ORDER BY tree_sha = ? DESC, built_at DESC LIMIT 1`,
+  )
+    .bind(projectId, canonicalTree)
+    .first<IndexRow>();
+  if (!row) return null;
+  const object = await env.EVIDENCE.get(indexKeys(projectId, row.tree_sha).productGraph);
+  if (!object) return null;
+  const graph = (await object.json()) as ProductGraphStore;
+  if (graph.projectId !== projectId || graph.treeSha !== row.tree_sha) return null;
+  return {
+    graph,
+    treeSha: row.tree_sha,
+    commit: row.commit_sha,
+    builtAt: row.built_at,
+    current: row.tree_sha === canonicalTree,
   };
 }
 
@@ -452,6 +542,8 @@ export const productGraph = new Hono<AppEnv>().get(
     const root = c.env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
     const canonical = await root.get(root.idFromName(projectId)).getCanonical();
     const hasSource = !!canonical && canonical.artifactRef !== UNASSIGNED;
+    const stored =
+      hasSource && canonical ? await readStoredGraph(c.env, projectId, canonical.treeSha) : null;
 
     let tasks: TaskRow[] = [];
     let dependencies: DependencyRow[] = [];
@@ -516,6 +608,7 @@ export const productGraph = new Hono<AppEnv>().get(
       projectId,
       canonicalGeneration: canonical?.generation ?? null,
       hasSource,
+      stored,
       changes,
       tasks: tasks.slice(0, TASK_LIMIT),
       dependencies: dependencies.slice(0, DEPENDENCY_LIMIT),

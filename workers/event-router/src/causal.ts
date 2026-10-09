@@ -6,6 +6,7 @@ import type {
   EventEnvelope,
   TaskStatus,
 } from "@rhumbatron/protocol";
+import { indexCommands } from "./indexing.ts";
 
 /**
  * Causal Router (AGENTS.md section 31). Deterministic rules first; Clef-flash only for ambiguous
@@ -324,6 +325,10 @@ export async function routeCausalBatch(
   }
   if (commands.length > 0) {
     await env.AGENT_WAKEUPS.sendBatch(commands.map((body) => ({ body, contentType: "json" })));
+  }
+  const indexing = indexCommands(relevant);
+  if (indexing.length > 0) {
+    await env.INDEXING.sendBatch(indexing.map((body) => ({ body, contentType: "json" })));
   }
   const staled = await settleCandidates(env, relevant);
   return { woke: commands.length, dispatched: dispatches.size, composed: composes.length, staled };

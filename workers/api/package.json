@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@clerk/backend": "3.23.1",
+    "@rhumbatron/context-compiler": "workspace:*",
     "@rhumbatron/protocol": "workspace:*",
     "hono": "4.13.13",
     "zod": "4.6.5"

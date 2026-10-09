@@ -78,6 +78,31 @@ resource "cloudflare_dns_record" "clerk" {
   comment = "Clerk production instance (managed by Terraform, envs/prod)"
 }
 
+# Per-environment caps (ADR 0017). The approved Sandbox (10 h/month, HOM-192) and Browser Run
+# (500 s/day) budgets are split evenly between dev and prod; each Worker reads its share from a
+# binding and enforces it on this environment's D1 meter. The Vertex cap is per gateway
+# (var.vertex_spend_limit_usd) and is mirrored to the Workers for budget-stop and Costs page text.
+locals {
+  caps = {
+    sandbox_monthly_seconds = 18000 # 5 h of the 10 h total
+    browser_daily_seconds   = 250   # half of the 500 s guard, under the 600 s free figure
+  }
+  cap_bindings = {
+    sandbox = { type = "plain_text", name = "SANDBOX_MONTHLY_SECONDS", text = tostring(local.caps.sandbox_monthly_seconds) }
+    browser = { type = "plain_text", name = "BROWSER_DAILY_SECONDS", text = tostring(local.caps.browser_daily_seconds) }
+    vertex  = { type = "plain_text", name = "VERTEX_SPEND_LIMIT_USD", text = tostring(var.vertex_spend_limit_usd) }
+  }
+}
+
+# Prod temporarily uses the Clerk dev instance (ADR 0017). A warning, not an error, so the plan
+# still runs; swap the Keychain items and set clerk_dns_records when the production instance exists.
+check "clerk_production_instance" {
+  assert {
+    condition     = startswith(var.clerk_publishable_key, "pk_live_")
+    error_message = "Prod uses a Clerk development key (pk_test_). Replace it with the production instance key and set clerk_dns_records (ADR 0017)."
+  }
+}
+
 # Worker bundles come from `bun run cf:bundle`. Run it before plan. Bundles are the same for every
 # environment; environment config travels in bindings.
 locals {
@@ -105,7 +130,7 @@ module "api_worker" {
     { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
     { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-api-${local.environment}" },
     # Prod hosts only: no localhost.
-    { type = "plain_text", name = "CLERK_AUTHORIZED_PARTIES", text = "https://${local.hostnames.web}" },
+    { type = "plain_text", name = "CLERK_AUTHORIZED_PARTIES", text = join(",", var.clerk_authorized_parties) },
     { type = "secret_text", name = "CLERK_SECRET_KEY", text = var.clerk_secret_key },
     # Prod rejects session tokens without azp (no backend-minted smoke tokens).
     { type = "plain_text", name = "CLERK_ALLOW_MISSING_AZP", text = "false" },
@@ -124,6 +149,11 @@ module "api_worker" {
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
     # Starts one ChangeWorkflow per Change (AGENTS.md section 21.1).
     { type = "workflow", name = "CHANGE_WORKFLOW", workflow_name = cloudflare_workflow.change.workflow_name, class_name = "ChangeWorkflow", script_name = module.integration_worker.name },
+    # Wishlist design-conflict fixture routes for the section 55 demo (ADR 0017).
+    { type = "plain_text", name = "FIXTURES_ENABLED", text = "true" },
+    # The Costs page shows this environment's caps (ADR 0017).
+    local.cap_bindings.sandbox,
+    local.cap_bindings.vertex,
   ]
 
   custom_domains = [{
@@ -155,7 +185,8 @@ module "web_worker" {
     { type = "plain_text", name = "CLERK_SIGN_IN_URL", text = "/sign-in" },
     { type = "plain_text", name = "CLERK_SIGN_UP_URL", text = "/sign-up" },
     # The bundle inlines the development key at build time. Clerk reads process.env before the
-    # inlined value, so this runtime var selects the production instance (ADR 0017).
+    # inlined value, so this runtime var selects the instance. Temporarily the dev instance's key
+    # until the production instance exists (ADR 0017; check "clerk_production_instance" warns).
     { type = "plain_text", name = "VITE_CLERK_PUBLISHABLE_KEY", text = var.clerk_publishable_key },
     { type = "secret_text", name = "CLERK_SECRET_KEY", text = var.clerk_secret_key },
     # Server functions call the API over this binding; the browser never calls it directly.
@@ -348,8 +379,10 @@ module "integration_worker" {
     { type = "secret_text", name = "VERTEX_SERVICE_ACCOUNT", text = var.vertex_service_account },
     { type = "plain_text", name = "MODEL_PROVIDER", text = var.model_provider },
     # Browser Run for the Candidate browser check (AGENTS.md section 35). Capped in code: one
-    # session of at most 55 s per check, 2 per Candidate, 500 browser-seconds per UTC day (D1).
+    # session of at most 55 s per check, 2 per Candidate, BROWSER_DAILY_SECONDS per UTC day (D1).
     { type = "browser", name = "BROWSER" },
+    local.cap_bindings.browser,
+    local.cap_bindings.sandbox,
   ]
 
   depends_on = [terraform_data.sandbox_worker]
@@ -410,6 +443,8 @@ module "agents_worker" {
     { type = "secret_text", name = "VERTEX_SERVICE_ACCOUNT", text = var.vertex_service_account },
     { type = "plain_text", name = "MODEL_PROVIDER", text = var.model_provider },
     { type = "ai", name = "AI" },
+    local.cap_bindings.sandbox,
+    local.cap_bindings.vertex,
   ]
 
   # First apply creates v1 (AgentDO); then steady state v1 -> v1. The Sandbox class lives in its
@@ -425,8 +460,8 @@ module "agents_worker" {
 }
 
 # Sandbox Worker (ADR 0012): hosts the Sandbox container class through the temporary adapter.
-# Caps (HOM-192), per environment: 1 instance, sleeps after 2 minutes idle (in code), 10-hour
-# monthly meter in this environment's D1. Prod doubles the account-wide worst case (ADR 0017).
+# Caps (HOM-192), per environment: 1 instance, sleeps after 2 minutes idle (in code), 5-hour
+# monthly meter in this environment's D1 (local.caps; dev has the other 5 h, ADR 0017).
 locals {
   sandbox_worker = {
     script_name         = "rhumbatron-sandbox-${local.environment}"

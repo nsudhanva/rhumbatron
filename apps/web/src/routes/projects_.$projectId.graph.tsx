@@ -195,7 +195,7 @@ function GraphScreen() {
             <EmptyState
               what="No product areas yet."
               how={
-                graph.data?.fixture.applied
+                graph.data?.fixture.applied || graph.data?.source?.kind === "index"
                   ? "Submit a Change; its Tasks declare the semantic resources this graph shows."
                   : "Seed the Acme Shop source on the project overview, or submit a Change."
               }
@@ -322,13 +322,19 @@ function Footnote({
   const hidden = view.hiddenAreas.map((n) => n.name);
   return (
     <>
-      Derived on each read, not stored: semantic resources of {formatNumber(counts.tasks)} Tasks and{" "}
-      {formatNumber(counts.intents)} Intents across {formatNumber(graph.changes.length)} Changes,{" "}
-      {formatNumber(counts.dependencies)} Task dependencies, {formatNumber(counts.changeSets)}{" "}
-      ChangeSets, {formatNumber(counts.conflicts)} conflicts, policy{" "}
-      <Mono subtle>{graph.policyVersion}</Mono> protected resources (
+      Derived on each read from stored and live data: semantic resources of{" "}
+      {formatNumber(counts.tasks)} Tasks and {formatNumber(counts.intents)} Intents across{" "}
+      {formatNumber(graph.changes.length)} Changes, {formatNumber(counts.dependencies)} Task
+      dependencies, {formatNumber(counts.changeSets)} ChangeSets, {formatNumber(counts.conflicts)}{" "}
+      conflicts, policy <Mono subtle>{graph.policyVersion}</Mono> protected resources (
       {graph.protectedResources.join(", ")})
-      {graph.fixture.applied ? (
+      {graph.source?.kind === "index" ? (
+        <>
+          , and the imports of the indexed canonical tree{" "}
+          <Mono subtle>{graph.source.treeSha.slice(0, 12)}</Mono>
+          {graph.source.current ? "" : " (an earlier tree: the current one is not indexed yet)"}
+        </>
+      ) : graph.fixture.applied ? (
         <>
           , and the imports of <Mono subtle>{graph.fixture.source}</Mono> as seeded (not the current
           canonical tree)

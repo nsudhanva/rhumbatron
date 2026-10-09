@@ -9,7 +9,7 @@ import {
   AGENT_DAILY_CALL_CAP,
   OPENROUTER_DAILY_CALL_CAP,
   USAGE_COUNTER,
-  VERTEX_SPEND_LIMIT,
+  vertexSpendLimit,
 } from "@rhumbatron/model-router";
 
 const token = process.env.CLOUDFLARE_MONITOR_TOKEN;
@@ -23,6 +23,12 @@ if (!token || !accountId) {
 }
 const alertsOnly = process.argv.includes("--alerts-only");
 const env = "dev";
+/**
+ * Dev's caps from envs/dev/main.tf (ADR 0017): `VERTEX_SPEND_LIMIT_USD` and
+ * `SANDBOX_MONTHLY_SECONDS`. Prod has its own (Vertex $10, Sandbox 5 h).
+ */
+const DEV_VERTEX_CAP = vertexSpendLimit("40");
+const DEV_SANDBOX_HOURS = 18_000 / 3600;
 const api = `https://api.cloudflare.com/client/v4/accounts/${accountId}`;
 
 type Level = "OK" | "WARN" | "ALERT" | "ERROR";
@@ -298,12 +304,17 @@ await section("rhumbatron meters", async () => {
     "openrouter today",
     `${value(USAGE_COUNTER.openrouterCalls)} / ${OPENROUTER_DAILY_CALL_CAP} calls${
       openrouterUsedUp
-        ? `; used up, new runs use Gemini (Vertex, $${VERTEX_SPEND_LIMIT.usd} per ${VERTEX_SPEND_LIMIT.days} days cap)`
+        ? `; used up, new runs use Gemini (Vertex, $${DEV_VERTEX_CAP.usd} per ${DEV_VERTEX_CAP.days} days cap)`
         : ""
     }${value(USAGE_COUNTER.vertexSpendLimited) > 0 ? "; Vertex spend cap reached today" : ""}`,
   );
   usage("clef-flash calls today", value("clef-flash"), 200, "calls (daily cap)");
-  usage("sandbox this month", value("sandbox-seconds") / 3600, 10, "hours (HOM-192 cap)");
+  usage(
+    "sandbox this month",
+    value("sandbox-seconds") / 3600,
+    DEV_SANDBOX_HOURS,
+    "hours (HOM-192 cap, dev share)",
+  );
 });
 
 const order: Level[] = ["ALERT", "ERROR", "WARN", "OK"];

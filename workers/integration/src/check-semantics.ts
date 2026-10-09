@@ -103,7 +103,10 @@ export function classifySecurity(check: VerificationCheck, run: CheckRun): Check
 export const BROWSER_SESSION_MS = 55_000;
 /** Section 44: max full browser verification runs per Candidate. */
 export const MAX_BROWSER_RUNS_PER_CANDIDATE = 2;
-/** Daily account guard, under the 600 s Browser Run free allowance (section 7.3). */
+/**
+ * Daily guard under the 600 s Browser Run free allowance (section 7.3). Fallback only: each
+ * environment sets its share with the `BROWSER_DAILY_SECONDS` binding (ADR 0017: 250 s each).
+ */
 export const BROWSER_DAILY_SECONDS = 500;
 /** Seconds reserved before a session opens; settled to the real duration after it closes. */
 export const BROWSER_RESERVATION_SECONDS = 60;

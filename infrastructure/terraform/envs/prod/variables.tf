@@ -15,18 +15,29 @@ variable "zone_name" {
 }
 
 variable "clerk_secret_key" {
-  description = "Clerk production secret key. Loaded from the Keychain by `bun run tf prod`."
+  description = "Clerk secret key. Loaded from the Keychain by `bun run tf prod`. Temporarily the dev instance's key until a production instance exists (ADR 0017)."
   type        = string
   sensitive   = true
 }
 
 variable "clerk_publishable_key" {
-  description = "Clerk production publishable key (public). Overrides the build-time development key at runtime (ADR 0017)."
+  description = "Clerk publishable key (public), set as a runtime binding on the web Worker. Temporarily the dev instance's pk_test_ key; the `clerk_production_instance` check warns until a pk_live_ key replaces it (ADR 0017)."
   type        = string
 
   validation {
-    condition     = startswith(var.clerk_publishable_key, "pk_live_")
-    error_message = "Prod needs the Clerk production instance key (pk_live_...)."
+    condition     = can(regex("^pk_(live|test)_", var.clerk_publishable_key))
+    error_message = "clerk_publishable_key must be a Clerk publishable key (pk_live_... or pk_test_...)."
+  }
+}
+
+variable "clerk_authorized_parties" {
+  description = "Origins allowed in the azp claim of Clerk session tokens on the prod API. No localhost."
+  type        = list(string)
+  default     = ["https://rhumbatron.com"]
+
+  validation {
+    condition     = contains(var.clerk_authorized_parties, "https://rhumbatron.com") && alltrue([for o in var.clerk_authorized_parties : startswith(o, "https://")])
+    error_message = "clerk_authorized_parties must include https://rhumbatron.com and list only https origins."
   }
 }
 
@@ -55,9 +66,9 @@ variable "vertex_service_account" {
 }
 
 variable "vertex_spend_limit_usd" {
-  description = "AI Gateway spend cap on Vertex AI per 30 days for the prod gateway. See ADR 0017 before raising it."
+  description = "AI Gateway spend cap on Vertex AI per 30 days for the prod gateway. Dev $40 + prod $10 = the approved ~$50 (ADR 0017)."
   type        = number
-  default     = 9
+  default     = 10
 }
 
 variable "model_provider" {

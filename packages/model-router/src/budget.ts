@@ -18,9 +18,19 @@ export const OPENROUTER_DAILY_CALL_CAP = 45;
 
 /**
  * The AI Gateway spend limit on `google-vertex-ai` (Terraform `modules/ai`,
- * `var.vertex_spend_limit_usd`). Mirrored here for budget-stop text only; Terraform enforces it.
+ * `var.vertex_spend_limit_usd`). For budget-stop text only; Terraform enforces it. `usd` is the
+ * fallback when a Worker has no `VERTEX_SPEND_LIMIT_USD` binding (ADR 0017: dev $40, prod $10).
  */
 export const VERTEX_SPEND_LIMIT = { usd: 9, days: 30 } as const;
+
+/** The configured Vertex cap from the `VERTEX_SPEND_LIMIT_USD` binding, else the $9 fallback. */
+export function vertexSpendLimit(configured?: string): { usd: number; days: number } {
+  const usd = Number(configured);
+  return {
+    usd: configured && Number.isFinite(usd) && usd >= 0 ? usd : VERTEX_SPEND_LIMIT.usd,
+    days: VERTEX_SPEND_LIMIT.days,
+  };
+}
 
 /** A Task's share of what is left of its Change budget. Never negative. */
 export function taskBudgetUsd(

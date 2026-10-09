@@ -169,6 +169,7 @@ function layout(areas: AreaView[], edges: EdgeView[]) {
 export function describeOrigin(origin: ProductGraphEdge["origins"][number]): string {
   switch (origin.kind) {
     case "fixture_import":
+    case "source_import":
       return `${origin.file} imports ${origin.detail}`;
     case "task_dependency":
       return `Task ${origin.taskKey} depends on Task ${origin.dependsOnTaskKey}`;

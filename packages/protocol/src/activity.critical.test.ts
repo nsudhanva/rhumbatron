@@ -3,7 +3,7 @@
 // through older events without gaps. The SQL in the API is `WHERE seq <op> ? ORDER BY seq <order>
 // LIMIT <take>`; `read` below is the same selection over an array.
 import { describe, expect, it } from "vitest";
-import { type ClaimFact, FeedQuery, foldClaims, planFeedQuery, toFeedPage } from "./activity.ts";
+import { ClaimFact, FeedQuery, foldClaims, planFeedQuery, toFeedPage } from "./activity.ts";
 
 type Row = { seq: number };
 
@@ -111,4 +111,48 @@ describe("claim fold", () => {
       leaseExpiresAt: "2026-10-09T10:09:00.000Z",
     });
   });
+
+  const contention = (seq = 2) =>
+    ClaimFact.parse({
+      ...fact(seq, "contended", "2026-10-09T10:01:00.000Z", "2026-10-09T10:05:00.000Z"),
+      agentId: `agent_contender_${seq}`,
+      heldByAgentId: "agent_1",
+    });
+
+  it("records the contender and holder without changing the holder's lease state", () => {
+    const acquired = fact(1, "acquired", "2026-10-09T10:00:00.000Z", "2026-10-09T10:05:00.000Z");
+    const facts = [acquired, contention(), contention(3)];
+    expect(facts[1]).toMatchObject({
+      action: "contended",
+      agentId: "agent_contender_2",
+      heldByAgentId: "agent_1",
+      claimId: "c1",
+      resource: "project:acme:cart",
+      occurredAt: "2026-10-09T10:01:00.000Z",
+    });
+    const now = Date.parse("2026-10-09T10:02:00.000Z");
+    expect(foldClaims(facts, now)).toEqual(foldClaims([acquired], now));
+    expect(foldClaims(facts, Date.parse("2026-10-09T10:05:00.000Z"))[0]?.status).toBe("expired");
+  });
+
+  it("does not create a lease from contention alone when lifecycle facts are absent", () => {
+    expect(foldClaims([contention()], Date.parse("2026-10-09T10:02:00.000Z"))).toEqual([]);
+  });
+
+  it.each(["released", "expired"] as const)(
+    "does not revive a %s Claim on contention",
+    (action) => {
+      const acquired = fact(1, "acquired", "2026-10-09T10:00:00.000Z", "2026-10-09T10:05:00.000Z");
+      const ended = fact(2, action, "2026-10-09T10:05:00.000Z", null);
+      const contended = {
+        ...contention(3),
+        occurredAt: "2026-10-09T10:06:00.000Z",
+        leaseExpiresAt: "2026-10-09T10:10:00.000Z",
+      };
+      const now = Date.parse("2026-10-09T10:07:00.000Z");
+      expect(foldClaims([acquired, ended, contended], now)).toEqual(
+        foldClaims([acquired, ended], now),
+      );
+    },
+  );
 });

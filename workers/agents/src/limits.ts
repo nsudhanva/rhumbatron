@@ -5,7 +5,7 @@ import {
   type ProviderChoice,
   selectProvider,
   USAGE_COUNTER,
-  VERTEX_SPEND_LIMIT,
+  vertexSpendLimit,
 } from "@rhumbatron/model-router";
 import type { ModelTier } from "@rhumbatron/protocol";
 
@@ -177,7 +177,11 @@ export function limitAttempts(
  * A terminal step reason that is a section 44 budget stop: the Task is `blocked` and the Change
  * `budget_blocked`, both naming the exact limit. Null for an ordinary failure.
  */
-export function limitStop(reason: string): { limit: LimitKey; text: string } | null {
+export function limitStop(
+  reason: string,
+  /** The `VERTEX_SPEND_LIMIT_USD` binding (ADR 0017); the $9 fallback when absent. */
+  vertexSpendLimitUsd?: string,
+): { limit: LimitKey; text: string } | null {
   if (reason === "budget_exhausted") {
     return {
       limit: "daily_model_calls",
@@ -185,9 +189,11 @@ export function limitStop(reason: string): { limit: LimitKey; text: string } | n
     };
   }
   if (reason === "vertex_spend_limit") {
+    const cap = vertexSpendLimit(vertexSpendLimitUsd);
+    const usd = Number.isInteger(cap.usd) ? String(cap.usd) : cap.usd.toFixed(2);
     return {
       limit: "vertex_spend_limit",
-      text: `Budget stop: the Gemini (Vertex AI) spend cap of $${VERTEX_SPEND_LIMIT.usd} per ${VERTEX_SPEND_LIMIT.days} days was reached at the AI Gateway, and today's OpenRouter free calls are used up. No new model work starts until the ${VERTEX_SPEND_LIMIT.days}-day window frees budget, the UTC day rolls over, or a person raises the cap in Terraform (modules/ai).`,
+      text: `Budget stop: the Gemini (Vertex AI) spend cap of $${usd} per ${cap.days} days was reached at the AI Gateway, and today's OpenRouter free calls are used up. No new model work starts until the ${cap.days}-day window frees budget, the UTC day rolls over, or a person raises the cap in Terraform (modules/ai).`,
     };
   }
   if (reason === "change_budget_exhausted") {

@@ -24,7 +24,9 @@ import {
  * Cost guards, all enforced before a session opens:
  * - one session per check run, closed after at most `BROWSER_SESSION_MS`;
  * - at most `MAX_BROWSER_RUNS_PER_CANDIDATE` runs per Candidate (retries included);
- * - at most `BROWSER_DAILY_SECONDS` per UTC day on the D1 meter, under the free 10 minutes.
+ * - at most the `BROWSER_DAILY_SECONDS` binding (fallback: the constant, 500) per UTC day on this
+ *   environment's D1 meter. ADR 0017 splits the 500 s between dev and prod (250 s each), so both
+ *   stay under the free 10 minutes together.
  *
  * Fixture sign-in: the shop names its user in `x-user-id`. The proxy sets that header to the
  * scenario's current actor (alice owns, bob collaborates), so no page code needs to change.
@@ -38,9 +40,18 @@ const MAX_SCREENSHOTS = 8;
 const VIEWPORT = { width: 1000, height: 720 };
 const DENIED = new Set([401, 403, 404, 410]);
 
-type BrowserEnv = Pick<Env, "BROWSER" | "DB" | "EVIDENCE" | "SANDBOX" | "ARTIFACTS">;
+type BrowserEnv = Pick<
+  Env,
+  "BROWSER" | "DB" | "EVIDENCE" | "SANDBOX" | "ARTIFACTS" | "BROWSER_DAILY_SECONDS"
+>;
 
 const utcDay = () => new Date().toISOString().slice(0, 10);
+
+/** This environment's daily guard: the binding when it is a positive integer, else the constant. */
+const dailySeconds = (configured?: string) => {
+  const n = Number(configured);
+  return configured && Number.isInteger(n) && n > 0 ? n : BROWSER_DAILY_SECONDS;
+};
 
 // --- Free-limit guard ----------------------------------------------------------------------
 
@@ -49,7 +60,11 @@ const utcDay = () => new Date().toISOString().slice(0, 10);
  * `BROWSER_RESERVATION_SECONDS` on today's `browser-seconds` meter. Null when either cap is
  * reached; nothing stays reserved then.
  */
-async function reserveBrowserRun(db: D1Database, candidateId: string): Promise<string | null> {
+async function reserveBrowserRun(
+  db: D1Database,
+  candidateId: string,
+  dailyCap: number,
+): Promise<string | null> {
   const seconds = await db
     .prepare(
       `INSERT INTO usage_counters (day, counter, count) VALUES (?, 'browser-seconds', ?)
@@ -61,11 +76,11 @@ async function reserveBrowserRun(db: D1Database, candidateId: string): Promise<s
       BROWSER_RESERVATION_SECONDS,
       BROWSER_RESERVATION_SECONDS,
       BROWSER_RESERVATION_SECONDS,
-      BROWSER_DAILY_SECONDS,
+      dailyCap,
     )
     .first<{ count: number }>();
   if (!seconds) {
-    return `daily Browser Run guard reached (${BROWSER_DAILY_SECONDS} s per UTC day)`;
+    return `daily Browser Run guard reached (${dailyCap} s per UTC day)`;
   }
   const runs = await db
     .prepare(
@@ -560,7 +575,11 @@ export async function runBrowserCheck(
     screenshotKeys,
   });
 
-  const refused = await reserveBrowserRun(env.DB, input.candidateId);
+  const refused = await reserveBrowserRun(
+    env.DB,
+    input.candidateId,
+    dailySeconds(env.BROWSER_DAILY_SECONDS),
+  );
   if (refused) {
     lines.push(`refused: ${refused}`);
     return done({ kind: "refused", reason: refused });

@@ -286,7 +286,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
 
     // Reserve before the Sandbox opens (HOM-192). A retried reservation can only over-count.
     const reservation = await step.do("reserve sandbox", async () => ({
-      ok: await reserveSandbox(this.env.DB),
+      ok: await reserveSandbox(this.env.DB, this.env.SANDBOX_MONTHLY_SECONDS),
       at: Date.now(),
     }));
     if (!reservation.ok) {

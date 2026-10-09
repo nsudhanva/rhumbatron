@@ -18,11 +18,11 @@
     <p id="total"></p>
     <script>
       const headers = { "x-user-id": "alice", "content-type": "application/json" };
-      const money = (c) => "$" + (c / 100).toFixed(2);
+      const money = (c) => `$${(c / 100).toFixed(2)}`;
       const names = {};
 
       async function api(path, init) {
-        const res = await fetch("/api" + path, { headers, ...init });
+        const res = await fetch(`/api${path}`, { headers, ...init });
         return res.json();
       }
 
@@ -33,7 +33,7 @@
             <button data-remove="${i.productId}">Remove</button></li>`)
           .join("");
         document.getElementById("total").textContent =
-          cart.itemCount + " items, " + money(cart.subtotalCents);
+          `${cart.itemCount} items, ${money(cart.subtotalCents)}`;
       }
 
       async function add(id) {
@@ -42,7 +42,7 @@
       }
 
       async function remove(id) {
-        await api("/cart/items/" + id, { method: "DELETE" });
+        await api(`/cart/items/${id}`, { method: "DELETE" });
         renderCart();
       }
 

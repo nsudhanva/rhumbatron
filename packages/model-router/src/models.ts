@@ -28,7 +28,7 @@ export const TIER_REASONING_EFFORT: Record<ModelTier, "low" | "medium" | "high">
 
 /**
  * Paid backup on Vertex AI (GCP credits), used only when every free model in the tier fails with a
- * rate limit, outage, or timeout. The gateway caps Vertex spend at $9 per 30 days (Terraform).
+ * rate limit, outage, or timeout. The gateway caps Vertex spend per environment (Terraform, ADR 0017).
  */
 export const TIER_VERTEX_MODEL: Record<ModelTier, string> = {
   haiku: "google/gemini-3.5-flash-lite",

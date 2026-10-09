@@ -5,6 +5,8 @@
   "name": "rhumbatron-indexer",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-08",
+  // isomorphic-git and memfs need Node.js APIs (Buffer, path).
+  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "observability": {
     "enabled": true
@@ -12,5 +14,44 @@
   "vars": {
     "ENVIRONMENT": "local",
     "SERVICE_NAME": "rhumbatron-indexer"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rhumbatron-control-local",
+      "database_id": "local",
+      "migrations_dir": "../../migrations/d1"
+    }
+  ],
+  // Reads source/<project>/<tree>/index.json; writes index/<project>/... (AGENTS.md section 12.7).
+  "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
+  "durable_objects": {
+    "bindings": [
+      // Current canonical tree: only that tree is indexed.
+      {
+        "name": "PROJECT_ROOT",
+        "class_name": "ProjectRootDO",
+        "script_name": "rhumbatron-coordinator"
+      }
+    ]
+  },
+  // Read-only canonical source (ADR 0010): one read token per build.
+  "artifacts": [{ "binding": "ARTIFACTS", "namespace": "rhumbatron-projects-local" }],
+  // Semantic memory (P7-05): 384 dims, cosine, namespace = Project ID (ADR 0003).
+  "vectorize": [{ "binding": "MEMORY", "index_name": "rhumbatron-memory-local" }],
+  // Embeddings only (@cf/baai/bge-small-en-v1.5), capped per UTC day in code.
+  "ai": { "binding": "AI" },
+  "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "rhumbatron_metrics_local" }],
+  "queues": {
+    // `index.build` from the Causal Router, `index.purge` from daily maintenance. No dead-letter
+    // Queue: the last failed delivery is recorded in D1 project_indexes.
+    "consumers": [
+      {
+        "queue": "rhumbatron-indexing-local",
+        "max_batch_size": 1,
+        "max_concurrency": 1,
+        "max_retries": 3
+      }
+    ]
   }
 }

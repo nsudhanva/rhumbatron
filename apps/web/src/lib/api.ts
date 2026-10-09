@@ -451,6 +451,8 @@ export type ProjectCost = {
     openrouterDailyCallCap: number;
     openrouterUsedUpToday: boolean;
     vertexSpendLimitedToday: boolean;
+    /** This environment's AI Gateway Vertex cap in USD per 30 days (ADR 0017). */
+    vertexSpendLimitUsd: number;
     clefFlashCallsToday: number;
     clefDailyCap: number;
     sandboxSecondsMonth: number;
@@ -776,11 +778,13 @@ export const getProjectAgents = createServerFn()
 
 /**
  * Product Graph (AGENTS.md 28, 38.3), derived by the API from Task resources, Intents, Task
- * dependencies, ChangeSets, conflicts, policy protected resources and the seeded fixture imports
- * (workers/api product-graph.ts). Nothing is stored yet (P7-04).
+ * dependencies, ChangeSets, conflicts, policy protected resources, and the stored Product Graph of
+ * the indexed canonical tree (P7-04), or the seeded fixture imports before the first index
+ * (workers/api product-graph.ts).
  */
 export type ProductGraphEdgeOrigin =
   | { kind: "fixture_import"; file: string; detail: string }
+  | { kind: "source_import"; file: string; detail: string }
   | { kind: "task_dependency"; changeId: string; taskKey: string; dependsOnTaskKey: string }
   | { kind: "shared_task"; changeId: string; taskKey: string; resources: string[] };
 
@@ -789,6 +793,8 @@ export type ProductGraphNode = {
   name: string;
   baseline: boolean;
   baselineFile: string | null;
+  sourceFiles: string[];
+  sourceResources: string[];
   protectedResources: string[];
   touches: {
     changeId: string;
@@ -815,6 +821,10 @@ export type ProductGraph = {
   canonicalGeneration: number | null;
   policyVersion: string;
   protectedResources: string[];
+  source:
+    | { kind: "index"; treeSha: string; commit: string | null; builtAt: string; current: boolean }
+    | { kind: "fixture" }
+    | { kind: "none" };
   fixture: { applied: boolean; source: string; hiddenFiles: string[] };
   /** Oldest first, newest 20. */
   changes: { id: string; goal: string; status: string; createdAt: string }[];

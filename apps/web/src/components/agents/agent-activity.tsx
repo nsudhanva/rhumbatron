@@ -73,6 +73,7 @@ const TYPE_TEXT = (event: ActivityEvent) => {
     return "text-kumo-danger";
   if (event.kind === "candidate.status" && event.status === "rejected") return "text-kumo-danger";
   if (event.kind === "challenge") return "text-kumo-danger";
+  if (event.kind === "claim" && event.action === "contended") return "text-kumo-warning";
   if (event.kind === "promoted") return "text-kumo-accent";
   if (event.kind === "fact") {
     const t = event.eventType;
@@ -754,6 +755,21 @@ function Rail({
           label: "Claim",
           accent: false,
         });
+    } else if (
+      event.kind === "claim" &&
+      event.action === "contended" &&
+      event.laneId &&
+      event.holderLaneId
+    ) {
+      const a = laneY(event.laneId);
+      const b = laneY(event.holderLaneId);
+      if (a !== null && b !== null)
+        packets.push({
+          id: event.id,
+          d: `M 0 ${a} H ${CONNECTOR_X} V ${b} H 0`,
+          label: `Contended · ${event.resource}`,
+          accent: false,
+        });
     } else if (event.kind === "changeset") {
       const y = laneY(event.laneId);
       const j = candIndex.get(event.candidateId);
@@ -786,6 +802,24 @@ function Rail({
       return { conflict, a, b, x: CONNECTOR_X + Math.min(k, 4) * CONNECTOR_STEP };
     })
     .filter((c): c is { conflict: ConflictView; a: number; b: number; x: number } => c !== null);
+
+  // Historical contention markers, one per recorded pair and resource. These are facts,
+  // not open conflicts or locks. A holder outside this Change has no invented lane.
+  const contentions = new Map<
+    string,
+    { event: Extract<ActivityEvent, { kind: "claim" }>; a: number; b: number | null }
+  >();
+  for (const event of model.events) {
+    if (event.kind !== "claim" || event.action !== "contended" || !player.played.has(event.id))
+      continue;
+    const a = event.laneId ? laneY(event.laneId) : null;
+    if (a === null) continue;
+    contentions.set(`${event.laneId}|${event.holderAgentId}|${event.resource}`, {
+      event,
+      a,
+      b: event.holderLaneId ? laneY(event.holderLaneId) : null,
+    });
+  }
 
   return (
     <div
@@ -831,7 +865,42 @@ function Rail({
             />
           );
         })}
+        {[...contentions.values()].map(({ event, a, b }) => (
+          <path
+            key={event.id}
+            d={b === null ? `M 0 ${a} H ${CONNECTOR_X}` : `M 0 ${a} H ${CONNECTOR_X} V ${b} H 0`}
+            pathLength={1}
+            className={cn("stroke-kumo-warning", player.animated.has(event.id) && "rh-fork")}
+            style={player.animated.has(event.id) && b !== null ? AFTER_PACKET : undefined}
+            strokeWidth={1}
+            strokeDasharray="2 3"
+            fill="none"
+          />
+        ))}
       </svg>
+
+      {[...contentions.values()].map(({ event, a, b }) => (
+        <span
+          key={event.id}
+          title={event.detail}
+          role="img"
+          aria-label={event.detail}
+          className={cn(
+            "pointer-events-auto absolute truncate bg-kumo-elevated px-1 text-[14px] leading-4 text-kumo-warning",
+            player.animated.has(event.id) && "rh-settle",
+          )}
+          style={{
+            top: (b === null ? a : (a + b) / 2) - 8,
+            left: CONNECTOR_X + 6,
+            maxWidth: RAIL - CONNECTOR_X - 10,
+            ...(player.animated.has(event.id) && b !== null
+              ? { animationDelay: "var(--rh-dur-packet)" }
+              : {}),
+          }}
+        >
+          Contended · {event.resource}
+        </span>
+      ))}
 
       {connectors.map(({ conflict, a, b, x }) => (
         <span

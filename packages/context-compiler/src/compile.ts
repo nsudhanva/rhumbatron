@@ -1,4 +1,5 @@
 import type { ContextItem, ContextPacket } from "@rhumbatron/protocol";
+import type { Retrieval, RetrievedFile } from "./retrieval.ts";
 
 /**
  * Context Compiler (AGENTS.md section 27): deterministic, no model calls, no I/O. Callers load the
@@ -66,6 +67,11 @@ export type CompileInput = {
     commit: string;
     files: string[];
   }[];
+  /**
+   * Indexed retrieval for the canonical tree (section 27.3): declared files, dependency neighbors,
+   * resource owners, and Vectorize matches. Absent when the tree has no index yet.
+   */
+  retrieval?: Retrieval | null;
   allowedTools: string[];
   budget: { maxModelCalls: number; budgetUsd: number };
   /** Hard ceiling for the rendered items. Lower-priority items are dropped first. */
@@ -140,7 +146,33 @@ export function compilePacket(input: CompileInput): ContextPacket {
       ].join("\n\n"),
     });
   }
+  const retrieval = input.retrieval ?? null;
+  const fileItem =
+    (prefix: string, label: string) =>
+    (f: RetrievedFile): ContextItem => ({
+      itemId: `${prefix}:${f.path}`,
+      source: "file",
+      sourceVersion: retrieval?.treeSha ?? "",
+      capturedAt: now,
+      title: `${label} ${f.path} (${f.reason})`,
+      body: f.summary,
+    });
+  const tier = (t: RetrievedFile["tier"]) => (retrieval?.files ?? []).filter((f) => f.tier === t);
+  // Section 27.3 order: declared files, dependency neighbors, resource owners, recent events
+  // (Intents and failures), then Vectorize matches last, so they are trimmed first.
   const optional: ContextItem[] = [
+    ...tier("declared").map(fileItem("file", "Declared file")),
+    ...tier("dependency").map(fileItem("dep", "Dependency")),
+    ...(retrieval?.owners ?? []).map(
+      (o): ContextItem => ({
+        itemId: `owner:${o.resource}`,
+        source: "product_graph",
+        sourceVersion: retrieval?.treeSha ?? "",
+        capturedAt: now,
+        title: `Files that own ${o.resource} (Product Graph)`,
+        body: bullets(o.files),
+      }),
+    ),
     ...input.dependencyIntents.map(
       (i): ContextItem => ({
         itemId: `intent:${i.runId}`,
@@ -171,6 +203,7 @@ export function compilePacket(input: CompileInput): ContextPacket {
         body: intentBody(i),
       }),
     ),
+    ...tier("semantic").map(fileItem("semantic", "Possibly related file")),
   ];
 
   const items = [...required];

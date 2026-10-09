@@ -15,8 +15,18 @@ import type { StackSource } from "./stack.ts";
  * the repo token stays out of the checkout's git config.
  */
 
-/** HOM-192: hard stop at 10 Sandbox hours per calendar month, counted conservatively. */
+/**
+ * HOM-192: hard stop at 10 Sandbox hours per calendar month, counted conservatively. ADR 0017
+ * splits the 10 hours between dev and prod: each environment's `SANDBOX_MONTHLY_SECONDS` binding
+ * sets its own meter. This is the fallback when the binding is absent.
+ */
 const MONTHLY_SECONDS = 36_000;
+
+/** This environment's monthly Sandbox cap: the binding when it is a positive integer, else 36,000. */
+const monthlySeconds = (configured?: string) => {
+  const n = Number(configured);
+  return configured && Number.isInteger(n) && n > 0 ? n : MONTHLY_SECONDS;
+};
 /** Charged when a session opens; the rest is settled when it closes. */
 const OPEN_RESERVATION_SECONDS = 300;
 /** Idle time billed after the last command, until the Sandbox sleeps. */
@@ -38,14 +48,13 @@ const FORBIDDEN_CHARS = /[;&|`$<>\\\n]/;
 const month = () => new Date().toISOString().slice(0, 7);
 
 /** Reserves Sandbox seconds. False when the monthly cap would be exceeded. */
-async function reserveSeconds(db: D1Database, seconds: number): Promise<boolean> {
-  const row = await db
-    .prepare(
-      `INSERT INTO usage_counters (day, counter, count) VALUES (?, 'sandbox-seconds', ?)
+async function reserveSeconds(env: WorkspaceEnv, seconds: number): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `INSERT INTO usage_counters (day, counter, count) VALUES (?, 'sandbox-seconds', ?)
        ON CONFLICT (day, counter) DO UPDATE SET count = count + ? WHERE count + ? <= ?
        RETURNING count`,
-    )
-    .bind(month(), seconds, seconds, seconds, MONTHLY_SECONDS)
+  )
+    .bind(month(), seconds, seconds, seconds, monthlySeconds(env.SANDBOX_MONTHLY_SECONDS))
     .first<{ count: number }>();
   return row !== null;
 }
@@ -93,6 +102,7 @@ type WorkspaceEnv = {
   SANDBOX: DurableObjectNamespace;
   ARTIFACTS: Artifacts;
   DB: D1Database;
+  SANDBOX_MONTHLY_SECONDS?: string;
 };
 
 const sandboxFor = (env: WorkspaceEnv, projectId: string) =>
@@ -269,7 +279,7 @@ export async function openWorkspace(
       message: `${sandboxLimitReason()} Declare your Intent without code changes, or call fail_task.`,
     };
   }
-  if (!(await reserveSeconds(env.DB, OPEN_RESERVATION_SECONDS))) {
+  if (!(await reserveSeconds(env, OPEN_RESERVATION_SECONDS))) {
     await releaseSandbox(env.DB, input.runId, now);
     return {
       refused: "monthly_sandbox_seconds",

@@ -305,6 +305,8 @@ describe("chooseProvider", () => {
     const stop = limitStop(choice.reason);
     expect(stop?.limit).toBe("vertex_spend_limit");
     expect(stop?.text).toContain("$9 per 30 days");
+    // ADR 0017: each environment names its own share of the cap from its binding.
+    expect(limitStop(choice.reason, "4.5")?.text).toContain("$4.50 per 30 days");
     // The spend-limit failure stops the Task; it never schedules a retry.
     expect(nextStep("haiku", [{ tier: "haiku", kind: "spend_limited" }])).toEqual({
       action: "stop",

@@ -38,6 +38,9 @@ describe("Queue consumers send poison commands to the dead-letter Queue", () => 
   for (const [name, block] of dev) {
     // The dead-letter Queue's own consumer is the end of the line: checked below.
     if (name === "dead_letter") continue;
+    // Index commands have no Task to block and must not be retried onto the integration Queue:
+    // the indexer records the last failed delivery itself (checked below).
+    if (name === "indexing") continue;
     it(`dev consumer ${name} has a dead-letter Queue and bounded retries`, () => {
       expect(block).toMatch(/dead_letter_queue\s*=\s*module\.async\.queues\["dead-letter"\]\.name/);
       const retries = Number(/max_retries\s*=\s*(\d+)/.exec(block)?.[1] ?? Number.NaN);
@@ -55,6 +58,19 @@ describe("Queue consumers send poison commands to the dead-letter Queue", () => 
     const retries = Number(/max_retries\s*=\s*(\d+)/.exec(block)?.[1] ?? Number.NaN);
     expect(retries).toBeGreaterThanOrEqual(1);
     expect(retries).toBeLessThanOrEqual(5);
+  });
+
+  it("dev indexing consumer has bounded retries and the indexer records its last failure", () => {
+    const block = dev.get("indexing") ?? "";
+    expect(block).toMatch(/script_name\s*=\s*module\.indexer_worker\.name/);
+    expect(block).not.toMatch(/dead_letter_queue/);
+    const retries = Number(/max_retries\s*=\s*(\d+)/.exec(block)?.[1] ?? Number.NaN);
+    expect(retries).toBeGreaterThanOrEqual(1);
+    expect(retries).toBeLessThanOrEqual(5);
+    // Same bound in the consumer code, which marks the build failed in D1 on the last delivery.
+    const indexer = read("workers/indexer/src/index.ts");
+    expect(indexer).toMatch(new RegExp(`const MAX_RETRIES = ${retries};`));
+    expect(indexer).toMatch(/recordFailure\(/);
   });
 
   it("local event router consumes the dead-letter Queue with bounded retries", () => {

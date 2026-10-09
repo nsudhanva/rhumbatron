@@ -47,7 +47,7 @@ export type RovingStep = { key: string } | { edge: "up" | "down" } | null;
 type Rows = readonly (readonly string[])[];
 
 /** Row and column of `key`, or null. */
-export function locate(rows: Rows, key: string | null): [number, number] | null {
+function locate(rows: Rows, key: string | null): [number, number] | null {
   if (key === null) return null;
   for (let r = 0; r < rows.length; r += 1) {
     const c = rows[r]?.indexOf(key) ?? -1;
@@ -61,7 +61,7 @@ export function locate(rows: Rows, key: string | null): [number, number] | null 
  * (the panels pass the item nearest by x); without it the same column, clamped. Returns null when
  * the move does nothing, `{ edge }` when Up/Down runs past the first or last non-empty row.
  */
-export function step(
+function step(
   rows: Rows,
   active: string | null,
   move: RovingMove,

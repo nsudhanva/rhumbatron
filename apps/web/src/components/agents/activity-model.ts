@@ -1,17 +1,23 @@
 import type {
   CandidateDetail,
   ChangeDetail,
-  ClaimFact,
   ConflictDetail,
   EvidenceRecord,
   FeedEvent,
   Intent,
+  ClaimFact as LifecycleClaimFact,
   RunProgress,
   TaskDetail,
   TaskRun,
 } from "../../lib/api";
 import { generation, truncate } from "../../lib/format";
 import { candidateLabels } from "../candidate/model";
+
+/** Advisory facts extend the web's lifecycle read type. Missing holder data stays unknown. */
+type ClaimFact = Omit<LifecycleClaimFact, "action"> & {
+  action: LifecycleClaimFact["action"] | "contended";
+  heldByAgentId?: string;
+};
 
 /**
  * Agent activity as a sequence of facts (DESIGN.md 11.1, AGENTS.md sections 17 and 31-36).
@@ -24,7 +30,7 @@ import { candidateLabels } from "../candidate/model";
  *   Candidates       candidate.forked, changeset.composed (from `changeSetIds`),
  *                    candidate status, approval, canonical.advanced
  *   Evidence         verification.check.completed
- *   Claims feed      claim.acquired / renewed / released / expired (ResourceShardDO events)
+ *   Claims feed      claim.acquired / renewed / released / expired / contended
  *   Event feed       every other recorded event of the Change (task.ready, agent.woken,
  *                    model.route.decided, changeset.proposed, ...). A feed event that a derived
  *                    fact above already shows is dropped, so one fact never appears twice.
@@ -101,6 +107,9 @@ export type ActivityEvent = Base &
         kind: "claim";
         /** Null when the claiming agent is not one of this Change's lanes. */
         laneId: string | null;
+        /** Recorded holder; null when absent or outside this Change's lanes. */
+        holderLaneId: string | null;
+        holderAgentId: string | null;
         claimId: string;
         action: ClaimFact["action"];
         resource: string;
@@ -623,7 +632,12 @@ function factDetail(event: FeedEvent, who: string | null): string {
   }
 }
 
-function claimDetail(agent: string, action: ClaimFact["action"], resource: string) {
+function claimDetail(
+  agent: string,
+  action: ClaimFact["action"],
+  resource: string,
+  holder: string | null,
+) {
   switch (action) {
     case "acquired":
       return `${agent} claims ${resource}.`;
@@ -633,6 +647,8 @@ function claimDetail(agent: string, action: ClaimFact["action"], resource: strin
       return `${agent} releases ${resource}.`;
     case "expired":
       return `${agent}'s claim on ${resource} expired.`;
+    case "contended":
+      return `${agent} contended for ${resource}${holder ? `, held by ${holder}` : "; holder not recorded"}.`;
   }
 }
 
@@ -655,7 +671,12 @@ function addRecordedFacts(
     const action = event.eventType.slice("claim.".length) as ClaimFact["action"];
     const claimId = str(event.data, "claimId");
     const agentId = str(event.data, "agentId");
-    if (!claimId || !agentId || !["acquired", "renewed", "released", "expired"].includes(action))
+    const heldByAgentId = str(event.data, "heldByAgentId");
+    if (
+      !claimId ||
+      !agentId ||
+      !["acquired", "renewed", "released", "expired", "contended"].includes(action)
+    )
       continue;
     claims.set(event.eventId, {
       seq: event.seq,
@@ -663,26 +684,44 @@ function addRecordedFacts(
       action,
       claimId,
       agentId,
+      ...(action === "contended" && heldByAgentId ? { heldByAgentId } : {}),
       resource: event.resource ?? "",
       leaseExpiresAt: str(event.data, "leaseExpiresAt"),
       occurredAt: event.occurredAt,
     });
   }
+  // A Claim ID identifies one owner. Recover that recorded identity for older projections
+  // only when a lifecycle fact for the same Claim is present; never guess from the resource.
+  const holderByClaim = new Map(
+    [...claims.values()].filter((f) => f.action !== "contended").map((f) => [f.claimId, f.agentId]),
+  );
   for (const fact of claims.values()) {
     const at = time(fact.occurredAt);
     if (at === null) continue;
     const lane = laneByAgent.get(fact.agentId);
+    const holderAgentId =
+      fact.action === "contended"
+        ? (fact.heldByAgentId ?? holderByClaim.get(fact.claimId) ?? null)
+        : null;
+    const holderLane = holderAgentId ? laneByAgent.get(holderAgentId) : undefined;
     events.push({
       id: `claim:${fact.eventId}`,
       at,
       kind: "claim",
       laneId: lane?.id ?? null,
+      holderLaneId: holderLane?.id ?? null,
+      holderAgentId,
       claimId: fact.claimId,
       action: fact.action,
       resource: fact.resource,
       type: `claim.${fact.action}`,
       actor: lane?.key ?? fact.agentId,
-      detail: claimDetail(lane?.key ?? fact.agentId, fact.action, fact.resource),
+      detail: claimDetail(
+        lane?.key ?? fact.agentId,
+        fact.action,
+        fact.resource,
+        holderLane?.key ?? holderAgentId,
+      ),
     });
   }
 
@@ -878,7 +917,8 @@ export function foldActivity(
         if (!lane) break;
         const held = new Set(lane.claims);
         if (event.action === "acquired" || event.action === "renewed") held.add(event.resource);
-        else held.delete(event.resource);
+        else if (event.action === "released" || event.action === "expired")
+          held.delete(event.resource);
         lane.claims = [...held];
         if (event.action === "acquired") view.workspaceArrival = event.id;
         view.current = event.laneId;

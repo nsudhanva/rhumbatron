@@ -23,8 +23,25 @@ const OPENROUTER_DAILY_CALL_CAP = 45;
 const MAX_CALLS_PER_RUN = { haiku: 16, sonnet: 32, opus: 32 } as const;
 /** Mirrors CLEF_DAILY_CAP in workers/event-router/src/causal.ts. */
 const CLEF_DAILY_CAP = 200;
-/** Mirrors MONTHLY_SECONDS in workers/agents/src/workspace.ts and integration candidate-sandbox.ts. */
+/**
+ * Fallback for the `SANDBOX_MONTHLY_SECONDS` binding; mirrors MONTHLY_SECONDS in
+ * workers/agents/src/workspace.ts and integration candidate-sandbox.ts. ADR 0017 sets the binding
+ * per environment (the 10 h split between dev and prod).
+ */
 const SANDBOX_MONTHLY_SECONDS = 36_000;
+
+/** Fallback for the `VERTEX_SPEND_LIMIT_USD` binding; mirrors VERTEX_SPEND_LIMIT in model-router. */
+const VERTEX_SPEND_LIMIT_USD = 9;
+
+const vertexSpendLimitUsd = (configured?: string) => {
+  const n = Number(configured);
+  return configured && Number.isFinite(n) && n >= 0 ? n : VERTEX_SPEND_LIMIT_USD;
+};
+
+const sandboxMonthlySeconds = (configured?: string) => {
+  const n = Number(configured);
+  return configured && Number.isInteger(n) && n > 0 ? n : SANDBOX_MONTHLY_SECONDS;
+};
 
 const CHANGE_LIMIT = 20;
 const TASK_LIMIT = 200;
@@ -109,8 +126,10 @@ const CostView = z.object({
     openrouterCallsToday: z.number().int(),
     openrouterDailyCallCap: z.number().int(),
     openrouterUsedUpToday: z.boolean(),
-    /** The gateway refused Gemini for its $9 per 30 days spend cap today. */
+    /** The gateway refused Gemini for its spend cap today. */
     vertexSpendLimitedToday: z.boolean(),
+    /** This environment's gateway Vertex cap in USD per 30 days (ADR 0017). */
+    vertexSpendLimitUsd: z.number(),
     clefFlashCallsToday: z.number().int(),
     clefDailyCap: z.number().int(),
     sandboxSecondsMonth: z.number().int(),
@@ -364,10 +383,11 @@ export const cost = new Hono<AppEnv>().get(
             meter(day, "openrouter-exhausted") > 0 ||
             meter(day, "openrouter-calls") >= OPENROUTER_DAILY_CALL_CAP,
           vertexSpendLimitedToday: meter(day, "vertex-spend-limited") > 0,
+          vertexSpendLimitUsd: vertexSpendLimitUsd(c.env.VERTEX_SPEND_LIMIT_USD),
           clefFlashCallsToday: meter(day, "clef-flash"),
           clefDailyCap: CLEF_DAILY_CAP,
           sandboxSecondsMonth: meter(month, "sandbox-seconds"),
-          sandboxMonthlyCapSeconds: SANDBOX_MONTHLY_SECONDS,
+          sandboxMonthlyCapSeconds: sandboxMonthlySeconds(c.env.SANDBOX_MONTHLY_SECONDS),
           agentModelCallsByDay: days.map((d) => ({ day: d, count: meter(d, "agent-model-calls") })),
         },
         callCapPerRun: MAX_CALLS_PER_RUN,

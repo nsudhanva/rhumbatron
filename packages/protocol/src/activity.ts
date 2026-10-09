@@ -97,16 +97,19 @@ export function toFeedPage<T extends { seq: number }>(
   };
 }
 
-export const ClaimAction = z.enum(["acquired", "renewed", "released", "expired"]);
+export const ClaimAction = z.enum(["acquired", "renewed", "released", "expired", "contended"]);
 export type ClaimAction = z.infer<typeof ClaimAction>;
 
-/** One Claim lifecycle fact (section 13.2), from the `claim.*` events of a Change. */
+/** One Claim lifecycle or advisory contention fact, from the `claim.*` events of a Change. */
 export const ClaimFact = z.object({
   seq: z.number().int().positive(),
   eventId: Id,
   action: ClaimAction,
   claimId: Id,
+  /** The contender for `contended`; the owner for lifecycle facts. */
   agentId: Id,
+  /** Holder recorded by `claim.contended`. Absent in older feed projections. */
+  heldByAgentId: Id.optional(),
   resource: z.string(),
   leaseExpiresAt: Timestamp.nullable(),
   occurredAt: Timestamp,
@@ -137,6 +140,9 @@ export type ChangeClaims = z.infer<typeof ChangeClaims>;
 export function foldClaims(facts: readonly ClaimFact[], now: number): ClaimState[] {
   const byId = new Map<string, ClaimState>();
   for (const fact of facts) {
+    // Contention records an attempted Claim, not a lease change. In particular, do not
+    // create a holder state when a truncated or cross-Change feed lacks lifecycle facts.
+    if (fact.action === "contended") continue;
     const prior = byId.get(fact.claimId);
     const status =
       fact.action === "released" ? "released" : fact.action === "expired" ? "expired" : "active";

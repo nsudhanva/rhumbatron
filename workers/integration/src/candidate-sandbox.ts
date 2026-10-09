@@ -10,8 +10,18 @@ export { candidateFork };
  * tokens are short-lived, passed as environment variables, and never written to git config.
  */
 
-/** HOM-192: hard stop at 10 Sandbox hours per calendar month. Same meter as Task workspaces. */
+/**
+ * HOM-192: hard stop at 10 Sandbox hours per calendar month. Same meter as Task workspaces.
+ * ADR 0017 splits the hours between dev and prod through the `SANDBOX_MONTHLY_SECONDS` binding;
+ * this is the fallback when the binding is absent.
+ */
 const MONTHLY_SECONDS = 36_000;
+
+/** This environment's monthly Sandbox cap: the binding when it is a positive integer, else 36,000. */
+const monthlySeconds = (configured?: string) => {
+  const n = Number(configured);
+  return configured && Number.isInteger(n) && n > 0 ? n : MONTHLY_SECONDS;
+};
 /** Reserved before the Sandbox opens: composition plus every check timeout, rounded up. */
 const RESERVATION_SECONDS = 900;
 /** Idle time billed after the last command, until the Sandbox sleeps. */
@@ -26,14 +36,24 @@ type CandidateEnv = { SANDBOX: DurableObjectNamespace; ARTIFACTS: Artifacts; DB:
 const month = () => new Date().toISOString().slice(0, 7);
 
 /** Reserves Sandbox seconds on the shared monthly meter. False when the cap would be exceeded. */
-export async function reserveSandbox(db: D1Database): Promise<boolean> {
+export async function reserveSandbox(
+  db: D1Database,
+  /** The `SANDBOX_MONTHLY_SECONDS` binding (ADR 0017). */
+  configuredMonthlySeconds?: string,
+): Promise<boolean> {
   const row = await db
     .prepare(
       `INSERT INTO usage_counters (day, counter, count) VALUES (?, 'sandbox-seconds', ?)
        ON CONFLICT (day, counter) DO UPDATE SET count = count + ? WHERE count + ? <= ?
        RETURNING count`,
     )
-    .bind(month(), RESERVATION_SECONDS, RESERVATION_SECONDS, RESERVATION_SECONDS, MONTHLY_SECONDS)
+    .bind(
+      month(),
+      RESERVATION_SECONDS,
+      RESERVATION_SECONDS,
+      RESERVATION_SECONDS,
+      monthlySeconds(configuredMonthlySeconds),
+    )
     .first<{ count: number }>();
   return row !== null;
 }

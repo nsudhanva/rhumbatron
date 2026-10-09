@@ -10,12 +10,17 @@ import { canAccessProject, ensureIdentity } from "./identity.ts";
  * Dev-only Wishlist design-conflict fixture (AGENTS.md sections 32.4, 54; P9-08). Publishing is a
  * command: the API checks the caller and the Change, then queues `fixture.publish`; the
  * integration Worker commits each design to an Artifacts fork and records fixture-sourced
- * ChangeSets and Intents. No model call. Outside dev the routes answer 404, as if absent.
+ * ChangeSets and Intents. No model call. The routes answer only where the `FIXTURES_ENABLED`
+ * binding is "true" (dev and prod, ADR 0017) or the environment is dev or local; elsewhere 404, as
+ * if absent.
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
 const DEV_ENVIRONMENTS: readonly string[] = ["dev", "local"];
+
+const fixturesEnabled = (env: Env) =>
+  env.FIXTURES_ENABLED === "true" || DEV_ENVIRONMENTS.includes(env.ENVIRONMENT as string);
 
 const ChangeIdParam = z.object({ changeId: z.string().regex(/^chg_[a-z0-9-]+$/) });
 const PublishRequest = z.object({ design: z.enum(["a", "b", "both"]) });
@@ -76,7 +81,7 @@ async function view(env: Env, changeId: string): Promise<z.infer<typeof FixtureV
 
 export const fixtures = new Hono<AppEnv>()
   .use("/v1/changes/:changeId/fixture-changesets", async (c, next) => {
-    if (!DEV_ENVIRONMENTS.includes(c.env.ENVIRONMENT as string)) {
+    if (!fixturesEnabled(c.env)) {
       return fail(c, 404, "not_found", "Route not found");
     }
     await next();

@@ -1,3 +1,5 @@
+import { formatNumber } from "../../lib/format";
+
 /**
  * What this page cannot show because nothing records it yet (AGENTS.md section 56: "do not
  * estimate all costs from arbitrary constants"). Those values read `—` or are absent; this
@@ -15,7 +17,7 @@ const NOT_RECORDED = [
   "R2 storage and operations",
 ];
 
-export function NotRecorded() {
+export function NotRecorded({ vertexSpendLimitUsd }: { vertexSpendLimitUsd: number }) {
   return (
     <footer className="grid max-w-[760px] gap-1 border-t border-kumo-rule pt-3 text-[11px] text-kumo-subtle">
       <p>
@@ -24,8 +26,9 @@ export function NotRecorded() {
       <p>
         Spend is the sum of recorded attempt cost. OpenRouter free models record $0.00 (ADR 0007);
         Gemini overflow attempts record their token cost at Vertex prices (ADR 0016), capped at the
-        gateway at $9 per 30 days. No routing savings are claimed. Call, Clef-flash and Sandbox
-        meters are account-wide, across every Project.
+        gateway at ${formatNumber(vertexSpendLimitUsd)} per 30 days in this environment. No routing
+        savings are claimed. Call, Clef-flash and Sandbox meters are account-wide, across every
+        Project.
       </p>
     </footer>
   );

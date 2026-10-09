@@ -1,6 +1,6 @@
 # ADR 0017: Prod environment
 
-- Status: Proposed (planned, not applied)
+- Status: Accepted 2026-10-09 (decisions below); not applied yet
 - Date: 2026-10-09
 - Decider: Project owner
 
@@ -50,13 +50,27 @@ zone-wide singleton.
 ### Prod-only settings
 
 - `model_provider` defaults to `openrouter` (dev keeps `vertex`).
-- `CLERK_ALLOW_MISSING_AZP = "false"`. `CLERK_AUTHORIZED_PARTIES = "https://rhumbatron.com"`.
-- Clerk production instance: `VITE_CLERK_PUBLISHABLE_KEY` is a `plain_text` binding on the prod web
-  Worker. The build inlines the development key, but Clerk's `getEnvVariable` reads `process.env`
-  first, and `nodejs_compat` (compatibility date 2026-10-08) fills `process.env` from bindings. So
-  one bundle serves both environments. The variable must start with `pk_live_`.
+- `CLERK_ALLOW_MISSING_AZP = "false"`. `CLERK_AUTHORIZED_PARTIES` comes from
+  `var.clerk_authorized_parties` (default `["https://rhumbatron.com"]`; it must include that origin
+  and list only `https` origins).
+- `FIXTURES_ENABLED = "true"` on the API Worker (dev and prod): the Wishlist design-conflict fixture
+  routes answer, so the section 55 demo runs on prod. Without the binding the routes still answer
+  in `dev` and `local` only.
+- `VITE_CLERK_PUBLISHABLE_KEY` is a `plain_text` binding on the prod web Worker. The build inlines
+  the development key, but Clerk's `getEnvVariable` reads `process.env` first, and `nodejs_compat`
+  (compatibility date 2026-10-08) fills `process.env` from bindings. So one bundle serves both
+  environments.
+- **Temporary: prod uses the Clerk development instance** until a production instance exists.
+  `bun run tf prod` loads the dev secret key (`rhumbatron-clerk-secret-key-dev`) and the dev
+  publishable key that the web build inlines (`VITE_CLERK_PUBLISHABLE_KEY` in `apps/web/.env.local`;
+  public). The variable accepts `pk_test_` and `pk_live_`; the Terraform check
+  `clerk_production_instance` prints a warning on every prod plan while the key is `pk_test_`.
+  Development instances show a "Development mode" badge and have lower limits; acceptable for the
+  hackathon. To switch: create the production instance for `rhumbatron.com`, store its keys as
+  `rhumbatron-clerk-secret-key-prod` and `rhumbatron-clerk-publishable-key-prod`, point the prod
+  Clerk entries in `scripts/tf.ts` at them (Keychain for both), and set `clerk_dns_records`.
 - Clerk DNS records: `var.clerk_dns_records` (label -> CNAME target, DNS only). Empty until the
-  instance exists; Clerk shows the five records when the domain is added.
+  production instance exists; Clerk shows the five records when the domain is added.
 
 ### AI Gateway: separate gateway
 
@@ -70,7 +84,10 @@ Prod gets `rhumbatron-models-prod`. Reasons:
 Sharing dev's gateway would give one real Vertex cap, but prod would then depend on a resource in
 dev state. Moving the gateway to `envs/global` would move a dev address. Both were rejected.
 
-The cost condition is in "Decisions needed" below: two $9 caps can spend $18 per 30 days.
+Caps (decided 2026-10-09): dev $40 and prod $10 per 30 days (`vertex_spend_limit_usd` in each
+root), about $50 in total. Both gateways bill the same GCP project through the same service
+account. Each Worker that writes budget-stop or Costs page text reads its gateway's cap from the
+`VERTEX_SPEND_LIMIT_USD` binding (code fallback: $9).
 
 ### K2
 
@@ -85,15 +102,17 @@ The cost condition is in "Decisions needed" below: two $9 caps can spend $18 per
 
 ### Credentials (ADR 0004 pattern, Keychain, never in Git)
 
-| Variable | Keychain service | Status 2026-10-09 |
-|---|---|---|
-| `TF_VAR_clerk_secret_key` | `rhumbatron-clerk-secret-key-prod` | missing |
-| `TF_VAR_clerk_publishable_key` | `rhumbatron-clerk-publishable-key-prod` | missing |
-| `TF_VAR_k2_consumer_token` | `rhumbatron-k2-consumer-token-prod` (new `rhumbatron-k2-consumer-prod` token, K2 Consume only) | missing |
-| `TF_VAR_openrouter_api_key` | `rhumbatron-openrouter-api-key` (shared with dev) | present |
-| `TF_VAR_vertex_service_account` | `rhumbatron-vertex-sa-prod` | missing |
+Decided 2026-10-09: no new tokens. Prod reuses dev's items.
 
-`bun run tf prod …` stops until the missing items exist. That is the gate for the decisions below.
+| Variable | Source for prod | Note |
+|---|---|---|
+| `TF_VAR_clerk_secret_key` | Keychain `rhumbatron-clerk-secret-key-dev` | Clerk dev instance, temporary |
+| `TF_VAR_clerk_publishable_key` | `VITE_CLERK_PUBLISHABLE_KEY` in `apps/web/.env.local` (public, Git-ignored) | Clerk dev instance, temporary |
+| `TF_VAR_k2_consumer_token` | Keychain `rhumbatron-k2-consumer-token-dev` | Account-scoped, K2 Consume only |
+| `TF_VAR_openrouter_api_key` | Keychain `rhumbatron-openrouter-api-key` | Shared with dev |
+| `TF_VAR_vertex_service_account` | Keychain `rhumbatron-vertex-sa-dev` | One GCP project; caps per gateway |
+
+Rotating one of these dev items now also changes prod: apply both roots after a rotation.
 
 ## Cost: what prod adds
 
@@ -109,10 +128,10 @@ Idle means no Change is running.
 | Queues | 10,000 ops/day | 6 queues, 3 consumers | 0 ops idle; ~3 ops per woken Task. |
 | K2 | 20 streams, 10 GB | 8 streams | 16 of 20. Billing disabled in beta. |
 | Workflows | 3,000 steps/day | 2 workflows | ~7 steps per Change, 10–14 per Candidate. Shared with dev. |
-| Sandbox / Containers | 25 GiB-h memory, 375 vCPU-min, 200 GB-h disk / month | 1 app, `basic`, `max_instances = 1`, 10 h/month meter in prod D1 | The meter is per environment. Worst case both: 20 h = 20 GiB-h, 300 vCPU-min, 80 GB-h. Inside included usage, but double the approved 10 h (HOM-192). |
-| Browser Run | 10 min/day (free figure) | 500 s/day guard in prod D1 | Per environment. Worst case both: 1,000 s/day, above 600 s/day. |
+| Sandbox / Containers | 25 GiB-h memory, 375 vCPU-min, 200 GB-h disk / month | 1 app, `basic`, `max_instances = 1`, 5 h/month meter in prod D1 | `SANDBOX_MONTHLY_SECONDS = 18000` in each environment: dev 5 h + prod 5 h = the approved 10 h (HOM-192). |
+| Browser Run | 10 min/day (free figure) | 250 s/day guard in prod D1 | `BROWSER_DAILY_SECONDS = 250` in each environment: 500 s/day together, under 600 s/day. |
 | Workers AI | 10,000 Neurons/day | Clef-flash cap 200 calls/day in prod D1 | Doubles the worst case. |
-| AI Gateway | free core features | 1 gateway, 10,000 stored logs | Vertex cap is per gateway (below). |
+| AI Gateway | free core features | 1 gateway, 10,000 stored logs | Vertex cap per gateway: prod $10, dev $40 per 30 days (~$50 total). |
 | Analytics Engine | 100,000 points/day | dataset `rhumbatron_metrics_prod` | Shared limit. |
 | Workers Logs | 200,000 events/day | 100 % sampling on 7 Workers | Cron alone is ~1,440 events/day. |
 | Artifacts | 10,000 ops/month, 1 GB-month | namespace `rhumbatron-projects-prod` | Account-wide allowance shared with dev. |
@@ -134,11 +153,12 @@ Observed on 2026-10-09 (read-only):
 
 Steps. Each step is a Terraform plan, read, then apply of the saved plan.
 
-1. Create the Clerk production instance for `rhumbatron.com`. Store its keys in the Keychain. Put
-   its CNAMEs in the `clerk_dns_records` default in `envs/prod/variables.tf` (the targets are
-   not secret, and Git ignores `terraform.tfvars` and `*.auto.tfvars`, so a committed default keeps the plan
+1. Later, not a gate (prod starts on the Clerk dev instance): create the Clerk production instance
+   for `rhumbatron.com`, store its keys in the Keychain, and put its CNAMEs in the
+   `clerk_dns_records` default in `envs/prod/variables.tf` (the targets are not secret, and Git
+   ignores `terraform.tfvars` and `*.auto.tfvars`, so a committed default keeps the plan
    reproducible).
-2. Decide the items in "Decisions needed". Create the missing Keychain items.
+2. Decided 2026-10-09 (below). No Keychain items to create.
 3. `bun run cf:bundle`, `bun run tf:plan:prod`, read, `bun run tf:apply:prod` (bootstrap = true,
    attach_apex = false). Set `bootstrap = false`, plan, apply again. `tf:drift:prod` must be
    clean. Check `https://api.rhumbatron.com/health`.
@@ -160,26 +180,25 @@ Steps. Each step is a Terraform plan, read, then apply of the saved plan.
 Rollback is a new transition: set `attach_apex = false`, apply, and recreate the legacy record
 in `envs/global` from the values recorded in step 6.
 
-## Decisions needed before the first prod apply
+## Decisions (2026-10-09)
 
-1. **Vertex spend.** Two gateways with a $9 cap each can spend $18 per 30 days; the GCP credit is
-   $10. Options: (a) `rhumbatron-vertex-sa-prod` comes from a separate GCP project with its own
-   credit; (b) one GCP project, and lower the caps so dev + prod ≤ $9 (for example dev $4, prod
-   $5; dev needs a `vertex_spend_limit_usd` argument on its `module.ai`); (c) prod sets
-   `model_provider = "openrouter"` and `vertex_spend_limit_usd` near $0, so prod has no overflow.
-2. **OpenRouter quota.** The key is shared, so dev and prod share 20 requests/minute and 50 (or
-   1,000) requests/day, while each environment's D1 counter allows 45. The second environment then
-   gets 429s, marks OpenRouter exhausted, and overflows to Vertex. Options: accept, or a separate
-   OpenRouter account for prod.
-3. **Sandbox hours.** Prod doubles the approved 10 h/month to a 20 h/month worst case. Options:
-   approve 20 h; split the meter (for example 5 h per environment; code constant in
-   `workers/api/src/cost.ts` and the agents workspace meter); or keep prod `paused` except for demos.
-4. **Browser Run.** Two 500 s/day guards exceed the 600 s/day free figure. Options: lower the guard
-   to 300 s per environment (code constant `BROWSER_DAILY_SECONDS`), or accept the Paid allowance
-   (10 h/month included; worst case 8.3 h/month).
-5. **Demo code paths.** The Wishlist design-conflict fixture routes answer only in `dev` and
-   `local`, and the Acme Shop fixture's `wrangler.jsonc` names `rhumbatron-acme-shop-dev`. Either
-   run the section 55 demo on dev, or make both environment-aware before a prod demo.
+The owner decided to apply prod before the hackathon, with no new spend.
+
+1. **Vertex spend.** One GCP project and service account. Gateway caps: dev $40, prod $10 per
+   30 days (about $50 in total). `VERTEX_SPEND_LIMIT_USD` mirrors each cap to the agents and API
+   Workers for budget-stop and Costs page text.
+2. **OpenRouter quota.** Accepted as shared: dev and prod share the key's per-minute and per-day
+   limits, so the second environment may overflow to Vertex sooner. The Vertex caps bound the cost.
+3. **Sandbox hours.** Split the approved 10 h/month: `SANDBOX_MONTHLY_SECONDS = 18000` (5 h) in
+   each environment (agents and integration Workers; the API shows it on the Costs page). Code
+   fallback without the binding: 36,000.
+4. **Browser Run.** Split the 500 s/day guard: `BROWSER_DAILY_SECONDS = 250` in each environment
+   (integration Worker). Code fallback without the binding: 500.
+5. **Demo code paths.** `FIXTURES_ENABLED = "true"` in dev and prod enables the Wishlist fixture
+   routes. Open item: the Acme Shop fixture's `wrangler.jsonc` still names
+   `rhumbatron-acme-shop-dev`, so a prod release of the demo app needs that made
+   environment-aware (or the release step of the demo runs on dev).
+6. **Credentials.** Prod reuses dev's Keychain items and the Clerk dev instance (Credentials above).
 
 ## Consequences
 

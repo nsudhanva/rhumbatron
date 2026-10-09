@@ -48,3 +48,9 @@ variable "model_provider" {
     error_message = "model_provider must be \"vertex\" or \"openrouter\"."
   }
 }
+
+variable "vertex_spend_limit_usd" {
+  description = "AI Gateway spend cap on Vertex AI per 30 days for the dev gateway. Dev $40 + prod $10 = the approved ~$50 (ADR 0017)."
+  type        = number
+  default     = 40
+}

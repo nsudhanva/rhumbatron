@@ -14,7 +14,7 @@ import type { ModelTier } from "@rhumbatron/protocol";
  * per tier, both through our AI Gateway:
  * - `tier-<t>`: OpenRouter with the tier's free-model fallback list ($0).
  * - `tier-<t>-vertex`: Gemini on Vertex AI through the gateway compat endpoint, priced from
- *   VERTEX_PRICES so Pi's usage records real cost. The gateway caps Vertex spend at $9 per 30 days.
+ *   VERTEX_PRICES so Pi's usage records real cost. The gateway caps Vertex spend per environment.
  * The AgentDO picks the provider once per run. `beforeCall` runs before every model request and may
  * throw to stop a run (budget, daily cap); `onFailure` sees every failed provider response.
  */

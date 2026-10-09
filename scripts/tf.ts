@@ -28,13 +28,26 @@ const rootKeychain: Record<string, Record<string, string>> = {
     TF_VAR_openrouter_api_key: "rhumbatron-openrouter-api-key",
     TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-dev",
   },
-  // ADR 0017. The OpenRouter key is shared with dev; the others are prod-only.
+  // ADR 0017. Prod reuses dev's items for now (no new tokens): the K2 Consume-only token, the
+  // Vertex service account (one GCP project; the per-gateway caps split the budget), the OpenRouter
+  // key, and the Clerk dev instance. When the Clerk production instance exists, point the Clerk
+  // entries at `rhumbatron-clerk-secret-key-prod` / `rhumbatron-clerk-publishable-key-prod`.
   prod: {
-    TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-prod",
-    TF_VAR_clerk_publishable_key: "rhumbatron-clerk-publishable-key-prod",
-    TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-prod",
+    TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-dev",
+    TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-dev",
     TF_VAR_openrouter_api_key: "rhumbatron-openrouter-api-key",
-    TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-prod",
+    TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-dev",
+  },
+};
+
+// Public, non-secret values read from a local file when no Keychain item holds them.
+// Prod's Clerk publishable key is the dev instance's key that the web build inlines (ADR 0017).
+const rootFiles: Record<string, Record<string, { file: string; key: string }>> = {
+  prod: {
+    TF_VAR_clerk_publishable_key: {
+      file: "apps/web/.env.local",
+      key: "VITE_CLERK_PUBLISHABLE_KEY",
+    },
   },
 };
 
@@ -60,6 +73,22 @@ for (const [name, service] of Object.entries({
   ).trim();
   if (!value) {
     console.error(`Missing ${name}: no Keychain item "${service}". See ADR 0004.`);
+    process.exit(1);
+  }
+  env[name] = value;
+}
+
+for (const [name, { file, key }] of Object.entries(rootFiles[root ?? ""] ?? {})) {
+  if (env[name]) continue;
+  const path = resolve(import.meta.dir, "..", file);
+  const text = (await Bun.file(path).exists()) ? await Bun.file(path).text() : "";
+  const line = text.split("\n").find((l) => l.startsWith(`${key}=`));
+  const value = line
+    ?.slice(key.length + 1)
+    .trim()
+    .replace(/^["']|["']$/g, "");
+  if (!value) {
+    console.error(`Missing ${name}: no ${key} in ${file}. See ADR 0017.`);
     process.exit(1);
   }
   env[name] = value;
