@@ -15,6 +15,7 @@ export default {
         "indexer",
         "protocol",
         "model-router",
+        "sandbox",
         "terraform",
         "migrations",
         "containers",
