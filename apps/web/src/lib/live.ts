@@ -1,5 +1,6 @@
 import { useAuth } from "@clerk/tanstack-react-start";
 import { useEffect, useRef, useState } from "react";
+import { useLiveStatusReporter } from "./live-status";
 
 /**
  * Client for the Project live socket (AGENTS.md section 39): snapshot plus sequence deltas from
@@ -166,6 +167,14 @@ export function useProjectLive(
       socket?.close(1000, "page closed");
     };
   }, [projectId, enabled]);
+
+  // Mirror the socket state into the shell status bar. Leaving the page clears it.
+  const report = useLiveStatusReporter();
+  const active = !!projectId && enabled;
+  useEffect(() => {
+    report?.({ status, enabled: active });
+  }, [report, status, active]);
+  useEffect(() => () => report?.({ status: "idle" }), [report]);
 
   return status;
 }

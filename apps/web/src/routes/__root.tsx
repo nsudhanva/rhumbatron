@@ -1,12 +1,6 @@
 import { env } from "cloudflare:workers";
-import {
-  ClerkProvider,
-  Show,
-  SignInButton,
-  SignUpButton,
-  UserButton,
-} from "@clerk/tanstack-react-start";
-import { Button, Text } from "@cloudflare/kumo";
+import { ClerkProvider } from "@clerk/tanstack-react-start";
+import { LinkProvider } from "@cloudflare/kumo";
 import type { QueryClient } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
@@ -16,10 +10,14 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import type { ReactNode } from "react";
+import { type AnchorHTMLAttributes, forwardRef, type ReactNode } from "react";
+import { AppShell } from "../components/shell/app-shell";
+import { PageMetaProvider } from "../components/shell/page-meta";
+import { LiveStatusProvider } from "../lib/live-status";
+import { MODE_BOOT_SCRIPT } from "../lib/mode";
 import appCss from "../styles.css?url";
 
-// Build and environment are shown on every page (AGENTS.md Phase 2 acceptance).
+// Build and environment are shown on every page (AGENTS.md Phase 2 acceptance), in the status bar.
 const getBuildInfo = createServerFn().handler(() => ({
   service: env.SERVICE_NAME,
   environment: env.ENVIRONMENT,
@@ -43,69 +41,50 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 function RootComponent() {
+  const build = Route.useLoaderData();
   return (
     <RootDocument>
-      <AppHeader />
-      <Outlet />
-      <AppFooter />
+      <AppShell build={build}>
+        <Outlet />
+      </AppShell>
     </RootDocument>
   );
 }
 
-function AppHeader() {
-  return (
-    <header className="sticky top-0 z-10 border-b border-kumo-line bg-kumo-base">
-      <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
-        <Link to="/">
-          <Text variant="heading">Rhumbatron</Text>
-        </Link>
-        <nav className="flex items-center gap-2">
-          <Show when="signed-out">
-            <SignInButton>
-              <Button variant="ghost" size="sm">
-                Sign in
-              </Button>
-            </SignInButton>
-            <SignUpButton>
-              <Button variant="primary" size="sm">
-                Sign up
-              </Button>
-            </SignUpButton>
-          </Show>
-          <Show when="signed-in">
-            <Link to="/">
-              <Button variant="ghost" size="sm">
-                Projects
-              </Button>
-            </Link>
-            <UserButton />
-          </Show>
-        </nav>
-      </div>
-    </header>
-  );
-}
-
-function AppFooter() {
-  const info = Route.useLoaderData();
-  return (
-    <footer className="mx-auto max-w-5xl px-6 py-6">
-      <Text variant="mono-secondary">
-        {info.service} · {info.environment}
-      </Text>
-    </footer>
-  );
-}
+/**
+ * Routes Kumo's `Link`, `LinkButton` and `Breadcrumbs.Link` through the TanStack router for
+ * same-origin paths. External URLs and in-page anchors stay plain anchors.
+ */
+const RouterLink = forwardRef<
+  HTMLAnchorElement,
+  AnchorHTMLAttributes<HTMLAnchorElement> & { to?: string }
+>(function RouterLink({ href, to, target, ...rest }, ref) {
+  const path = href ?? to;
+  if (!path?.startsWith("/") || path.startsWith("//")) {
+    return <a ref={ref} href={path} target={target} {...rest} />;
+  }
+  // A runtime path string: the router resolves it, so the typed route union does not apply.
+  return <Link ref={ref} to={path as "/"} {...(target ? { target } : {})} {...rest} />;
+});
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    // The boot script sets data-mode before hydration, so the server value may differ.
+    <html lang="en" data-mode="light" suppressHydrationWarning>
       <head>
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: static script that applies the stored color mode before first paint
+          dangerouslySetInnerHTML={{ __html: MODE_BOOT_SCRIPT }}
+        />
         <HeadContent />
       </head>
-      <body className="bg-kumo-elevated">
+      <body>
         <ClerkProvider>
-          {children}
+          <LinkProvider component={RouterLink}>
+            <LiveStatusProvider>
+              <PageMetaProvider>{children}</PageMetaProvider>
+            </LiveStatusProvider>
+          </LinkProvider>
           <Scripts />
         </ClerkProvider>
       </body>

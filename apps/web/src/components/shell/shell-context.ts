@@ -1,0 +1,90 @@
+import { useAuth } from "@clerk/tanstack-react-start";
+import { useQuery } from "@tanstack/react-query";
+import { useParams, useRouterState } from "@tanstack/react-router";
+import { getCandidate, getChange, getProject } from "../../lib/api";
+import { truncate } from "../../lib/format";
+import type { Crumb } from "./page-meta";
+
+/** Which top-level destination the current route belongs to (drives the sidebar marker). */
+export type ShellSection = "projects" | "overview" | "changes" | "candidates" | "other";
+
+export type ShellContext = {
+  section: ShellSection;
+  projectId?: string | undefined;
+  projectName?: string | undefined;
+  changeId?: string | undefined;
+  candidateId?: string | undefined;
+  /** Route-derived breadcrumbs, before any page-appended crumbs. */
+  trail: Crumb[];
+};
+
+/**
+ * Derives the Project / Change / Candidate in context from route params. Labels come from the
+ * same React Query keys and server functions the pages use, so on those pages the data is
+ * shared from the cache rather than fetched twice.
+ */
+export function useShellContext(): ShellContext {
+  const params = useParams({ strict: false }) as {
+    projectId?: string;
+    changeId?: string;
+    candidateId?: string;
+  };
+  const routeId = useRouterState({ select: (s) => s.matches.at(-1)?.routeId });
+  const { isSignedIn } = useAuth();
+  const signedIn = isSignedIn === true;
+
+  const candidate = useQuery({
+    queryKey: ["candidate", params.candidateId],
+    queryFn: () => getCandidate({ data: params.candidateId ?? "" }),
+    enabled: signedIn && !!params.candidateId,
+  });
+  const changeId = params.changeId ?? candidate.data?.changeId;
+  const change = useQuery({
+    queryKey: ["change", changeId],
+    queryFn: () => getChange({ data: changeId ?? "" }),
+    enabled: signedIn && !!changeId,
+  });
+  const projectId = params.projectId ?? change.data?.projectId ?? candidate.data?.projectId;
+  const project = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => getProject({ data: projectId ?? "" }),
+    enabled: signedIn && !!projectId,
+  });
+
+  const section: ShellSection =
+    routeId === "/"
+      ? "projects"
+      : routeId === "/projects/$projectId"
+        ? "overview"
+        : routeId === "/changes/$changeId"
+          ? "changes"
+          : routeId === "/candidates/$candidateId"
+            ? "candidates"
+            : "other";
+
+  const trail: Crumb[] = [{ label: "Projects", link: { to: "/" } }];
+  if (projectId) {
+    trail.push({
+      label: project.data?.name ?? "Project",
+      link: { to: "/projects/$projectId", params: { projectId } },
+    });
+  }
+  if (changeId) {
+    trail.push({
+      label: change.data ? truncate(change.data.goal, 44) : "Change",
+      link: { to: "/changes/$changeId", params: { changeId } },
+    });
+  }
+  if (params.candidateId) {
+    trail.push({ label: params.candidateId, mono: true });
+  }
+
+  return {
+    section,
+    projectId,
+    projectName: project.data?.name,
+    changeId,
+    candidateId: params.candidateId,
+    trail,
+  };
+}
