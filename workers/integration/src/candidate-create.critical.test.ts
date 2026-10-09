@@ -1,11 +1,13 @@
 // Candidate creation is a retry boundary (AGENTS.md section 60) and enforces the fork rule
 // (section 32.4) and the Candidate limit (section 44). Invariants: a repeated trigger yields the
 // same Candidate IDs and no new rows; a fork conflict yields one Candidate per side, each with the
-// shared non-conflicting ChangeSets; a ChangeSet stacked on one side's ChangeSet joins only that
-// side's Candidate, and one stacked on both sides joins neither (deferred, with a reason); a Change
+// shared non-conflicting ChangeSets; a ChangeSet stacked on or dependent on one side joins only that
+// side's Candidate, and one requiring both sides joins neither (deferred, with a reason); a Change
 // never holds more than MAX_CANDIDATES Candidates.
 import { COMPOSITION_RULES_VERSION } from "@rhumbatron/evidence";
+import { MAX_TASKS_PER_CHANGE } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
+import type { TaskEdge } from "./candidate-composer.ts";
 import {
   composeChangeCandidates,
   compositionKeyFor,
@@ -81,6 +83,53 @@ describe("planCandidateSets", () => {
   const stacked = (over: Record<string, string[]>) =>
     proposed.map((c) => ({ ...c, ...(over[c.id] ? { stackedOn: over[c.id] } : {}) }));
   const fork: ForkConflict[] = [{ id: "cf_1", sides: [["tsk_t2"], ["tsk_t3"]] }];
+
+  it("puts an unstacked ChangeSet whose Task depends on side A only in A's Candidate", () => {
+    const edges = [{ task_id: "tsk_t4", depends_on_task_id: "tsk_t2" }];
+    const plan = planCandidateSets(proposed, fork, edges);
+    expect(plan.sets).toEqual([
+      ["cs_t1_1", "cs_t2_1", "cs_t4_1"],
+      ["cs_t1_1", "cs_t3_1"],
+    ]);
+    expect(plan.deferred).toEqual([]);
+    expect(planCandidateSets([...proposed].reverse(), fork, edges)).toEqual(plan);
+  });
+
+  it("defers an unstacked ChangeSet whose Task depends on both sides, with a reason", () => {
+    const plan = planCandidateSets(proposed, fork, [
+      { task_id: "tsk_t4", depends_on_task_id: "tsk_t2" },
+      { task_id: "tsk_t4", depends_on_task_id: "tsk_t3" },
+    ]);
+    expect(plan.sets).toEqual([
+      ["cs_t1_1", "cs_t2_1"],
+      ["cs_t1_1", "cs_t3_1"],
+    ]);
+    expect(plan.deferred).toEqual([
+      { id: "cs_t4_1", reason: expect.stringContaining("both sides of fork conflict cf_1") },
+    ]);
+    expect(plan.deferred[0]?.reason).toContain("cs_t2_1");
+    expect(plan.deferred[0]?.reason).toContain("cs_t3_1");
+  });
+
+  it("follows transitive Task dependencies through a Task without a ChangeSet", () => {
+    const edges = [
+      { task_id: "tsk_t4", depends_on_task_id: "tsk_bridge" },
+      { task_id: "tsk_bridge", depends_on_task_id: "tsk_t2" },
+      { task_id: "tsk_t1", depends_on_task_id: "tsk_t4" },
+    ];
+    const plan = planCandidateSets(proposed, fork, edges);
+    expect(plan.sets).toEqual([["cs_t1_1", "cs_t2_1", "cs_t4_1"], ["cs_t3_1"]]);
+    expect(plan.deferred).toEqual([]);
+    expect(planCandidateSets([...proposed].reverse(), fork, [...edges].reverse())).toEqual(plan);
+  });
+
+  it("unions stacked lineage and Task dependencies and defers their descendants", () => {
+    const plan = planCandidateSets(stacked({ cs_t4_1: ["cs_t2_1"], cs_t1_1: ["cs_t4_1"] }), fork, [
+      { task_id: "tsk_t4", depends_on_task_id: "tsk_t3" },
+    ]);
+    expect(plan.sets).toEqual([["cs_t2_1"], ["cs_t3_1"]]);
+    expect(plan.deferred.map((d) => d.id)).toEqual(["cs_t1_1", "cs_t4_1"]);
+  });
 
   it("puts a ChangeSet stacked on one side only in that side's Candidate", () => {
     const plan = planCandidateSets(stacked({ cs_t4_1: ["cs_t2_1"] }), fork);
@@ -159,6 +208,7 @@ type CandidateRow = { id: string; change_id: string; change_set_ids_json: string
 function fakeEnv(input: {
   changeSets: { id: string; taskId: string; stackedOn?: string[] }[];
   conflicts?: { id: string; taskIds: [string, string] }[];
+  taskDependencies?: TaskEdge[];
   status?: string;
 }) {
   const candidates: CandidateRow[] = [];
@@ -185,6 +235,12 @@ function fakeEnv(input: {
       throw new Error(`unexpected first: ${sql}`);
     },
     all: async () => {
+      if (sql.includes("FROM task_dependencies d")) {
+        expect(args).toEqual([CHANGE, MAX_TASKS_PER_CHANGE * MAX_TASKS_PER_CHANGE + 1]);
+        expect(sql).toContain("JOIN tasks t ON t.id = d.task_id WHERE t.change_id = ?");
+        expect(sql).toContain("LIMIT ?");
+        return { results: (input.taskDependencies ?? []).slice(0, Number(args[1])) };
+      }
       if (sql.includes("FROM changesets cs")) {
         return {
           results: input.changeSets.map((c) => ({
@@ -314,6 +370,50 @@ describe("composeChangeCandidates", () => {
     expect(outcome.deferred.map((d) => d.id)).toEqual(["cs_t5_1"]);
     // The event of every Candidate of the round records the deferral and its reason.
     for (const payload of fake.payloads) expect(payload.deferred).toEqual(outcome.deferred);
+  });
+
+  it("loads Task dependencies to assign unstacked ChangeSets and report deferrals", async () => {
+    const fake = fakeEnv({
+      changeSets: [
+        ...changeSets,
+        { id: "cs_t4_1", taskId: "tsk_t4", stackedOn: [] },
+        { id: "cs_t5_1", taskId: "tsk_t5", stackedOn: [] },
+      ],
+      conflicts: [{ id: "cf_1", taskIds: ["tsk_t2", "tsk_t3"] }],
+      taskDependencies: [
+        { task_id: "tsk_t4", depends_on_task_id: "tsk_bridge" },
+        { task_id: "tsk_bridge", depends_on_task_id: "tsk_t2" },
+        { task_id: "tsk_t5", depends_on_task_id: "tsk_t4" },
+        { task_id: "tsk_t5", depends_on_task_id: "tsk_t3" },
+      ],
+    });
+    const outcome = await composeChangeCandidates(fake.env, CHANGE);
+    if (outcome.status !== "composed") throw new Error("expected composed");
+    expect(fake.candidates.map((c) => JSON.parse(c.change_set_ids_json))).toEqual([
+      ["cs_t1_1", "cs_t2_1", "cs_t4_1"],
+      ["cs_t1_1", "cs_t3_1"],
+    ]);
+    expect(outcome.deferred).toEqual([
+      { id: "cs_t5_1", reason: expect.stringContaining("both sides of fork conflict cf_1") },
+    ]);
+    for (const payload of fake.payloads) expect(payload.deferred).toEqual(outcome.deferred);
+    expect(ids(await composeChangeCandidates(fake.env, CHANGE))).toEqual(ids(outcome));
+    expect(fake.candidates).toHaveLength(2);
+  });
+
+  it("creates no Candidates when the Task dependency graph exceeds the loader cap", async () => {
+    const fake = fakeEnv({
+      changeSets,
+      taskDependencies: Array.from(
+        { length: MAX_TASKS_PER_CHANGE * MAX_TASKS_PER_CHANGE + 1 },
+        (_, i) => ({ task_id: `tsk_${i}`, depends_on_task_id: "tsk_t2" }),
+      ),
+    });
+    await expect(composeChangeCandidates(fake.env, CHANGE)).rejects.toThrow(
+      "Task dependency limit exceeded",
+    );
+    expect(fake.candidates).toHaveLength(0);
+    expect(fake.workflows.size).toBe(0);
   });
 
   it("refuses a Candidate beyond MAX_CANDIDATES and starts no verification for it", async () => {

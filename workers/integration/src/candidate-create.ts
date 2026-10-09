@@ -1,6 +1,7 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { COMPOSITION_RULES_VERSION } from "@rhumbatron/evidence";
-import { ChangeSetIntent } from "@rhumbatron/protocol";
+import { ChangeSetIntent, MAX_TASKS_PER_CHANGE } from "@rhumbatron/protocol";
+import type { TaskEdge } from "./candidate-composer.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 
 /**
@@ -57,23 +58,48 @@ export type CandidatePlan = {
   deferred: DeferredChangeSet[];
 };
 
-/** Each ChangeSet's lineage: itself plus every ChangeSet it is stacked on, transitively. */
-function lineages(proposed: readonly ProposedChangeSet[]): Map<string, Set<string>> {
-  const direct = new Map(proposed.map((c) => [c.id, c.stackedOn ?? []]));
-  const memo = new Map<string, Set<string>>();
-  const visit = (id: string, path: Set<string>): Set<string> => {
-    const known = memo.get(id);
-    if (known) return known;
-    const out = new Set([id]);
-    for (const parent of direct.get(id) ?? []) {
-      if (path.has(parent)) continue; // A cycle cannot come from real commits; do not loop.
-      for (const a of visit(parent, new Set([...path, parent]))) out.add(a);
+/** Lineage includes stacked ancestors and transitive Task dependencies, including paths through
+ * Tasks without a proposed ChangeSet. Follow both kinds of dependency to keep compositions whole. */
+function lineages(
+  proposed: readonly ProposedChangeSet[],
+  edges: readonly TaskEdge[],
+): Map<string, Set<string>> {
+  const byId = new Map(proposed.map((c) => [c.id, c]));
+  const byTask = new Map<string, string[]>();
+  for (const c of proposed) {
+    if (c.taskId === null) continue;
+    byTask.set(c.taskId, [...(byTask.get(c.taskId) ?? []), c.id]);
+  }
+  const taskDeps = new Map<string, string[]>();
+  for (const e of edges) {
+    taskDeps.set(e.task_id, [...(taskDeps.get(e.task_id) ?? []), e.depends_on_task_id]);
+  }
+  const result = new Map<string, Set<string>>();
+  for (const c of proposed) {
+    const out = new Set<string>();
+    const tasks = new Set<string>();
+    const pending: { kind: "changeset" | "task"; id: string }[] = [{ kind: "changeset", id: c.id }];
+    while (pending.length > 0) {
+      const next = pending.pop();
+      if (!next) break;
+      if (next.kind === "changeset") {
+        if (out.has(next.id)) continue;
+        out.add(next.id);
+        const row = byId.get(next.id);
+        for (const id of row?.stackedOn ?? []) pending.push({ kind: "changeset", id });
+        if (row?.taskId) pending.push({ kind: "task", id: row.taskId });
+      } else {
+        if (tasks.has(next.id)) continue;
+        tasks.add(next.id);
+        for (const id of taskDeps.get(next.id) ?? []) {
+          pending.push({ kind: "task", id });
+          for (const cs of byTask.get(id) ?? []) pending.push({ kind: "changeset", id: cs });
+        }
+      }
     }
-    memo.set(id, out);
-    return out;
-  };
-  for (const c of proposed) visit(c.id, new Set([c.id]));
-  return memo;
+    result.set(c.id, out);
+  }
+  return result;
 }
 
 /**
@@ -82,8 +108,8 @@ function lineages(proposed: readonly ProposedChangeSet[]): Map<string, Set<strin
  *    nothing competes and its ChangeSets compose normally.
  * 2. No counting fork conflict: one Candidate from every proposed ChangeSet.
  * 3. Otherwise the first counting conflict (input order: oldest first) is the fork axis. Every
- *    ChangeSet goes where its lineage (itself plus its `stackedOn` ancestors) allows, because a
- *    stacked commit already carries its ancestors' source and composition rejects it without them:
+ *    ChangeSet goes where its lineage (itself, stacked ancestors, and Task dependencies) allows,
+ *    because composition rejects it without its required ChangeSets:
  *    - lineage meets one axis side: that side's Candidate only;
  *    - lineage meets both axis sides: deferred, it fits neither Candidate;
  *    - lineage meets a side of a further counting conflict: deferred (rule 4);
@@ -91,11 +117,12 @@ function lineages(proposed: readonly ProposedChangeSet[]): Map<string, Set<strin
  *    Each axis side with at least one ChangeSet left gives one Candidate: shared plus that side.
  *    Two Candidates at most, within MAX_CANDIDATES.
  * 4. A further counting conflict is not paired: a third design would exceed the limit, so its
- *    ChangeSets, and every ChangeSet stacked on them, wait for a later round.
+ *    ChangeSets, and every ChangeSet stacked on or dependent on them, wait for a later round.
  */
 export function planCandidateSets(
   proposed: readonly ProposedChangeSet[],
   forkConflicts: readonly ForkConflict[],
+  edges: readonly TaskEdge[] = [],
 ): CandidatePlan {
   const all = proposed.map((c) => c.id).sort();
   const onSide = (side: readonly string[]) =>
@@ -119,7 +146,7 @@ export function planCandidateSets(
     }
   }
 
-  const lineage = lineages(proposed);
+  const lineage = lineages(proposed, edges);
   const shared: string[] = [];
   const own: [string[], string[]] = [[], []];
   const deferred: DeferredChangeSet[] = [];
@@ -131,7 +158,7 @@ export function planCandidateSets(
     if (inA.length > 0 && inB.length > 0) {
       deferred.push({
         id,
-        reason: `carries both sides of fork conflict ${axis.id} (${inA.join(", ")} and ${inB.join(", ")}); no Candidate of the fork can include it`,
+        reason: `requires both sides of fork conflict ${axis.id} (${inA.join(", ")} and ${inB.join(", ")}); no Candidate of the fork can include it`,
       });
     } else if (waiting.length > 0) {
       const first = waiting[0] as string;
@@ -140,7 +167,7 @@ export function planCandidateSets(
         reason:
           first === id
             ? `on a side of fork conflict ${later.get(id)}, which waits for a later round`
-            : `stacked on ${waiting.join(", ")}, on a side of fork conflict ${later.get(first)}, which waits for a later round`,
+            : `stacked on ${waiting.join(", ")} or depends on their Tasks, on a side of fork conflict ${later.get(first)}, which waits for a later round`,
       });
     } else if (inA.length > 0) own[0].push(id);
     else if (inB.length > 0) own[1].push(id);
@@ -249,6 +276,21 @@ async function loadForkConflicts(env: Env, changeId: string): Promise<ForkConfli
     }
   }
   return out;
+}
+
+/** One bounded query for the Work Graph. Never classify sides using a truncated dependency graph. */
+async function loadTaskDependencies(env: Env, changeId: string): Promise<TaskEdge[]> {
+  const cap = MAX_TASKS_PER_CHANGE * MAX_TASKS_PER_CHANGE;
+  const rows = await env.DB.prepare(
+    `SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d
+     JOIN tasks t ON t.id = d.task_id WHERE t.change_id = ?
+     ORDER BY d.task_id, d.depends_on_task_id LIMIT ?`,
+  )
+    .bind(changeId, cap + 1)
+    .all<TaskEdge>();
+  const edges = rows.results ?? [];
+  if (edges.length > cap) throw new Error(`Task dependency limit exceeded for Change ${changeId}`);
+  return edges;
 }
 
 /**
@@ -428,12 +470,13 @@ export async function composeChangeCandidates(
       return { status: "waiting", reason: `${pending?.n} conflict review(s) still running` };
     }
   }
-  const [proposed, forks] = await Promise.all([
+  const [proposed, forks, edges] = await Promise.all([
     loadProposed(env, change.id),
     loadForkConflicts(env, change.id),
+    loadTaskDependencies(env, change.id),
   ]);
   if (proposed.length === 0) return { status: "skipped", reason: "no proposed ChangeSets" };
-  const plan = planCandidateSets(proposed, forks);
+  const plan = planCandidateSets(proposed, forks, edges);
   const candidates: CreateCandidateOutcome[] = [];
   for (const set of plan.sets) {
     candidates.push(

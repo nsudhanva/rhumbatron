@@ -170,7 +170,7 @@ function migrationNumbers(cs: ComposableChangeSet): number[] {
  * contract, migration, or file conflict with it; a ChangeSet whose stacked ancestor is missing from
  * the composition is an unsatisfied dependency; overlap uses the files a ChangeSet itself changed.
  */
-export const COMPOSITION_RULES_VERSION = 6;
+export const COMPOSITION_RULES_VERSION = 7;
 
 /**
  * Transitive `stackedOn` ancestors of each ChangeSet. A pair where one is an ancestor of the other
