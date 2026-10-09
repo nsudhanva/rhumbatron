@@ -24,7 +24,24 @@ type TaskRow = {
   assigned_agent_id: string | null;
   semantic_resources_json: string;
   title: string | null;
+  wake_sent_at: string | null;
+  blocked_limit: string | null;
 };
+
+/** Events after which a Task of the Change no longer holds a reasoning agent slot (section 44). */
+const SLOT_FREEING = new Set(["task.completed", "task.failed"]);
+
+/**
+ * Section 44 and 61: a ready Task the wake consumer deferred at the active-agent limit has no wake
+ * in flight. When a slot frees, the Change is dispatched again so the integration Worker wakes it.
+ */
+export const hasDeferredReady = (rows: readonly TaskRow[], changeId: string | undefined) =>
+  rows.some(
+    (r) =>
+      r.change_id === changeId &&
+      r.status === "ready" &&
+      (r.wake_sent_at === null || r.blocked_limit === "max_active_agents_per_change"),
+  );
 
 const log = (line: Record<string, unknown>) => console.warn(JSON.stringify(line));
 
@@ -59,7 +76,8 @@ async function loadTasks(env: Env, changeIds: string[], projectIds: string[]) {
     .join(" OR ");
   const [tasks, deps] = await env.DB.batch([
     env.DB.prepare(
-      `SELECT t.id, t.change_id, t.status, t.assigned_agent_id, t.semantic_resources_json, t.title
+      `SELECT t.id, t.change_id, t.status, t.assigned_agent_id, t.semantic_resources_json, t.title,
+              t.wake_sent_at, t.blocked_limit
        FROM tasks t JOIN changes c ON c.id = t.change_id WHERE ${scope}`,
     ).bind(...changeIds, ...projectIds),
     env.DB.prepare(
@@ -207,6 +225,7 @@ export async function routeCausalBatch(
   });
 
   const dispatches = new Map<string, CommandEnvelope<Record<string, never>>>();
+  const readmitted = new Set<string>();
   const commands: CommandEnvelope<AgentWakePayload>[] = [];
   for (const event of relevant) {
     const scoped = activeAgents.filter((a) =>
@@ -224,7 +243,13 @@ export async function routeCausalBatch(
       { activeAgents: scoped },
       graphFor(event.changeId),
     );
-    if (decision.ready.length > 0 && event.changeId && !dispatches.has(event.changeId)) {
+    const readmit = SLOT_FREEING.has(event.eventType) && hasDeferredReady(rows, event.changeId);
+    if (readmit && event.changeId) readmitted.add(event.changeId);
+    if (
+      (decision.ready.length > 0 || readmit) &&
+      event.changeId &&
+      !dispatches.has(event.changeId)
+    ) {
       dispatches.set(event.changeId, dispatchCommand(event, event.changeId));
     }
     const wakes = [
@@ -253,6 +278,17 @@ export async function routeCausalBatch(
     }
   }
 
+  if (readmitted.size > 0) {
+    // A deferred Task must look unwoken to the dispatcher, even if a late dispatch write set it.
+    await env.DB.batch(
+      [...readmitted].map((changeId) =>
+        env.DB.prepare(
+          `UPDATE tasks SET wake_sent_at = NULL
+           WHERE change_id = ? AND status = 'ready' AND blocked_limit = 'max_active_agents_per_change'`,
+        ).bind(changeId),
+      ),
+    );
+  }
   if (dispatches.size > 0) {
     await env.INTEGRATION_COMMANDS.sendBatch(
       [...dispatches.values()].map((body) => ({ body, contentType: "json" })),

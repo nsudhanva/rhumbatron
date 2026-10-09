@@ -41,6 +41,14 @@ const MAX_CANDIDATES = 3;
 
 const ChangeIdParam = z.object({ changeId: z.string().regex(/^chg_[a-z0-9-]+$/) });
 const CandidateIdParam = z.object({ candidateId: z.string().regex(/^cand_[a-z0-9]+$/) });
+/** Optional create body: compose only these proposed ChangeSets (competing designs, P9-08). */
+const CandidateSubset = z.object({
+  changeSetIds: z
+    .array(z.string().regex(/^cs_[A-Za-z0-9_-]+$/))
+    .min(1)
+    .max(20)
+    .optional(),
+});
 
 const Gap = z.object({ checkId: z.string(), reason: z.string() });
 
@@ -230,7 +238,15 @@ export const candidates = new Hono<AppEnv>()
       )
         .bind(changeId)
         .all<{ id: string }>();
-      const changeSetIds = (sets.results ?? []).map((r) => r.id);
+      const proposed = (sets.results ?? []).map((r) => r.id);
+      // No body (or no `changeSetIds`) composes every proposed ChangeSet, as before.
+      const subset = CandidateSubset.safeParse(await c.req.json().catch(() => ({})));
+      if (!subset.success) return fail(c, 400, "invalid_request", "Invalid json");
+      const wanted = subset.data.changeSetIds;
+      if (wanted?.some((id) => !proposed.includes(id))) {
+        return fail(c, 409, "conflict", "changeSetIds must be proposed ChangeSets of this Change");
+      }
+      const changeSetIds = wanted ? proposed.filter((id) => wanted.includes(id)) : proposed;
       const compositionKey = await hex(
         `${changeId}\n${change.base_generation}\n${changeSetIds.join(",")}`,
       );

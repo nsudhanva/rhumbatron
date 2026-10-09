@@ -39,6 +39,7 @@ import {
   sqlRunClaimStore,
 } from "./claims-client.ts";
 import { declareIntentAndDetect } from "./conflicts.ts";
+import { limitAttempts, limitStop } from "./limits.ts";
 import { createTierModels, modelIdFor, PROVIDER_ID } from "./models.ts";
 import type {
   AgentResumeEvent,
@@ -342,7 +343,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     let receipt: Record<string, unknown>;
     const lastTier = previous.results?.at(-1)?.tier;
     if (lastTier) {
-      const step = nextStep(lastTier, failures);
+      // Section 44: at most 2 attempts per tier before escalation or re-plan (limits.ts).
+      const step = limitAttempts(nextStep(lastTier, failures), previous.results ?? []);
       if (step.action !== "retry" && step.action !== "escalate") {
         await this.failTask(input, task, step.reason);
         return { runId: "", accepted: false, state: { status: "idle" } };
@@ -816,7 +818,9 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   private async failTask(input: AgentRunInput, _task: TaskRow | null, reason: string) {
     const ctx = this.changeContext(input);
     const now = new Date().toISOString();
-    const budget = reason === "budget_exhausted";
+    // Section 44 budget stop: the Task and Change name the exact limit that was reached.
+    const stop = limitStop(reason);
+    const budget = stop !== null;
     const graph = await this.env.DB.batch([
       this.env.DB.prepare("SELECT id, status FROM tasks WHERE change_id = ?").bind(input.changeId),
       this.env.DB.prepare(
@@ -835,8 +839,15 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     );
     await this.env.DB.batch([
       this.env.DB.prepare(
-        `UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status IN ('assigned', 'running')`,
-      ).bind(budget ? "blocked" : "failed", now, input.taskId),
+        `UPDATE tasks SET status = ?, blocked_limit = ?, blocked_reason = ?, updated_at = ?
+         WHERE id = ? AND status IN ('assigned', 'running')`,
+      ).bind(
+        budget ? "blocked" : "failed",
+        stop?.limit ?? null,
+        stop?.text ?? null,
+        now,
+        input.taskId,
+      ),
       ...blocked.map((id) =>
         this.env.DB.prepare(
           "UPDATE tasks SET status = 'blocked', updated_at = ? WHERE id = ? AND status = 'pending'",
@@ -845,8 +856,9 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       ...(budget
         ? [
             this.env.DB.prepare(
-              "UPDATE changes SET status = 'budget_blocked', updated_at = ? WHERE id = ? AND status = 'running'",
-            ).bind(now, input.changeId),
+              `UPDATE changes SET status = 'budget_blocked', blocked_limit = ?, blocked_reason = ?,
+                 updated_at = ? WHERE id = ? AND status = 'running'`,
+            ).bind(stop?.limit ?? null, stop?.text ?? null, now, input.changeId),
           ]
         : []),
     ]);
@@ -976,22 +988,27 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     return row ? (JSON.parse(row.ws_json) as WorkspaceRef) : null;
   }
 
-  /** Opens the run's workspace on first use. Null for Tasks without one or when the Sandbox cap is reached. */
+  /** Opens the run's workspace on first use. A string explains why there is none (no source, Task kind, or a Sandbox limit). */
   private async workspace(): Promise<WorkspaceRef | string> {
     const source = this.runSource();
     if (!source) return "No source repository for this Project yet.";
-    const input = JSON.parse(source.run.input_json) as { taskKind?: string };
+    const input = JSON.parse(source.run.input_json) as {
+      taskKind?: string;
+      taskId: string;
+      changeId: string;
+    };
     if (!WORKSPACE_KINDS.has(input.taskKind ?? ""))
       return "This Task has no workspace: declare your Intent instead.";
     const existing = this.workspaceRef(source.run.run_id);
     if (existing) return existing;
     const ws = await openWorkspace(this.env, {
       projectId: source.projectId,
+      change: { changeId: input.changeId, taskId: input.taskId },
       runId: source.run.run_id,
       baseCommit: source.commit,
     });
-    if (!ws)
-      return "The monthly Sandbox budget is used up. Declare your Intent without code changes.";
+    // Monthly Sandbox meter or the per-Change Sandbox limit (section 44): no Sandbox opened.
+    if ("refused" in ws) return ws.message;
     this.ctx.storage.sql.exec(
       "INSERT OR REPLACE INTO run_workspaces (run_id, ws_json) VALUES (?, ?)",
       source.run.run_id,

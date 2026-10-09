@@ -827,3 +827,69 @@ export type ProductGraph = {
 export const getProductGraph = createServerFn()
   .inputValidator((projectId: string) => projectId)
   .handler(({ data }) => call<ProductGraph>(`/v1/projects/${data}/product-graph`));
+
+/**
+ * Operator actions (AGENTS.md sections 42.7 and 44): commands that failed after their Queue
+ * retries, and Tasks or Changes a section 44 limit stopped or delays (workers/api dead-letters.ts).
+ */
+export type DeadLetter = {
+  id: string;
+  commandId: string;
+  commandType: string;
+  /** Original Queue key: `agent-wakeups` or `integration`. */
+  queue: string;
+  changeId: string | null;
+  taskId: string | null;
+  taskTitle: string | null;
+  error: string;
+  attempt: number;
+  /** How many copies of this command reached the dead-letter Queue. */
+  deadCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+};
+
+export type LimitBlock = {
+  scope: "task" | "change";
+  id: string;
+  changeId: string;
+  title: string | null;
+  status: string;
+  /** Machine key, for example `max_active_agents_per_change`. */
+  limit: string;
+  /** The sentence that names the exact limit. */
+  reason: string;
+};
+
+export type OperatorState = { deadLetters: DeadLetter[]; limits: LimitBlock[] };
+
+export const getDeadLetters = createServerFn()
+  .inputValidator((input: { projectId: string; changeId?: string | undefined }) => input)
+  .handler(({ data }) =>
+    call<OperatorState>(
+      `/v1/projects/${data.projectId}/dead-letters${
+        data.changeId ? `?changeId=${encodeURIComponent(data.changeId)}` : ""
+      }`,
+    ),
+  );
+
+type DeadLetterResolution = {
+  id: string;
+  resolution: "retried" | "dismissed";
+  commandId: string;
+  queue: string;
+};
+
+/** Sends the same command (same command ID) back to its original Queue. */
+export const retryDeadLetter = createServerFn({ method: "POST" })
+  .inputValidator((id: string) => id)
+  .handler(({ data }) =>
+    call<DeadLetterResolution>(`/v1/dead-letters/${data}/retry`, { method: "POST", body: {} }),
+  );
+
+/** Accepts the failure: nothing is sent; a blocked Task stays blocked. */
+export const dismissDeadLetter = createServerFn({ method: "POST" })
+  .inputValidator((id: string) => id)
+  .handler(({ data }) =>
+    call<DeadLetterResolution>(`/v1/dead-letters/${data}/dismiss`, { method: "POST", body: {} }),
+  );

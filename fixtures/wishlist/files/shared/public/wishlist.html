@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Acme Shop - Wishlists</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+      li { margin: 0.4rem 0; }
+      #error { color: #b00020; }
+      input[readonly] { width: 100%; }
+    </style>
+  </head>
+  <body>
+    <h1><a href="/">Acme Shop</a> / Wishlists</h1>
+    <p>
+      Signed in as
+      <select id="user">
+        <option>alice</option>
+        <option>bob</option>
+        <option>carol</option>
+      </select>
+    </p>
+    <form id="create">
+      <input id="name" placeholder="New wishlist name" required />
+      <button type="submit">Create wishlist</button>
+    </form>
+    <p id="error"></p>
+    <section id="wishlist" hidden>
+      <h2 id="title">Wishlist</h2>
+      <p id="share-box">
+        <button id="share" type="button">Share with a link</button>
+        <button id="revoke" type="button">Revoke link</button>
+        <input id="share-url" readonly hidden />
+      </p>
+      <h3>Items</h3>
+      <ul id="items"></ul>
+      <h3>Collaborators</h3>
+      <ul id="collaborators"></ul>
+      <h3>Add products</h3>
+      <ul id="products"></ul>
+    </section>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const money = (c) => `$${(c / 100).toFixed(2)}`;
+      const params = new URLSearchParams(location.search);
+      let current = params.get("id");
+      $("user").value = params.get("as") || "alice";
+
+      async function api(path, init = {}) {
+        const res = await fetch(`/api${path}`, {
+          ...init,
+          headers: { "x-user-id": $("user").value, "content-type": "application/json" },
+        });
+        const body = await res.json().catch(() => ({}));
+        $("error").textContent = res.ok ? "" : `${res.status}: ${body.error || "request failed"}`;
+        return res.ok ? body : null;
+      }
+
+      function render(w) {
+        if (!w) return;
+        current = w.id;
+        history.replaceState(null, "", `?id=${w.id}&as=${$("user").value}`);
+        const owner = w.owner === $("user").value;
+        $("wishlist").hidden = false;
+        $("title").textContent = `${w.name} (owner: ${w.owner})`;
+        $("share-box").hidden = !owner;
+        $("items").innerHTML = w.items
+          .map((i) => `<li>${i.name} ${money(i.priceCents)}, added by ${i.addedBy}
+            <button data-remove="${i.productId}">Remove</button></li>`)
+          .join("") || "<li>No items yet</li>";
+        $("collaborators").innerHTML = w.collaborators
+          .map((c) => `<li>${c.userId} (${c.role})${owner && c.role === "editor"
+            ? ` <button data-kick="${c.userId}">Remove</button>` : ""}</li>`)
+          .join("");
+      }
+
+      const load = async () => current && render(await api(`/wishlists/${current}`));
+
+      $("create").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        render(await api("/wishlists", { method: "POST", body: JSON.stringify({ name: $("name").value }) }));
+      });
+      $("share").addEventListener("click", async () => {
+        const link = await api(`/wishlists/${current}/share`, { method: "POST" });
+        if (!link) return;
+        $("share-url").hidden = false;
+        $("share-url").value = `${location.origin}/wishlist.html?join=${link.token}`;
+      });
+      $("revoke").addEventListener("click", async () => {
+        $("share-url").hidden = true;
+        render(await api(`/wishlists/${current}/share`, { method: "DELETE" }));
+      });
+      $("user").addEventListener("change", load);
+      document.addEventListener("click", async (e) => {
+        const { add, remove, kick } = e.target.dataset;
+        if (add) render(await api(`/wishlists/${current}/items`, { method: "POST", body: JSON.stringify({ productId: add }) }));
+        if (remove) render(await api(`/wishlists/${current}/items/${remove}`, { method: "DELETE" }));
+        if (kick) render(await api(`/wishlists/${current}/collaborators/${kick}`, { method: "DELETE" }));
+      });
+
+      (async () => {
+        const { products } = (await api("/products")) || { products: [] };
+        $("products").innerHTML = products
+          .map((p) => `<li>${p.name} (${money(p.priceCents)})
+            <button data-add="${p.id}">Add to wishlist</button></li>`)
+          .join("");
+        const token = params.get("join");
+        if (token) {
+          if (!params.get("as")) $("user").value = "bob";
+          render(await api(`/wishlist-links/${token}/join`, { method: "POST" }));
+        } else {
+          await load();
+        }
+      })();
+    </script>
+  </body>
+</html>

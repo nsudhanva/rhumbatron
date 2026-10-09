@@ -1,4 +1,11 @@
 import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
+import {
+  admitSandbox,
+  type LimitKey,
+  noteSandboxRefused,
+  releaseSandbox,
+  sandboxLimitReason,
+} from "./limits.ts";
 
 /**
  * Task Workspace (AGENTS.md sections 29.2 and 30): an Artifacts fork of the canonical repo,
@@ -108,12 +115,43 @@ async function run(sandbox: Sandbox, command: string, dir: string, env?: Record<
   };
 }
 
-/** Forks the canonical repo and checks it out in the Project Sandbox. Null when the cap is reached. */
+/** A workspace that was not opened, and why. The agent sees `message` as its tool result. */
+export type WorkspaceRefused = { refused: "monthly_sandbox_seconds" | LimitKey; message: string };
+
+/**
+ * Forks the canonical repo and checks it out in the Project Sandbox. Refused, with no fork and no
+ * Sandbox work, when the Change already has its maximum of open coding Sandboxes (section 44) or
+ * the monthly Sandbox meter is used up.
+ */
 export async function openWorkspace(
   env: WorkspaceEnv,
-  input: { projectId: string; runId: string; baseCommit: string },
-): Promise<WorkspaceRef | null> {
-  if (!(await reserveSeconds(env.DB, OPEN_RESERVATION_SECONDS))) return null;
+  input: {
+    projectId: string;
+    /** The Task run's Change and Task. Absent only for the Sandbox smoke check, which has no Change. */
+    change?: { changeId: string; taskId: string };
+    runId: string;
+    baseCommit: string;
+  },
+): Promise<WorkspaceRef | WorkspaceRefused> {
+  const now = new Date().toISOString();
+  const change = input.change;
+  if (
+    change &&
+    !(await admitSandbox(env.DB, { runId: input.runId, changeId: change.changeId, now }))
+  ) {
+    await noteSandboxRefused(env.DB, change.taskId, now);
+    return {
+      refused: "max_active_sandboxes_per_change",
+      message: `${sandboxLimitReason()} Declare your Intent without code changes, or call fail_task.`,
+    };
+  }
+  if (!(await reserveSeconds(env.DB, OPEN_RESERVATION_SECONDS))) {
+    await releaseSandbox(env.DB, input.runId, now);
+    return {
+      refused: "monthly_sandbox_seconds",
+      message: "The monthly Sandbox budget is used up. Declare your Intent without code changes.",
+    };
+  }
   const fork = `ws-${input.runId.slice(4)}`;
   const dir = `/workspace/${input.runId.slice(-24)}`;
   using canonical = await env.ARTIFACTS.get(input.projectId);
@@ -155,6 +193,7 @@ export async function openWorkspace(
     // A failed open must not leave a fork or a reservation behind (cost report: leftovers).
     await env.ARTIFACTS.delete(fork).catch(() => false);
     await settleSeconds(env.DB, -OPEN_RESERVATION_SECONDS);
+    await releaseSandbox(env.DB, input.runId, new Date().toISOString());
     throw error;
   }
   return {
@@ -250,6 +289,8 @@ export async function publishWorkspace(
 export async function closeWorkspace(env: WorkspaceEnv, ws: WorkspaceRef) {
   const elapsed = Math.ceil((Date.now() - ws.openedAt) / 1000) + SLEEP_TAIL_SECONDS;
   await settleSeconds(env.DB, elapsed - OPEN_RESERVATION_SECONDS);
+  // Frees the Change's Sandbox slot (section 44) before the directory cleanup, which may fail.
+  await releaseSandbox(env.DB, ws.runId, new Date().toISOString());
   try {
     await sandboxFor(env, ws.projectId).exec(`rm -rf ${ws.dir}`);
   } catch {

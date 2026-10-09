@@ -48,9 +48,13 @@
       "script_name": "rhumbatron-integration"
     }
   ],
-  // Project source provisioning commands for the integration Worker (ADR 0010).
+  // Project source provisioning commands for the integration Worker (ADR 0010). Dead-letter retry
+  // sends a command back to its original Queue: integration or agent wakeups (section 42.7).
   "queues": {
-    "producers": [{ "binding": "INTEGRATION_COMMANDS", "queue": "rhumbatron-integration-local" }]
+    "producers": [
+      { "binding": "INTEGRATION_COMMANDS", "queue": "rhumbatron-integration-local" },
+      { "binding": "AGENT_WAKEUPS", "queue": "rhumbatron-agent-wakeups-local" }
+    ]
   },
   "services": [
     // Sandbox smoke check RPC (AGENTS.md section 49.3).

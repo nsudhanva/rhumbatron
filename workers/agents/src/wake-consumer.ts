@@ -7,6 +7,7 @@ import {
 import { AgentWakePayload, AnyCommandEnvelope, type TaskStatus } from "@rhumbatron/protocol";
 import { getAgentByName } from "agents";
 import type { AgentDO } from "./agent-do.ts";
+import { admitAgent } from "./limits.ts";
 
 /**
  * Consumer for `rhumbatron-agent-wakeups` (AGENTS.md sections 20 and 31.3). It checks that the
@@ -27,7 +28,7 @@ type TaskRow = {
   base_generation: number;
 };
 
-type Outcome = "woken" | "duplicate" | "stale" | "invalid";
+type Outcome = "woken" | "duplicate" | "stale" | "invalid" | "deferred";
 
 // Biome allows only warn and error; Workers Logs keeps them as structured JSON lines.
 const log = (line: Record<string, unknown>) => console.warn(JSON.stringify(line));
@@ -67,15 +68,25 @@ export async function handleWake(env: Env, body: unknown): Promise<Outcome> {
   }
 
   if (wake.reason === "task_ready") {
-    const now = new Date().toISOString();
-    const assigned = await env.DB.prepare(
-      `UPDATE tasks SET status = 'assigned', assigned_agent_id = ?, updated_at = ?
-       WHERE id = ? AND status = 'ready'`,
-    )
-      .bind(wake.agentId, now, taskId)
-      .run();
+    // Section 44: at most 8 reasoning agents per Change. Count and assignment are one statement.
+    const admission = await admitAgent(env.DB, {
+      taskId,
+      changeId: task.change_id,
+      agentId: wake.agentId,
+      now: new Date().toISOString(),
+    });
     // A concurrent delivery of the same command won the race.
-    if (assigned.meta.changes === 0) return "duplicate";
+    if (admission.kind === "not_ready") return "duplicate";
+    if (admission.kind === "deferred") {
+      // The Task stays ready and names the limit; a later dispatch wakes it (section 61).
+      env.METRICS.writeDataPoint({
+        blobs: ["limit_reached", "max_active_agents_per_change", taskId],
+        doubles: [admission.active],
+        indexes: [command.data.projectId],
+      });
+      log({ event: "wake.deferred", taskId, active: admission.active });
+      return "deferred";
+    }
   }
 
   const ctx: ChangeContext = {

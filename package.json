@@ -41,7 +41,8 @@
     "cost:report": "CLOUDFLARE_MONITOR_TOKEN=$(security find-generic-password -s rhumbatron-cloudflare-monitor-token -w) CLOUDFLARE_D1_TOKEN=$(security find-generic-password -s rhumbatron-cloudflare-api-token -w) CLOUDFLARE_ACCOUNT_ID=$(security find-generic-password -s rhumbatron-cloudflare-account-id -w) bun scripts/cost-report.ts",
     "demo:project": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/demo-project.ts",
     "cleanup:projects": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/cleanup-projects.ts",
-    "inject": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/inject.ts"
+    "inject": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/inject.ts",
+    "demo:wishlist": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/demo-wishlist.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

@@ -131,6 +131,7 @@
         "agents": "0.27.0",
       },
       "devDependencies": {
+        "@types/node": "26.6.4",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -147,6 +148,7 @@
       },
       "devDependencies": {
         "@rhumbatron/coordinator": "workspace:*",
+        "@types/node": "26.6.4",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -171,6 +173,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@rhumbatron/causal-router": "workspace:*",
+        "@rhumbatron/integration": "workspace:*",
         "@rhumbatron/model-router": "workspace:*",
         "@rhumbatron/protocol": "workspace:*",
         "zod": "4.6.5",
@@ -198,6 +201,7 @@
         "@cloudflare/puppeteer": "1.4.0",
         "@cloudflare/sandbox": "0.12.6",
         "@rhumbatron/causal-router": "workspace:*",
+        "@rhumbatron/conflict": "workspace:*",
         "@rhumbatron/coordinator": "workspace:*",
         "@rhumbatron/evidence": "workspace:*",
         "@rhumbatron/model-router": "workspace:*",

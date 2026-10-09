@@ -3,6 +3,7 @@ import type { ProjectViewDO } from "@rhumbatron/coordinator";
 import type { EventEnvelope } from "@rhumbatron/protocol";
 import { buildArchive, writeArchive } from "./archive.ts";
 import { routeCausalBatch } from "./causal.ts";
+import { consumeDeadLetters } from "./dead-letter.ts";
 import { claimEvents, releaseEvents } from "./dedupe.ts";
 import { feedStatements } from "./feed.ts";
 import {
@@ -279,6 +280,14 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
     await processStream(this.env, index);
     const run = newRun(this.env, index);
     if (run) await runArchive(run);
+  }
+
+  /**
+   * Dead-letter Queue consumer (AGENTS.md section 42.7): records each poison command, blocks its
+   * Task, and leaves the operator a retry or dismiss action. This is the only Queue it consumes.
+   */
+  override async queue(batch: MessageBatch): Promise<void> {
+    await consumeDeadLetters(this.env, batch.messages, log);
   }
 
   /** Fast path: the coordinator calls this through a service binding after publishing. */

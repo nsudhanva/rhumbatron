@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@rhumbatron/causal-router": "workspace:*",
+    "@rhumbatron/integration": "workspace:*",
     "@rhumbatron/model-router": "workspace:*",
     "@rhumbatron/protocol": "workspace:*",
     "zod": "4.6.5"

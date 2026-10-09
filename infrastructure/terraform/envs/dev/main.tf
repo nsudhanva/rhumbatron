@@ -90,6 +90,8 @@ module "api_worker" {
     { type = "service", name = "INTEGRATION", service = module.integration_worker.name, environment = "production" },
     # Project source provisioning commands (ADR 0010).
     { type = "queue", name = "INTEGRATION_COMMANDS", queue_name = module.async.queues["integration"].name },
+    # Dead-letter retry sends an `agent.wake` back to its original Queue (section 42.7).
+    { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
     # Starts one ChangeWorkflow per Change (AGENTS.md section 21.1).
     { type = "workflow", name = "CHANGE_WORKFLOW", workflow_name = cloudflare_workflow.change.workflow_name, class_name = "ChangeWorkflow", script_name = module.integration_worker.name },
   ]
@@ -243,6 +245,8 @@ module "event_router_worker" {
     module.state.bindings.EVIDENCE,
     # Literal name (not a module output) avoids a cycle: the coordinator binds back to this Worker.
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = "rhumbatron-coordinator-${local.environment}" },
+    # Dead-letter consumer records `task.failed` through the Change's shard outbox (section 42.7).
+    { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = "rhumbatron-coordinator-${local.environment}" },
     # Causal Router (AGENTS.md section 31): wake commands, ready-task dispatch, Clef-flash.
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
     { type = "queue", name = "INTEGRATION_COMMANDS", queue_name = module.async.queues["integration"].name },
@@ -487,6 +491,23 @@ resource "cloudflare_queue_consumer" "integration" {
     max_retries      = 3
     max_wait_time_ms = 1000
     retry_delay      = 30
+  }
+}
+
+# Poison commands (AGENTS.md section 42.7): the event router records each one in D1, blocks its
+# Task, and the operator retries or dismisses it through the API. This consumer has no dead-letter
+# Queue of its own; a storage failure retries 5 times, then the message is dropped and logged.
+# Queues Free: about 3 operations per dead-lettered command.
+resource "cloudflare_queue_consumer" "dead_letter" {
+  account_id  = var.account_id
+  queue_id    = module.async.queues["dead-letter"].id
+  script_name = module.event_router_worker.name
+  type        = "worker"
+  settings = {
+    batch_size       = 5
+    max_retries      = 5
+    max_wait_time_ms = 1000
+    retry_delay      = 60
   }
 }
 

@@ -4,6 +4,7 @@ import { SignIn } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { DeadLetters } from "../components/dead-letters";
 import { EventStream } from "../components/project/event-stream";
 import { SectionError, SkeletonBar, SkeletonRows } from "../components/project/feedback";
 import {
@@ -152,6 +153,8 @@ function Overview() {
           )
         }
       />
+
+      <DeadLetters projectId={projectId} />
 
       {project.isError && (
         <SectionError

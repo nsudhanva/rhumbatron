@@ -13,6 +13,7 @@ import {
   InvariantList,
 } from "../components/change/change-overview";
 import { ConflictCard } from "../components/conflict-card";
+import { DeadLetters } from "../components/dead-letters";
 import { useEventFeed } from "../components/project/use-event-feed";
 import { TaskPanel } from "../components/task-detail";
 import { EmptyState } from "../components/ui/empty-state";
@@ -285,6 +286,8 @@ function ChangeView() {
           </>
         }
       />
+
+      <DeadLetters projectId={data.projectId} changeId={data.id} />
 
       <ChangeStats
         tasks={taskList}

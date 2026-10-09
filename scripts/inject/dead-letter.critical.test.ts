@@ -36,6 +36,8 @@ describe("Queue consumers send poison commands to the dead-letter Queue", () => 
   });
 
   for (const [name, block] of dev) {
+    // The dead-letter Queue's own consumer is the end of the line: checked below.
+    if (name === "dead_letter") continue;
     it(`dev consumer ${name} has a dead-letter Queue and bounded retries`, () => {
       expect(block).toMatch(/dead_letter_queue\s*=\s*module\.async\.queues\["dead-letter"\]\.name/);
       const retries = Number(/max_retries\s*=\s*(\d+)/.exec(block)?.[1] ?? Number.NaN);
@@ -43,6 +45,24 @@ describe("Queue consumers send poison commands to the dead-letter Queue", () => 
       expect(retries).toBeLessThanOrEqual(5);
     });
   }
+
+  it("dev dead-letter Queue is consumed by the event router, with bounded retries and no loop", () => {
+    const block = dev.get("dead_letter") ?? "";
+    expect(block).toMatch(/queue_id\s*=\s*module\.async\.queues\["dead-letter"\]\.id/);
+    expect(block).toMatch(/script_name\s*=\s*module\.event_router_worker\.name/);
+    // A dead-letter Queue for the dead-letter consumer would be a loop.
+    expect(block).not.toMatch(/dead_letter_queue/);
+    const retries = Number(/max_retries\s*=\s*(\d+)/.exec(block)?.[1] ?? Number.NaN);
+    expect(retries).toBeGreaterThanOrEqual(1);
+    expect(retries).toBeLessThanOrEqual(5);
+  });
+
+  it("local event router consumes the dead-letter Queue with bounded retries", () => {
+    const config = read("workers/event-router/wrangler.jsonc");
+    expect(config).toMatch(/"queue":\s*"rhumbatron-dead-letter-local"/);
+    expect(config).toMatch(/"max_retries":\s*[1-5]\b/);
+    expect(config).not.toMatch(/"dead_letter_queue"/);
+  });
 
   for (const worker of ["agents", "integration"]) {
     it(`local ${worker} consumer matches: bounded retries and a dead-letter Queue`, () => {

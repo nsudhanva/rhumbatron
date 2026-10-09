@@ -11,7 +11,12 @@ import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import { createFsFromVolume, Volume } from "memfs";
 import { applyDesign } from "../../../fixtures/wishlist/apply.ts";
-import { CHANGE_PLAN, DESIGNS, type WishlistDesign } from "../../../fixtures/wishlist/manifest.ts";
+import {
+  CHANGE_PLAN,
+  DESIGNS,
+  fixtureIds,
+  type WishlistDesign,
+} from "../../../fixtures/wishlist/manifest.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent, qualify } from "./events.ts";
 import wishlistFixture from "./fixtures/wishlist.fixture.gen.ts";
 
@@ -37,6 +42,9 @@ export type FixtureOutcome =
   | { status: "skipped"; reason: string }
   | { status: "published"; changeSets: string[]; conflicts: string[] };
 
+/** The fixture does not fit the canonical source (for example after a promotion). Permanent. */
+class FixtureMismatch extends Error {}
+
 type ChangeRow = {
   status: string;
   base_generation: number;
@@ -45,19 +53,6 @@ type ChangeRow = {
   slug: string;
   project_status: string;
 };
-
-/** IDs one design gets on one Change, in the agents' formats (dispatch.ts, agent-do.ts). */
-export function fixtureIds(changeId: string, design: WishlistDesign) {
-  const taskId = `tsk_${changeId.slice(4)}_${DESIGNS[design].taskKey}`;
-  const run = `${taskId.slice(4)}_1`;
-  return {
-    taskId,
-    runId: `run_${run}`,
-    fork: `ws-${run}`,
-    changeSetId: `cs_${run}`,
-    intentId: `int_${run}`,
-  };
-}
 
 /** `git diff --stat`-style summary from common prefix and suffix lines per file. */
 function diffStat(changes: { path: string; before: string | null; after: string }[]) {
@@ -113,10 +108,13 @@ async function commitDesign(
   try {
     const fs = createFsFromVolume(new Volume()) as unknown as MemFs;
     await git.init({ fs, dir: DIR, defaultBranch: "main" });
+    // isomorphic-git needs a configured remote for its fetch refspec.
+    await git.addRemote({ fs, dir: DIR, remote: "origin", url: info.remote, force: true });
     await git.fetch({
       fs,
       http,
       dir: DIR,
+      remote: "origin",
       url: info.remote,
       ref: "main",
       singleBranch: true,
@@ -146,7 +144,12 @@ async function commitDesign(
       }
     }
     for (const edit of spec.edits) base.set(edit.path, await readBase(edit.path));
-    const changes = applyDesign(input.design, wishlistFixture, (p) => base.get(p) ?? null);
+    let changes: ReturnType<typeof applyDesign>;
+    try {
+      changes = applyDesign(input.design, wishlistFixture, (p) => base.get(p) ?? null);
+    } catch (error) {
+      throw new FixtureMismatch(String(error));
+    }
 
     for (const [path, content] of Object.entries(changes.files)) {
       const full = `${DIR}/${path}`;
@@ -363,7 +366,7 @@ async function declareAndDetect(
 }
 
 /** Publishes the requested designs as proposed ChangeSets on a Change. See the module comment. */
-export async function publishFixtureChangeSets(
+async function publishFixtureChangeSets(
   env: Env,
   input: { projectId: string; changeId: string; designs: WishlistDesign[] },
 ): Promise<FixtureOutcome> {
@@ -373,7 +376,7 @@ export async function publishFixtureChangeSets(
   )
     .bind(input.changeId, input.projectId)
     .first<ChangeRow>();
-  if (!row || row.project_status !== "active") return { status: "skipped", reason: "no change" };
+  if (row?.project_status !== "active") return { status: "skipped", reason: "no change" };
   if (!["created", "verifying"].includes(row.status)) {
     return { status: "skipped", reason: `change is ${row.status}` };
   }
@@ -479,13 +482,19 @@ export async function publishFixtureChangeSets(
       declared = JSON.parse(existing.intent_json) as Record<string, unknown>;
       createdAt = existing.created_at;
     } else {
-      await ensureFork(env, input.projectId, ids.fork);
-      const published = await commitDesign(env, {
-        fork: ids.fork,
-        baseCommit,
-        design,
-        commitTime,
-      });
+      let published: Awaited<ReturnType<typeof commitDesign>>;
+      try {
+        await ensureFork(env, input.projectId, ids.fork);
+        published = await commitDesign(env, { fork: ids.fork, baseCommit, design, commitTime });
+      } catch (error) {
+        // No `task_runs` row tracks the fork yet, so cleanup could never find it: remove it now.
+        // A retry forks again and rebuilds the same commit.
+        await env.ARTIFACTS.delete(ids.fork).catch(() => false);
+        if (error instanceof FixtureMismatch) {
+          return { status: "skipped", reason: `design ${design} does not apply: ${error.message}` };
+        }
+        throw error;
+      }
       declared = { ...published.intent, changeSet: published.changeSet };
       createdAt = new Date().toISOString();
       const outcome = JSON.stringify(declared);
@@ -577,7 +586,7 @@ export async function publishFixtureChangeSets(
 }
 
 /** Environments where fixture ChangeSets may be published. Never production. */
-export const FIXTURE_ENVIRONMENTS: readonly string[] = ["dev", "local"];
+const FIXTURE_ENVIRONMENTS: readonly string[] = ["dev", "local"];
 
 /** Queue entry for `fixture.publish` (payload `{designs: ["a", "b"]}`). Logs the outcome. */
 export async function handleFixtureCommand(

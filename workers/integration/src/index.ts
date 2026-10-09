@@ -6,6 +6,7 @@ import {
 } from "@rhumbatron/protocol";
 import { z } from "zod";
 import { dispatchReadyTasks } from "./dispatch.ts";
+import { handleFixtureCommand } from "./fixture-changesets.ts";
 import { cleanupProject, forkRetentionDays, sweepForks } from "./project-cleanup.ts";
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
@@ -94,6 +95,10 @@ async function handleCommand(env: Env, body: unknown): Promise<"continue" | unde
       }),
     );
     return;
+  }
+  // Dev-only Wishlist fixture ChangeSets (P9-08); refused outside dev inside the handler.
+  if (command.data.commandType === "fixture.publish") {
+    return handleFixtureCommand(env, command.data);
   }
   if (command.data.commandType === "candidate.verify") {
     await startCandidateVerification(env, command.data.payload);

@@ -5,6 +5,8 @@ import { agents } from "./agents.ts";
 import { candidates } from "./candidates.ts";
 import { conflicts } from "./conflicts.ts";
 import { cost } from "./cost.ts";
+import { deadLetters } from "./dead-letters.ts";
+import { fixtures } from "./fixtures.ts";
 import { errorBody, fail, respond } from "./http.ts";
 import { live } from "./live.ts";
 import { productGraph } from "./product-graph.ts";
@@ -33,6 +35,7 @@ app.get("/v1/version", (c) =>
 app.route("/", live);
 app.route("/", conflicts);
 app.route("/", candidates);
+app.route("/", fixtures);
 app.route("/", screenshots);
 app.route("/", verification);
 app.route("/", activity);
@@ -40,6 +43,7 @@ app.route("/", agents);
 app.route("/", cost);
 app.route("/", workspace);
 app.route("/", productGraph);
+app.route("/", deadLetters);
 app.route("/", projects);
 
 app.notFound((c) => fail(c, 404, "not_found", "Route not found"));

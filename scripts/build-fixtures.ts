@@ -8,7 +8,7 @@ import { join, relative } from "node:path";
 
 const root = join(import.meta.dirname, "..");
 const SKIP = new Set(["node_modules", ".DS_Store"]);
-const fixtures = ["acme-shop"];
+const fixtures = ["acme-shop", "wishlist"];
 const check = process.argv.includes("--check");
 
 async function walk(dir: string): Promise<string[]> {

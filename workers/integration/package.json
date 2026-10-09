@@ -19,6 +19,7 @@
     "@cloudflare/puppeteer": "1.4.0",
     "@cloudflare/sandbox": "0.12.6",
     "@rhumbatron/causal-router": "workspace:*",
+    "@rhumbatron/conflict": "workspace:*",
     "@rhumbatron/coordinator": "workspace:*",
     "@rhumbatron/evidence": "workspace:*",
     "@rhumbatron/model-router": "workspace:*",

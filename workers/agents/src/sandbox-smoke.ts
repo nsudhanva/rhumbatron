@@ -1,5 +1,5 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
-import { closeWorkspace, openWorkspace, runCommand } from "./workspace.ts";
+import { closeWorkspace, openWorkspace, runCommand, type WorkspaceRef } from "./workspace.ts";
 
 /**
  * Integration smoke check "Sandbox executes Bun" (AGENTS.md section 49.3), with no model calls:
@@ -41,10 +41,10 @@ export async function sandboxSmoke(env: Env, projectId: string): Promise<Sandbox
   const index = await env.EVIDENCE.get(`source/${projectId}/${canonical.treeSha}/index.json`);
   const commit = index ? ((await index.json()) as { commit: string }).commit : "";
   const runId = `run_smoke-${Date.now().toString(36)}`;
-  let ws: Awaited<ReturnType<typeof openWorkspace>> = null;
+  let ws: WorkspaceRef | null = null;
   try {
     const opening = Date.now();
-    ws = await openWorkspace(env, { projectId, runId, baseCommit: commit }).catch(
+    const result = await openWorkspace(env, { projectId, runId, baseCommit: commit }).catch(
       (error: unknown) => {
         steps.push({
           step: "open (fork, clone, bun install)",
@@ -55,12 +55,13 @@ export async function sandboxSmoke(env: Env, projectId: string): Promise<Sandbox
         throw error;
       },
     );
-    if (!ws)
+    if ("refused" in result)
       return {
         ok: false,
-        steps: [{ step: "open", ok: false, ms: 0, detail: "monthly Sandbox cap reached" }],
+        steps: [{ step: "open", ok: false, ms: 0, detail: result.message }],
       };
-    const opened = ws;
+    ws = result;
+    const opened = result;
     steps.push({
       step: "open (fork, clone, bun install)",
       ok: true,

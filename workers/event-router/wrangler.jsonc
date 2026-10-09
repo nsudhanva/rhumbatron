@@ -32,6 +32,12 @@
         "name": "PROJECT_VIEW",
         "class_name": "ProjectViewDO",
         "script_name": "rhumbatron-coordinator"
+      },
+      // Dead-letter consumer records `task.failed` through the Change's shard outbox (section 42.7).
+      {
+        "name": "RESOURCE_SHARD",
+        "class_name": "ResourceShardDO",
+        "script_name": "rhumbatron-coordinator"
       }
     ]
   },
@@ -40,6 +46,15 @@
       { "binding": "AGENT_WAKEUPS", "queue": "rhumbatron-agent-wakeups-local" },
       // The Causal Router hands newly ready Tasks to the integration Worker's dispatcher.
       { "binding": "INTEGRATION_COMMANDS", "queue": "rhumbatron-integration-local" }
+    ],
+    // Poison commands (AGENTS.md section 42.7). This consumer has no dead-letter Queue of its own:
+    // a storage failure retries a bounded number of times, then the message is dropped and logged.
+    "consumers": [
+      {
+        "queue": "rhumbatron-dead-letter-local",
+        "max_batch_size": 5,
+        "max_retries": 5
+      }
     ]
   },
   // Clef-flash for ambiguous wakeups only (AGENTS.md section 31.2), capped per day.

@@ -43,10 +43,13 @@ async function fastForward(env: Env, projectId: string, candidateId: string, com
   const source = await repoAccess(env, candidateFork(candidateId), "read");
   const target = await repoAccess(env, projectId, "write");
   try {
+    // isomorphic-git needs a configured remote for its fetch refspec.
+    await git.addRemote({ fs, dir: DIR, remote: "origin", url: source.remote, force: true });
     await git.fetch({
       fs,
       http,
       dir: DIR,
+      remote: "origin",
       url: source.remote,
       ref: "main",
       singleBranch: true,
