@@ -107,6 +107,30 @@ function dispatchCommand(
   };
 }
 
+/**
+ * AGENTS.md section 21.1 step 7. When the last Task completes, the agents Worker moves the Change
+ * to `verifying` and records `verification.started` with reason `work_graph_completed`. The
+ * integration Worker then composes the Change's Candidates (fork rule, section 32.4). The command
+ * ID derives from the event, and the Candidate IDs from the composition key, so a redelivery
+ * creates nothing new. Deterministic: no model call.
+ */
+export function composeCommand(
+  event: EventEnvelope,
+): CommandEnvelope<Record<string, never>> | null {
+  if (event.eventType !== "verification.started" || !event.changeId) return null;
+  const reason = (event.payload as { reason?: unknown } | null)?.reason;
+  if (reason !== "work_graph_completed") return null;
+  return {
+    commandId: `cmd_${event.eventId.slice(4)}_compose`,
+    commandType: "candidate.create",
+    projectId: event.projectId,
+    changeId: event.changeId,
+    attempt: 0,
+    createdAt: new Date().toISOString(),
+    payload: {},
+  };
+}
+
 /** Asks Clef-flash whether an ambiguous overlap matters. Abstain or cap reached: wake (safe side). */
 async function decideAmbiguous(
   model: DecisionModel,
@@ -190,7 +214,7 @@ async function settleCandidates(env: Env, events: EventEnvelope[]): Promise<numb
 export async function routeCausalBatch(
   env: Env,
   events: EventEnvelope[],
-): Promise<{ woke: number; dispatched: number; staled: number }> {
+): Promise<{ woke: number; dispatched: number; composed: number; staled: number }> {
   const relevant = events.filter((e) => e.eventType !== "task.ready");
   const changeIds = [
     ...new Set(relevant.map((e) => e.changeId).filter((id): id is string => !!id)),
@@ -225,6 +249,9 @@ export async function routeCausalBatch(
   });
 
   const dispatches = new Map<string, CommandEnvelope<Record<string, never>>>();
+  const composes = relevant
+    .map(composeCommand)
+    .filter((c): c is CommandEnvelope<Record<string, never>> => c !== null);
   const readmitted = new Set<string>();
   const commands: CommandEnvelope<AgentWakePayload>[] = [];
   for (const event of relevant) {
@@ -289,14 +316,15 @@ export async function routeCausalBatch(
       ),
     );
   }
-  if (dispatches.size > 0) {
+  const integrationCommands = [...dispatches.values(), ...composes];
+  if (integrationCommands.length > 0) {
     await env.INTEGRATION_COMMANDS.sendBatch(
-      [...dispatches.values()].map((body) => ({ body, contentType: "json" })),
+      integrationCommands.map((body) => ({ body, contentType: "json" })),
     );
   }
   if (commands.length > 0) {
     await env.AGENT_WAKEUPS.sendBatch(commands.map((body) => ({ body, contentType: "json" })));
   }
   const staled = await settleCandidates(env, relevant);
-  return { woke: commands.length, dispatched: dispatches.size, staled };
+  return { woke: commands.length, dispatched: dispatches.size, composed: composes.length, staled };
 }

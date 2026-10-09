@@ -5,6 +5,12 @@ import {
   type PromotionOutcome,
 } from "@rhumbatron/protocol";
 import { z } from "zod";
+import {
+  type CreateCandidateOutcome,
+  composeChangeCandidates,
+  createCandidate,
+  startCandidateVerification,
+} from "./candidate-create.ts";
 import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { handleFixtureCommand } from "./fixture-changesets.ts";
@@ -24,23 +30,6 @@ type ChangeRow = {
 };
 
 const CandidateVerifyPayload = z.object({ candidateId: z.string().regex(/^cand_[a-z0-9]+$/) });
-
-/**
- * Starts CandidateVerificationWorkflow for a Candidate the API created (AGENTS.md section 21.2).
- * The instance ID is the Candidate ID, so a duplicate command finds the running instance.
- */
-async function startCandidateVerification(env: Env, payload: unknown) {
-  const parsed = CandidateVerifyPayload.safeParse(payload);
-  if (!parsed.success) return;
-  const { candidateId } = parsed.data;
-  try {
-    await env.CANDIDATE_WORKFLOW.create({ id: candidateId, params: { candidateId } });
-  } catch (error) {
-    // Already started by an earlier delivery: nothing to do. Anything else is retried.
-    const existing = await env.CANDIDATE_WORKFLOW.get(candidateId).catch(() => null);
-    if (!existing) throw error;
-  }
-}
 
 /**
  * Queue deliveries per message (consumer `max_retries` = 3, plus the first). A bounded command
@@ -80,7 +69,9 @@ async function handleCommand(env: Env, body: unknown): Promise<"continue" | unde
     return result.more ? "continue" : undefined;
   }
   if (
-    ["project.provision", "candidate.verify"].includes(command.data.commandType) &&
+    ["project.provision", "candidate.verify", "candidate.create"].includes(
+      command.data.commandType,
+    ) &&
     (await isArchived(env, command.data.projectId))
   ) {
     return;
@@ -102,7 +93,18 @@ async function handleCommand(env: Env, body: unknown): Promise<"continue" | unde
     return handleFixtureCommand(env, command.data);
   }
   if (command.data.commandType === "candidate.verify") {
-    await startCandidateVerification(env, command.data.payload);
+    // Older API deployments queued this after creating the Candidate; createCandidate now starts it.
+    const parsed = CandidateVerifyPayload.safeParse(command.data.payload);
+    if (parsed.success) await startCandidateVerification(env, parsed.data.candidateId);
+    return;
+  }
+  // Section 21.1 step 7: the Work Graph completed; compose its Candidates (Causal Router).
+  if (command.data.commandType === "candidate.create") {
+    if (!command.data.changeId) return;
+    const result = await composeChangeCandidates(env, command.data.changeId);
+    console.warn(
+      JSON.stringify({ event: "candidate.create", changeId: command.data.changeId, ...result }),
+    );
     return;
   }
   if (command.data.commandType !== "change.dispatch" || !command.data.changeId) return;
@@ -162,6 +164,18 @@ export default class Integration extends WorkerEntrypoint<Env> {
         message.retry({ delaySeconds: 30 });
       }
     }
+  }
+
+  /**
+   * Creates (or finds) one Candidate of a Change and starts its verification (sections 33, 60).
+   * The API authenticated the user and checked Project membership. `changeSetIds` narrows the
+   * composition to a subset of the proposed ChangeSets (competing designs, P9-08).
+   */
+  async createCandidate(input: {
+    changeId: string;
+    changeSetIds?: string[] | undefined;
+  }): Promise<CreateCandidateOutcome> {
+    return createCandidate(this.env, input);
   }
 
   /** P11-03/P11-04: preconditions, then ProjectRootDO compare-and-swap (section 36). */

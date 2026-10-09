@@ -28,7 +28,7 @@
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
   "queues": {
     "producers": [{ "binding": "AGENT_WAKEUPS", "queue": "rhumbatron-agent-wakeups-local" }],
-    // `change.dispatch` from the Causal Router, `project.provision` and `candidate.verify` from the API.
+    // `change.dispatch` and `candidate.create` from the Causal Router, `project.provision` from the API.
     "consumers": [
       {
         "queue": "rhumbatron-integration-local",

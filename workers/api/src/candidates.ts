@@ -1,5 +1,4 @@
 import { createClerkClient } from "@clerk/backend";
-import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import {
   ApprovalOutcome,
   ApprovalRequest,
@@ -17,8 +16,8 @@ import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
  * Candidates and their Evidence (AGENTS.md sections 15.5, 16.1, 33, 34). Creating a Candidate is
- * a command: the API records it and queues `candidate.verify`; the integration Worker runs
- * CandidateVerificationWorkflow. Reads come from D1 only. Approval and promotion (section 36) are
+ * an RPC to the integration Worker, which owns the one Candidate-creation implementation (also
+ * used when a Work Graph completes) and starts CandidateVerificationWorkflow. Reads come from D1. Approval and promotion (section 36) are
  * RPCs to the integration Worker after this Worker authenticated the user and checked membership.
  */
 
@@ -26,6 +25,20 @@ type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
 /** Internal RPC on the integration Worker (service binding `INTEGRATION`, ADR 0013). */
 type IntegrationRpc = {
+  createCandidate(input: { changeId: string; changeSetIds?: string[] | undefined }): Promise<
+    | { status: "created" | "existing"; candidateId: string; changeSetIds: string[] }
+    | {
+        status: "refused";
+        reason:
+          | "not_found"
+          | "change_closed"
+          | "archived"
+          | "no_source"
+          | "not_proposed"
+          | "candidate_limit";
+        detail: string;
+      }
+  >;
   promoteCandidate(input: { candidateId: string; actorUserId: string }): Promise<unknown>;
   decideApproval(input: {
     candidateId: string;
@@ -35,9 +48,6 @@ type IntegrationRpc = {
   }): Promise<unknown>;
 };
 const integration = (env: Env) => env.INTEGRATION as unknown as IntegrationRpc;
-
-/** Policy `maxCandidates` (section 53). */
-const MAX_CANDIDATES = 3;
 
 const ChangeIdParam = z.object({ changeId: z.string().regex(/^chg_[a-z0-9-]+$/) });
 const CandidateIdParam = z.object({ candidateId: z.string().regex(/^cand_[a-z0-9]+$/) });
@@ -161,11 +171,6 @@ function toView(row: CandidateRow): CandidateView {
   };
 }
 
-async function hex(text: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 /**
  * Stores the approver's primary email once, so approvals show a person and not an internal ID.
  * Runs only on the approval path, only while the users row has no email: at most one Clerk
@@ -205,9 +210,10 @@ async function loadCandidate(env: Env, candidateId: string) {
 
 export const candidates = new Hono<AppEnv>()
   /**
-   * Creates the Candidate of a Change from all its `proposed` ChangeSets on the Change base and
-   * queues verification. A Change with no ChangeSets yields the canonical baseline Candidate. The
-   * Candidate ID is the composition key (section 60), so a retry returns the same Candidate.
+   * Creates the Candidate of a Change from all its `proposed` ChangeSets (or the `changeSetIds`
+   * subset) on the Change base and starts verification, through the integration Worker. A Change
+   * with no ChangeSets yields the canonical baseline Candidate. The Candidate ID is the composition
+   * key (section 60, includes the composition rules version), so a retry returns the same one.
    */
   .post(
     "/v1/changes/:changeId/candidates",
@@ -216,84 +222,26 @@ export const candidates = new Hono<AppEnv>()
     async (c) => {
       const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
       const { changeId } = c.req.valid("param");
-      const change = await c.env.DB.prepare(
-        "SELECT project_id, status, base_generation FROM changes WHERE id = ?",
-      )
+      const change = await c.env.DB.prepare("SELECT project_id FROM changes WHERE id = ?")
         .bind(changeId)
-        .first<{ project_id: string; status: string; base_generation: number }>();
+        .first<{ project_id: string }>();
       if (!change || !(await canAccessProject(c.env.DB, userId, change.project_id))) {
         return fail(c, 404, "not_found", "Change not found");
       }
-      if (["cancelled", "failed", "completed"].includes(change.status)) {
-        return fail(c, 409, "conflict", `Change is ${change.status}`);
-      }
-      const root = c.env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
-      const canonical = await root.get(root.idFromName(change.project_id)).getCanonical();
-      if (!canonical || canonical.artifactRef === "unassigned") {
-        return fail(c, 409, "conflict", "Project has no source to compose on");
-      }
-
-      const sets = await c.env.DB.prepare(
-        "SELECT id FROM changesets WHERE change_id = ? AND status = 'proposed' ORDER BY id",
-      )
-        .bind(changeId)
-        .all<{ id: string }>();
-      const proposed = (sets.results ?? []).map((r) => r.id);
-      // No body (or no `changeSetIds`) composes every proposed ChangeSet, as before.
+      // No body (or no `changeSetIds`) composes every proposed ChangeSet.
       const subset = CandidateSubset.safeParse(await c.req.json().catch(() => ({})));
       if (!subset.success) return fail(c, 400, "invalid_request", "Invalid json");
-      const wanted = subset.data.changeSetIds;
-      if (wanted?.some((id) => !proposed.includes(id))) {
-        return fail(c, 409, "conflict", "changeSetIds must be proposed ChangeSets of this Change");
+      const outcome = await integration(c.env).createCandidate({
+        changeId,
+        changeSetIds: subset.data.changeSetIds,
+      });
+      if (outcome.status === "refused") {
+        return outcome.reason === "not_found"
+          ? fail(c, 404, "not_found", outcome.detail)
+          : fail(c, 409, "conflict", outcome.detail);
       }
-      const changeSetIds = wanted ? proposed.filter((id) => wanted.includes(id)) : proposed;
-      const compositionKey = await hex(
-        `${changeId}\n${change.base_generation}\n${changeSetIds.join(",")}`,
-      );
-      const candidateId = `cand_${compositionKey.slice(0, 24)}`;
-
-      let row = await loadCandidate(c.env, candidateId);
-      if (!row) {
-        const count = await c.env.DB.prepare(
-          "SELECT COUNT(*) AS n FROM candidates WHERE change_id = ?",
-        )
-          .bind(changeId)
-          .first<{ n: number }>();
-        if ((count?.n ?? 0) >= MAX_CANDIDATES) {
-          return fail(c, 409, "conflict", `A Change can have at most ${MAX_CANDIDATES} Candidates`);
-        }
-        const now = new Date().toISOString();
-        await c.env.DB.prepare(
-          `INSERT OR IGNORE INTO candidates (id, change_id, base_generation, status, created_at,
-             updated_at, composition_key, change_set_ids_json)
-           VALUES (?, ?, ?, 'composing', ?, ?, ?, ?)`,
-        )
-          .bind(
-            candidateId,
-            changeId,
-            change.base_generation,
-            now,
-            now,
-            compositionKey,
-            JSON.stringify(changeSetIds),
-          )
-          .run();
-        row = await loadCandidate(c.env, candidateId);
-        if (!row) throw new Error("Candidate was not readable after creation");
-      }
-      // Safe to repeat: the command ID is stable and the workflow instance ID is the Candidate ID.
-      await c.env.INTEGRATION_COMMANDS.send(
-        {
-          commandId: `cmd_${candidateId}_verify`,
-          commandType: "candidate.verify",
-          projectId: change.project_id,
-          changeId,
-          attempt: 0,
-          createdAt: new Date().toISOString(),
-          payload: { candidateId },
-        },
-        { contentType: "json" },
-      );
+      const row = await loadCandidate(c.env, outcome.candidateId);
+      if (!row) throw new Error("Candidate was not readable after creation");
       return respond(c, apiData(CandidateView), { data: toView(row) }, 202);
     },
   )

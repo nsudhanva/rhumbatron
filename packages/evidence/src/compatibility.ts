@@ -139,6 +139,16 @@ function migrationNumbers(cs: ComposableChangeSet): number[] {
 }
 
 /**
+ * Version of the composition rules in this file. It is part of the Candidate composition key
+ * (AGENTS.md section 60), so a rules change gives the same ChangeSets a fresh Candidate and the
+ * Candidate rejected under the old rules stays on record with its Evidence (section 42.9).
+ * Bump it whenever `checkCompatibility` accepts or rejects a different set of compositions.
+ * 2: two declarations of one contract conflict only on removal vs not, disjoint status codes, or
+ * append-only vs mutable data model, not on wording.
+ */
+export const COMPOSITION_RULES_VERSION = 2;
+
+/**
  * Returns the first incompatibility, checked in this order: base generation, dependencies, protected
  * invariants, contracts, migration order, then shared files. Semantic conflicts are reported before
  * the source-level file conflict because they explain why the futures diverge; a file overlap alone
