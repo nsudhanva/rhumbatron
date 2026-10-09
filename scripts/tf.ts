@@ -28,6 +28,14 @@ const rootKeychain: Record<string, Record<string, string>> = {
     TF_VAR_openrouter_api_key: "rhumbatron-openrouter-api-key",
     TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-dev",
   },
+  // ADR 0017. The OpenRouter key is shared with dev; the others are prod-only.
+  prod: {
+    TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-prod",
+    TF_VAR_clerk_publishable_key: "rhumbatron-clerk-publishable-key-prod",
+    TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-prod",
+    TF_VAR_openrouter_api_key: "rhumbatron-openrouter-api-key",
+    TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-prod",
+  },
 };
 
 const [root, ...args] = process.argv.slice(2);

@@ -18,6 +18,18 @@ const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}/k2/stre
 const existing = await cfApi<Stream[]>(token, `${base}?per_page=100`);
 const byName = new Map(existing.map((s) => [s.name.toLowerCase(), s]));
 
+// K2 beta allows 20 streams per account, shared by dev, prod, and other projects (ADR 0017).
+// Refuse before creating anything, so a full account never ends with a partial stream set.
+const ACCOUNT_STREAM_LIMIT = 20;
+const missing = config.streams.filter((d) => !byName.has(d.name.toLowerCase()));
+if (existing.length + missing.length > ACCOUNT_STREAM_LIMIT) {
+  console.error(
+    `K2 account limit: ${existing.length} streams exist and ${missing.length} are missing; ` +
+      `the account allows ${ACCOUNT_STREAM_LIMIT}. Nothing was created.`,
+  );
+  process.exit(1);
+}
+
 for (const desired of config.streams) {
   let stream = byName.get(desired.name.toLowerCase());
   if (!stream) {

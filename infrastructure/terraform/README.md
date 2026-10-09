@@ -8,9 +8,9 @@ the dashboard, `wrangler deploy`, or direct API writes.
 | Path | State key | Purpose |
 |---|---|---|
 | `bootstrap/` | local, then `bootstrap/terraform.tfstate` | R2 state bucket `rhumbatron-terraform-state-global`. |
-| `envs/global/` | `global/terraform.tfstate` | Zone-wide singletons for `rhumbatron.com` (TLS settings, later WAF). Owned once, never by dev or prod. Applied. |
+| `envs/global/` | `global/terraform.tfstate` | Zone-wide singletons for `rhumbatron.com` (TLS settings, `www` redirect, later WAF). Owned once, never by dev or prod. Applied. |
 | `envs/dev/` | `dev/terraform.tfstate` | Dev environment. Applied. |
-| `envs/prod/` | `prod/terraform.tfstate` | Prod environment. Planned only until the first end-to-end Change works (AGENTS.md section 10). |
+| `envs/prod/` | `prod/terraform.tfstate` | Prod environment, mirrors dev (ADR 0017). Planned, not applied. Switches: `paused`, `bootstrap`, `attach_apex`. |
 | `modules/` | - | `worker`, `durable-worker` (ADR 0005), `dns`, `state`, `async`, `security` are implemented. `ai`, `code-storage`, `observability` are placeholders. |
 
 ## Environments
@@ -25,7 +25,8 @@ the dashboard, `wrangler deploy`, or direct API writes.
 | R2 `events/` retention | none | 30 days | 365 days |
 | R2 `evidence/` retention | none | 30 days | kept |
 | R2 `tmp/` retention | none | 7 days | 7 days |
-| Clerk instance | development | development | production (not configured yet) |
+| Clerk instance | development | development | production (not configured yet; ADR 0017) |
+| `www` | none | none | 301 to the apex (`envs/global`) |
 
 Hostnames stay one label deep so Universal SSL covers them.
 
@@ -48,7 +49,8 @@ R2 lifecycle rules are prefix-based. Write objects under `events/`, `evidence/`,
 1. `bootstrap` (once).
 2. `envs/global`.
 3. `envs/dev`.
-4. `envs/prod` (after the first end-to-end Change).
+4. `envs/prod` (after the first end-to-end Change). First apply with `bootstrap = true`, then
+   `false`; the apex cutover is in ADR 0017.
 
 ## Credentials
 
@@ -92,6 +94,9 @@ bun run tf:plan:dev                                # writes dev.tfplan, read it
 bun run tf:apply:dev                               # applies exactly that plan
 bun run tf:drift                                   # global and dev must report no changes
 ```
+
+Prod uses the same flow: `bun run tf:plan:prod`, `bun run tf:apply:prod`, `bun run tf:drift:prod`.
+The prod Keychain items are listed in ADR 0017.
 
 ## D1 migrations
 
