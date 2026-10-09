@@ -301,6 +301,9 @@ module "agents_worker" {
     { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-agents-${local.environment}" },
     module.state.bindings.DB,
     { type = "durable_object_namespace", name = "AGENT", class_name = "AgentDO" },
+    { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
+    # Read-only canonical source for agent file tools (ADR 0010).
+    { type = "artifacts", name = "ARTIFACTS", namespace = "rhumbatron-projects-${local.environment}" },
     # Context Packet snapshots under context/ (AGENTS.md section 27.5).
     module.state.bindings.EVIDENCE,
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },

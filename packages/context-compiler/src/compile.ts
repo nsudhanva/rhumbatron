@@ -53,6 +53,8 @@ export type CompileInput = {
     reason: string;
     endedAt: string;
   }[];
+  /** Canonical source files (paths only). Agents read contents with tools, not from the packet. */
+  repository?: { commit: string; files: string[] };
   allowedTools: string[];
   budget: { maxModelCalls: number; budgetUsd: number };
   /** Hard ceiling for the rendered items. Lower-priority items are dropped first. */
@@ -95,6 +97,17 @@ export function compilePacket(input: CompileInput): ContextPacket {
       body: `Objective: ${task.objective}\n\nSemantic resources:\n${bullets(task.semanticResources)}\n\nAcceptance criteria:\n${bullets(task.acceptanceCriteria)}`,
     },
   ];
+  if (input.repository) {
+    const shown = input.repository.files.slice(0, 300);
+    required.push({
+      itemId: `repo:${input.repository.commit}`,
+      source: "file",
+      sourceVersion: input.repository.commit,
+      capturedAt: now,
+      title: `Repository at commit ${input.repository.commit.slice(0, 12)} (${input.repository.files.length} files)`,
+      body: `${shown.join("\n")}${input.repository.files.length > shown.length ? "\n…" : ""}\n\nRead files with read_file before declaring changes to them.`,
+    });
+  }
   const optional: ContextItem[] = [
     ...input.dependencyIntents.map(
       (i): ContextItem => ({

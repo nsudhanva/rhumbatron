@@ -20,6 +20,8 @@
   // Workers AI: Clef-flash routing decisions only, capped per day (rule 50).
   "ai": { "binding": "AI" },
   // Context Packet snapshots: context/<project>/<change>/<task>/<hash>.json (AGENTS.md 27.5).
+  // Read-only canonical source for agents (ADR 0010).
+  "artifacts": [{ "binding": "ARTIFACTS", "namespace": "rhumbatron-projects-local" }],
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
   "d1_databases": [
     {
@@ -33,6 +35,11 @@
     "bindings": [
       // One AgentDO per logical agent identity (AGENTS.md section 13.4).
       { "name": "AGENT", "class_name": "AgentDO" },
+      {
+        "name": "PROJECT_ROOT",
+        "class_name": "ProjectRootDO",
+        "script_name": "rhumbatron-coordinator"
+      },
       {
         "name": "RESOURCE_SHARD",
         "class_name": "ResourceShardDO",

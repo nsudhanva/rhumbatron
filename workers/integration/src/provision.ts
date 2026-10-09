@@ -15,7 +15,33 @@ const TEMPLATES: Record<string, Record<string, string>> = { "acme-shop": acmeSho
 const DIR = "/repo";
 const AUTHOR = { name: "Rhumbatron", email: "bot@rhumbatron.com" };
 
-type Provisioned = { artifactRef: string; commit: string; treeSha: string; seeded: boolean };
+type Provisioned = {
+  artifactRef: string;
+  commit: string;
+  treeSha: string;
+  seeded: boolean;
+  files: number;
+};
+
+/** File index of one canonical tree, stored once per tree in R2 (Context Compiler input, P7-02). */
+export type SourceIndex = { commit: string; treeSha: string; files: string[] };
+
+const MAX_INDEXED_FILES = 2000;
+
+/** Walks a tree with the binding: one readTree per directory, no blob reads (Artifacts ops). */
+async function indexTree(repo: ArtifactsRepo, treeSha: string): Promise<SourceIndex["files"]> {
+  const files: SourceIndex["files"] = [];
+  const pending: [string, string][] = [["", treeSha]];
+  while (pending.length > 0 && files.length < MAX_INDEXED_FILES) {
+    const [prefix, hash] = pending.shift() ?? ["", ""];
+    for (const entry of (await repo.readTree(hash)) ?? []) {
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.type === "tree") pending.push([path, entry.hash]);
+      else if (entry.type === "blob") files.push(path);
+    }
+  }
+  return files.sort();
+}
 
 function isNotFound(error: unknown) {
   const code = (error as { code?: string } | null)?.code;
@@ -88,10 +114,24 @@ export async function provisionProject(
   }
   if (!head) throw new Error(`repo ${input.projectId} has no commits`);
 
+  const indexKey = `source/${input.projectId}/${head.treeHash}/index.json`;
+  let fileCount = 0;
+  if (!(await env.EVIDENCE.head(indexKey))) {
+    const index: SourceIndex = {
+      commit: head.hash,
+      treeSha: head.treeHash,
+      files: await indexTree(repo, head.treeHash),
+    };
+    fileCount = index.files.length;
+    await env.EVIDENCE.put(indexKey, JSON.stringify(index), {
+      httpMetadata: { contentType: "application/json" },
+    });
+  }
+
   const artifactRef = `artifacts://${input.projectId}@main`;
   const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
   await root
     .get(root.idFromName(input.projectId))
     .assignSource({ artifactRef, treeSha: head.treeHash });
-  return { artifactRef, commit: head.hash, treeSha: head.treeHash, seeded };
+  return { artifactRef, commit: head.hash, treeSha: head.treeHash, seeded, files: fileCount };
 }

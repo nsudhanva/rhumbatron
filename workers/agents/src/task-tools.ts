@@ -47,13 +47,55 @@ export const FailArgs = Type.Object({
   ]),
 });
 
+const ReadFileArgs = Type.Object({
+  path: Type.String({
+    minLength: 1,
+    maxLength: 300,
+    description: "Repository-relative file path.",
+  }),
+});
+const ListFilesArgs = Type.Object({
+  prefix: Type.Optional(
+    Type.String({ maxLength: 300, description: "Only paths starting with this." }),
+  ),
+});
+
+/** Read-only view of the canonical source, capped per run (Artifacts operations). */
+export type SourceReader = {
+  listFiles(prefix?: string): Promise<string>;
+  readFile(path: string): Promise<string>;
+};
+
 export type TaskOutcomeSink = {
   complete(args: Static<typeof IntentArgs>): Promise<string>;
   fail(args: Static<typeof FailArgs>): Promise<string>;
 };
 
 /** One extension per run: the system prompt for the Task and its two terminal tools. */
-export function taskExtension(prompt: () => string, sink: TaskOutcomeSink): Extension {
+export function taskExtension(
+  prompt: () => string,
+  sink: TaskOutcomeSink,
+  source: SourceReader,
+): Extension {
+  const listFiles: ToolRegistration<typeof ListFilesArgs> = {
+    name: "list_files",
+    description: "List repository files at the canonical commit.",
+    parameters: ListFilesArgs,
+    replay: "safe",
+    async execute(args) {
+      return { content: [{ type: "text", text: await source.listFiles(args.prefix) }] };
+    },
+  };
+  const readFile: ToolRegistration<typeof ReadFileArgs> = {
+    name: "read_file",
+    description:
+      "Read one repository file at the canonical commit. Read before you plan changes to it.",
+    parameters: ReadFileArgs,
+    replay: "safe",
+    async execute(args) {
+      return { content: [{ type: "text", text: await source.readFile(args.path) }] };
+    },
+  };
   const complete: ToolRegistration<typeof IntentArgs> = {
     name: "complete_task",
     description: "Declare the Intent for this Task and finish it. Call exactly once when done.",
@@ -76,6 +118,6 @@ export function taskExtension(prompt: () => string, sink: TaskOutcomeSink): Exte
   return {
     name: "rhumbatron-task",
     sections: [{ key: "task", render: prompt, tag: false }],
-    tools: [complete, fail],
+    tools: [listFiles, readFile, complete, fail],
   } as unknown as Extension;
 }

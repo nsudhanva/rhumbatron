@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
+    "@rhumbatron/coordinator": "workspace:*",
     "typescript": "7.0.2",
     "wrangler": "4.149.0"
   },
