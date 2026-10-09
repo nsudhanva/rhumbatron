@@ -1,5 +1,5 @@
 # AGENTS.md section 5.4: AI Gateway is the model proxy. ADR 0007: the provider is OpenRouter.
-# Free-tier settings only: no Logpush, no guardrails (billed as Workers AI), no DLP, no Unified Billing.
+# Cloudflare free-tier settings only: no Logpush, no guardrails (billed as Workers AI), no DLP, no Unified Billing.
 resource "cloudflare_ai_gateway" "this" {
   account_id = var.account_id
   id         = "rhumbatron-models-${var.environment}"
@@ -20,6 +20,23 @@ resource "cloudflare_ai_gateway" "this" {
   rate_limiting_limit     = var.requests_per_minute
   rate_limiting_interval  = 60
   rate_limiting_technique = "sliding"
+
+  # Hard cap on paid Gemini (Vertex AI, billed to GCP credits). OpenRouter :free models cost $0.
+  # Window is in seconds (2,592,000 = 30 days); a longer unit would only make the cap stricter.
+  spend_limits = {
+    enabled = true
+    rules = [{
+      enabled    = true
+      limit_type = "cost"
+      limit      = var.vertex_spend_limit_usd
+      window     = 2592000
+      technique  = "fixed"
+      ai_gateway_provider = {
+        mode   = "filter"
+        values = ["google-vertex-ai"]
+      }
+    }]
+  }
 
   retry_max_attempts = 2
   retry_delay        = 2000

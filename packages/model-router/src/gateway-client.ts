@@ -1,9 +1,10 @@
 import type { ModelTier } from "@rhumbatron/protocol";
 import { z } from "zod";
-import { TIER_MODELS, TIER_REASONING_EFFORT } from "./models.ts";
+import { TIER_MODELS, TIER_REASONING_EFFORT, TIER_VERTEX_MODEL, VERTEX_PRICES } from "./models.ts";
 
 /**
- * OpenRouter chat completions through Cloudflare AI Gateway (ADR 0007). Runs in Workers and Bun.
+ * Chat completions through Cloudflare AI Gateway (ADR 0007). Runs in Workers and Bun.
+ * Order: OpenRouter free models first, then the tier's Vertex AI Gemini model as a capped paid backup.
  * Never logs the API key, prompts, or completions; callers record only the returned metadata.
  */
 
@@ -66,7 +67,10 @@ export type CompletionRequest = {
   models?: readonly string[];
 };
 
+export type ModelProvider = "openrouter" | "google-vertex-ai";
+
 export type CompletionResult = {
+  provider: ModelProvider;
   model: string;
   content: string | null;
   toolCalls: ToolCall[];
@@ -102,9 +106,12 @@ export class ModelCallError extends Error {
 export type GatewayConfig = {
   accountId: string;
   gatewayId: string;
+  /** OpenRouter API key. */
   apiKey: string;
+  /** Base64 service account JSON with a `region` field. Enables the Vertex backup when set. */
+  vertexServiceAccount?: string;
   timeoutMs?: number;
-  fetch?: typeof fetch;
+  fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 };
 
 function classify(status: number, code: number | string | undefined): ModelErrorKind {
@@ -116,14 +123,70 @@ function classify(status: number, code: number | string | undefined): ModelError
   return "invalid_request";
 }
 
+/** Vertex reports no cost. An unpriced model is charged at the highest known rate, never as $0. */
+function vertexCost(model: unknown, input: number, output: number): number {
+  const id = String(model).replace(/^google-vertex-ai\//, "");
+  const fallback = { input: 0, output: 0 };
+  for (const p of Object.values(VERTEX_PRICES)) {
+    fallback.input = Math.max(fallback.input, p.input);
+    fallback.output = Math.max(fallback.output, p.output);
+  }
+  const price = VERTEX_PRICES[id] ?? fallback;
+  return (input * price.input + output * price.output) / 1_000_000;
+}
+
+/** Failures that a different provider can avoid. */
+const FALLBACK_KINDS = new Set<ModelErrorKind>(["rate_limited", "transient", "timeout"]);
+
 export async function complete(
   config: GatewayConfig,
   req: CompletionRequest,
 ): Promise<CompletionResult> {
-  const url = `https://gateway.ai.cloudflare.com/v1/${config.accountId}/${config.gatewayId}/openrouter/v1/chat/completions`;
-  const models = req.models ?? TIER_MODELS[req.tier];
+  const base = `https://gateway.ai.cloudflare.com/v1/${config.accountId}/${config.gatewayId}`;
+  try {
+    return await call(
+      config,
+      "openrouter",
+      `${base}/openrouter/v1/chat/completions`,
+      config.apiKey,
+      {
+        models: req.models ?? TIER_MODELS[req.tier],
+        reasoning: { effort: TIER_REASONING_EFFORT[req.tier], exclude: true },
+        usage: { include: true },
+      },
+      req,
+    );
+  } catch (error) {
+    const canFallBack =
+      config.vertexServiceAccount &&
+      !req.models &&
+      error instanceof ModelCallError &&
+      FALLBACK_KINDS.has(error.kind);
+    if (!canFallBack) throw error;
+    return call(
+      config,
+      "google-vertex-ai",
+      `${base}/compat/chat/completions`,
+      config.vertexServiceAccount ?? "",
+      {
+        model: `google-vertex-ai/${TIER_VERTEX_MODEL[req.tier]}`,
+        reasoning_effort: TIER_REASONING_EFFORT[req.tier],
+      },
+      req,
+    );
+  }
+}
+
+async function call(
+  config: GatewayConfig,
+  provider: ModelProvider,
+  url: string,
+  credential: string,
+  providerFields: Record<string, unknown>,
+  req: CompletionRequest,
+): Promise<CompletionResult> {
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${config.apiKey}`,
+    Authorization: `Bearer ${credential}`,
     "Content-Type": "application/json",
     "X-Title": "Rhumbatron",
   };
@@ -136,12 +199,10 @@ export async function complete(
       method: "POST",
       headers,
       body: JSON.stringify({
-        models,
+        ...providerFields,
         messages: req.messages,
         tools: req.tools?.length ? req.tools : undefined,
         max_tokens: req.maxOutputTokens,
-        reasoning: { effort: TIER_REASONING_EFFORT[req.tier], exclude: true },
-        usage: { include: true },
       }),
       signal: AbortSignal.timeout(config.timeoutMs ?? 120_000),
     });
@@ -165,6 +226,8 @@ export async function complete(
       response.status,
     );
   }
+  // Vertex errors through the compat endpoint arrive wrapped in a one-element array.
+  if (Array.isArray(json)) json = json[0];
 
   // OpenRouter can return HTTP 200 with an error body when every fallback model fails.
   const failure = ErrorSchema.safeParse(json);
@@ -184,16 +247,24 @@ export async function complete(
   const choice = choices[0];
   if (!choice) throw new ModelCallError("bad_response", "No completion choice", response.status);
 
+  const inputTokens = usage?.prompt_tokens ?? 0;
+  const outputTokens = usage?.completion_tokens ?? 0;
+  const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+
   return {
+    provider,
     model,
     content: choice.message.content ?? null,
     toolCalls: choice.message.tool_calls ?? [],
     finishReason: choice.finish_reason,
-    inputTokens: usage?.prompt_tokens ?? 0,
-    outputTokens: usage?.completion_tokens ?? 0,
-    reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens ?? 0,
+    inputTokens,
+    outputTokens,
+    reasoningTokens,
     cachedInputTokens: usage?.prompt_tokens_details?.cached_tokens ?? 0,
-    costUsd: usage?.cost ?? 0,
+    costUsd:
+      provider === "openrouter"
+        ? (usage?.cost ?? 0)
+        : vertexCost(providerFields.model, inputTokens, outputTokens + reasoningTokens),
     latencyMs,
     gatewayLogId: response.headers.get("cf-aig-log-id"),
   };

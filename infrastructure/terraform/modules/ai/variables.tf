@@ -24,3 +24,9 @@ variable "max_stored_logs" {
   type        = number
   default     = 10000
 }
+
+variable "vertex_spend_limit_usd" {
+  description = "Spend cap for Vertex AI Gemini per 30 days. GCP credit is $10, so keep a margin."
+  type        = number
+  default     = 9
+}

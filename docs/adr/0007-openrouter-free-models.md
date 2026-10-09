@@ -1,4 +1,4 @@
-# ADR 0007: OpenRouter free models through AI Gateway
+# ADR 0007: OpenRouter free models through AI Gateway, Gemini as a capped backup
 
 - Status: Accepted
 - Date: 2026-10-08
@@ -30,6 +30,23 @@ AI Gateway as the model proxy.
 - The OpenRouter key is in the Keychain (`rhumbatron-openrouter-api-key`) and reaches Workers
   as a `secret_text` binding only. The gateway stores no provider key (`byok_only = true`), so
   Unified Billing cannot charge the account.
+
+## Paid backup: Gemini on Vertex AI
+
+- When every free model in a tier fails with a rate limit, outage, or timeout, the client retries once
+  on Vertex AI through the gateway's compat endpoint: haiku uses `google/gemini-3.5-flash-lite`;
+  sonnet and opus use `google/gemini-3.8-flash`.
+- Billing: GCP project `sudhanva-personal`, billing account with $10 of credit. Spend beyond the
+  credit would reach a card, so the gateway enforces a hard cap: `spend_limits` in `modules/ai`, $9
+  per 2,592,000-second window, filtered to the `google-vertex-ai` provider. Requests over the cap
+  get HTTP 429. The gateway's cost estimate is eventually consistent, so a burst can pass the cap
+  slightly; the $1 margin covers that.
+- Credential: service account `vertex-express@sudhanva-personal` (roles `aiplatform.expressUser`,
+  `aiplatform.user`). Its JSON key, with `region: global` added and base64-encoded, is in the
+  Keychain as `rhumbatron-vertex-sa-dev` and reaches Workers only as a `secret_text` binding. The
+  newest Gemini models are served only from `global`. Rotate the key if it is exposed.
+- The client prices Vertex calls itself (Vertex reports no cost); prices match the gateway's
+  estimate. An unpriced model is charged at the highest known rate, never $0.
 
 ## Gateway settings (free tier)
 

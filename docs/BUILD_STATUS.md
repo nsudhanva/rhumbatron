@@ -18,7 +18,8 @@ Phase 4 complete; Phase 5 - Work Graph and causal scheduling next
 - Clerk authentication in apps/web (local development instance)
 - Model access (pulled forward from Phase 6 for P5-02): P6-04 AI Gateway `rhumbatron-models-dev`,
   P6-05 OpenRouter free-model client, P6-06 deterministic routing rules (`packages/model-router`)
-  - `bun run smoke:models`: one tool call per tier through the gateway, $0
+  - `bun run smoke:models`: one tool call per tier through the gateway ($0), plus one Vertex fallback call
+  - Gemini on Vertex AI is the paid backup, capped at $9 per 30 days by the gateway (ADR 0007)
 
 ## Active
 - P3-05 ResourceShardDO in review: deployed, first live use is Phase 9 claims
@@ -43,7 +44,7 @@ Phase 4 complete; Phase 5 - Work Graph and causal scheduling next
 - Provider cloudflare 5.27 has no Vectorize, Artifacts, K2, Containers, or resource-tagging resource. Section 11.4 applies.
 - Durable Object Workers deploy via cloudflare_workers_script: docs/adr/0005.
 - envs/global owns zone-wide settings. Prod is planned only until the first E2E Change.
-- Models: OpenRouter free models through AI Gateway, tiers haiku/sonnet/opus kept: docs/adr/0007.
+- Models: OpenRouter free models through AI Gateway, Gemini (Vertex, GCP credit) as a capped backup: docs/adr/0007.
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 
 ## Next
