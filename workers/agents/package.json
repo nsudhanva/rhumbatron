@@ -14,8 +14,11 @@
     "wrangler": "4.149.0"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-durable": "1.1.0",
     "@rhumbatron/causal-router": "workspace:*",
     "@rhumbatron/integration": "workspace:*",
-    "@rhumbatron/protocol": "workspace:*"
+    "@rhumbatron/protocol": "workspace:*",
+    "agents": "0.27.0"
   }
 }

@@ -26,10 +26,16 @@ export async function changeEvent<T>(
   ctx: ChangeContext,
   eventType: EventType,
   payload: T,
-  extra: { taskId?: string; resource?: string; actor?: EventEnvelope["actor"] } = {},
+  extra: { taskId?: string; resource?: string; actor?: EventEnvelope["actor"]; key?: string } = {},
 ): Promise<EventEnvelope<T>> {
   return {
-    eventId: await stableEventId(ctx.changeId, eventType, extra.taskId ?? ""),
+    // `key` separates repeated events of one type for one Task, for example one route per attempt.
+    eventId: await stableEventId(
+      ctx.changeId,
+      eventType,
+      extra.taskId ?? "",
+      ...(extra.key ? [extra.key] : []),
+    ),
     eventType,
     eventVersion: 1,
     tenantId: ctx.orgId,

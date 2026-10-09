@@ -175,28 +175,40 @@ if (secretKey && smokeUserId) {
       },
     )) as { data?: { id: string } } | undefined;
     const changeId = planned?.data?.id ?? "missing";
-    type PlannedTask = { key: string; title: string; status: string; dependsOn: string[] };
+    type PlannedTask = {
+      id: string;
+      key: string;
+      title: string;
+      status: string;
+      dependsOn: string[];
+    };
+    // Clerk session tokens live 60 seconds; mint one per read while waiting for the planner.
+    const fresh = async () => {
+      const { jwt: token } = await clerk<{ jwt: string }>(`/sessions/${session.id}/tokens`, {});
+      return { authorization: `Bearer ${token}` };
+    };
     let status = "created";
     let tasks: PlannedTask[] = [];
     const deadline = Date.now() + 5 * 60_000;
     while (Date.now() < deadline && ["created", "compiling"].includes(status)) {
       await Bun.sleep(5000);
-      const read = await fetch(`${target.api}/v1/changes/${changeId}`, { headers });
+      const read = await fetch(`${target.api}/v1/changes/${changeId}`, { headers: await fresh() });
       status = ((await read.json()) as { data?: { status: string } }).data?.status ?? "missing";
     }
     // Give the wake consumer a moment to assign the ready Tasks.
     await Bun.sleep(5000);
-    const listed = await fetch(`${target.api}/v1/changes/${changeId}/tasks`, { headers });
+    const listed = await fetch(`${target.api}/v1/changes/${changeId}/tasks`, {
+      headers: await fresh(),
+    });
     tasks = ((await listed.json()) as { data?: PlannedTask[] }).data ?? [];
     report("change compiled", status === "running", `status ${status}`);
     report("work graph has tasks", tasks.length >= 2, `${tasks.length} tasks`);
-    const roots = tasks.filter((t) => t.dependsOn.length === 0);
+    // Agents may already be running: the invariant is that no Task starts before its dependencies finish.
+    const done = new Set(tasks.filter((t) => t.status === "completed").map((t) => t.id));
     report(
-      "only root tasks dispatched",
-      roots.length > 0 &&
-        tasks.every(
-          (t) => (t.dependsOn.length === 0) === ["ready", "assigned", "running"].includes(t.status),
-        ),
+      "no task started before its dependencies",
+      tasks.length > 0 &&
+        tasks.every((t) => t.status === "pending" || t.dependsOn.every((d) => done.has(d))),
     );
     for (const t of tasks)
       console.log(`      ${t.key} ${t.status.padEnd(9)} ${t.title}  deps=${t.dependsOn.length}`);

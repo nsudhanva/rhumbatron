@@ -1,5 +1,7 @@
 import { handleWake } from "./wake-consumer.ts";
 
+export { AgentDO } from "./agent-do.ts";
+
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);

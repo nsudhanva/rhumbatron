@@ -273,15 +273,14 @@ resource "cloudflare_workflow" "change" {
   script_name   = module.integration_worker.name
 }
 
-# Agent Plane (AGENTS.md section 12.4). Phase 5 consumes wake commands; AgentDO arrives in Phase 6.
+# Agent Plane (AGENTS.md section 12.4): wake consumer plus AgentDO running Pi (ADR 0009).
 module "agents_worker" {
-  source      = "../../modules/worker"
+  source      = "../../modules/durable-worker"
   account_id  = var.account_id
   component   = "agents"
   environment = local.environment
 
   main_module         = local.bundles.agents.main_module
-  bundle_sha256       = local.bundles.agents.bundle_sha256
   compatibility_date  = local.bundles.agents.compatibility_date
   compatibility_flags = local.bundles.agents.compatibility_flags
   modules = [for m in local.bundles.agents.modules : {
@@ -294,10 +293,22 @@ module "agents_worker" {
     { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
     { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-agents-${local.environment}" },
     module.state.bindings.DB,
+    { type = "durable_object_namespace", name = "AGENT", class_name = "AgentDO" },
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
-    # Analytics Engine datasets are created on first write. Wakeup and false-wakeup points (P5-10).
+    # Analytics Engine datasets are created on first write. Wakeups, model calls, run outcomes.
     { type = "analytics_engine", name = "METRICS", dataset = "rhumbatron_metrics_${local.environment}" },
+    # Models through the AI Gateway (ADR 0007); Workers AI only for Clef-flash, capped per day.
+    { type = "plain_text", name = "AI_ACCOUNT_ID", text = var.account_id },
+    { type = "plain_text", name = "AI_GATEWAY_ID", text = module.ai.gateway_id },
+    { type = "secret_text", name = "OPENROUTER_API_KEY", text = var.openrouter_api_key },
+    { type = "ai", name = "AI" },
   ]
+
+  # First migration for this script: AgentDO as a SQLite class. Steady state later: v1 -> v1.
+  migrations = {
+    new_tag            = "v1"
+    new_sqlite_classes = ["AgentDO"]
+  }
 }
 
 # One consumer for all wake commands. Poison commands go to the dead-letter Queue (section 42.7).

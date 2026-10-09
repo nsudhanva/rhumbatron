@@ -78,9 +78,14 @@ export function routeByRules(req: RouteRequest): RouteDecision {
     reasons.push("billing_floor");
   }
 
+  return decisionFor(tier, reasons, 1);
+}
+
+/** The full decision for a chosen tier: output cap and escalation triggers come from the tier. */
+export function decisionFor(tier: ModelTier, reasons: string[], confidence: number): RouteDecision {
   return {
     selectedTier: tier,
-    confidence: 1,
+    confidence,
     reasons,
     maxOutputTokens: MAX_OUTPUT_TOKENS[tier],
     maxAttemptsAtTier: 2,

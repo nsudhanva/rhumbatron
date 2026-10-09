@@ -1,7 +1,7 @@
 # Build Status
 
 ## Current phase
-Phase 5 complete on dev; Phase 6 - Agent runtime and model routing next
+Phase 6 complete on dev; first live UI (pulled forward from Phase 12) next
 
 ## Completed
 - P0-01 through P0-10
@@ -26,6 +26,11 @@ Phase 5 complete on dev; Phase 6 - Agent runtime and model routing next
   - verified on dev: the Wishlist goal compiled into 7 Tasks; only the root Task was dispatched and assigned
   - `bun run smoke:plan` runs this end to end (1 to 4 free model calls)
 
+- P6-01 to P6-12: AgentDO with the Pi Durable harness, tier models over OpenRouter, Clef-assisted
+  routing, Decision Receipts, run budgets and daily caps, escalation (ADR 0009)
+  - verified on dev: Wishlist Tasks run in dependency order; each agent declares an Intent, and its
+    `task.completed` wakes the next ready Tasks through K2 and the Causal Router
+
 ## Active
 - P3-05 ResourceShardDO in review: deployed, first live use is Phase 9 claims
 - P2-03 Zustand (add with the first client-state page)
@@ -49,10 +54,12 @@ Phase 5 complete on dev; Phase 6 - Agent runtime and model routing next
 - Provider cloudflare 5.27 has no Vectorize, Artifacts, K2, Containers, or resource-tagging resource. Section 11.4 applies.
 - Durable Object Workers deploy via cloudflare_workers_script: docs/adr/0005.
 - ChangeWorkflow, Work Graph persistence, causal routing: docs/adr/0008.
+- AgentDO with the Pi Durable harness: docs/adr/0009.
 - envs/global owns zone-wide settings. Prod is planned only until the first E2E Change.
 - Models: OpenRouter free models through AI Gateway, Gemini (Vertex, GCP credit) as a capped backup: docs/adr/0007.
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 
 ## Next
-- Phase 6: AgentRuntime, PiAgentRuntime, AgentDO, Decision Receipts, budgets, escalation.
+- Live UI: Project overview, Change page with the Work Graph, agent activity over WebSocket.
+- Then Phase 7 (Context Compiler).
 - Tracking: Linear project Rhumbatron (AGENTS.md rule 49).

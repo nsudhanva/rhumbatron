@@ -5,11 +5,14 @@ import {
   changeEvent,
 } from "@rhumbatron/integration/events";
 import { AgentWakePayload, AnyCommandEnvelope, type TaskStatus } from "@rhumbatron/protocol";
+import { getAgentByName } from "agents";
+import type { AgentDO } from "./agent-do.ts";
 
 /**
  * Consumer for `rhumbatron-agent-wakeups` (AGENTS.md sections 20 and 31.3). It checks that the
  * wake is still relevant, assigns the Task, and records `task.assigned` and `agent.woken`.
- * The Agent Runtime (Phase 6) runs from here; until then the agent sleeps after waking.
+ * A ready Task then starts a run on its AgentDO (Pi, Phase 6). Other wake reasons are recorded only
+ * until conflict handling (Phase 9) gives agents a resume path.
  */
 
 type TaskRow = {
@@ -109,5 +112,13 @@ export async function handleWake(env: Env, body: unknown): Promise<Outcome> {
     doubles: [1],
     indexes: [ctx.projectId],
   });
+
+  if (wake.reason === "task_ready") {
+    const agent = await getAgentByName(
+      env.AGENT as unknown as DurableObjectNamespace<AgentDO>,
+      wake.agentId,
+    );
+    await agent.start({ agentId: wake.agentId, taskId, ...ctx });
+  }
   return "woken";
 }
