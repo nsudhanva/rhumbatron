@@ -26,7 +26,7 @@ locals {
   # false until the legacy apex record is gone (ADR 0017 cutover). A Worker custom domain cannot
   # take over a hostname that still has its own DNS record, so the web Worker gets the apex only
   # after the cutover. The API on api.rhumbatron.com works before that.
-  attach_apex = false
+  attach_apex = true
 }
 
 module "dns" {

@@ -7,8 +7,7 @@ module "dns" {
   zone_name  = var.zone_name
 }
 
-# Safe, additive TLS settings only. SSL mode and the existing apex records stay untouched until
-# Phase 2 moves the apex to the web Worker.
+# TLS settings. Every hostname is a Worker custom domain (no origin servers), so SSL is strict.
 module "security" {
   source  = "../../modules/security"
   zone_id = module.dns.zone_id
@@ -17,13 +16,8 @@ module "security" {
     automatic_https_rewrites = "on"
     min_tls_version          = "1.2"
     tls_1_3                  = "on"
+    ssl                      = "strict"
   }
-}
-
-# www.rhumbatron.com -> https://rhumbatron.com (ADR 0017). The zone's dynamic-redirect entrypoint
-# is a zone-wide singleton, so global owns it. The proxied placeholder record only lets Cloudflare
-# receive www requests; the redirect answers them before any origin. Single Redirects are free.
-locals {
 }
 
 # www.rhumbatron.com is a custom domain of the prod web Worker, which redirects it to the apex
