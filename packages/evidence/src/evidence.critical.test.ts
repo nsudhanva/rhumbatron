@@ -277,6 +277,30 @@ describe("checkCompatibility", () => {
     ).toEqual({ ok: true });
   });
 
+  it("treats two wordings of one contract as compatible, and real disagreements as conflicts", () => {
+    const implement =
+      "POST /api/wishlists: create a new wishlist (returns 201 with wishlist and items)";
+    const test = "POST /api/wishlists: create a new wishlist (returns 201)";
+    expect(
+      checkCompatibility(1841, [
+        cs("a", { contracts: [implement] }),
+        cs("b", { contracts: [test] }),
+      ]),
+    ).toEqual({ ok: true });
+    expect(
+      checkCompatibility(1841, [
+        cs("a", { contracts: ["POST /api/wishlists - returns 201"] }),
+        cs("b", { contracts: ["POST /api/wishlists - returns 200"] }),
+      ]),
+    ).toMatchObject({ ok: false, kind: "contract_conflict" });
+    expect(
+      checkCompatibility(1841, [
+        cs("a", { contracts: ["DELETE /api/cart/items/:id - remove the route"] }),
+        cs("b", { contracts: ["DELETE /api/cart/items/:id - returns 204"] }),
+      ]),
+    ).toMatchObject({ ok: false, kind: "contract_conflict" });
+  });
+
   it("rejects a declared change to a protected resource, not a passing mention", () => {
     const opts = { protectedResources: ["cart"] };
     expect(

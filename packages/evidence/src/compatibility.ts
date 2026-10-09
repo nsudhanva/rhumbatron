@@ -93,6 +93,34 @@ export function contractKey(change: string): string {
   return s.route ?? (s.tokens.length > 0 ? s.tokens.join(" ") : normalize(change));
 }
 
+/**
+ * What a declared contract or data change commits to, beyond its wording. Agents describe the
+ * same contract in different words (an implementer and a test author), so only these facts can
+ * disagree: removal, the status codes it returns, and the data model it stores.
+ */
+function signature(text: string) {
+  return {
+    removes: /\b(remove|removes|delete the route|drop|drops|deprecate|deprecates)\b/.test(text),
+    statuses: new Set(text.match(/\b[1-5]\d\d\b/g) ?? []),
+    model: /append[- ]only|event log|immutable/.test(text)
+      ? "append_only"
+      : /mutable|update(s|d)? in place|overwrite/.test(text)
+        ? "mutable"
+        : null,
+  };
+}
+
+/** Why two declarations of one contract disagree, or null when they are compatible. */
+function disagree(a: string, b: string): string | null {
+  const x = signature(a);
+  const y = signature(b);
+  if (x.removes !== y.removes) return "one removes it";
+  if (x.statuses.size > 0 && y.statuses.size > 0 && ![...x.statuses].some((s) => y.statuses.has(s)))
+    return "different status codes";
+  if (x.model && y.model && x.model !== y.model) return `${x.model} vs ${y.model}`;
+  return null;
+}
+
 /** True when the protected resource is the subject the change starts with, not a passing mention. */
 function touchesProtected(change: string, resource: string): boolean {
   const want = tokens(resource);
@@ -166,11 +194,12 @@ export function checkCompatibility(
         const key = contractKey(change);
         if (dismissed.has(key)) continue;
         const prior = seen.get(key);
-        if (prior && prior.id !== cs.id && prior.text !== normalize(change)) {
+        const disagreement = prior && prior.id !== cs.id && disagree(prior.text, normalize(change));
+        if (prior && disagreement) {
           return {
             ok: false,
             kind: "contract_conflict",
-            detail: `${prior.id} and ${cs.id} change ${key} differently: "${prior.text}" vs "${normalize(change)}"`,
+            detail: `${prior.id} and ${cs.id} change ${key} incompatibly (${disagreement}): "${prior.text}" vs "${normalize(change)}"`,
           };
         }
         if (!prior) seen.set(key, { id: cs.id, text: normalize(change) });
