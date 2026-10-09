@@ -152,6 +152,73 @@ export const projects = new Hono<AppEnv>()
     return respond(c, apiData(Project), { data: project }, 201);
   })
 
+  // Projects the caller can open, newest first (UI navigation).
+  .get("/v1/projects", async (c) => {
+    const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+    const rows = await c.env.DB.prepare(
+      `SELECT p.id, p.name, p.slug, p.status, p.canonical_generation, p.created_at
+       FROM projects p JOIN memberships m ON m.org_id = p.org_id
+       WHERE m.user_id = ? ORDER BY p.created_at DESC LIMIT 50`,
+    )
+      .bind(userId)
+      .all<{
+        id: string;
+        name: string;
+        slug: string;
+        status: string;
+        canonical_generation: number;
+        created_at: string;
+      }>();
+    return c.json({
+      data: (rows.results ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        status: p.status,
+        canonicalGeneration: p.canonical_generation,
+        createdAt: p.created_at,
+      })),
+    });
+  })
+
+  // Changes of one Project, newest first.
+  .get("/v1/projects/:projectId/changes", validate("param", ProjectIdParam), async (c) => {
+    const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+    const { projectId } = c.req.valid("param");
+    if (!(await canAccessProject(c.env.DB, userId, projectId))) {
+      return fail(c, 404, "not_found", "Project not found");
+    }
+    const rows = await c.env.DB.prepare(
+      `SELECT c.id, c.goal, c.status, c.risk_tier, c.budget_usd, c.created_at,
+              (SELECT COUNT(*) FROM tasks t WHERE t.change_id = c.id) AS task_count,
+              (SELECT COUNT(*) FROM tasks t WHERE t.change_id = c.id AND t.status = 'completed') AS completed_count
+       FROM changes c WHERE c.project_id = ? ORDER BY c.created_at DESC LIMIT 20`,
+    )
+      .bind(projectId)
+      .all<{
+        id: string;
+        goal: string;
+        status: string;
+        risk_tier: string | null;
+        budget_usd: number;
+        created_at: string;
+        task_count: number;
+        completed_count: number;
+      }>();
+    return c.json({
+      data: (rows.results ?? []).map((r) => ({
+        id: r.id,
+        goal: r.goal,
+        status: r.status,
+        riskTier: r.risk_tier,
+        budgetUsd: r.budget_usd,
+        createdAt: r.created_at,
+        taskCount: r.task_count,
+        completedCount: r.completed_count,
+      })),
+    });
+  })
+
   .get("/v1/projects/:projectId", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");
@@ -273,13 +340,38 @@ export const projects = new Hono<AppEnv>()
     if (!change || !(await canAccessProject(c.env.DB, userId, change.project_id))) {
       return fail(c, 404, "not_found", "Change not found");
     }
-    const [tasks, deps] = await c.env.DB.batch([
+    const [tasks, deps, runs] = await c.env.DB.batch([
       c.env.DB.prepare("SELECT * FROM tasks WHERE change_id = ? ORDER BY task_key").bind(changeId),
       c.env.DB.prepare(
         `SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d
          JOIN tasks t ON t.id = d.task_id WHERE t.change_id = ?`,
       ).bind(changeId),
+      c.env.DB.prepare(
+        `SELECT r.task_id, r.attempt, r.tier, r.status, r.failure_kind, r.outcome_json, r.model_calls,
+                r.input_tokens, r.output_tokens, r.cost_usd, r.started_at, r.ended_at,
+                d.decided_by, d.receipt_json
+         FROM task_runs r JOIN tasks t ON t.id = r.task_id
+         LEFT JOIN decision_receipts d ON d.id = 'rcpt_' || substr(r.id, 5)
+         WHERE t.change_id = ? ORDER BY r.attempt`,
+      ).bind(changeId),
     ]);
+    type RunRow = {
+      task_id: string;
+      attempt: number;
+      tier: string;
+      status: string;
+      failure_kind: string | null;
+      outcome_json: string | null;
+      model_calls: number;
+      input_tokens: number;
+      output_tokens: number;
+      cost_usd: number;
+      started_at: string;
+      ended_at: string | null;
+      decided_by: string | null;
+      receipt_json: string | null;
+    };
+    const runRows = (runs?.results ?? []) as RunRow[];
     const edges = (deps?.results ?? []) as { task_id: string; depends_on_task_id: string }[];
     const data = ((tasks?.results ?? []) as TaskRow[]).map((t) => ({
       id: t.id,
@@ -295,6 +387,26 @@ export const projects = new Hono<AppEnv>()
       complexity: Task.shape.complexity.parse(t.complexity ?? "medium"),
       status: Task.shape.status.parse(t.status),
       assignedAgentId: t.assigned_agent_id,
+      // Agent runs for this Task: tier, outcome (the typed Intent or a failure), usage, and route.
+      runs: runRows
+        .filter((r) => r.task_id === t.id)
+        .map((r) => ({
+          attempt: r.attempt,
+          tier: r.tier,
+          status: r.status,
+          failureKind: r.failure_kind,
+          outcome: r.outcome_json ? (JSON.parse(r.outcome_json) as unknown) : null,
+          modelCalls: r.model_calls,
+          inputTokens: r.input_tokens,
+          outputTokens: r.output_tokens,
+          costUsd: r.cost_usd,
+          startedAt: r.started_at,
+          endedAt: r.ended_at,
+          decidedBy: r.decided_by,
+          routeReasons: r.receipt_json
+            ? ((JSON.parse(r.receipt_json) as { reasons?: string[] }).reasons ?? [])
+            : [],
+        })),
     }));
-    return respond(c, apiData(z.array(Task)), { data });
+    return c.json({ data });
   });

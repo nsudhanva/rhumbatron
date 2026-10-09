@@ -422,12 +422,22 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     });
 
     if (result.ok) {
-      await this.env.DB.batch([
+      const [, , changeMoved] = await this.env.DB.batch([
         runUpdate,
         this.env.DB.prepare(
           "UPDATE tasks SET status = 'completed', updated_at = ? WHERE id = ? AND status = 'running'",
         ).bind(now, input.taskId),
+        // The last Task to finish moves the Change on to verification (section 21.1 steps 5-8).
+        this.env.DB.prepare(
+          `UPDATE changes SET status = 'verifying', updated_at = ? WHERE id = ? AND status = 'running'
+           AND NOT EXISTS (SELECT 1 FROM tasks WHERE change_id = ? AND status != 'completed')`,
+        ).bind(now, input.changeId, input.changeId),
       ]);
+      if (changeMoved?.meta.changes) {
+        await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
+          await changeEvent(ctx, "verification.started", { reason: "work_graph_completed" }),
+        ]);
+      }
       const resources = (result.intent.semanticResources as string[] | undefined) ?? [];
       await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
         await changeEvent(

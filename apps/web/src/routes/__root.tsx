@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import {
   ClerkProvider,
   Show,
@@ -14,8 +15,15 @@ import {
   Outlet,
   Scripts,
 } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
 import type { ReactNode } from "react";
 import appCss from "../styles.css?url";
+
+// Build and environment are shown on every page (AGENTS.md Phase 2 acceptance).
+const getBuildInfo = createServerFn().handler(() => ({
+  service: env.SERVICE_NAME,
+  environment: env.ENVIRONMENT,
+}));
 
 type RouterContext = {
   queryClient: QueryClient;
@@ -30,6 +38,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     ],
     links: [{ rel: "stylesheet", href: appCss }],
   }),
+  loader: () => getBuildInfo(),
   component: RootComponent,
 });
 
@@ -38,6 +47,7 @@ function RootComponent() {
     <RootDocument>
       <AppHeader />
       <Outlet />
+      <AppFooter />
     </RootDocument>
   );
 }
@@ -63,11 +73,27 @@ function AppHeader() {
             </SignUpButton>
           </Show>
           <Show when="signed-in">
+            <Link to="/">
+              <Button variant="ghost" size="sm">
+                Projects
+              </Button>
+            </Link>
             <UserButton />
           </Show>
         </nav>
       </div>
     </header>
+  );
+}
+
+function AppFooter() {
+  const info = Route.useLoaderData();
+  return (
+    <footer className="mx-auto max-w-5xl px-6 py-6">
+      <Text variant="mono-secondary">
+        {info.service} · {info.environment}
+      </Text>
+    </footer>
   );
 }
 

@@ -1,7 +1,7 @@
 # Build Status
 
 ## Current phase
-Phase 6 complete on dev; first live UI (pulled forward from Phase 12) next
+Phase 6 complete on dev; first live UI shipped (pulled forward from Phase 12); Phase 7 next
 
 ## Completed
 - P0-01 through P0-10
@@ -30,6 +30,10 @@ Phase 6 complete on dev; first live UI (pulled forward from Phase 12) next
   routing, Decision Receipts, run budgets and daily caps, escalation (ADR 0009)
   - verified on dev: Wishlist Tasks run in dependency order; each agent declares an Intent, and its
     `task.completed` wakes the next ready Tasks through K2 and the Causal Router
+
+- First live UI (P12-01, P12-02 first slice): Projects, Project overview with a New Change form,
+  Change page with criteria, protected invariants, live Work Graph (XYFlow), agent chips, and
+  Task runs with tier, route, usage, and the declared Intent. Web calls the API over a service binding.
 
 ## Active
 - P3-05 ResourceShardDO in review: deployed, first live use is Phase 9 claims
@@ -60,6 +64,5 @@ Phase 6 complete on dev; first live UI (pulled forward from Phase 12) next
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 
 ## Next
-- Live UI: Project overview, Change page with the Work Graph, agent activity over WebSocket.
-- Then Phase 7 (Context Compiler).
+- Phase 7 (Context Compiler). UI follow-ups: WebSocket push instead of polling, vertical graph layout.
 - Tracking: Linear project Rhumbatron (AGENTS.md rule 49).

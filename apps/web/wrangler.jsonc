@@ -12,5 +12,7 @@
   "vars": {
     "ENVIRONMENT": "local",
     "SERVICE_NAME": "rhumbatron-web"
-  }
+  },
+  // Server functions call the API Worker over this binding (AGENTS.md section 12.1).
+  "services": [{ "binding": "API", "service": "rhumbatron-api" }]
 }

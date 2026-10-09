@@ -106,6 +106,8 @@ module "web_worker" {
     { type = "plain_text", name = "CLERK_SIGN_IN_URL", text = "/sign-in" },
     { type = "plain_text", name = "CLERK_SIGN_UP_URL", text = "/sign-up" },
     { type = "secret_text", name = "CLERK_SECRET_KEY", text = var.clerk_secret_key },
+    # Server functions call the API over this binding; the browser never calls it directly.
+    { type = "service", name = "API", service = module.api_worker.name, environment = "production" },
   ]
 
   custom_domains = [{
@@ -304,10 +306,10 @@ module "agents_worker" {
     { type = "ai", name = "AI" },
   ]
 
-  # First migration for this script: AgentDO as a SQLite class. Steady state later: v1 -> v1.
+  # v1 (AgentDO as a SQLite class) is applied, so steady state is v1 -> v1 (see coordinator).
   migrations = {
-    new_tag            = "v1"
-    new_sqlite_classes = ["AgentDO"]
+    old_tag = "v1"
+    new_tag = "v1"
   }
 }
 
