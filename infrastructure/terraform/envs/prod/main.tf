@@ -62,7 +62,54 @@ module "ai" {
   vertex_spend_limit_usd = var.vertex_spend_limit_usd
 }
 
-# Vectorize (P1-10) is deferred: provider 5.27 has no resource. See docs/adr/0003.
+# Vectorize semantic memory (P1-10, P7-05). Provider 5.27 has no Vectorize index resource, so a
+# temporary adapter creates it (ADR 0003). 384 dims for Workers AI bge-small-en-v1.5. Free plan:
+# 5M stored dimensions = 13,020 vectors; the indexer caps the account at 10,000 vectors in code.
+locals {
+  vectorize_index = {
+    name       = "rhumbatron-memory-${local.environment}"
+    dimensions = 384
+    metric     = "cosine"
+  }
+}
+
+# Creates the index if missing and checks its shape. Never deletes on a config change.
+resource "terraform_data" "vectorize_index" {
+  triggers_replace = { config = jsonencode(local.vectorize_index) }
+
+  provisioner "local-exec" {
+    command = "bun ${local.repo_root}/scripts/vectorize-sync.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      VECTORIZE_MODE        = "sync"
+      VECTORIZE_ACCOUNT_ID  = var.account_id
+      VECTORIZE_CONFIG      = jsonencode(local.vectorize_index)
+    }
+  }
+
+  depends_on = [terraform_data.vectorize_index_teardown]
+}
+
+# Deletes the index on a real destroy only. Keyed by the name alone. The index holds derived data
+# that the indexer rebuilds, so deletion is safe (section 11.4 step 9).
+resource "terraform_data" "vectorize_index_teardown" {
+  input = {
+    account_id = var.account_id
+    repo_root  = local.repo_root
+    config     = jsonencode({ name = local.vectorize_index.name, dimensions = 0, metric = "cosine" })
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "bun ${self.input.repo_root}/scripts/vectorize-sync.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      VECTORIZE_MODE        = "destroy"
+      VECTORIZE_ACCOUNT_ID  = self.input.account_id
+      VECTORIZE_CONFIG      = self.input.config
+    }
+  }
+}
 
 # DNS-only records for the Clerk production instance (frontend API, accounts portal, email). Clerk
 # rejects proxied records. Empty until the instance exists (ADR 0017).
@@ -330,6 +377,8 @@ module "event_router_worker" {
     # Causal Router (AGENTS.md section 31): wake commands, ready-task dispatch, Clef-flash.
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
     { type = "queue", name = "INTEGRATION_COMMANDS", queue_name = module.async.queues["integration"].name },
+    # `index.build` on a new canonical tree, `index.purge` for archived Projects (section 12.7).
+    { type = "queue", name = "INDEXING", queue_name = module.async.queues["indexing"].name },
     # Workers AI for Clef-flash only, capped at 200 calls per day in code (rule 50).
     { type = "ai", name = "AI" },
   ]
@@ -445,6 +494,8 @@ module "agents_worker" {
     { type = "ai", name = "AI" },
     local.cap_bindings.sandbox,
     local.cap_bindings.vertex,
+    # Semantic memory, read-only: one top-k query per agent run, capped at 1,000 per day (P7-06).
+    { type = "vectorize", name = "MEMORY", index_name = local.vectorize_index.name },
   ]
 
   # First apply creates v1 (AgentDO); then steady state v1 -> v1. The Sandbox class lives in its
@@ -455,8 +506,46 @@ module "agents_worker" {
     new_sqlite_classes = local.bootstrap ? ["AgentDO"] : null
   }
 
-  # The SANDBOX binding needs the Sandbox Worker and its class to exist first.
-  depends_on = [terraform_data.sandbox_worker]
+  # The SANDBOX binding needs the Sandbox Worker and its class to exist first; MEMORY its index.
+  depends_on = [terraform_data.sandbox_worker, terraform_data.vectorize_index]
+}
+
+# Indexer (AGENTS.md section 12.7, Phase 7): exact symbol and dependency indexes, the Product Graph
+# store, and Vectorize file summaries, once per canonical tree. Queue-driven only: no cron, no
+# public route. Per build: about 5 Artifacts operations, 3 R2 writes, 1 Workers AI batch.
+module "indexer_worker" {
+  source      = "../../modules/worker"
+  account_id  = var.account_id
+  component   = "indexer"
+  environment = local.environment
+
+  main_module         = local.bundles.indexer.main_module
+  bundle_sha256       = local.bundles.indexer.bundle_sha256
+  compatibility_date  = local.bundles.indexer.compatibility_date
+  compatibility_flags = local.bundles.indexer.compatibility_flags
+  modules = [for m in local.bundles.indexer.modules : {
+    name         = m.name
+    content_file = "${local.repo_root}/${m.content_file}"
+    content_type = m.content_type
+  }]
+
+  bindings = [
+    { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
+    { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-indexer-${local.environment}" },
+    module.state.bindings.DB,
+    # Reads source/<project>/<tree>/index.json; writes index/<project>/... (no lifecycle expiry).
+    module.state.bindings.EVIDENCE,
+    # Current canonical tree: only that tree is indexed.
+    { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
+    # Read-only canonical source: one read token per build (ADR 0010).
+    { type = "artifacts", name = "ARTIFACTS", namespace = "rhumbatron-projects-${local.environment}" },
+    { type = "vectorize", name = "MEMORY", index_name = local.vectorize_index.name },
+    # Embeddings only (bge-small-en-v1.5), capped at 2,000 texts per day in code (rule 50).
+    { type = "ai", name = "AI" },
+    { type = "analytics_engine", name = "METRICS", dataset = "rhumbatron_metrics_${local.environment}" },
+  ]
+
+  depends_on = [terraform_data.vectorize_index]
 }
 
 # Sandbox Worker (ADR 0012): hosts the Sandbox container class through the temporary adapter.
@@ -572,6 +661,25 @@ resource "cloudflare_queue_consumer" "integration" {
   dead_letter_queue = module.async.queues["dead-letter"].name
   settings = {
     batch_size       = 10
+    max_retries      = 3
+    max_wait_time_ms = 1000
+    retry_delay      = 30
+  }
+}
+
+# Index commands to the indexer. No dead-letter Queue: the dead-letter consumer retries commands on
+# the integration Queue only, so the indexer records a build's last failed delivery in D1
+# `project_indexes` itself. Queues: about 3 operations per index command.
+resource "cloudflare_queue_consumer" "indexing" {
+  account_id  = var.account_id
+  queue_id    = module.async.queues["indexing"].id
+  script_name = module.indexer_worker.name
+  type        = "worker"
+  # One build per invocation and one invocation at a time: about 25 subrequests each (under the
+  # 50 of Workers Free), and builds of one Project never race on its vector manifest.
+  settings = {
+    batch_size       = 1
+    max_concurrency  = 1
     max_retries      = 3
     max_wait_time_ms = 1000
     retry_delay      = 30
