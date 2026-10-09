@@ -203,16 +203,51 @@ await section("r2", async () => {
   usage("r2 storage (Rhumbatron)", bytes / 1e9, 10, "GB (included)");
 });
 
+/** Read-only D1 query on the control database with the D1 token. */
+async function d1Query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+  if (!d1Token) throw new Error("set CLOUDFLARE_D1_TOKEN");
+  const dbs = await get<{ uuid: string; name: string }[]>("/d1/database", d1Token);
+  const db = dbs.find((d) => d.name === `rhumbatron-control-${env}`);
+  if (!db) throw new Error("control database not found");
+  const response = await fetch(`${api}/d1/database/${db.uuid}/query`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${d1Token}`, "content-type": "application/json" },
+    body: JSON.stringify({ sql, params }),
+  });
+  const body = (await response.json()) as { result?: { results: T[] }[] };
+  return body.result?.[0]?.results ?? [];
+}
+
 await section("artifacts", async () => {
   type Repo = { name: string };
   const repos = await get<Repo[]>(
     `/artifacts/namespaces/rhumbatron-projects-${env}/repos?limit=200`,
   );
-  const forks = repos.filter((r) => r.name.startsWith("ws-"));
+  const workspaces = repos.filter((r) => r.name.startsWith("ws-")).length;
+  const candidates = repos.filter((r) => r.name.startsWith("cand-")).length;
+  const canonical = repos.filter((r) => r.name.startsWith("proj_")).length;
   report(
-    forks.length > 50 ? "WARN" : "OK",
+    workspaces + candidates > 50 ? "WARN" : "OK",
     "artifacts",
-    `${repos.length} repos, ${forks.length} workspace forks (cleanup after evidence retention)`,
+    `${repos.length} repos: ${canonical} canonical, ${workspaces} workspace forks, ${candidates} candidate forks (daily sweep after retention)`,
+  );
+});
+
+await section("projects", async () => {
+  // Cleanup runs seconds after an archive; a day later anything left is stuck (DLQ or errors).
+  const [row] = await d1Query<{ active: number; pending: number; stuck: number; cleaned: number }>(
+    `SELECT COALESCE(SUM(status = 'active'), 0) AS active,
+            COALESCE(SUM(status = 'archived' AND cleaned_at IS NULL), 0) AS pending,
+            COALESCE(SUM(status = 'archived' AND cleaned_at IS NULL AND archived_at < ?), 0) AS stuck,
+            COALESCE(SUM(cleaned_at IS NOT NULL), 0) AS cleaned
+     FROM projects`,
+    [since],
+  );
+  if (!row) throw new Error("no result");
+  report(
+    row.stuck > 0 ? "WARN" : "OK",
+    "projects",
+    `${row.active} active, ${row.pending} archived awaiting cleanup${row.stuck ? ` (${row.stuck} for over a day)` : ""}, ${row.cleaned} cleaned`,
   );
 });
 
@@ -236,21 +271,10 @@ await section("rhumbatron meters", async () => {
     report("WARN", "rhumbatron meters", "set CLOUDFLARE_D1_TOKEN to read usage_counters");
     return;
   }
-  const dbs = await get<{ uuid: string; name: string }[]>("/d1/database", d1Token);
-  const db = dbs.find((d) => d.name === `rhumbatron-control-${env}`);
-  if (!db) throw new Error("control database not found");
-  const response = await fetch(`${api}/d1/database/${db.uuid}/query`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${d1Token}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      sql: "SELECT day, counter, count FROM usage_counters WHERE day IN (?, ?)",
-      params: [today, today.slice(0, 7)],
-    }),
-  });
-  const body = (await response.json()) as {
-    result?: { results: { day: string; counter: string; count: number }[] }[];
-  };
-  const rows = body.result?.[0]?.results ?? [];
+  const rows = await d1Query<{ day: string; counter: string; count: number }>(
+    "SELECT day, counter, count FROM usage_counters WHERE day IN (?, ?)",
+    [today, today.slice(0, 7)],
+  );
   const value = (counter: string) => rows.find((r) => r.counter === counter)?.count ?? 0;
   usage("agent model calls today", value("agent-model-calls"), 40, "calls (daily cap)");
   usage("clef-flash calls today", value("clef-flash"), 200, "calls (daily cap)");

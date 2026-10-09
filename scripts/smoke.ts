@@ -10,6 +10,7 @@
  * `--sandbox` seeds an Acme Shop project and runs its Bun tests in the Sandbox, then verifies the
  * canonical baseline Candidate (no model calls; a few minutes of the monthly Sandbox budget, ADR 0011),
  * promotes it S0 -> S1, retries the promotion, and checks that a Candidate on S0 is then stale.
+ * Every Project a run creates is archived at the end, which queues deletion of its Artifacts repos.
  */
 
 const hosts: Record<string, { web: string; api: string }> = {
@@ -101,6 +102,8 @@ if (secretKey && smokeUserId) {
     body: JSON.stringify({ name: "Smoke Project", slug }),
   })) as { data?: { id: string } } | undefined;
   const projectId = created?.data?.id ?? "missing";
+  // Archived at the end of the run, also when a check failed.
+  const createdProjects = [projectId];
 
   await expectStatus("duplicate slug conflicts", `${target.api}/v1/projects`, 409, {
     method: "POST",
@@ -234,6 +237,7 @@ if (secretKey && smokeUserId) {
       })
     ).json()) as { data?: { id: string } };
     const demoId = demo.data?.id ?? "missing";
+    createdProjects.push(demoId);
     let source = "unassigned";
     const until = Date.now() + 120_000;
     while (source === "unassigned" && Date.now() < until) {
@@ -451,6 +455,37 @@ if (secretKey && smokeUserId) {
       `S${project.data?.canonical.generation ?? "?"}`,
     );
   }
+
+  // Cleanup (AGENTS.md section 43): archive every Project this run created. The integration Worker
+  // then deletes their Artifacts repos and R2 source objects; Evidence expires by lifecycle rule.
+  const freshHeaders = async () => {
+    const { jwt: token } = await clerk<{ jwt: string }>(`/sessions/${session.id}/tokens`, {});
+    return { authorization: `Bearer ${token}` };
+  };
+  const toArchive = createdProjects.filter((id) => id !== "missing");
+  const archived: string[] = [];
+  for (const id of toArchive) {
+    const response = await fetch(`${target.api}/v1/projects/${id}`, {
+      method: "DELETE",
+      headers: await freshHeaders(),
+    });
+    const body = (await response.json().catch(() => ({}))) as { data?: { status?: string } };
+    if (response.status === 200 && body.data?.status === "archived") archived.push(id);
+  }
+  report(
+    "archive smoke projects",
+    toArchive.length > 0 && archived.length === toArchive.length,
+    `${archived.length}/${toArchive.length}`,
+  );
+  const remaining = (
+    (await (
+      await fetch(`${target.api}/v1/projects?limit=200`, { headers: await freshHeaders() })
+    ).json()) as { data?: { id: string }[] }
+  ).data;
+  report(
+    "archived projects leave the project list",
+    !!remaining && archived.length > 0 && !remaining.some((p) => archived.includes(p.id)),
+  );
 
   await clerk(`/sessions/${session.id}/revoke`, {});
 } else {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CanonicalGeneration, Id, RiskTier } from "./common.ts";
+import { CanonicalGeneration, Id, RiskTier, Timestamp } from "./common.ts";
 
 /** URL-safe Project slug, for example `acme-shop`. */
 export const Slug = z
@@ -76,6 +76,15 @@ export const Change = z.object({
   rolloutPolicy: RolloutPolicy,
 });
 export type Change = z.infer<typeof Change>;
+
+/** `GET /v1/changes/:changeId`: the Change plus its planned risk tier and record times. */
+export const ChangeDetail = Change.extend({
+  /** Set by the Root Planner when it compiles the Work Graph; null before. */
+  riskTier: RiskTier.nullable(),
+  createdAt: Timestamp,
+  updatedAt: Timestamp,
+});
+export type ChangeDetail = z.infer<typeof ChangeDetail>;
 
 /** `POST /v1/projects` request. */
 /** Source templates a Project can start from (AGENTS.md section 54). */

@@ -338,6 +338,25 @@ export class ProjectRootDO extends DurableObject<Env> {
     else await this.ctx.storage.setAlarm(Math.max(at, Date.now()));
   }
 
+  /**
+   * Drops all state of an archived Project (`DELETE /v1/projects/:id`). Due outbox events are
+   * published first, best effort. Afterwards the instance answers like an uninitialized one:
+   * `getCanonical()` returns null, so no Candidate can compose on it. Safe to repeat.
+   */
+  async purge(projectId: string): Promise<{ purged: boolean }> {
+    const existing = this.row();
+    if (existing && existing.project_id !== projectId) {
+      throw new Error("ProjectRootDO belongs to a different project");
+    }
+    if (!existing) return { purged: false };
+    await this.outbox.publishAllDue(Date.now()).catch(() => 0);
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    // Empty tables keep later calls on this instance working until it is evicted.
+    this.migrate();
+    return { purged: true };
+  }
+
   /** Unpublished outbox rows (pending or failed), oldest first. */
   async pendingOutbox(limit = 50) {
     return this.outbox.pending(limit);

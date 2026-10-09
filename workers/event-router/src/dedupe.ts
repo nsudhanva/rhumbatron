@@ -6,12 +6,15 @@
 /**
  * Records (consumer, eventId) rows with INSERT OR IGNORE and returns the event IDs whose row was
  * new. Only those events may be applied. An ID repeated inside one call is fresh only once.
+ * `extra` statements run in the same D1 batch (one transaction, one subrequest) after the claims,
+ * for example the event feed projection: either all commit or none do.
  */
 export async function claimEvents(
   db: D1Database,
   consumer: string,
   eventIds: readonly string[],
   now: Date = new Date(),
+  extra: readonly D1PreparedStatement[] = [],
 ): Promise<Set<string>> {
   const fresh = new Set<string>();
   if (eventIds.length === 0) return fresh;
@@ -23,7 +26,7 @@ export async function claimEvents(
       )
       .bind(consumer, eventId, processedAt),
   );
-  const results = await db.batch(statements);
+  const results = await db.batch([...statements, ...extra]);
   results.forEach((result, index) => {
     const eventId = eventIds[index];
     if (eventId !== undefined && result.meta.changes > 0) fresh.add(eventId);

@@ -1,12 +1,58 @@
 import { useAuth } from "@clerk/tanstack-react-start";
 import { useQuery } from "@tanstack/react-query";
-import { useParams, useRouterState } from "@tanstack/react-router";
+import { type LinkOptions, useParams, useRouterState } from "@tanstack/react-router";
 import { getCandidate, getChange, getProject } from "../../lib/api";
 import { truncate } from "../../lib/format";
 import type { Crumb } from "./page-meta";
 
+/**
+ * Project-scoped pages at `/projects/$projectId/<slug>`. The shell adds their name to the
+ * breadcrumb (Projects / <project> / <page name>) and marks them in the sidebar, so the pages
+ * themselves do not set a page name.
+ */
+export const PROJECT_PAGES = {
+  graph: "Product Graph",
+  agents: "Agents",
+  events: "Events",
+  verification: "Verification",
+  workspace: "Workspace",
+  costs: "Costs",
+} as const;
+
+export type ProjectPage = keyof typeof PROJECT_PAGES;
+
+/** Link to a project-scoped page. */
+export function projectPageLink(projectId: string, page: ProjectPage): LinkOptions {
+  return { to: `/projects/$projectId/${page}`, params: { projectId } } as LinkOptions;
+}
+
 /** Which top-level destination the current route belongs to (drives the sidebar marker). */
-export type ShellSection = "projects" | "overview" | "changes" | "candidates" | "other";
+export type ShellSection =
+  | "projects"
+  | "overview"
+  | "changes"
+  | "candidates"
+  | ProjectPage
+  | "other";
+
+/** Route IDs of pathless-parent routes (`projects_.$projectId.x`) carry a trailing "_" per segment. */
+function sectionFor(routeId: string | undefined): ShellSection {
+  const path = routeId?.replace(/_(?=\/|$)/g, "") ?? "";
+  if (path === "/") return "projects";
+  if (path === "/projects/$projectId") return "overview";
+  if (path.startsWith("/changes/$changeId")) return "changes";
+  if (path.startsWith("/candidates/$candidateId") || path.startsWith("/compare/$changeId")) {
+    return "candidates";
+  }
+  const match = /^\/projects\/\$projectId\/([^/]+)/.exec(path);
+  const slug = match?.[1];
+  if (slug && Object.hasOwn(PROJECT_PAGES, slug)) return slug as ProjectPage;
+  return "other";
+}
+
+function isProjectPage(section: ShellSection): section is ProjectPage {
+  return Object.hasOwn(PROJECT_PAGES, section);
+}
 
 export type ShellContext = {
   section: ShellSection;
@@ -51,16 +97,7 @@ export function useShellContext(): ShellContext {
     enabled: signedIn && !!projectId,
   });
 
-  const section: ShellSection =
-    routeId === "/"
-      ? "projects"
-      : routeId === "/projects/$projectId"
-        ? "overview"
-        : routeId === "/changes/$changeId"
-          ? "changes"
-          : routeId === "/candidates/$candidateId"
-            ? "candidates"
-            : "other";
+  const section = sectionFor(routeId);
 
   const trail: Crumb[] = [{ label: "Projects", link: { to: "/" } }];
   if (projectId) {
@@ -77,6 +114,9 @@ export function useShellContext(): ShellContext {
   }
   if (params.candidateId) {
     trail.push({ label: params.candidateId, mono: true });
+  }
+  if (projectId && isProjectPage(section)) {
+    trail.push({ label: PROJECT_PAGES[section], link: projectPageLink(projectId, section) });
   }
 
   return {

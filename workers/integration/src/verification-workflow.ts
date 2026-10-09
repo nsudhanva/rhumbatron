@@ -14,6 +14,7 @@ import {
   type VerificationCheck,
   type VerificationPlan,
 } from "@rhumbatron/protocol";
+import { runBrowserCheck } from "./browser-check.ts";
 import {
   type ChangeSetRow,
   type CheckOutcome,
@@ -38,6 +39,7 @@ import {
   runContractCheck,
   settleSandbox,
 } from "./candidate-sandbox.ts";
+import { classifyBrowser, classifySecurity } from "./check-semantics.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
 
@@ -415,7 +417,9 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
             () =>
               check.kind === "contract"
                 ? this.runContract(ctx, candidateId, { commit, baseCommit }, declared, check)
-                : this.runCheck(ctx, candidateId, commit, check),
+                : check.kind === "browser"
+                  ? this.runBrowser(ctx, candidateId, commit, check)
+                  : this.runCheck(ctx, candidateId, commit, check),
           );
           if (at) lastSandboxAt = at;
         } catch (error) {
@@ -530,6 +534,40 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     return Date.now();
   }
 
+  /**
+   * Browser check (section 35, P10-11): the composed app in the Sandbox, one capped Browser Run
+   * session, screenshots in R2 beside the report. A refused budget, a missing preview, or a
+   * session deadline is recorded as a gap, never a pass.
+   */
+  private async runBrowser(
+    ctx: ChangeContext,
+    candidateId: string,
+    commit: string,
+    check: VerificationCheck,
+  ): Promise<number | null> {
+    const prefix = `evidence/${ctx.projectId}/${ctx.changeId}/${candidateId}/${check.checkId}`;
+    const result = await runBrowserCheck(this.env, {
+      projectId: ctx.projectId,
+      candidateId,
+      commit,
+      prefix,
+    });
+    await this.recordEvidence(ctx, candidateId, {
+      checkId: check.checkId,
+      kind: check.kind,
+      outcome: classifyBrowser(result.run),
+      startedAt: result.startedAt,
+      completedAt: result.completedAt,
+      output: result.log,
+      sourceRefs: [`artifacts://${candidateFork(candidateId)}@${commit}`],
+      report: {
+        browser: result.run,
+        screenshotKeys: result.screenshotKeys,
+      },
+    });
+    return result.run.kind === "refused" ? null : Date.now();
+  }
+
   /** Runs one check and records its Evidence. Returns the Sandbox activity time, if any. */
   private async runCheck(
     ctx: ChangeContext,
@@ -575,7 +613,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     await this.recordEvidence(ctx, candidateId, {
       checkId: check.checkId,
       kind: check.kind,
-      outcome: classifyCheck(check, run),
+      // Security: at least one authorization test must run; zero matched is a gap (P10-10).
+      outcome: check.kind === "security" ? classifySecurity(check, run) : classifyCheck(check, run),
       startedAt: run.startedAt,
       completedAt: run.completedAt,
       output: `$ ${check.command}\n${run.output}${run.error ? `\n[error] ${run.error}` : ""}`,
@@ -602,6 +641,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       output: string;
       sourceRefs: string[];
       exitCode?: number | null;
+      /** Extra report fields, for example browser steps and screenshot keys. */
+      report?: Record<string, unknown>;
       command?: string;
     },
   ) {
@@ -635,6 +676,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
           command: input.command ?? null,
           exitCode: input.exitCode ?? null,
           stdoutKey: `${prefix}/stdout.txt`,
+          ...input.report,
         },
         null,
         2,

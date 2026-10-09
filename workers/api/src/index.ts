@@ -1,10 +1,17 @@
 import { HealthResponse, VersionResponse } from "@rhumbatron/protocol";
 import { Hono } from "hono";
+import { activity } from "./activity.ts";
+import { agents } from "./agents.ts";
 import { candidates } from "./candidates.ts";
 import { conflicts } from "./conflicts.ts";
+import { cost } from "./cost.ts";
 import { errorBody, fail, respond } from "./http.ts";
 import { live } from "./live.ts";
+import { productGraph } from "./product-graph.ts";
 import { projects } from "./projects.ts";
+import { screenshots } from "./screenshots.ts";
+import { verification } from "./verification.ts";
+import { workspace } from "./workspace.ts";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -26,6 +33,13 @@ app.get("/v1/version", (c) =>
 app.route("/", live);
 app.route("/", conflicts);
 app.route("/", candidates);
+app.route("/", screenshots);
+app.route("/", verification);
+app.route("/", activity);
+app.route("/", agents);
+app.route("/", cost);
+app.route("/", workspace);
+app.route("/", productGraph);
 app.route("/", projects);
 
 app.notFound((c) => fail(c, 404, "not_found", "Route not found"));

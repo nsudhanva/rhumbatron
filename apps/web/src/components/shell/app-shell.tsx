@@ -8,6 +8,7 @@ import {
   GearSix,
   GitDiff,
   GitFork,
+  Graph,
   type Icon,
   List,
   Moon,
@@ -15,6 +16,7 @@ import {
   Robot,
   SealCheck,
   SquaresFour,
+  Stack,
   Sun,
   TreeStructure,
   X,
@@ -23,8 +25,16 @@ import { Link, type LinkOptions } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { type ShellLiveState, useShellLiveState } from "../../lib/live-status";
 import { type ColorMode, useColorMode } from "../../lib/mode";
+import { setViewMode, useViewMode, type ViewMode } from "../../lib/view-mode";
 import { type Crumb, usePageTrail } from "./page-meta";
-import { type ShellContext, type ShellSection, useShellContext } from "./shell-context";
+import {
+  PROJECT_PAGES,
+  type ProjectPage,
+  projectPageLink,
+  type ShellContext,
+  type ShellSection,
+  useShellContext,
+} from "./shell-context";
 
 /**
  * Application shell (DESIGN.md 6.1): elevated 228px sidebar, header with breadcrumb and mode
@@ -85,9 +95,34 @@ type NavItem = {
   unavailable?: string;
 };
 
+const SOON = "Not built yet";
+const NEEDS_PROJECT = "Open a project first";
+
+/** A project-scoped page: linked whenever a project is in context. */
+function projectPageItem(projectId: string | undefined, section: ProjectPage, icon: Icon): NavItem {
+  return {
+    label: PROJECT_PAGES[section],
+    icon,
+    section,
+    ...(projectId ? { link: projectPageLink(projectId, section) } : { unavailable: NEEDS_PROJECT }),
+  };
+}
+
+/** Navigation order follows AGENTS.md 38. */
 function navItems(context: ShellContext): NavItem[] {
   const { projectId, changeId, candidateId } = context;
-  const soon = "Not built yet";
+  // Changes are listed on the project overview; a Change in context links to that Change.
+  const changes: Pick<NavItem, "link" | "unavailable"> = changeId
+    ? { link: { to: "/changes/$changeId", params: { changeId } } }
+    : projectId
+      ? { link: { to: "/projects/$projectId", params: { projectId } } }
+      : { unavailable: NEEDS_PROJECT };
+  // Candidates are compared per Change (38.4); a Candidate in context links to that Candidate.
+  const candidates: Pick<NavItem, "link" | "unavailable"> = candidateId
+    ? { link: { to: "/candidates/$candidateId", params: { candidateId } } }
+    : changeId
+      ? { link: { to: "/compare/$changeId", params: { changeId } } }
+      : { unavailable: projectId ? "Open a Change to compare its Candidates" : NEEDS_PROJECT };
   return [
     {
       label: "Overview",
@@ -95,30 +130,18 @@ function navItems(context: ShellContext): NavItem[] {
       section: "overview",
       ...(projectId
         ? { link: { to: "/projects/$projectId", params: { projectId } } }
-        : { unavailable: "Open a project first" }),
+        : { unavailable: NEEDS_PROJECT }),
     },
-    {
-      label: "Changes",
-      icon: GitDiff,
-      section: "changes",
-      ...(changeId
-        ? { link: { to: "/changes/$changeId", params: { changeId } } }
-        : { unavailable: "Open a Change from the project overview" }),
-    },
-    {
-      label: "Candidates",
-      icon: GitFork,
-      section: "candidates",
-      ...(candidateId
-        ? { link: { to: "/candidates/$candidateId", params: { candidateId } } }
-        : { unavailable: "Open a Candidate from its Change" }),
-    },
-    { label: "Agents", icon: Robot, unavailable: soon },
-    { label: "Events", icon: Pulse, unavailable: soon },
-    { label: "Verification", icon: SealCheck, unavailable: soon },
-    { label: "Workspace", icon: TreeStructure, unavailable: soon },
-    { label: "Costs", icon: CurrencyDollar, unavailable: soon },
-    { label: "Settings", icon: GearSix, unavailable: soon },
+    { label: "Changes", icon: GitDiff, section: "changes", ...changes },
+    projectPageItem(projectId, "graph", Graph),
+    { label: "Candidates", icon: GitFork, section: "candidates", ...candidates },
+    { label: "Environments", icon: Stack, unavailable: SOON },
+    projectPageItem(projectId, "agents", Robot),
+    projectPageItem(projectId, "events", Pulse),
+    projectPageItem(projectId, "verification", SealCheck),
+    projectPageItem(projectId, "workspace", TreeStructure),
+    projectPageItem(projectId, "costs", CurrencyDollar),
+    { label: "Settings", icon: GearSix, unavailable: SOON },
   ];
 }
 
@@ -234,7 +257,7 @@ function NavRow({ item, current }: { item: NavItem; current: boolean }) {
         className={cn(rowClasses, "cursor-not-allowed border-transparent text-kumo-subtle")}
       >
         {content}
-        {item.unavailable === "Not built yet" && (
+        {item.unavailable === SOON && (
           <span className="ml-auto font-mono text-[10px] text-kumo-subtle">soon</span>
         )}
       </span>
@@ -305,7 +328,10 @@ function Header({ context }: { context: ShellContext }) {
   return (
     <header className="col-start-2 row-start-1 flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b-2 border-kumo-divider bg-kumo-base px-7 py-2 max-[720px]:col-start-1 max-[720px]:row-start-2 max-[720px]:px-4">
       <Breadcrumbs crumbs={[...context.trail, ...extra]} />
-      <ModeToggle />
+      <div className="flex flex-wrap items-center gap-2">
+        <ViewToggle />
+        <ModeToggle />
+      </div>
     </header>
   );
 }
@@ -358,6 +384,45 @@ function Breadcrumbs({ crumbs }: { crumbs: Crumb[] }) {
         })}
       </ol>
     </nav>
+  );
+}
+
+const VIEWS: { value: ViewMode; label: string; title: string }[] = [
+  { value: "product", label: "Product", title: "Product View: user outcomes" },
+  {
+    value: "systems",
+    label: "Systems",
+    title:
+      "Systems View: K2 and Queue flow, Durable Object ownership, model routes, Sandboxes, cost",
+  },
+];
+
+/** Product View / Systems View (AGENTS.md 38.7). Segmented control (8.2), selected in ink. */
+function ViewToggle() {
+  const view = useViewMode();
+  return (
+    <fieldset className="flex border border-kumo-divider">
+      <legend className="sr-only">View</legend>
+      {VIEWS.map(({ value, label, title }, index) => {
+        const selected = view === value;
+        return (
+          <button
+            key={value}
+            type="button"
+            title={title}
+            aria-pressed={selected}
+            onClick={() => setViewMode(value)}
+            className={cn(
+              "flex h-7 items-center px-3 text-[13px] transition-colors duration-(--rh-dur-ui) focus-visible:outline-offset-[-2px] pointer-coarse:h-11",
+              index > 0 && "border-l border-kumo-divider",
+              selected ? "bg-kumo-ink text-kumo-inverse" : "hover:bg-kumo-tint",
+            )}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </fieldset>
   );
 }
 

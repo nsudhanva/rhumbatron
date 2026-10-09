@@ -35,6 +35,11 @@ const TIERS: readonly RiskTier[] = ["low", "medium", "high", "critical"];
 const MINIMUM_CHECKS: readonly PolicyCheck[] = ["build", "targeted"];
 
 const STD = ["report.json", "stdout.txt.zst"];
+
+/** Test-name filter of the security check. Authorization tests must carry it in their name. */
+export const SECURITY_TEST_PATTERN = "authorization";
+/** Browser check budget: one Browser Run session (at most 55 s) plus Evidence upload. */
+export const BROWSER_CHECK_TIMEOUT_MS = 90_000;
 const exit0 = { kind: "exit_code", code: 0 } as const;
 
 /**
@@ -162,7 +167,9 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
       reason: touches.authorization
         ? "The Candidate changes authorization; denied actions must stay denied."
         : `Risk tier ${riskTier} requires security Evidence.`,
-      command: "bun test --test-name-pattern authorization",
+      // Runs only the tests whose name contains `authorization`. Zero matched or all skipped is
+      // `checked_no_signal`, a gap; only exit 0 with at least one executed test passes.
+      command: `bun test --test-name-pattern ${SECURITY_TEST_PATTERN}`,
       timeoutMs: 180_000,
       required: true,
       expected: exit0,
@@ -170,18 +177,22 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
     });
   }
 
+  // Browser Run is metered (section 7.3): only a high-risk Change that touches pages gets it.
   if (touches.ui && atLeast(riskTier, "high")) {
     checks.push({
       checkId: "browser",
       kind: "browser",
       reason: "High-risk user-facing change: run the end-to-end flow in Browser Run.",
       procedure:
-        "Open the Candidate preview, run the section 35 Wishlist flow as owner and collaborator, " +
-        "revoke the link, and confirm the later collaborator write is denied.",
-      timeoutMs: 300_000,
+        "Start the composed app in the Sandbox (bun run dev) and open it in one Browser Run " +
+        "session. With Wishlist UI, run the section 35 flow: owner creates and shares, " +
+        "collaborator adds and removes, owner revokes, a later collaborator write is denied. " +
+        "Otherwise open the shop, add to cart, and verify the total. Every step must pass.",
+      // One session of at most 55 s plus screenshot upload; Sandbox restore is not counted.
+      timeoutMs: BROWSER_CHECK_TIMEOUT_MS,
       required: true,
-      expected: { kind: "procedure", description: "Every flow step completes as specified" },
-      evidenceOutput: ["report.json", "screenshot.png", "trace.json.zst"],
+      expected: { kind: "procedure", description: "Every flow step passes (k/N with k = N)" },
+      evidenceOutput: ["report.json", "stdout.txt", "screenshot-<n>.png"],
     });
   }
 

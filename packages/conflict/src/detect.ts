@@ -32,6 +32,18 @@ export type DetectOptions = {
   dependsOn?: Readonly<Record<string, readonly string[]>>;
   /** Return benign pairs as `none` + `dismiss`, so callers can record a Decision Receipt. Default true. */
   includeDismissed?: boolean;
+  /**
+   * Advisory Claim contention (ADR 0015): `agentId` ran on `resource` while `holderAgentId` held
+   * its Claim. A contended pair is at least `suspected`; it never confirms a conflict alone.
+   */
+  contentions?: readonly ClaimContention[];
+};
+
+export type ClaimContention = {
+  resource: string;
+  agentId: string;
+  holderAgentId: string;
+  holderClaimId: string;
 };
 
 const SIGNAL_ORDER: readonly ConflictSignalKind[] = [
@@ -226,6 +238,25 @@ function sharedFiles(a: Intent, b: Intent): { files: string[]; refs: string[] } 
   return { files: [...files].sort(), refs };
 }
 
+/** Contention between the two Intents' agents, in either direction, deduplicated by resource. */
+function contentionsBetween(
+  a: Intent,
+  b: Intent,
+  contentions: readonly ClaimContention[] | undefined,
+): ClaimContention[] {
+  if (!contentions || a.agentId === b.agentId) return [];
+  const pair = new Set([a.agentId, b.agentId]);
+  const byResource = new Map<string, ClaimContention>();
+  for (const c of contentions) {
+    if (c.agentId === c.holderAgentId || !pair.has(c.agentId) || !pair.has(c.holderAgentId)) {
+      continue;
+    }
+    const resource = normalizeResource(c.resource);
+    if (!byResource.has(resource)) byResource.set(resource, { ...c, resource });
+  }
+  return [...byResource.values()].sort((x, y) => cmp(x.resource, y.resource));
+}
+
 function protectedHit(resources: readonly string[], protectedResources: readonly string[]) {
   const guards = protectedResources.map(normalizeResource);
   return resources.filter((r) => guards.some((g) => resourceOverlap(r, g) !== "none")).sort();
@@ -251,7 +282,13 @@ function comparePair(a: Intent, b: Intent, options: DetectOptions): ConflictRepo
   const files = sharedFiles(a, b);
   const contracts = compareContracts(a, b);
   const data = compareData(a, b, shared);
-  if (shared.length === 0 && files.files.length === 0 && contracts.length + data.length === 0) {
+  const contended = contentionsBetween(a, b, options.contentions);
+  if (
+    shared.length === 0 &&
+    files.files.length === 0 &&
+    contracts.length + data.length === 0 &&
+    contended.length === 0
+  ) {
     return null;
   }
 
@@ -264,6 +301,18 @@ function comparePair(a: Intent, b: Intent, options: DetectOptions): ConflictRepo
       severity: expected ? "benign" : "soft",
       detail: shared.map((s) => `${s.overlap} ${s.resource}`).join(", "),
       evidenceRefs: shared.flatMap((s) => s.refs),
+    });
+  }
+  if (contended.length > 0) {
+    // Both agents worked on one resource at the same time. Even additive or Work Graph-ordered
+    // overlap then needs review; only the typed Intent fields can make it `confirmed`.
+    signals.push({
+      kind: "resource_overlap",
+      severity: "soft",
+      detail: `claim contention on ${contended
+        .map((c) => `${c.resource} (${c.agentId} ran while ${c.holderAgentId} held the Claim)`)
+        .join(", ")}`,
+      evidenceRefs: contended.map((c) => `claim:${c.holderClaimId}`),
     });
   }
   if (files.files.length > 0) {
@@ -298,6 +347,7 @@ function comparePair(a: Intent, b: Intent, options: DetectOptions): ConflictRepo
       (best, s) => (best === undefined || s.resource.length > best.length ? s.resource : best),
       undefined,
     ) ??
+    contended[0]?.resource ??
     [...a.semanticResources, ...b.semanticResources].map(normalizeResource).sort()[0] ??
     "unscoped";
   return {

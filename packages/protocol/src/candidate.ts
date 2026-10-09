@@ -231,6 +231,8 @@ export const ApprovalView = z.object({
   changeId: Id,
   decision: z.enum(["granted", "rejected"]),
   approverUserId: Id,
+  /** Display name of the approver (their email) when the users table has one. Read side only. */
+  approverName: z.string().nullable().optional(),
   candidateTree: z.string(),
   policyVersion: z.string(),
   reason: z.string().nullable(),

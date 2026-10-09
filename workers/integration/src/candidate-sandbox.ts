@@ -1,5 +1,8 @@
 import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
 import type { CheckRun, ComposeSource } from "./candidate-composer.ts";
+import { candidateFork } from "./repo-names.ts";
+
+export { candidateFork };
 
 /**
  * Candidate source in the Project Sandbox (AGENTS.md sections 29.3, 30, 33). The Sandbox is the
@@ -56,7 +59,6 @@ const sandboxFor = (env: CandidateEnv, projectId: string) =>
   );
 
 const candidateDir = (candidateId: string) => `/workspace/cand-${candidateId.slice(5)}`;
-export const candidateFork = (candidateId: string) => `cand-${candidateId.slice(5)}`;
 
 /** The Sandbox drops stdout's trailing newline; keep stderr on its own line so line parsers work. */
 const joinOutput = (stdout: string, stderr: string) =>
@@ -351,7 +353,7 @@ export async function runContractCheck(
   }
 }
 
-/** Removes the Candidate directory. The fork keeps the composed source (cleanup: HOM-195). */
+/** Removes the Candidate directory. The fork keeps the composed source until the fork sweep (HOM-195). */
 export async function removeCandidateDir(
   env: CandidateEnv,
   projectId: string,
@@ -362,4 +364,59 @@ export async function removeCandidateDir(
   } catch {
     // A sleeping or lost Sandbox already dropped the directory.
   }
+}
+
+/** Port of the Candidate preview server: stable per Candidate, clear of the Sandbox control port. */
+function previewPort(candidateId: string) {
+  let hash = 2166136261;
+  for (const ch of candidateId) hash = Math.imul(hash ^ ch.charCodeAt(0), 16777619);
+  return 20_000 + ((hash >>> 0) % 10_000);
+}
+
+export type CandidatePreview = {
+  port: number;
+  /** Sends one request to the preview server inside the Sandbox. No public URL exists. */
+  fetch(path: string, init: RequestInit): Promise<Response>;
+  stop(): Promise<void>;
+};
+
+/**
+ * Starts the composed app (`bun run dev`, fixed in code) on its preview port for the browser check
+ * (AGENTS.md section 35). The preview is reached only through the Sandbox Durable Object
+ * (`containerFetch`), never through an exposed preview URL, so it needs no wildcard route and no
+ * public hostname. Throws when the server does not answer within `readyMs`.
+ */
+export async function startCandidatePreview(
+  env: CandidateEnv,
+  input: { projectId: string; candidateId: string; commit: string; readyMs: number },
+): Promise<CandidatePreview> {
+  const sandbox = sandboxFor(env, input.projectId);
+  const dir = await ensureCheckout(env, sandbox, input);
+  const port = previewPort(input.candidateId);
+  const processId = `preview-${input.candidateId.slice(5)}`;
+  // A retried step may find the previous server; restart it so the in-memory store starts empty.
+  await sandbox.killProcess(processId).catch(() => undefined);
+  const server = await sandbox.startProcess("bun run dev", {
+    cwd: dir,
+    env: { PORT: String(port) },
+    processId,
+  });
+  const stop = async () => {
+    await sandbox.killProcess(processId).catch(() => undefined);
+  };
+  try {
+    await server.waitForPort(port, { path: "/", timeout: input.readyMs });
+  } catch (error) {
+    const logs = await sandbox
+      .getProcessLogs(processId)
+      .then((l) => joinOutput(l.stdout, l.stderr).slice(-300))
+      .catch(() => "");
+    await stop();
+    throw new Error(`preview did not answer on :${port}: ${String(error).slice(0, 200)} ${logs}`);
+  }
+  return {
+    port,
+    fetch: (path, init) => sandbox.containerFetch(`http://localhost:${port}${path}`, init, port),
+    stop,
+  };
 }

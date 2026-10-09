@@ -4,6 +4,7 @@ import {
   type AcquireRequest,
   type ClaimRecord,
   type ClaimStatus,
+  contendedEventId,
   decideAcquire,
   decideRelease,
   decideRenew,
@@ -48,9 +49,27 @@ export type Claim = {
 
 export type AcquireClaimInput = AcquireRequest;
 
+/**
+ * `held` is advisory (ADR 0015): the caller keeps working without the lease. The shard has already
+ * written `claim.contended` in the same transaction as the decision.
+ */
 export type AcquireClaimResult =
   | { ok: true; claim: Claim }
   | { ok: false; reason: "held"; heldBy: HeldBy };
+
+/**
+ * One agent ran on a resource while another agent held its Claim (ADR 0015). The Change shard
+ * stores these so conflict detection can see contention from either side of the pair.
+ */
+export type ClaimContention = {
+  /** Qualified resource, for example `project:acme-shop:wishlist:membership`. */
+  resource: string;
+  /** The agent that asked for the Claim and ran without it. */
+  agentId: string;
+  holderAgentId: string;
+  holderClaimId: string;
+  holderChangeId: string;
+};
 
 export type RenewClaimInput = { claimId: string; agentId: string; ttlMs: number };
 
@@ -62,7 +81,12 @@ export type ReleaseClaimInput = { claimId: string; agentId: string };
 
 export type ReleaseClaimResult = { ok: true } | { ok: false; reason: "not_found" | "not_owner" };
 
-type ClaimEventType = "claim.acquired" | "claim.renewed" | "claim.released" | "claim.expired";
+type ClaimEventType =
+  | "claim.acquired"
+  | "claim.renewed"
+  | "claim.released"
+  | "claim.expired"
+  | "claim.contended";
 
 type ClaimRow = {
   claim_id: string;
@@ -78,6 +102,17 @@ type ClaimRow = {
 
 /** Finished claim rows stay this long so a repeated release stays a no-op success. */
 const TERMINAL_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+/** Contention rows feed conflict detection of a running Change; a week covers any demo Change. */
+const CONTENTION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+type ContentionRow = {
+  resource: string;
+  agent_id: string;
+  holder_agent_id: string;
+  holder_claim_id: string;
+  holder_change_id: string;
+};
 
 const SYSTEM_ACTOR_ID = "resource-shard-do";
 
@@ -112,6 +147,16 @@ export class ResourceShardDO extends DurableObject<Env> {
       CREATE UNIQUE INDEX IF NOT EXISTS claims_one_active_per_resource
         ON claims (project_id, resource) WHERE status = 'active';
       CREATE INDEX IF NOT EXISTS claims_status_expiry ON claims (status, lease_expires_at);
+      CREATE TABLE IF NOT EXISTS claim_contentions (
+        change_id TEXT NOT NULL,
+        resource TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        holder_agent_id TEXT NOT NULL,
+        holder_claim_id TEXT NOT NULL,
+        holder_change_id TEXT NOT NULL,
+        observed_at INTEGER NOT NULL,
+        PRIMARY KEY (change_id, resource, agent_id, holder_agent_id)
+      );
     `);
     migrateOutbox(this.sql);
     migrateIntents(this.sql);
@@ -119,7 +164,8 @@ export class ResourceShardDO extends DurableObject<Env> {
 
   /**
    * Grants the lease on a free resource. The same agent and change asking again gets the existing
-   * claim, renewed. Any other agent gets `held` until the lease ends.
+   * claim, renewed. Any other agent gets `held` until the lease ends, and the shard writes one
+   * `claim.contended` per holder Claim and contender in the same transaction (ADR 0015).
    * Throws when `ttlMs` or `resource` is invalid.
    */
   async acquireClaim(input: AcquireClaimInput): Promise<AcquireClaimResult> {
@@ -132,9 +178,24 @@ export class ResourceShardDO extends DurableObject<Env> {
       const holder = this.activeClaimFor(input.projectId, input.resource);
       const decision = decideAcquire(holder, input, now);
 
-      if (decision.kind === "held") {
+      if (decision.kind === "held" && holder !== null) {
+        // Advisory lease: the contention is a fact, never a block. A repeat ask is a no-op insert.
+        this.enqueue("claim.contended", holder, { kind: "agent", id: input.agentId }, now, {
+          eventId: contendedEventId(decision.heldBy.claimId, input.agentId, input.changeId),
+          changeId: input.changeId,
+          payload: {
+            claimId: decision.heldBy.claimId,
+            agentId: input.agentId,
+            intentHash: input.intentHash,
+            leaseExpiresAt: new Date(decision.heldBy.leaseExpiresAt).toISOString(),
+            heldByAgentId: decision.heldBy.agentId,
+            heldByChangeId: decision.heldBy.changeId,
+          },
+        });
         return { ok: false, reason: "held", heldBy: decision.heldBy };
       }
+
+      if (decision.kind === "held") throw new Error("held decision without a holder");
 
       if (decision.kind === "renew_existing") {
         this.sql.exec(
@@ -253,11 +314,43 @@ export class ResourceShardDO extends DurableObject<Env> {
    * Idempotent on `intentId`: a retry returns `duplicate`; a reused ID with other content is
    * rejected. Throws when the input is invalid.
    */
-  async declareIntent(input: DeclareIntentInput): Promise<DeclareIntentResult> {
+  async declareIntent(
+    input: DeclareIntentInput,
+    contentions: readonly ClaimContention[] = [],
+  ): Promise<DeclareIntentResult> {
     const now = Date.now();
-    const result = this.ctx.storage.transactionSync(() => this.intents.declare(input, now));
+    const result = this.ctx.storage.transactionSync(() => {
+      const declared = this.intents.declare(input, now);
+      // Contention the declaring run saw goes in with its Intent: no extra request (ADR 0015).
+      if (declared.ok) this.recordContentions(input.changeId, contentions, now);
+      return declared;
+    });
     if (result.ok && result.status === "declared") await this.rescheduleAlarm();
     return result;
+  }
+
+  /**
+   * Inputs of one Change's conflict pass in one request: every Intent on this shard (the caller
+   * keeps its own Tasks) and the Claim contention recorded for the Change.
+   */
+  async detectionInputs(changeId: string) {
+    const contentions = this.sql
+      .exec<ContentionRow>(
+        `SELECT resource, agent_id, holder_agent_id, holder_claim_id, holder_change_id
+         FROM claim_contentions WHERE change_id = ? ORDER BY observed_at, resource`,
+        changeId,
+      )
+      .toArray()
+      .map(
+        (r): ClaimContention => ({
+          resource: r.resource,
+          agentId: r.agent_id,
+          holderAgentId: r.holder_agent_id,
+          holderClaimId: r.holder_claim_id,
+          holderChangeId: r.holder_change_id,
+        }),
+      );
+    return { intents: await this.intents.list(), contentions };
   }
 
   /** Intents oldest first; with `resource`, those on it, its ancestors, or its descendants. */
@@ -299,6 +392,10 @@ export class ResourceShardDO extends DurableObject<Env> {
       this.sql.exec(
         "DELETE FROM claims WHERE status != 'active' AND ended_at IS NOT NULL AND ended_at < ?",
         now - TERMINAL_RETENTION_MS,
+      );
+      this.sql.exec(
+        "DELETE FROM claim_contentions WHERE observed_at < ?",
+        now - CONTENTION_RETENTION_MS,
       );
     });
     await this.outbox.publishAllDue(now);
@@ -383,6 +480,29 @@ export class ResourceShardDO extends DurableObject<Env> {
     }
   }
 
+  /** Idempotent on (Change, resource, agent, holder). Call it inside a transaction. */
+  private recordContentions(
+    changeId: string,
+    contentions: readonly ClaimContention[],
+    now: number,
+  ) {
+    for (const c of contentions.slice(0, 50)) {
+      SemanticResource.parse(c.resource);
+      this.sql.exec(
+        `INSERT OR IGNORE INTO claim_contentions (change_id, resource, agent_id, holder_agent_id,
+           holder_claim_id, holder_change_id, observed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        changeId,
+        c.resource,
+        c.agentId,
+        c.holderAgentId,
+        c.holderClaimId,
+        c.holderChangeId,
+        now,
+      );
+    }
+  }
+
   private async rescheduleAlarm() {
     const active = this.sql
       .exec<ClaimRow>("SELECT * FROM claims WHERE status = 'active'")
@@ -396,34 +516,34 @@ export class ResourceShardDO extends DurableObject<Env> {
     else await this.ctx.storage.setAlarm(Math.max(Math.min(...candidates), Date.now()));
   }
 
-  /** Writes one claim event to the outbox. Call it in the same transaction as the state change. */
+  /**
+   * Writes one claim event to the outbox. Call it in the same transaction as the state change.
+   * `override` sets a stable event ID, the Change, and the payload for `claim.contended`, whose
+   * subject is the requester, not the holder Claim. A stable ID that is already present is ignored.
+   */
   private enqueue(
     eventType: ClaimEventType,
     claim: ClaimRecord,
     actor: { kind: "agent" | "system"; id: string },
     now: number,
+    override?: { eventId: string; changeId: string; payload: Record<string, string> },
   ) {
     const timestamp = new Date(now).toISOString();
-    const event: EventEnvelope<{
-      claimId: string;
-      agentId: string;
-      intentHash: string;
-      leaseExpiresAt: string;
-    }> = {
-      eventId: crypto.randomUUID(),
+    const event: EventEnvelope<Record<string, string>> = {
+      eventId: override?.eventId ?? crypto.randomUUID(),
       eventType,
       eventVersion: 1,
       // The tenant is not known to the shard yet. Use the project ID until auth adds an org ID.
       tenantId: claim.projectId,
       projectId: claim.projectId,
-      changeId: claim.changeId,
+      changeId: override?.changeId ?? claim.changeId,
       actor,
       resource: claim.resource,
       // Filled from ProjectRootDO once the shard reads the Canonical Generation.
       canonicalGeneration: 0,
       correlationId: claim.claimId,
       timestamp,
-      payload: {
+      payload: override?.payload ?? {
         claimId: claim.claimId,
         agentId: claim.agentId,
         intentHash: claim.intentHash,
@@ -432,7 +552,7 @@ export class ResourceShardDO extends DurableObject<Env> {
     };
     AnyEventEnvelope.parse(event);
     this.sql.exec(
-      "INSERT INTO outbox (event_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO outbox (event_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
       event.eventId,
       event.eventType,
       JSON.stringify(event),

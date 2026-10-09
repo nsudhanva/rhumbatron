@@ -1,3 +1,4 @@
+export * from "./activity.ts";
 export * from "./api.ts";
 export * from "./candidate.ts";
 export * from "./command.ts";

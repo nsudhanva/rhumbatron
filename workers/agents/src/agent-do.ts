@@ -115,6 +115,8 @@ async function takeQuota(db: D1Database, counter: string, cap: number): Promise<
 export class AgentDO extends Agent<Env> implements AgentRuntime {
   private readonly registry = createRegistry();
   private prompt = "";
+  /** The last tool step of the active run, for live progress. In memory: losing it is harmless. */
+  private lastStep: string | null = null;
 
   readonly harness = new PiHarness({
     harness: ({ storage, context }) =>
@@ -178,10 +180,14 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
             }),
         },
         {
-          listFiles: (prefix) => this.withBudget(this.listFiles(prefix)),
-          readFile: (path) => this.withBudget(this.readSourceFile(path)),
-          writeFile: (path, content) => this.withBudget(this.writeSourceFile(path, content)),
-          runCommand: (command) => this.withBudget(this.runSourceCommand(command)),
+          listFiles: (prefix) =>
+            this.withBudget(this.noteStep("list_files", prefix ?? "", this.listFiles(prefix))),
+          readFile: (path) =>
+            this.withBudget(this.noteStep("read_file", path, this.readSourceFile(path))),
+          writeFile: (path, content) =>
+            this.withBudget(this.noteStep("write_file", path, this.writeSourceFile(path, content))),
+          runCommand: (command) =>
+            this.withBudget(this.noteStep("run_command", command, this.runSourceCommand(command))),
         },
       ),
     );
@@ -229,6 +235,44 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       doubles: [1],
       indexes: [input.projectId],
     });
+    // Live progress: one D1 write per model call, off the model request path.
+    this.ctx.waitUntil(this.writeProgress(run.run_id, run.calls + 1));
+  }
+
+  /** Records the tool step the agent is taking, then returns its result unchanged. */
+  private noteStep(tool: string, target: string, result: Promise<string>): Promise<string> {
+    const clean = target.replace(/\s+/g, " ").trim();
+    this.lastStep = (clean ? `${tool} ${clean}` : tool).slice(0, 120);
+    return result;
+  }
+
+  /**
+   * Writes calls, usage so far, and the last tool step to the running `task_runs` row. At most one
+   * write per model call, and calls are capped per run and per day, so D1 writes stay small.
+   * The guards keep it monotonic and never touch a finished run. Reporting only: never throws.
+   */
+  private async writeProgress(runId: string, calls: number) {
+    try {
+      const usage = await this.usage();
+      await this.env.DB.prepare(
+        `UPDATE task_runs SET model_calls = ?, input_tokens = ?, output_tokens = ?, cost_usd = ?,
+           last_step = ?, progress_at = ?
+         WHERE id = ? AND status = 'running' AND model_calls <= ?`,
+      )
+        .bind(
+          calls,
+          usage.input,
+          usage.output,
+          usage.cost,
+          this.lastStep,
+          new Date().toISOString(),
+          runId,
+          calls,
+        )
+        .run();
+    } catch (error) {
+      log({ event: "agent.progress_failed", runId, message: String(error).slice(0, 200) });
+    }
   }
 
   /** AgentRuntime.start (P6-02). Idempotent: an active run for the same Task is returned as is. */
@@ -445,6 +489,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     ]);
 
     // Fresh context for every attempt (section 23.3), then the run itself.
+    this.lastStep = null;
     const session = this.harness.session();
     await session.reset();
     await session.setModel({ provider: PROVIDER_ID, id: modelIdFor(tier) });

@@ -1,0 +1,83 @@
+# Continuous integration (AGENTS.md section 45 and Phase 14, ci.yml only).
+# Checks only: no secrets, no Cloudflare credentials, no remote Terraform state, no deploy step.
+# Remote changes still go through `terraform plan` and `terraform apply` on a developer machine.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+  # Git hooks are a local gate; CI runs the same checks as explicit steps.
+  LEFTHOOK: "0"
+
+jobs:
+  check:
+    name: lint, typecheck, critical tests, build, bundle, terraform validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Bun (version from package.json packageManager)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Critical tests
+        run: bun run test:critical
+
+      - name: Build
+        run: bun run build
+
+      # Local bundling only (dry run). Terraform reads dist/bundles/manifest.json during validate.
+      - name: Bundle Workers
+        run: bun run cf:bundle
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive infrastructure/terraform
+
+      # -backend=false: no R2 state and no credentials. Validate never contacts Cloudflare.
+      - name: Terraform validate
+        env:
+          AWS_ACCESS_KEY_ID: ""
+          AWS_SECRET_ACCESS_KEY: ""
+        run: |
+          set -euo pipefail
+          for dir in bootstrap envs/global envs/dev envs/prod modules/worker modules/durable-worker; do
+            echo "== ${dir}"
+            terraform -chdir="infrastructure/terraform/${dir}" init -backend=false -input=false -no-color
+            terraform -chdir="infrastructure/terraform/${dir}" validate -no-color
+          done

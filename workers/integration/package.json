@@ -16,6 +16,7 @@
     "wrangler": "4.149.0"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "1.4.0",
     "@cloudflare/sandbox": "0.12.6",
     "@rhumbatron/causal-router": "workspace:*",
     "@rhumbatron/coordinator": "workspace:*",

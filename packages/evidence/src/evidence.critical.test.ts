@@ -73,6 +73,21 @@ describe("buildVerificationPlan", () => {
     expect(ids(p)).toContain("security");
     expect(p.humanApprovalRequired).toBe(true);
   });
+
+  it("the security check runs only authorization-named tests", () => {
+    const security = plan("low", { authorization: true }).checks.find((c) => c.kind === "security");
+    expect(security?.command).toBe("bun test --test-name-pattern authorization");
+  });
+
+  it("Browser Run is planned only for a high-risk UI change, within one capped session", () => {
+    // Browser minutes are metered (section 7.3): no browser check without UI or below high risk.
+    expect(ids(plan("high", { ui: false }))).not.toContain("browser");
+    expect(ids(plan("low", { ui: true, authorization: true }))).not.toContain("browser");
+    const browser = plan("critical", { ui: true }).checks.find((c) => c.kind === "browser");
+    expect(browser?.required).toBe(true);
+    expect(browser?.command).toBeUndefined();
+    expect(browser?.timeoutMs).toBeLessThanOrEqual(90_000);
+  });
 });
 
 const ev = (checkId: string, over: Partial<EvidenceRecord> = {}): EvidenceRecord => ({

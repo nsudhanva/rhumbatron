@@ -4,6 +4,7 @@ import type { EventEnvelope } from "@rhumbatron/protocol";
 import { buildArchive, writeArchive } from "./archive.ts";
 import { routeCausalBatch } from "./causal.ts";
 import { claimEvents, releaseEvents } from "./dedupe.ts";
+import { feedStatements } from "./feed.ts";
 import {
   APPLY_DELTA_CAP,
   ARCHIVE_SUBSCRIPTION,
@@ -15,6 +16,7 @@ import {
   type SubscriptionName,
   sweepStreamIndex,
 } from "./k2-consumer.ts";
+import { isMaintenanceTick, queueMaintenance } from "./maintenance.ts";
 import { decodeEnvelope, groupByProject, planProjects, toViewDelta } from "./projector.ts";
 
 /**
@@ -24,6 +26,7 @@ import { decodeEnvelope, groupByProject, planProjects, toViewDelta } from "./pro
  *   per subscription: 1 resolve + 2 consume + 2 ack/nack + 2 D1 claim batches + 2 D1 release batches
  *   shared: at most APPLY_DELTA_CAP (15) applyDelta calls
  *   total: 2 * 9 + 15 = 33, below the Workers Free limit of 50.
+ * The projector's event feed rows (feed.ts) ride in its D1 claim batch: no extra subrequest.
  */
 
 const NOT_INITIALIZED = "ProjectViewDO is not initialized";
@@ -68,10 +71,14 @@ async function handleBatch(
   if (invalid > 0)
     log({ event: "router.invalid_records", stream: run.streamIndex, sub, count: invalid });
 
+  // The projector also records every decoded event in the feed, in the same batch as its claims.
+  // A redelivered event is ignored by the feed's UNIQUE event_id, so this needs no fresh check.
   const freshIds = await claimEvents(
     run.env.DB,
     sub,
     events.map((e) => e.eventId),
+    new Date(),
+    sub === "project-view-projector" ? feedStatements(run.env.DB, events) : [],
   );
   const seen = new Set<string>();
   const fresh = events.filter((event) => {
@@ -254,8 +261,18 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
     return new Response("Not Found", { status: 404 });
   }
 
-  /** Safety-net sweep: one stream per tick. */
+  /** Safety-net sweep: one stream per tick. Once a day it also queues fork and Project cleanup. */
   override async scheduled(controller: ScheduledController): Promise<void> {
+    if (isMaintenanceTick(controller.scheduledTime)) {
+      try {
+        log({
+          event: "router.maintenance",
+          ...(await queueMaintenance(this.env, controller.scheduledTime)),
+        });
+      } catch (error) {
+        log({ event: "router.maintenance_failed", ...errorInfo(error) });
+      }
+    }
     const count = parseStreamIds(this.env.K2_STREAM_IDS).length;
     const index = sweepStreamIndex(controller.scheduledTime, count);
     if (index < 0) return;

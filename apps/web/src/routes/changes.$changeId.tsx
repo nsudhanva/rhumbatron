@@ -2,7 +2,7 @@ import { Show } from "@clerk/tanstack-react-start";
 import { cn } from "@cloudflare/kumo";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { deriveActivity } from "../components/agents/activity-model";
 import { AgentActivity } from "../components/agents/agent-activity";
 import { CandidateList } from "../components/candidate-list";
@@ -13,6 +13,7 @@ import {
   InvariantList,
 } from "../components/change/change-overview";
 import { ConflictCard } from "../components/conflict-card";
+import { useEventFeed } from "../components/project/use-event-feed";
 import { TaskPanel } from "../components/task-detail";
 import { EmptyState } from "../components/ui/empty-state";
 import { Loader } from "../components/ui/loader";
@@ -23,12 +24,15 @@ import { Tag } from "../components/ui/tag";
 import { WorkGraph } from "../components/work-graph";
 import {
   type CandidateDetail,
+  type ChangeDetail,
+  type ChangeMeta,
   type EvidenceRecord,
   getChange,
+  getChangeClaims,
+  getChangeProgress,
   getConflicts,
   listCandidateEvidence,
   listCandidates,
-  listChanges,
   listTasks,
 } from "../lib/api";
 import {
@@ -47,6 +51,11 @@ export const Route = createFileRoute("/changes/$changeId")({ component: ChangePa
 
 /** Safety net while the live socket is down (AGENTS.md section 39). */
 const FALLBACK_POLL_MS = 30_000;
+/**
+ * Model calls emit no event, so live run progress is polled, and only while a run is running and
+ * the tab is visible. One indexed D1 read of the Change's running attempts per poll.
+ */
+const PROGRESS_POLL_MS = 5_000;
 const IN_FLIGHT = new Set<CandidateDetail["status"]>(["composing", "composed", "verifying"]);
 
 /** Module-level so useQueries keeps the combined result stable between renders. */
@@ -78,7 +87,8 @@ function ChangeView() {
   const fallback = socket === "open" ? false : FALLBACK_POLL_MS;
   const change = useQuery({
     queryKey: ["change", changeId],
-    queryFn: () => getChange({ data: changeId }),
+    // The API returns the risk tier and record times with the detail (workers/api changes.ts).
+    queryFn: () => getChange({ data: changeId }) as Promise<ChangeDetail & Partial<ChangeMeta>>,
     refetchInterval: (query) => (isLive(query.state.data, undefined) ? fallback : false),
     // A demo screen may sit in a background tab; polling still stops once the Change is idle.
     refetchIntervalInBackground: true,
@@ -113,26 +123,53 @@ function ChangeView() {
     combine: combineEvidence,
   });
 
-  const projectId = change.data?.projectId;
-  // Risk tier and creation time live on the Change summary, not on the detail.
-  const summaries = useQuery({
-    queryKey: ["changes", projectId],
-    queryFn: () => listChanges({ data: projectId ?? "" }),
-    enabled: !!projectId,
+  const running = (tasks.data ?? []).some((t) => t.runs.at(-1)?.status === "running");
+  const progress = useQuery({
+    queryKey: ["change-progress", changeId],
+    queryFn: () => getChangeProgress({ data: changeId }),
+    enabled: running,
+    refetchInterval: running ? PROGRESS_POLL_MS : false,
   });
-  const status = useProjectLive(projectId, isLive(change.data, tasks.data), (signal) => {
+  const claims = useQuery({
+    queryKey: ["change-claims", changeId],
+    queryFn: () => getChangeClaims({ data: changeId }),
+  });
+  // Recorded events of this Change: read once, then only newer rows on each push.
+  const feed = useEventFeed({ kind: "change", changeId }, { initial: 100, keep: 500 });
+  // A new claim event in the feed refreshes the Claims read (it holds the full Claim history).
+  const lastClaimSeq = useRef(0);
+  useEffect(() => {
+    const newest = feed.events.find((e) => e.eventType.startsWith("claim."));
+    if (!newest || newest.seq <= lastClaimSeq.current) return;
+    const first = lastClaimSeq.current === 0;
+    lastClaimSeq.current = newest.seq;
+    if (!first) void queryClient.invalidateQueries({ queryKey: ["change-claims", changeId] });
+  }, [feed.events, changeId, queryClient]);
+
+  const projectId = change.data?.projectId;
+  const live = isLive(change.data, tasks.data);
+  const status = useProjectLive(projectId, live, (signal) => {
+    // Any push can carry events of this Change (claims, routes), so the feed always reads on.
+    feed.refresh();
     const taskIds = new Set((tasks.data ?? []).map((t) => t.id));
     if (signal.kind === "delta" && !deltaTouchesChange(signal.delta, changeId, taskIds)) return;
     void queryClient.invalidateQueries({ queryKey: ["change", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["tasks", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["conflicts", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["candidates", changeId] });
-    void queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
+    void queryClient.invalidateQueries({ queryKey: ["change-progress", changeId] });
     for (const c of candidates.data ?? []) {
       void queryClient.invalidateQueries({ queryKey: ["candidate-evidence", c.id] });
     }
   });
   useEffect(() => setSocket(status), [status]);
+  // Without the socket, the feed follows the same slow fallback poll as the other reads.
+  const refreshFeed = feed.refresh;
+  useEffect(() => {
+    if (!live || status === "open") return;
+    const timer = setInterval(refreshFeed, FALLBACK_POLL_MS);
+    return () => clearInterval(timer);
+  }, [live, status, refreshFeed]);
 
   const evidenceById = useMemo(() => {
     const map: Record<string, EvidenceRecord[] | undefined> = {};
@@ -151,13 +188,30 @@ function ChangeView() {
             conflicts: conflicts.data ?? [],
             candidates: candidates.data ?? [],
             evidence: evidenceById,
+            progress: progress.data ?? [],
+            claims: claims.data?.facts ?? [],
+            feed: feed.events,
           })
         : null,
-    [change.data, tasks.data, conflicts.data, candidates.data, evidenceById],
+    [
+      change.data,
+      tasks.data,
+      conflicts.data,
+      candidates.data,
+      evidenceById,
+      progress.data,
+      claims.data,
+      feed.events,
+    ],
   );
   // Every source has answered once (or failed): later facts are new and animate.
   const ready =
-    !tasks.isPending && !conflicts.isPending && !candidates.isPending && !evidence.pending;
+    !tasks.isPending &&
+    !conflicts.isPending &&
+    !candidates.isPending &&
+    !evidence.pending &&
+    !claims.isPending &&
+    !feed.loading;
 
   if (change.isError) {
     return (
@@ -179,11 +233,10 @@ function ChangeView() {
   }
 
   const data = change.data;
-  const summary = summaries.data?.find((c) => c.id === changeId);
   const taskList = tasks.data ?? [];
   const conflictList = conflicts.data ?? [];
   const candidateList = candidates.data ?? [];
-  const live = isLive(data, tasks.data) && socket === "open";
+  const liveOpen = live && socket === "open";
   const selectedTask = taskList.find((t) => t.id === selected) ?? lastActiveTask(taskList);
   const spend = changeSpend(taskList);
   const compiling = isCompiling(data.status) && taskList.length === 0;
@@ -196,9 +249,9 @@ function ChangeView() {
           <span className="inline-flex flex-wrap items-center gap-2">
             <span>Change</span>
             <StatusPill status={data.status} className="tracking-normal normal-case" />
-            {summary?.riskTier && (
+            {data.riskTier && (
               <Tag variant="outline" className="tracking-normal normal-case">
-                Risk {summary.riskTier}
+                Risk {data.riskTier}
               </Tag>
             )}
           </span>
@@ -218,15 +271,17 @@ function ChangeView() {
                   : formatUsd(data.budgetUsd)}
               </Mono>
             </span>
-            {summary && (
+            {data.createdAt && (
               <>
                 <span aria-hidden>·</span>
-                <span>created {timeAgo(summary.createdAt)}</span>
+                <time dateTime={data.createdAt} title={data.createdAt}>
+                  created {timeAgo(data.createdAt)}
+                </time>
               </>
             )}
             <span aria-hidden>·</span>
             <Mono subtle>{data.id}</Mono>
-            {live && <StatusPill status="live" />}
+            {liveOpen && <StatusPill status="live" />}
           </>
         }
       />

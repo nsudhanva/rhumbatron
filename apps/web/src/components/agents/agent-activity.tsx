@@ -74,6 +74,13 @@ const TYPE_TEXT = (event: ActivityEvent) => {
   if (event.kind === "candidate.status" && event.status === "rejected") return "text-kumo-danger";
   if (event.kind === "challenge") return "text-kumo-danger";
   if (event.kind === "promoted") return "text-kumo-accent";
+  if (event.kind === "fact") {
+    const t = event.eventType;
+    if (t.endsWith(".failed") || t === "candidate.stale" || t.endsWith(".rejected"))
+      return "text-kumo-danger";
+    if (t === "canonical.advanced" || t === "artifact.promoted") return "text-kumo-accent";
+    if (t.endsWith(".completed")) return "text-kumo-success";
+  }
   if (
     event.kind === "run.end" ||
     (event.kind === "candidate.status" && event.status === "verified")
@@ -427,6 +434,12 @@ function Lane({
       <div className="relative grid min-w-0">
         <span className="truncate font-mono text-[10px] tracking-[0.06em] text-kumo-subtle uppercase">
           {lane.key} · {lane.kind}
+          {state.claims.length > 0 && (
+            <span title={`Claims: ${state.claims.join(", ")}`} className="text-kumo-default">
+              {" "}
+              · {state.claims.length === 1 ? "1 claim" : `${state.claims.length} claims`}
+            </span>
+          )}
         </span>
         <span className="truncate text-[13px] font-semibold" title={lane.title}>
           {lane.title}
@@ -730,6 +743,15 @@ function Rail({
           id: event.id,
           d: `M 0 ${y} H ${BUS_X} V ${geo.headMid}`,
           label: "Intent",
+          accent: false,
+        });
+    } else if (event.kind === "claim" && event.action === "acquired" && event.laneId) {
+      const y = laneY(event.laneId);
+      if (y !== null)
+        packets.push({
+          id: event.id,
+          d: `M 0 ${y} H ${BUS_X} V ${geo.headMid}`,
+          label: "Claim",
           accent: false,
         });
     } else if (event.kind === "changeset") {
@@ -1047,7 +1069,8 @@ function EventList({
         </ol>
       )}
       <p className="px-4 py-2 text-[11px] text-kumo-subtle">
-        Derived from Task runs, conflicts, Candidates and Evidence. Times are as recorded.
+        From Task runs, conflicts, Candidates, Evidence, Claims and the Change's event feed. Times
+        are as recorded.
       </p>
     </section>
   );

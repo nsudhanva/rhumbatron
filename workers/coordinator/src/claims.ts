@@ -2,7 +2,12 @@
  * Claim lease decisions (AGENTS.md sections 13.2 and 42.3).
  * Pure logic with no I/O. Every function takes `now` (epoch milliseconds) as a parameter.
  * ResourceShardDO reads rows, calls these functions, and applies the decision in one transaction.
+ *
+ * Claims are advisory (ADR 0015): `held` tells the requester who holds the resource, and the shard
+ * records `claim.contended`. It never stops the requester's run. Only the owner renews or releases.
  */
+
+import { fnv1a32 } from "./shard-key.ts";
 
 export const MIN_TTL_MS = 5_000;
 export const MAX_TTL_MS = 600_000;
@@ -31,7 +36,12 @@ export type AcquireRequest = {
   ttlMs: number;
 };
 
-export type HeldBy = { agentId: string; claimId: string; leaseExpiresAt: number };
+export type HeldBy = {
+  agentId: string;
+  changeId: string;
+  claimId: string;
+  leaseExpiresAt: number;
+};
 
 export type AcquireDecision =
   | { kind: "grant"; leaseExpiresAt: number }
@@ -83,10 +93,25 @@ export function decideAcquire(
     kind: "held",
     heldBy: {
       agentId: holder.agentId,
+      changeId: holder.changeId,
       claimId: holder.claimId,
       leaseExpiresAt: holder.leaseExpiresAt,
     },
   };
+}
+
+/**
+ * Event ID of `claim.contended`: one per holder Claim and contending agent and Change. A contender
+ * that asks again on every renewal tick produces no new event while the same Claim holds the lease.
+ */
+export function contendedEventId(holderClaimId: string, agentId: string, changeId: string): string {
+  const id = `cnt_${holderClaimId}_${agentId}_${changeId}`;
+  // Event IDs are at most 128 characters. Long inputs fall back to two independent 32-bit hashes.
+  if (id.length <= 128) return id;
+  const key = `${agentId}\u0000${changeId}`;
+  const h1 = fnv1a32(key).toString(16).padStart(8, "0");
+  const h2 = fnv1a32(`${key}\u0000salt`).toString(16).padStart(8, "0");
+  return `cnt_${holderClaimId.slice(0, 100)}_${h1}${h2}`;
 }
 
 /** Only the owning agent can renew, and only while the lease is live. */

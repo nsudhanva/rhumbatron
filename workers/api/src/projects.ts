@@ -109,6 +109,50 @@ async function loadProject(env: Env, projectId: string): Promise<Project | null>
   };
 }
 
+/**
+ * Membership check plus the Project status, in one D1 read. Null when the caller cannot open it.
+ * Reads only columns from 0001_init, so it works before and after migration 0009.
+ */
+async function projectAccess(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+): Promise<{ status: string } | null> {
+  return db
+    .prepare(
+      `SELECT p.status FROM projects p JOIN memberships m ON m.org_id = p.org_id
+       WHERE p.id = ? AND m.user_id = ? LIMIT 1`,
+    )
+    .bind(projectId, userId)
+    .first<{ status: string }>();
+}
+
+const ARCHIVED = "Project is archived";
+
+const ListProjectsQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  /** `archived` also lists archived Projects (cleanup tooling). The UI never sends it. */
+  include: z.enum(["archived"]).optional(),
+});
+
+/**
+ * Queues Artifacts and R2 cleanup of an archived Project (integration Worker, AGENTS.md section
+ * 43). The command ID is stable per Project; the handler is idempotent, so a repeat is harmless.
+ */
+async function sendCleanup(env: Env, projectId: string) {
+  await env.INTEGRATION_COMMANDS.send(
+    {
+      commandId: `cmd_${projectId.slice(5)}_cleanup`,
+      commandType: "project.cleanup",
+      projectId,
+      attempt: 0,
+      createdAt: new Date().toISOString(),
+      payload: {},
+    },
+    { contentType: "json" },
+  );
+}
+
 const ProvisionRequest = z.object({ template: ProjectTemplate });
 
 /** Queues source provisioning. The command ID is stable per Project, so a retry is harmless. */
@@ -177,15 +221,17 @@ export const projects = new Hono<AppEnv>()
     return respond(c, apiData(Project), { data: project }, 201);
   })
 
-  // Projects the caller can open, newest first (UI navigation).
-  .get("/v1/projects", async (c) => {
+  // Projects the caller can open, newest first (UI navigation). Archived Projects are hidden.
+  .get("/v1/projects", validate("query", ListProjectsQuery), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+    const { limit, include } = c.req.valid("query");
     const rows = await c.env.DB.prepare(
       `SELECT p.id, p.name, p.slug, p.status, p.canonical_generation, p.created_at
        FROM projects p JOIN memberships m ON m.org_id = p.org_id
-       WHERE m.user_id = ? ORDER BY p.created_at DESC LIMIT 50`,
+       WHERE m.user_id = ? AND (p.status = 'active' OR ? = 1)
+       ORDER BY p.created_at DESC LIMIT ?`,
     )
-      .bind(userId)
+      .bind(userId, include === "archived" ? 1 : 0, limit)
       .all<{
         id: string;
         name: string;
@@ -252,9 +298,9 @@ export const projects = new Hono<AppEnv>()
     async (c) => {
       const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
       const { projectId } = c.req.valid("param");
-      if (!(await canAccessProject(c.env.DB, userId, projectId))) {
-        return fail(c, 404, "not_found", "Project not found");
-      }
+      const access = await projectAccess(c.env.DB, userId, projectId);
+      if (!access) return fail(c, 404, "not_found", "Project not found");
+      if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
       await sendProvision(c.env, projectId, c.req.valid("json").template);
       return c.json({ data: { queued: true } }, 202);
     },
@@ -264,13 +310,51 @@ export const projects = new Hono<AppEnv>()
   .post("/v1/projects/:projectId/sandbox-smoke", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");
-    if (!(await canAccessProject(c.env.DB, userId, projectId))) {
-      return fail(c, 404, "not_found", "Project not found");
-    }
+    const access = await projectAccess(c.env.DB, userId, projectId);
+    if (!access) return fail(c, 404, "not_found", "Project not found");
+    if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
     const agents = c.env.AGENTS as unknown as {
       sandboxSmoke(id: string): Promise<{ ok: boolean; steps: unknown[] }>;
     };
     return c.json({ data: await agents.sandboxSmoke(projectId) });
+  })
+
+  /**
+   * Archives a Project. Irreversible: the Project leaves the list, takes no new Changes,
+   * Candidates, or provisioning, its live view and canonical state are purged, and the integration
+   * Worker deletes its Artifacts repos and R2 source and context objects. Evidence and D1 rows stay.
+   * Idempotent: a repeat returns the same archive record and re-queues cleanup until it is done.
+   */
+  .delete("/v1/projects/:projectId", validate("param", ProjectIdParam), async (c) => {
+    const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+    const { projectId } = c.req.valid("param");
+    if (!(await projectAccess(c.env.DB, userId, projectId))) {
+      return fail(c, 404, "not_found", "Project not found");
+    }
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(
+      `UPDATE projects SET status = 'archived', archived_at = ?, updated_at = ?
+       WHERE id = ? AND status = 'active'`,
+    )
+      .bind(now, now, projectId)
+      .run();
+    const row = await c.env.DB.prepare("SELECT archived_at, cleaned_at FROM projects WHERE id = ?")
+      .bind(projectId)
+      .first<{ archived_at: string | null; cleaned_at: string | null }>();
+    // ProjectRootDO first: once its state is gone, no Candidate can compose on this Project.
+    await projectRoot(c.env, projectId).purge(projectId);
+    await projectView(c.env, projectId).purge(projectId);
+    const cleanupQueued = !row?.cleaned_at;
+    if (cleanupQueued) await sendCleanup(c.env, projectId);
+    return c.json({
+      data: {
+        id: projectId,
+        status: "archived",
+        archivedAt: row?.archived_at ?? now,
+        cleanedAt: row?.cleaned_at ?? null,
+        cleanupQueued,
+      },
+    });
   })
 
   .get("/v1/projects/:projectId", validate("param", ProjectIdParam), async (c) => {
@@ -288,9 +372,10 @@ export const projects = new Hono<AppEnv>()
   .get("/v1/projects/:projectId/snapshot", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");
-    if (!(await canAccessProject(c.env.DB, userId, projectId))) {
-      return fail(c, 404, "not_found", "Project not found");
-    }
+    const access = await projectAccess(c.env.DB, userId, projectId);
+    if (!access) return fail(c, 404, "not_found", "Project not found");
+    // The read model of an archived Project is purged.
+    if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
     const view = await projectView(c.env, projectId).getSnapshot();
     return c.json({ data: view });
   })
@@ -304,9 +389,9 @@ export const projects = new Hono<AppEnv>()
       const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
       const { projectId } = c.req.valid("param");
       const body = c.req.valid("json");
-      if (!(await canAccessProject(c.env.DB, userId, projectId))) {
-        return fail(c, 404, "not_found", "Project not found");
-      }
+      const access = await projectAccess(c.env.DB, userId, projectId);
+      if (!access) return fail(c, 404, "not_found", "Project not found");
+      if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
 
       if (body.clientRequestId) {
         const existing = await c.env.DB.prepare(
@@ -322,10 +407,12 @@ export const projects = new Hono<AppEnv>()
 
       const changeId = `chg_${crypto.randomUUID()}`;
       const now = new Date().toISOString();
-      await c.env.DB.prepare(
+      // ON CONFLICT closes the race between two retries that both missed the lookup above.
+      const inserted = await c.env.DB.prepare(
         `INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd,
            client_request_id, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (project_id, client_request_id) DO NOTHING`,
       )
         .bind(
           changeId,
@@ -339,6 +426,14 @@ export const projects = new Hono<AppEnv>()
           now,
         )
         .run();
+      if (inserted.meta.changes === 0 && body.clientRequestId) {
+        const winner = await c.env.DB.prepare(
+          "SELECT * FROM changes WHERE project_id = ? AND client_request_id = ?",
+        )
+          .bind(projectId, body.clientRequestId)
+          .first<ChangeRow>();
+        if (winner) return respond(c, apiData(Change), { data: toChange(winner) });
+      }
 
       // ChangeWorkflow compiles the Work Graph asynchronously (AGENTS.md section 58). The instance
       // ID is the Change ID, so a retried request cannot start a second planner.
@@ -371,18 +466,6 @@ export const projects = new Hono<AppEnv>()
       return respond(c, apiData(Change), { data: toChange(row) }, 201);
     },
   )
-
-  .get("/v1/changes/:changeId", validate("param", ChangeIdParam), async (c) => {
-    const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
-    const { changeId } = c.req.valid("param");
-    const row = await c.env.DB.prepare("SELECT * FROM changes WHERE id = ?")
-      .bind(changeId)
-      .first<ChangeRow>();
-    if (!row || !(await canAccessProject(c.env.DB, userId, row.project_id))) {
-      return fail(c, 404, "not_found", "Change not found");
-    }
-    return respond(c, apiData(Change), { data: toChange(row) });
-  })
 
   // The Work Graph of one Change, in plan order (AGENTS.md section 16.1).
   .get("/v1/changes/:changeId/tasks", validate("param", ChangeIdParam), async (c) => {

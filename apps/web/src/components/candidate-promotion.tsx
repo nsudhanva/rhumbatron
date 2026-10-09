@@ -1,8 +1,9 @@
+import { useUser } from "@clerk/tanstack-react-start";
 import { Button } from "@cloudflare/kumo";
 import { ArrowRight, CheckCircle, RocketLaunch } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { type CandidateDetail, promoteCandidate } from "../lib/api";
+import { type ApprovalWithName, type CandidateDetail, promoteCandidate } from "../lib/api";
 import { generation, timeAgo } from "../lib/format";
 import { ApprovalDialog } from "./candidate/approval-dialog";
 import { Banner } from "./candidate/banner";
@@ -29,6 +30,7 @@ export function CandidatePromotion({
   riskTier: string | null | undefined;
 }) {
   const queryClient = useQueryClient();
+  const { user } = useUser();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [decided, setDecided] = useState<"approve" | "reject" | null>(null);
   const refresh = () =>
@@ -90,9 +92,9 @@ export function CandidatePromotion({
           <StatusPill status={approval.decision === "granted" ? "approved" : "rejected"} />
           <span>
             {approval.decision === "granted" ? "Approved" : "Rejected"} by{" "}
-            <Mono>{approval.approverUserId}</Mono> {timeAgo(approval.createdAt)} for tree{" "}
-            <Mono>{shortHash(approval.candidateTree)}</Mono> under{" "}
-            <Mono>{approval.policyVersion}</Mono>
+            <ApproverName approval={approval} me={user ? `usr_${user.id}` : null} />{" "}
+            {timeAgo(approval.createdAt)} for tree <Mono>{shortHash(approval.candidateTree)}</Mono>{" "}
+            under <Mono>{approval.policyVersion}</Mono>
           </span>
           {approval.reason && <span className="text-kumo-subtle">· {approval.reason}</span>}
         </div>
@@ -199,3 +201,18 @@ export function CandidatePromotion({
     </div>
   );
 }
+
+/**
+ * The approver as a person: their email from the API, "you" when it is the signed-in user (the
+ * API maps a Clerk user to `usr_<clerk id>`), else the internal ID in mono.
+ */
+function ApproverName({ approval, me }: { approval: ApprovalWithName; me: string | null }) {
+  if (approval.approverUserId === me) {
+    return <span title={approval.approverUserId}>you</span>;
+  }
+  if (approval.approverName) {
+    return <span title={approval.approverUserId}>{approval.approverName}</span>;
+  }
+  return <Mono>{approval.approverUserId}</Mono>;
+}
+ApproverName.displayName = "ApproverName";

@@ -18,6 +18,12 @@ import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projec
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as LiveProjectsProjectIdRouteImport } from './routes/live.projects.$projectId'
+import { Route as ProjectsProjectIdAgentsRouteImport } from './routes/projects_.$projectId.agents'
+import { Route as ProjectsProjectIdCostsRouteImport } from './routes/projects_.$projectId.costs'
+import { Route as ProjectsProjectIdEventsRouteImport } from './routes/projects_.$projectId.events'
+import { Route as ProjectsProjectIdGraphRouteImport } from './routes/projects_.$projectId.graph'
+import { Route as ProjectsProjectIdVerificationRouteImport } from './routes/projects_.$projectId.verification'
+import { Route as ProjectsProjectIdWorkspaceRouteImport } from './routes/projects_.$projectId.workspace'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -64,6 +70,38 @@ const LiveProjectsProjectIdRoute = LiveProjectsProjectIdRouteImport.update({
   path: '/live/projects/$projectId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsProjectIdAgentsRoute = ProjectsProjectIdAgentsRouteImport.update({
+  id: '/projects_/$projectId/agents',
+  path: '/projects/$projectId/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsProjectIdCostsRoute = ProjectsProjectIdCostsRouteImport.update({
+  id: '/projects_/$projectId/costs',
+  path: '/projects/$projectId/costs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsProjectIdEventsRoute = ProjectsProjectIdEventsRouteImport.update({
+  id: '/projects_/$projectId/events',
+  path: '/projects/$projectId/events',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsProjectIdGraphRoute = ProjectsProjectIdGraphRouteImport.update({
+  id: '/projects_/$projectId/graph',
+  path: '/projects/$projectId/graph',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsProjectIdVerificationRoute =
+  ProjectsProjectIdVerificationRouteImport.update({
+    id: '/projects_/$projectId/verification',
+    path: '/projects/$projectId/verification',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ProjectsProjectIdWorkspaceRoute =
+  ProjectsProjectIdWorkspaceRouteImport.update({
+    id: '/projects_/$projectId/workspace',
+    path: '/projects/$projectId/workspace',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -75,6 +113,12 @@ export interface FileRoutesByFullPath {
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
+  '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
+  '/projects/$projectId/costs': typeof ProjectsProjectIdCostsRoute
+  '/projects/$projectId/events': typeof ProjectsProjectIdEventsRoute
+  '/projects/$projectId/graph': typeof ProjectsProjectIdGraphRoute
+  '/projects/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
+  '/projects/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -86,6 +130,12 @@ export interface FileRoutesByTo {
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
+  '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
+  '/projects/$projectId/costs': typeof ProjectsProjectIdCostsRoute
+  '/projects/$projectId/events': typeof ProjectsProjectIdEventsRoute
+  '/projects/$projectId/graph': typeof ProjectsProjectIdGraphRoute
+  '/projects/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
+  '/projects/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -98,6 +148,12 @@ export interface FileRoutesById {
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
+  '/projects_/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
+  '/projects_/$projectId/costs': typeof ProjectsProjectIdCostsRoute
+  '/projects_/$projectId/events': typeof ProjectsProjectIdEventsRoute
+  '/projects_/$projectId/graph': typeof ProjectsProjectIdGraphRoute
+  '/projects_/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
+  '/projects_/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -111,6 +167,12 @@ export interface FileRouteTypes {
     | '/sign-in/$'
     | '/sign-up/$'
     | '/live/projects/$projectId'
+    | '/projects/$projectId/agents'
+    | '/projects/$projectId/costs'
+    | '/projects/$projectId/events'
+    | '/projects/$projectId/graph'
+    | '/projects/$projectId/verification'
+    | '/projects/$projectId/workspace'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -122,6 +184,12 @@ export interface FileRouteTypes {
     | '/sign-in/$'
     | '/sign-up/$'
     | '/live/projects/$projectId'
+    | '/projects/$projectId/agents'
+    | '/projects/$projectId/costs'
+    | '/projects/$projectId/events'
+    | '/projects/$projectId/graph'
+    | '/projects/$projectId/verification'
+    | '/projects/$projectId/workspace'
   id:
     | '__root__'
     | '/'
@@ -133,6 +201,12 @@ export interface FileRouteTypes {
     | '/sign-in/$'
     | '/sign-up/$'
     | '/live/projects/$projectId'
+    | '/projects_/$projectId/agents'
+    | '/projects_/$projectId/costs'
+    | '/projects_/$projectId/events'
+    | '/projects_/$projectId/graph'
+    | '/projects_/$projectId/verification'
+    | '/projects_/$projectId/workspace'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -145,6 +219,12 @@ export interface RootRouteChildren {
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
   LiveProjectsProjectIdRoute: typeof LiveProjectsProjectIdRoute
+  ProjectsProjectIdAgentsRoute: typeof ProjectsProjectIdAgentsRoute
+  ProjectsProjectIdCostsRoute: typeof ProjectsProjectIdCostsRoute
+  ProjectsProjectIdEventsRoute: typeof ProjectsProjectIdEventsRoute
+  ProjectsProjectIdGraphRoute: typeof ProjectsProjectIdGraphRoute
+  ProjectsProjectIdVerificationRoute: typeof ProjectsProjectIdVerificationRoute
+  ProjectsProjectIdWorkspaceRoute: typeof ProjectsProjectIdWorkspaceRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -212,6 +292,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LiveProjectsProjectIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects_/$projectId/agents': {
+      id: '/projects_/$projectId/agents'
+      path: '/projects/$projectId/agents'
+      fullPath: '/projects/$projectId/agents'
+      preLoaderRoute: typeof ProjectsProjectIdAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects_/$projectId/costs': {
+      id: '/projects_/$projectId/costs'
+      path: '/projects/$projectId/costs'
+      fullPath: '/projects/$projectId/costs'
+      preLoaderRoute: typeof ProjectsProjectIdCostsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects_/$projectId/events': {
+      id: '/projects_/$projectId/events'
+      path: '/projects/$projectId/events'
+      fullPath: '/projects/$projectId/events'
+      preLoaderRoute: typeof ProjectsProjectIdEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects_/$projectId/graph': {
+      id: '/projects_/$projectId/graph'
+      path: '/projects/$projectId/graph'
+      fullPath: '/projects/$projectId/graph'
+      preLoaderRoute: typeof ProjectsProjectIdGraphRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects_/$projectId/verification': {
+      id: '/projects_/$projectId/verification'
+      path: '/projects/$projectId/verification'
+      fullPath: '/projects/$projectId/verification'
+      preLoaderRoute: typeof ProjectsProjectIdVerificationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects_/$projectId/workspace': {
+      id: '/projects_/$projectId/workspace'
+      path: '/projects/$projectId/workspace'
+      fullPath: '/projects/$projectId/workspace'
+      preLoaderRoute: typeof ProjectsProjectIdWorkspaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -225,6 +347,12 @@ const rootRouteChildren: RootRouteChildren = {
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
   LiveProjectsProjectIdRoute: LiveProjectsProjectIdRoute,
+  ProjectsProjectIdAgentsRoute: ProjectsProjectIdAgentsRoute,
+  ProjectsProjectIdCostsRoute: ProjectsProjectIdCostsRoute,
+  ProjectsProjectIdEventsRoute: ProjectsProjectIdEventsRoute,
+  ProjectsProjectIdGraphRoute: ProjectsProjectIdGraphRoute,
+  ProjectsProjectIdVerificationRoute: ProjectsProjectIdVerificationRoute,
+  ProjectsProjectIdWorkspaceRoute: ProjectsProjectIdWorkspaceRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

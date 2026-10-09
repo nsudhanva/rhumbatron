@@ -1,9 +1,12 @@
 import type {
   CandidateDetail,
   ChangeDetail,
+  ClaimFact,
   ConflictDetail,
   EvidenceRecord,
+  FeedEvent,
   Intent,
+  RunProgress,
   TaskDetail,
   TaskRun,
 } from "../../lib/api";
@@ -13,8 +16,7 @@ import { candidateLabels } from "../candidate/model";
 /**
  * Agent activity as a sequence of facts (DESIGN.md 11.1, AGENTS.md sections 17 and 31-36).
  *
- * The API has no per-Change event feed, so this module derives the sequence from records the
- * page already reads, and from nothing else:
+ * The sequence comes from records the page reads, and from nothing else:
  *
  *   Task runs        lane.forked, run.started, run.completed / run.failed, intent.declared
  *   Conflicts        challenge.created (earlier Intent's agent -> later Intent's agent),
@@ -22,9 +24,14 @@ import { candidateLabels } from "../candidate/model";
  *   Candidates       candidate.forked, changeset.composed (from `changeSetIds`),
  *                    candidate status, approval, canonical.advanced
  *   Evidence         verification.check.completed
+ *   Claims feed      claim.acquired / renewed / released / expired (ResourceShardDO events)
+ *   Event feed       every other recorded event of the Change (task.ready, agent.woken,
+ *                    model.route.decided, changeset.proposed, ...). A feed event that a derived
+ *                    fact above already shows is dropped, so one fact never appears twice.
+ *   Run progress     calls and the last tool step of a running attempt (state, not a fact)
  *
  * Each fact carries the time the API recorded. Nothing is interpolated: a fact the API does not
- * record (Claims, per-tool-call progress) is not drawn.
+ * record is not drawn.
  */
 
 /** Model calls a run may make per tier. Mirrors MAX_CALLS_PER_RUN in packages/model-router. */
@@ -39,6 +46,8 @@ export type LaneSpec = {
   status: TaskDetail["status"];
   /** Time the latest run started while it is still running, for the elapsed readout. */
   runningSince: number | null;
+  /** Live progress of the running attempt (calls so far and the last tool step). */
+  live: { attempt: number; calls: number; lastStep: string | null } | null;
 };
 
 export type CandidateCheckSpec = { checkId: string; kind: string; required: boolean };
@@ -89,8 +98,25 @@ export type ActivityEvent = Base &
       }
     | { kind: "intent"; laneId: string; summary: string }
     | {
+        kind: "claim";
+        /** Null when the claiming agent is not one of this Change's lanes. */
+        laneId: string | null;
+        claimId: string;
+        action: ClaimFact["action"];
+        resource: string;
+      }
+    | {
+        /** A recorded event no derived fact shows. Drawn in the event list only. */
+        kind: "fact";
+        laneId: string | null;
+        candidateId: string | null;
+        eventType: string;
+        data: FeedEvent["data"];
+      }
+    | {
         kind: "challenge";
         conflictId: string;
+        challengeId: string | null;
         fromLaneId: string;
         toLaneId: string;
         resource: string;
@@ -127,6 +153,12 @@ export type ActivityInput = {
   candidates: CandidateDetail[];
   /** Evidence per Candidate id, when loaded. */
   evidence: Record<string, EvidenceRecord[] | undefined>;
+  /** Running attempts with their latest calls and tool step. */
+  progress?: RunProgress[];
+  /** Claim facts of the Change, oldest first. */
+  claims?: ClaimFact[];
+  /** Recorded events of the Change, any order. */
+  feed?: FeedEvent[];
 };
 
 export type ActivityModel = {
@@ -139,18 +171,20 @@ export type ActivityModel = {
 
 /** Within one recorded instant, causes come before effects. */
 const ORDER: Record<ActivityEvent["kind"], number> = {
-  "lane.fork": 0,
-  "run.start": 1,
-  "run.end": 2,
-  intent: 3,
-  challenge: 4,
-  "conflict.resolved": 5,
-  "candidate.fork": 6,
-  changeset: 7,
-  check: 8,
-  "candidate.status": 9,
-  approval: 10,
-  promoted: 11,
+  fact: 0,
+  "lane.fork": 1,
+  "run.start": 2,
+  claim: 3,
+  "run.end": 4,
+  intent: 5,
+  challenge: 6,
+  "conflict.resolved": 7,
+  "candidate.fork": 8,
+  changeset: 9,
+  check: 10,
+  "candidate.status": 11,
+  approval: 12,
+  promoted: 13,
 };
 
 const time = (iso: string | null | undefined) => {
@@ -198,8 +232,20 @@ export function deriveActivity(input: ActivityInput): ActivityModel {
     if (event) events.push(event);
   };
 
+  const progressOf = new Map((input.progress ?? []).map((p) => [p.taskId, p]));
   const lanes: LaneSpec[] = tasks.map((task) => {
     const last = task.runs[task.runs.length - 1];
+    const running = last?.status === "running" ? last : undefined;
+    const progress = running ? progressOf.get(task.id) : undefined;
+    const live =
+      running && (!progress || progress.attempt === running.attempt)
+        ? {
+            attempt: running.attempt,
+            // Both sources are written by the same per-call update; take the newer count.
+            calls: Math.max(running.modelCalls, progress?.modelCalls ?? 0),
+            lastStep: progress?.lastStep ?? null,
+          }
+        : null;
     return {
       id: task.id,
       key: task.key,
@@ -207,7 +253,8 @@ export function deriveActivity(input: ActivityInput): ActivityModel {
       kind: task.kind,
       agentId: task.assignedAgentId,
       status: task.status,
-      runningSince: last?.status === "running" ? time(last.startedAt) : null,
+      runningSince: running ? time(running.startedAt) : null,
+      live,
     };
   });
 
@@ -301,6 +348,7 @@ export function deriveActivity(input: ActivityInput): ActivityModel {
       at,
       kind: "challenge",
       conflictId: conflict.id,
+      challengeId: conflict.challengeId,
       fromLaneId: earlier.taskId,
       toLaneId: later.taskId,
       resource: conflict.resource,
@@ -465,8 +513,222 @@ export function deriveActivity(input: ActivityInput): ActivityModel {
     };
   });
 
+  addRecordedFacts(events, input, candidates);
   events.sort((a, b) => a.at - b.at || ORDER[a.kind] - ORDER[b.kind]);
   return { baseGeneration: change.baseGeneration, lanes, candidates, events };
+}
+
+/* --------------------------------------------------------------------------------------------
+ * Recorded facts: the Claims feed and the per-Change event feed.
+ * ------------------------------------------------------------------------------------------ */
+
+/** The identity of a derived fact in event-feed terms, used to drop the feed's copy of it. */
+function derivedCover(event: ActivityEvent): string | null {
+  switch (event.kind) {
+    case "lane.fork":
+      return `task.started|${event.laneId}`;
+    case "run.start":
+      return event.previousTier !== event.tier
+        ? `agent.escalated|${event.laneId}|${event.previousTier}>${event.tier}`
+        : null;
+    case "run.end":
+      return `${event.status === "completed" ? "task.completed" : "task.failed"}|${event.laneId}`;
+    case "intent":
+      return `intent.declared|${event.laneId}`;
+    case "challenge":
+      return event.challengeId ? `challenge.created|${event.challengeId}` : null;
+    case "check":
+      return `check|${event.candidateId}|${event.id.split(":check:")[1] ?? ""}`;
+    case "candidate.status":
+      return `candidate.status|${event.candidateId}`;
+    case "approval":
+      return `approval|${event.candidateId}`;
+    case "promoted":
+      return `promoted|${event.candidateId}`;
+    default:
+      return null;
+  }
+}
+
+const str = (data: FeedEvent["data"], key: string) =>
+  typeof data[key] === "string" ? (data[key] as string) : null;
+
+function feedCover(event: FeedEvent): string | null {
+  const d = event.data;
+  switch (event.eventType) {
+    case "task.started":
+    case "task.completed":
+    case "task.failed":
+    case "intent.declared":
+      return event.taskId ? `${event.eventType}|${event.taskId}` : null;
+    case "agent.escalated":
+      return event.taskId
+        ? `agent.escalated|${event.taskId}|${str(d, "from")}>${str(d, "to")}`
+        : null;
+    case "challenge.created":
+      return str(d, "challengeId") ? `challenge.created|${str(d, "challengeId")}` : null;
+    case "challenge.resolved":
+      // The derived conflict.resolved fact shows it when the conflict row is resolved.
+      return str(d, "challengeId") ? `challenge.resolved|${str(d, "challengeId")}` : null;
+    case "verification.check.completed":
+      return `check|${event.candidateId}|${str(d, "evidenceId")}`;
+    case "verification.completed":
+    case "candidate.stale":
+      return event.candidateId ? `candidate.status|${event.candidateId}` : null;
+    case "approval.granted":
+    case "approval.rejected":
+      return event.candidateId ? `approval|${event.candidateId}` : null;
+    case "canonical.advanced":
+      return event.candidateId ? `promoted|${event.candidateId}` : null;
+    default:
+      return null;
+  }
+}
+
+/** One plain sentence for a recorded event, from its typed fields. */
+function factDetail(event: FeedEvent, who: string | null): string {
+  const d = event.data;
+  const subject = who ?? event.actor.id;
+  switch (event.eventType) {
+    case "change.created":
+      return "Change created.";
+    case "change.compiled":
+      return `Work Graph compiled: ${d.taskCount ?? "?"} Tasks${str(d, "riskTier") ? `, risk ${str(d, "riskTier")}` : ""}.`;
+    case "task.created":
+      return `${subject} planned${str(d, "title") ? `: ${str(d, "title")}` : ""}.`;
+    case "task.ready":
+      return `${subject} is ready. Its dependencies are done.`;
+    case "task.assigned":
+      return `${subject} is assigned to ${str(d, "agentId") ?? "an agent"}.`;
+    case "agent.woken":
+      return `${subject} agent wakes${str(d, "reason") ? ` (${str(d, "reason")})` : ""}.`;
+    case "model.route.decided":
+      return `${subject} routes to ${str(d, "selectedTier") ?? "a model"}${str(d, "decidedBy") ? ` by ${str(d, "decidedBy")}` : ""}.`;
+    case "changeset.proposed":
+      return str(d, "changeSetId")
+        ? `${subject} proposes ChangeSet ${str(d, "changeSetId")}.`
+        : `${subject} proposes a ChangeSet.`;
+    case "verification.started":
+      return "Every Task is done. Verification can start.";
+    case "candidate.composed":
+      return `${subject} is composed from its ChangeSets.`;
+    case "approval.requested":
+      return `${subject} needs a human approval${str(d, "riskTier") ? ` (${str(d, "riskTier")} risk)` : ""}.`;
+    case "canonical.promotion.requested":
+      return `Promotion of ${subject} is requested.`;
+    case "challenge.resolved":
+      return `Challenge resolved${str(d, "resolution") ? `: ${str(d, "resolution")}` : ""}.`;
+    default:
+      return event.summary;
+  }
+}
+
+function claimDetail(agent: string, action: ClaimFact["action"], resource: string) {
+  switch (action) {
+    case "acquired":
+      return `${agent} claims ${resource}.`;
+    case "renewed":
+      return `${agent} renews its claim on ${resource}.`;
+    case "released":
+      return `${agent} releases ${resource}.`;
+    case "expired":
+      return `${agent}'s claim on ${resource} expired.`;
+  }
+}
+
+function addRecordedFacts(
+  events: ActivityEvent[],
+  input: ActivityInput,
+  candidates: CandidateSpec[],
+) {
+  const laneByTask = new Map(input.tasks.map((t) => [t.id, t]));
+  const laneByAgent = new Map(
+    input.tasks.filter((t) => t.assignedAgentId).map((t) => [t.assignedAgentId as string, t]),
+  );
+  const nameOf = new Map(candidates.map((c) => [c.id, c.name]));
+
+  // Claims: the Claims feed, plus any claim event of the event feed it does not hold yet.
+  const claims = new Map<string, ClaimFact>();
+  for (const fact of input.claims ?? []) claims.set(fact.eventId, fact);
+  for (const event of input.feed ?? []) {
+    if (!event.eventType.startsWith("claim.") || claims.has(event.eventId)) continue;
+    const action = event.eventType.slice("claim.".length) as ClaimFact["action"];
+    const claimId = str(event.data, "claimId");
+    const agentId = str(event.data, "agentId");
+    if (!claimId || !agentId || !["acquired", "renewed", "released", "expired"].includes(action))
+      continue;
+    claims.set(event.eventId, {
+      seq: event.seq,
+      eventId: event.eventId,
+      action,
+      claimId,
+      agentId,
+      resource: event.resource ?? "",
+      leaseExpiresAt: str(event.data, "leaseExpiresAt"),
+      occurredAt: event.occurredAt,
+    });
+  }
+  for (const fact of claims.values()) {
+    const at = time(fact.occurredAt);
+    if (at === null) continue;
+    const lane = laneByAgent.get(fact.agentId);
+    events.push({
+      id: `claim:${fact.eventId}`,
+      at,
+      kind: "claim",
+      laneId: lane?.id ?? null,
+      claimId: fact.claimId,
+      action: fact.action,
+      resource: fact.resource,
+      type: `claim.${fact.action}`,
+      actor: lane?.key ?? fact.agentId,
+      detail: claimDetail(lane?.key ?? fact.agentId, fact.action, fact.resource),
+    });
+  }
+
+  // Every other recorded event, unless a derived fact already shows it.
+  const covered = new Set(events.map(derivedCover).filter((k): k is string => k !== null));
+  for (const event of input.feed ?? []) {
+    if (event.eventType.startsWith("claim.")) continue;
+    const cover = feedCover(event);
+    if (cover && covered.has(cover)) continue;
+    const at = time(event.occurredAt);
+    if (at === null) continue;
+    const lane = event.taskId ? laneByTask.get(event.taskId) : undefined;
+    const candidateName = event.candidateId ? nameOf.get(event.candidateId) : undefined;
+    const who = lane?.key ?? candidateName ?? null;
+    events.push({
+      id: `feed:${event.eventId}`,
+      at,
+      kind: "fact",
+      laneId: lane?.id ?? null,
+      candidateId: candidateName ? event.candidateId : null,
+      eventType: event.eventType,
+      data: event.data,
+      type: event.eventType,
+      actor: who ?? event.actor.id,
+      detail: factDetail(event, who),
+    });
+  }
+}
+
+/** A tool step in words, for example `read_file src/cart.ts` -> `Reading src/cart.ts`. */
+function describeStep(step: string): string {
+  const cut = step.indexOf(" ");
+  const tool = cut < 0 ? step : step.slice(0, cut);
+  const target = cut < 0 ? "" : step.slice(cut + 1);
+  switch (tool) {
+    case "read_file":
+      return `Reading ${target}`;
+    case "write_file":
+      return `Writing ${target}`;
+    case "list_files":
+      return target ? `Listing ${target}` : "Listing files";
+    case "run_command":
+      return `Running ${target}`;
+    default:
+      return step;
+  }
 }
 
 /* --------------------------------------------------------------------------------------------
@@ -480,6 +742,8 @@ export type LaneView = {
   attempt: number;
   step: string;
   calls: number | null;
+  /** Resources this lane's agent holds a Claim on, after the played facts. */
+  claims: string[];
   /** Event id of the last message that arrived at this lane (restarts the flash). */
   arrival: string | null;
 };
@@ -538,6 +802,7 @@ export function foldActivity(
       attempt: 0,
       step: lane.status === "ready" ? "Ready, waiting for an agent" : "Waiting on dependencies",
       calls: null,
+      claims: [],
       arrival: null,
     };
   }
@@ -608,6 +873,39 @@ export function foldActivity(
         view.workspaceArrival = event.id;
         view.current = event.laneId;
         break;
+      case "claim": {
+        const lane = event.laneId ? lanes[event.laneId] : undefined;
+        if (!lane) break;
+        const held = new Set(lane.claims);
+        if (event.action === "acquired" || event.action === "renewed") held.add(event.resource);
+        else held.delete(event.resource);
+        lane.claims = [...held];
+        if (event.action === "acquired") view.workspaceArrival = event.id;
+        view.current = event.laneId;
+        break;
+      }
+      case "fact": {
+        const lane = event.laneId ? lanes[event.laneId] : undefined;
+        // Before its first run, a lane shows how far it got: ready, assigned, woken, routed.
+        if (lane && !lane.forked) {
+          if (event.eventType === "task.ready") {
+            lane.status = "ready";
+            lane.step = "Ready, waiting for an agent";
+          } else if (event.eventType === "task.assigned") {
+            lane.status = "assigned";
+            lane.step = "Assigned, agent waking";
+          } else if (event.eventType === "agent.woken") {
+            lane.step = "Agent awake, compiling context";
+          } else if (event.eventType === "model.route.decided") {
+            const tier = event.data.selectedTier;
+            if (tier === "haiku" || tier === "sonnet" || tier === "opus") lane.tier = tier;
+            lane.step = `Routed to ${String(tier ?? "a model")}`;
+          }
+        }
+        if (event.laneId) view.current = event.laneId;
+        else if (event.candidateId) view.current = event.candidateId;
+        break;
+      }
       case "challenge": {
         conflicts.set(event.conflictId, {
           id: event.conflictId,
@@ -687,6 +985,15 @@ export function foldActivity(
     for (const spec of model.lanes) {
       const lane = lanes[spec.id];
       if (!lane) continue;
+      // Live progress of the running attempt: real calls and the last tool step.
+      if (lane.status === "running" && spec.live && spec.live.attempt === lane.attempt) {
+        lane.calls = spec.live.calls;
+        lane.step = `Attempt ${lane.attempt} · ${
+          spec.live.lastStep
+            ? describeStep(spec.live.lastStep)
+            : `model call ${spec.live.calls || 1}`
+        }`;
+      }
       // Statuses without a recorded time (blocked, cancelled) settle once every fact has played.
       if (["blocked", "cancelled", "assigned"].includes(spec.status)) lane.status = spec.status;
       if (spec.status === "assigned" && !lane.forked) lane.step = "Assigned, agent waking";

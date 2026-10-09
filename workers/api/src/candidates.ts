@@ -1,3 +1,4 @@
+import { createClerkClient } from "@clerk/backend";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import {
   ApprovalOutcome,
@@ -98,6 +99,8 @@ type CandidateRow = {
   approval_policy: string | null;
   approval_reason: string | null;
   approval_at: string | null;
+  /** Approver email from the users table, when known (see recordApproverEmail). */
+  approval_email: string | null;
 };
 
 const CANDIDATE_COLUMNS = `c.id, c.change_id, ch.project_id, c.status, c.status_reason, c.base_generation,
@@ -105,10 +108,11 @@ const CANDIDATE_COLUMNS = `c.id, c.change_id, ch.project_id, c.status, c.status_
   c.score_json, c.base_tree, c.promoted_generation, c.created_at, c.updated_at,
   a.id AS approval_id, a.decision AS approval_decision, a.approver_user_id AS approval_user_id,
   a.candidate_tree AS approval_tree, a.policy_version AS approval_policy,
-  a.reason AS approval_reason, a.created_at AS approval_at`;
+  a.reason AS approval_reason, a.created_at AS approval_at, u.email AS approval_email`;
 
 const CANDIDATE_FROM = `candidates c JOIN changes ch ON ch.id = c.change_id
-  LEFT JOIN approvals a ON a.candidate_id = c.id`;
+  LEFT JOIN approvals a ON a.candidate_id = c.id
+  LEFT JOIN users u ON u.id = a.approver_user_id`;
 
 function toView(row: CandidateRow): CandidateView {
   const plan = row.plan_json ? (JSON.parse(row.plan_json) as VerificationPlan) : null;
@@ -135,6 +139,7 @@ function toView(row: CandidateRow): CandidateView {
             changeId: row.change_id,
             decision: row.approval_decision,
             approverUserId: row.approval_user_id,
+            approverName: row.approval_email,
             candidateTree: row.approval_tree ?? "",
             policyVersion: row.approval_policy ?? "",
             reason: row.approval_reason,
@@ -151,6 +156,37 @@ function toView(row: CandidateRow): CandidateView {
 async function hex(text: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Stores the approver's primary email once, so approvals show a person and not an internal ID.
+ * Runs only on the approval path, only while the users row has no email: at most one Clerk
+ * Backend API call per approver. Display data only; never used for authorization.
+ */
+async function recordApproverEmail(env: Env, userId: string, authSubject: string) {
+  try {
+    const row = await env.DB.prepare("SELECT email FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ email: string | null }>();
+    if (!row || row.email) return;
+    const user = await createClerkClient({ secretKey: env.CLERK_SECRET_KEY }).users.getUser(
+      authSubject,
+    );
+    const email = user.primaryEmailAddress?.emailAddress;
+    if (!email) return;
+    await env.DB.prepare(
+      "UPDATE users SET email = ?, updated_at = ? WHERE id = ? AND email IS NULL",
+    )
+      .bind(email.slice(0, 254), new Date().toISOString(), userId)
+      .run();
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "approval.approver_email_failed",
+        message: String(error).slice(0, 200),
+      }),
+    );
+  }
 }
 
 async function loadCandidate(env: Env, candidateId: string) {
@@ -315,6 +351,9 @@ export const candidates = new Hono<AppEnv>()
           reason: body.reason || null,
         }),
       );
+      if (outcome.status === "recorded" && !outcome.repeated) {
+        c.executionCtx.waitUntil(recordApproverEmail(c.env, userId, c.get("authSubject")));
+      }
       if (outcome.status === "refused") {
         const message = {
           not_verified: "Only a verified Candidate can be approved or rejected",

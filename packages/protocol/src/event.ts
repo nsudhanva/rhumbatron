@@ -17,6 +17,8 @@ export const EVENT_TYPES = [
   "claim.renewed",
   "claim.released",
   "claim.expired",
+  /** Advisory Claims (ADR 0015): another agent holds a live Claim; the requester ran anyway. */
+  "claim.contended",
   "intent.declared",
   "intent.changed",
   "challenge.created",

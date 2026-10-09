@@ -1,68 +1,61 @@
 # Build Status
 
 ## Current phase
-Phase 6 complete on dev; first live UI shipped (pulled forward from Phase 12); Phase 7 next
+Phase 12 - Product UX and demo narrative (in progress). Phase 13 and Phase 14 (`ci.yml` only) started.
 
 ## Completed
-- P0-01 through P0-10
-- P1-01 through P1-09, P1-11, P1-12
-- P2-01, P2-02, P2-04 through P2-11
-- P3-01 through P3-03: schemas, first migration, Terraform-run migrations (applied to dev)
-- P4-01 to P4-12: envelopes, outbox, K2 publisher, event router (nudge + 1-min cron), D1 dedupe,
-  projector, R2 audit archive (gzipped NDJSON), duplicate-event and K2-outage critical tests
-  - verified on dev: project.created reaches the live view in about 3 s and is archived to R2
-  - 8 K2 streams x 4 subscriptions on dev (ADR 0006)
-- P3-04, P3-06 to P3-12: Durable Objects, Clerk-authenticated Project and Change API, live on dev
-  - `bun run smoke:dev`: 16 checks including the authenticated flow (Clerk smoke user): web and API live on dev via Terraform
-  - https://dev.rhumbatron.com, https://api-dev.rhumbatron.com (`bun run smoke:dev`)
-- Clerk authentication in apps/web (local development instance)
-- Model access (pulled forward from Phase 6 for P5-02): P6-04 AI Gateway `rhumbatron-models-dev`,
-  P6-05 OpenRouter free-model client, P6-06 deterministic routing rules (`packages/model-router`)
-  - `bun run smoke:models`: one tool call per tier through the gateway ($0), plus one Vertex fallback call
-  - Gemini on Vertex AI is the paid backup, capped at $9 per 30 days by the gateway (ADR 0007)
-
-- P5-01 to P5-10: ChangeWorkflow, Root Planner, D1 Work Graph, scheduler, Causal Router, Clef-flash
-  (capped), wake consumer, false-wakeup metric (ADR 0008)
-  - verified on dev: the Wishlist goal compiled into 7 Tasks; only the root Task was dispatched and assigned
-  - `bun run smoke:plan` runs this end to end (1 to 4 free model calls)
-
-- P6-01 to P6-12: AgentDO with the Pi Durable harness, tier models over OpenRouter, Clef-assisted
-  routing, Decision Receipts, run budgets and daily caps, escalation (ADR 0009)
-  - verified on dev: Wishlist Tasks run in dependency order; each agent declares an Intent, and its
-    `task.completed` wakes the next ready Tasks through K2 and the Causal Router
-
-- First live UI (P12-01, P12-02 first slice): Projects, Project overview with a New Change form,
-  Change page with criteria, protected invariants, live Work Graph (XYFlow), agent chips, and
-  Task runs with tier, route, usage, and the declared Intent. Web calls the API over a service binding.
+- P0-01 through P0-10: Bun and Turborepo monorepo, Biome, protocol package, Terraform skeleton
+- P1-01 through P1-09, P1-11, P1-12: R2 remote state, DNS, dev D1, KV, R2, six Queues
+- P2-01, P2-02, P2-04 through P2-11: web and API Workers on dev through Terraform
+- P3-01 through P3-12: Project and Change API (Clerk), ProjectRootDO, ResourceShardDO,
+  ProjectViewDO, Terraform-run D1 migrations, CAS test
+- P4-01 through P4-12: Event envelope, transactional outbox, 8 K2 streams x 4 subscriptions
+  (ADR 0006), event router, projector, R2 archive, duplicate-Event and K2-outage tests
+- P5-01 through P5-10: ChangeWorkflow, Root Planner, Work Graph, Causal Router, Clef-flash (ADR 0008)
+- P6-01 through P6-12: AgentDO with the Pi harness, tier routing, Decision Receipts, budgets,
+  escalation (ADR 0009); models through AI Gateway (ADR 0007)
+- P7: Context Packet per agent run (exact retrieval first; Vectorize still deferred, ADR 0003)
+- P8: Artifacts canonical source and forks (ADR 0010), capped Sandbox in its own Worker
+  (ADR 0011, ADR 0012)
+- P9: Intents, Challenges, deterministic semantic conflict detection, Candidate fork decision
+- P10: Candidate composition and verification in the Sandbox (build, unit, contract,
+  Cart invariant, p95), coverage states, citation validation, R2 Evidence
+- P11-01 through P11-06, P11-09, P11-10: approval policy and dialog, promotion preconditions
+  (ADR 0013), ProjectRootDO compare-and-swap, `canonical.advanced`, stale-promotion smoke check
+- P12-01, P12-02, P12-04: Kumo theme and app shell, Project overview, Change page with agent
+  activity, Candidate page, Candidate comparison
 
 ## Active
-- P3-05 ResourceShardDO in review: deployed, first live use is Phase 9 claims
-- P2-03 Zustand (add with the first client-state page)
+- P12: Product Graph, Agents, Events, Verification, Workspace, and Costs pages; demo reset
+  (`bun run demo:wishlist`); convergence animation
+- P13: failure injection. Critical tests cover every fault except deployment failure;
+  `bun run inject` runs the faults the public API can reach (docs/demo/failure-injection.md)
+- P14: `.github/workflows/ci.yml` (lint, typecheck, critical tests, build, bundle, Terraform fmt
+  and validate; no secrets, no deploy). `terraform-plan.yml` and `production.yml` not started
 
 ## Blocked
-- P1-10 Vectorize deferred to Phase 7 (ADR 0003).
+- P11-07, P11-08 Release (Workers Builds, ReleaseWorkflow): parked. Workers Builds has no
+  Terraform resource and needs a one-time dashboard connection (ADR 0014)
+- P13-12 deployment failure: needs the ReleaseWorkflow
+- P1-10 Vectorize: deferred (ADR 0003)
 
 ## Cost
-- Cloudflare plan: account is Workers Paid for other projects; Rhumbatron budget is free-tier limits only
-- Rhumbatron monthly cost target: $0
-- Remote resources: state bucket (global); 4 zone settings (global); dev D1, KV, R2 + lifecycle, 6 Queues; dev web and API Workers with custom domains
+- Cloudflare plan: Workers Paid (account-wide, for other projects); Rhumbatron stays inside included usage
+- Cloudflare fixed monthly base: $5 (shared account plan, not added by Rhumbatron)
+- Sandbox: 1 instance, sleeps after 2 minutes, hard stop at 10 hours per month
+- Dev pause switch: `locals.paused` in `infrastructure/terraform/envs/dev/main.tf`
 - Prod: planned, not applied
-- Current Change model spend: $0.00 (OpenRouter `:free` models only; 50 requests/day until $10 lifetime credits)
+- Current Change model spend: $0.00 (OpenRouter free models; Gemini on Vertex capped, ADR 0007)
 
 ## Decisions
-- Terraform owns remote control-plane changes.
-- Artifacts is canonical source for managed Projects.
-- Repository tooling: docs/adr/0001-repository-tooling.md.
-- User authentication: Clerk, docs/adr/0002-clerk-authentication.md.
-- Naming rhumbatron-<component>-<env>; bootstrap credentials via cf CLI: docs/adr/0004.
-- Provider cloudflare 5.27 has no Vectorize, Artifacts, K2, Containers, or resource-tagging resource. Section 11.4 applies.
-- Durable Object Workers deploy via cloudflare_workers_script: docs/adr/0005.
-- ChangeWorkflow, Work Graph persistence, causal routing: docs/adr/0008.
-- AgentDO with the Pi Durable harness: docs/adr/0009.
-- envs/global owns zone-wide settings. Prod is planned only until the first E2E Change.
-- Models: OpenRouter free models through AI Gateway, Gemini (Vertex, GCP credit) as a capped backup: docs/adr/0007.
-- P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
+- Terraform owns remote control-plane changes. Never `wrangler deploy`.
+- Artifacts is canonical source for managed Projects (ADR 0010).
+- Workers Builds connection is the one documented dashboard step (ADR 0014).
+- CI runs checks only and needs no credentials. Deployment stays local through Terraform.
+- Faults that need internal hooks are documented, not hooked (docs/demo/failure-injection.md).
 
 ## Next
-- Phase 7 (Context Compiler). UI follow-ups: WebSocket push instead of polling, vertical graph layout.
-- Tracking: Linear project Rhumbatron (AGENTS.md rule 49).
+- Finish P12 pages and `demo:wishlist`; run the section 55 runbook end to end (docs/demo/runbook.md)
+- Fix the concurrent Change create race (`change-double-submit` in docs/demo/failure-injection.md)
+- Dead-letter consumer and blocked Task state (section 42.7)
+- Unpark P11-07/08 when the release path is chosen

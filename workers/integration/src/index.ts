@@ -6,6 +6,7 @@ import {
 } from "@rhumbatron/protocol";
 import { z } from "zod";
 import { dispatchReadyTasks } from "./dispatch.ts";
+import { cleanupProject, forkRetentionDays, sweepForks } from "./project-cleanup.ts";
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
 
@@ -39,10 +40,49 @@ async function startCandidateVerification(env: Env, payload: unknown) {
   }
 }
 
-/** Handles one command. Unknown commands and Changes are acknowledged and dropped. */
-async function handleCommand(env: Env, body: unknown) {
+/**
+ * Queue deliveries per message (consumer `max_retries` = 3, plus the first). A bounded command
+ * that has more work asks for another delivery; on the last one it is acked instead of going to
+ * the dead-letter Queue, and the event router's daily maintenance tick queues it again.
+ */
+const MAX_DELIVERIES = 4;
+
+/** Commands for archived Projects stop here: no new source, Tasks, or Candidate checks. */
+async function isArchived(env: Env, projectId: string) {
+  const row = await env.DB.prepare("SELECT status FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ status: string }>();
+  return row?.status === "archived";
+}
+
+/**
+ * Handles one command. Unknown commands and Changes are acknowledged and dropped. Returns
+ * "continue" when a bounded command has more work for another delivery.
+ */
+async function handleCommand(env: Env, body: unknown): Promise<"continue" | undefined> {
   const command = AnyCommandEnvelope.safeParse(body);
   if (!command.success) return;
+  if (command.data.commandType === "project.cleanup") {
+    const result = await cleanupProject(env, command.data.projectId);
+    console.warn(
+      JSON.stringify({ event: "project.cleanup", projectId: command.data.projectId, ...result }),
+    );
+    return result.status === "partial" ? "continue" : undefined;
+  }
+  if (command.data.commandType === "forks.sweep") {
+    const result = await sweepForks(env, {
+      now: Date.now(),
+      retentionDays: forkRetentionDays(env.ENVIRONMENT),
+    });
+    console.warn(JSON.stringify({ event: "forks.sweep", ...result }));
+    return result.more ? "continue" : undefined;
+  }
+  if (
+    ["project.provision", "candidate.verify"].includes(command.data.commandType) &&
+    (await isArchived(env, command.data.projectId))
+  ) {
+    return;
+  }
   if (command.data.commandType === "project.provision") {
     const template = (command.data.payload as { template?: string } | null)?.template ?? "empty";
     const result = await provisionProject(env, { projectId: command.data.projectId, template });
@@ -63,7 +103,8 @@ async function handleCommand(env: Env, body: unknown) {
   const { changeId } = command.data;
   const row = await env.DB.prepare(
     `SELECT c.project_id, p.org_id, p.slug, c.base_generation, c.budget_usd
-     FROM changes c JOIN projects p ON p.id = c.project_id WHERE c.id = ? AND c.status = 'running'`,
+     FROM changes c JOIN projects p ON p.id = c.project_id
+     WHERE c.id = ? AND c.status = 'running' AND p.status = 'active'`,
   )
     .bind(changeId)
     .first<ChangeRow>();
@@ -101,8 +142,10 @@ export default class Integration extends WorkerEntrypoint<Env> {
   override async queue(batch: MessageBatch): Promise<void> {
     for (const message of batch.messages) {
       try {
-        await handleCommand(this.env, message.body);
-        message.ack();
+        const outcome = await handleCommand(this.env, message.body);
+        if (outcome === "continue" && message.attempts < MAX_DELIVERIES) {
+          message.retry({ delaySeconds: 10 });
+        } else message.ack();
       } catch (error) {
         console.error(
           JSON.stringify({ event: "dispatch.failed", message: String(error).slice(0, 200) }),

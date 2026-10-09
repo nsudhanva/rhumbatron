@@ -69,5 +69,8 @@
     }
   ],
   // Canonical source for managed Projects (AGENTS.md section 29). One repo per Project.
-  "artifacts": [{ "binding": "ARTIFACTS", "namespace": "rhumbatron-projects-local" }]
+  "artifacts": [{ "binding": "ARTIFACTS", "namespace": "rhumbatron-projects-local" }],
+  // Browser Run for the Candidate browser check (AGENTS.md section 35). Capped in code:
+  // one session per check, at most 2 per Candidate, 500 browser-seconds per UTC day.
+  "browser": { "binding": "BROWSER" }
 }

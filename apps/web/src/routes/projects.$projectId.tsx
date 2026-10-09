@@ -3,13 +3,15 @@ import { Button, Input, InputArea } from "@cloudflare/kumo";
 import { SignIn } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { EventStream } from "../components/project/event-stream";
 import { SectionError, SkeletonBar, SkeletonRows } from "../components/project/feedback";
 import {
   ACTIVE_CHANGE_STATUSES,
   ChangeStatusPill,
   TaskProgress,
 } from "../components/project/status";
+import { useEventFeed } from "../components/project/use-event-feed";
 import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../components/ui/data-table";
 import { EmptyState } from "../components/ui/empty-state";
 import { KeyValue } from "../components/ui/key-value";
@@ -21,15 +23,22 @@ import {
   type ChangeSummary,
   createChange,
   getProject,
+  getProjectStats,
   listChanges,
+  type ProjectStats as ProjectStatsData,
   provisionProject,
 } from "../lib/api";
 import { DEMO_GOAL, EMPTY, formatAge, formatNumber, formatUsd, generation } from "../lib/format";
+import { useProjectLive } from "../lib/live";
 
 export const Route = createFileRoute("/projects/$projectId")({ component: ProjectPage });
 
 /** The changes endpoint returns the newest 20 (workers/api projects.ts). */
 const CHANGE_LIMIT = 20;
+/** Stats aggregate every Change of the Project: refetch at most this often on live pushes. */
+const STATS_MIN_INTERVAL_MS = 10_000;
+/** Safety net while the live socket is down. */
+const FALLBACK_POLL_MS = 30_000;
 const UNASSIGNED = "unassigned";
 
 function ProjectPage() {
@@ -80,6 +89,30 @@ function Overview() {
         ? 2500
         : false,
   });
+
+  const queryClient = useQueryClient();
+  const stats = useQuery({
+    queryKey: ["project-stats", projectId],
+    queryFn: () => getProjectStats({ data: projectId }),
+  });
+  const feed = useEventFeed({ kind: "project", projectId }, { initial: 50 });
+  // Live push (AGENTS.md section 39): each delta means new events were projected. The feed reads
+  // only rows after its cursor; the stats aggregate refetches at most every 10 seconds.
+  const statsAt = useRef(0);
+  const socket = useProjectLive(projectId, true, () => {
+    feed.refresh();
+    void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    if (Date.now() - statsAt.current >= STATS_MIN_INTERVAL_MS) {
+      statsAt.current = Date.now();
+      void queryClient.invalidateQueries({ queryKey: ["project-stats", projectId] });
+    }
+  });
+  const { refresh } = feed;
+  useEffect(() => {
+    if (socket === "open") return;
+    const timer = setInterval(refresh, FALLBACK_POLL_MS);
+    return () => clearInterval(timer);
+  }, [socket, refresh]);
 
   const source = project.data?.canonical;
   const assigned = !!source && source.artifactRef !== UNASSIGNED;
@@ -132,6 +165,8 @@ function Overview() {
         generationValue={project.data ? generation(project.data.canonical.generation) : undefined}
         treeSha={assigned ? source.treeSha : undefined}
         changes={changes.data}
+        stats={stats.data}
+        statsFailed={stats.isError}
       />
 
       <Section
@@ -162,6 +197,20 @@ function Overview() {
         ) : (
           <ChangesTable changes={changes.data} />
         )}
+      </Section>
+
+      <Section
+        label="Recent events"
+        meta={
+          feed.events[0] ? <Mono subtle>latest #{formatNumber(feed.events[0].seq)}</Mono> : null
+        }
+      >
+        <EventStream
+          events={feed.events}
+          loading={feed.loading}
+          error={feed.error}
+          onRetry={feed.refresh}
+        />
       </Section>
 
       <TwoUp>
@@ -212,17 +261,22 @@ function Overview() {
 }
 
 /**
- * Stat strip from data the page already loads: the project's canonical generation and the
- * Change list (status and Task counts). Cells without a source are left out, not estimated.
+ * Stat strip: the canonical generation, the Change list (status and Task counts), and the stats
+ * endpoint (Candidates and model calls across every Change). Cells without a source are left
+ * out, not estimated.
  */
 function ProjectStats({
   generationValue,
   treeSha,
   changes,
+  stats,
+  statsFailed,
 }: {
   generationValue: string | undefined;
   treeSha: string | undefined;
   changes: ChangeSummary[] | undefined;
+  stats: ProjectStatsData | undefined;
+  statsFailed: boolean;
 }) {
   const loading = <SkeletonBar height={34} width={96} />;
   const active = changes?.filter((c) => ACTIVE_CHANGE_STATUSES.has(c.status));
@@ -246,13 +300,12 @@ function ProjectStats({
         label="Active changes"
         value={active ? formatNumber(active.length) : loading}
         footnote={
-          changes ? (waiting > 0 ? `${formatNumber(waiting)} waiting on approval` : scope) : EMPTY
+          changes
+            ? waiting > 0
+              ? `${formatNumber(waiting)} waiting on approval`
+              : `${formatNumber(completed ?? 0)} completed${stopped ? ` · ${formatNumber(stopped)} failed or blocked` : ""}`
+            : EMPTY
         }
-      />
-      <StatCell
-        label="Completed changes"
-        value={completed !== undefined ? formatNumber(completed) : loading}
-        footnote={stopped ? `${formatNumber(stopped)} failed or blocked` : changes ? scope : EMPTY}
       />
       <StatCell
         label="Tasks done"
@@ -260,6 +313,29 @@ function ProjectStats({
         unit={tasks ? `/ ${formatNumber(tasks.total)}` : undefined}
         footnote={changes ? scope : EMPTY}
       />
+      {!statsFailed && (
+        <StatCell
+          label="Candidates verified"
+          value={stats ? formatNumber(stats.candidates.verified) : loading}
+          unit={stats ? `/ ${formatNumber(stats.candidates.total)}` : undefined}
+          footnote={
+            stats
+              ? `${formatNumber(stats.candidates.promoted)} promoted · ${formatNumber(stats.candidates.rejected)} rejected`
+              : EMPTY
+          }
+        />
+      )}
+      {!statsFailed && (
+        <StatCell
+          label="Model calls"
+          value={stats ? formatNumber(stats.model.calls) : loading}
+          footnote={
+            stats
+              ? `${formatUsd(stats.model.costUsd)} spent${stats.model.running > 0 ? ` · ${formatNumber(stats.model.running)} running` : ""}`
+              : EMPTY
+          }
+        />
+      )}
     </StatStrip>
   );
 }

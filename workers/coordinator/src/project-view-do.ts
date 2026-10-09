@@ -109,6 +109,28 @@ export class ProjectViewDO extends DurableObject<Env> {
     return { sequence, snapshot };
   }
 
+  /**
+   * Drops the read model of an archived Project and closes its live sockets. Later deltas fail
+   * with "not initialized", which the projector skips. Safe to repeat.
+   */
+  async purge(projectId: string): Promise<{ purged: boolean }> {
+    const existing = this.state();
+    if (existing && existing.snapshot.project.id !== projectId) {
+      throw new Error("ProjectViewDO belongs to a different project");
+    }
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        socket.close(1000, "project archived");
+      } catch {
+        // Already closed.
+      }
+    }
+    if (!existing) return { purged: false };
+    await this.ctx.storage.deleteAll();
+    this.migrate();
+    return { purged: true };
+  }
+
   private broadcast(message: string) {
     for (const socket of this.ctx.getWebSockets()) {
       try {
