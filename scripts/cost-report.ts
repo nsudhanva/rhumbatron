@@ -157,16 +157,18 @@ await section("durable objects", async () => {
 });
 
 await section("workflows", async () => {
-  for (const status of ["running", "queued", "waiting"]) {
-    const result = await get<unknown[]>(
-      `/workflows/rhumbatron-change-workflow-${env}/instances?status=${status}&per_page=50`,
-    );
-    if (result.length > 0)
-      report(
-        status === "running" ? "WARN" : "OK",
-        "workflows",
-        `${result.length} ${status} ChangeWorkflow instances`,
+  for (const name of ["change-workflow", "candidate-verification"]) {
+    for (const status of ["running", "queued", "waiting"]) {
+      const result = await get<unknown[]>(
+        `/workflows/rhumbatron-${name}-${env}/instances?status=${status}&per_page=50`,
       );
+      if (result.length > 0)
+        report(
+          status === "running" ? "WARN" : "OK",
+          "workflows",
+          `${result.length} ${status} ${name} instances`,
+        );
+    }
   }
   report("OK", "workflows", "checked running, queued, waiting");
 });

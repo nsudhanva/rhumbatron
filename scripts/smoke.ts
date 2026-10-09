@@ -315,7 +315,13 @@ if (secretKey && smokeUserId) {
       !!read && ["verified", "rejected"].includes(read.status),
       `${read?.status ?? "missing"}${read?.statusReason ? `: ${read.statusReason.slice(0, 120)}` : ""}`,
     );
-    for (const checkId of ["build", "unit", "protected-invariant-cart", "performance"]) {
+    for (const checkId of [
+      "build",
+      "unit",
+      "contract",
+      "protected-invariant-cart",
+      "performance",
+    ]) {
       const e = evidence.find((x) => x.checkId === checkId);
       report(
         `baseline ${checkId} passes with evidence`,
@@ -323,14 +329,12 @@ if (secretKey && smokeUserId) {
         e ? `${e.status}/${e.coverage}` : "no evidence",
       );
     }
-    // The gate is computed, and a check that cannot run yet (contract) is a gap, never green.
+    // The baseline adds no route, so every required check has supporting Evidence and it can
+    // promote. A gap (browser, when planned) would block it: never green.
     report("gate computed", read?.gate !== null && read?.gate !== undefined);
     report(
-      "unautomated checks are gaps",
-      evidence
-        .filter((e) => ["contract", "browser"].includes(e.checkId))
-        .every((e) => e.status !== "pass" && e.coverage === "not_checked") &&
-        (read?.gate?.gaps ?? []).every((g) => ["contract", "browser"].includes(g.checkId)),
+      "baseline Candidate is promotable",
+      read?.status === "verified" && read.gate?.promotable === true,
       (read?.gate?.gaps ?? []).map((g) => `${g.checkId}:${g.reason}`).join(", ") || "no gaps",
     );
   }

@@ -6,7 +6,8 @@
     "dev": "bun run src/server.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "bench": "bun run bench/cart.bench.ts"
+    "bench": "bun run bench/cart.bench.ts",
+    "contract": "bun run scripts/contract.ts"
   },
   "dependencies": {
     "hono": "4.13.13"

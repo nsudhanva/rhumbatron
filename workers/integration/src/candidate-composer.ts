@@ -1,4 +1,9 @@
-import { type ComposableChangeSet, parseBenchOutput } from "@rhumbatron/evidence";
+import {
+  type ComposableChangeSet,
+  diffContract,
+  parseBenchOutput,
+  parseRouteTable,
+} from "@rhumbatron/evidence";
 import {
   ChangeSetIntent,
   type EvidenceCoverage,
@@ -245,6 +250,56 @@ export function classifyCheck(check: VerificationCheck, run: CheckRun): CheckOut
 }
 
 /** Outcome for a check that has a procedure and no automated command yet. */
+/**
+ * Contract check outcome from the base and Candidate route tables. A missing table (no contract
+ * script, crash, timeout) is a gap, never a pass. Any undeclared route change fails.
+ */
+export function classifyContract(
+  base: CheckRun,
+  candidate: CheckRun,
+  declared: string[],
+): CheckOutcome {
+  const runs = [
+    ["base", base],
+    ["candidate", candidate],
+  ] as const;
+  const tables: string[][] = [];
+  for (const [label, run] of runs) {
+    const routes = run.exitCode === 0 ? parseRouteTable(run.output) : null;
+    if (!routes) {
+      const why = run.timedOut
+        ? "timed out"
+        : (run.error ?? `exit ${run.exitCode ?? "none"}: ${tail(run.output, 2, 200)}`);
+      return {
+        status: "error",
+        coverage: "not_checked",
+        summary: `No ${label} route table (${why}). A gap, never a pass.`,
+      };
+    }
+    tables.push(routes);
+  }
+  const [before = [], after = []] = tables;
+  const diff = diffContract(before, after, declared);
+  const metrics = { routesAdded: diff.added.length, routesRemoved: diff.removed.length };
+  if (diff.undeclared.length > 0) {
+    return {
+      status: "fail",
+      coverage: "checked_supported",
+      summary: `Undeclared contract changes: ${diff.undeclared.join(", ").slice(0, 300)}`,
+      metrics,
+    };
+  }
+  return {
+    status: "pass",
+    coverage: "checked_supported",
+    summary:
+      diff.added.length + diff.removed.length === 0
+        ? `Route table unchanged (${after.length} routes).`
+        : `${diff.added.length} added, ${diff.removed.length} removed; all declared.`,
+    metrics,
+  };
+}
+
 export function procedureGap(check: VerificationCheck): CheckOutcome {
   return {
     status: "skipped",

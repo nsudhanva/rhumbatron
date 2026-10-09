@@ -101,8 +101,8 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
       kind: "contract",
       reason: `Risk tier ${riskTier} requires contract Evidence for declared API and data changes.`,
       procedure:
-        "Compare the composed route table and stored data shapes with the declared " +
-        "expectedContractChanges and expectedDataChanges; any undeclared change fails.",
+        "Diff the composed API route table against the base (bun run contract) and match each " +
+        "added or removed route to the declared expectedContractChanges; any undeclared change fails.",
       timeoutMs: 120_000,
       required: true,
       expected: {

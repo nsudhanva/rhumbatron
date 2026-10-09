@@ -7,6 +7,7 @@ import {
   gateRequiredChecks,
 } from "@rhumbatron/evidence";
 import {
+  ChangeSetIntent,
   type EvidenceRecord,
   RiskTier,
   type VerificationCheck,
@@ -16,6 +17,7 @@ import {
   type ChangeSetRow,
   type CheckOutcome,
   classifyCheck,
+  classifyContract,
   DEFAULT_POLICY,
   isAllowedCheckCommand,
   orderChangeSets,
@@ -32,6 +34,7 @@ import {
   removeCandidateDir,
   reserveSandbox,
   runCandidateCheck,
+  runContractCheck,
   settleSandbox,
 } from "./candidate-sandbox.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
@@ -410,6 +413,11 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         return built;
       });
 
+      // Contract changes the ChangeSets declared; the contract check fails on any other.
+      const declared = loaded.changeSets.flatMap(
+        (c) => ChangeSetIntent.parse(JSON.parse(c.intent_json)).expectedContractChanges,
+      );
+
       // Steps 3-8: one step per check, so each has its own timeout, retry, and Evidence.
       for (const check of plan.checks) {
         const name = `check ${check.checkId}`;
@@ -421,7 +429,10 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
               // Room for a Sandbox restore (clone and install) on top of the check timeout.
               timeout: check.timeoutMs + 6 * 60_000,
             },
-            () => this.runCheck(ctx, candidateId, commit, check),
+            () =>
+              check.kind === "contract"
+                ? this.runContract(ctx, candidateId, { commit, baseCommit }, declared, check)
+                : this.runCheck(ctx, candidateId, commit, check),
           );
           if (at) lastSandboxAt = at;
         } catch (error) {
@@ -488,6 +499,40 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         return candidateFork(candidateId);
       });
     }
+  }
+
+  /** Diffs the route table against the base and records contract Evidence (section 34.1). */
+  private async runContract(
+    ctx: ChangeContext,
+    candidateId: string,
+    commits: { commit: string; baseCommit: string },
+    declared: string[],
+    check: VerificationCheck,
+  ): Promise<number> {
+    const run = await runContractCheck(this.env, {
+      projectId: ctx.projectId,
+      candidateId,
+      ...commits,
+      timeoutMs: check.timeoutMs,
+    });
+    await this.recordEvidence(ctx, candidateId, {
+      checkId: check.checkId,
+      kind: check.kind,
+      outcome: classifyContract(run.base, run.candidate, declared),
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+      output: [
+        `$ CONTRACT_ROOT=<base ${commits.baseCommit.slice(0, 12)}> bun run contract`,
+        run.base.output,
+        `$ bun run contract`,
+        run.candidate.output,
+        `declared: ${JSON.stringify(declared)}`,
+      ].join("\n"),
+      sourceRefs: [`artifacts://${candidateFork(candidateId)}@${commits.commit}`],
+      exitCode: run.candidate.exitCode,
+      command: "bun run contract",
+    });
+    return Date.now();
   }
 
   /** Runs one check and records its Evidence. Returns the Sandbox activity time, if any. */

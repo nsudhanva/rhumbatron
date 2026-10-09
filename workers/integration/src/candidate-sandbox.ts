@@ -309,6 +309,48 @@ export async function runCandidateCheck(
   return { ...run, startedAt, completedAt: new Date().toISOString() };
 }
 
+/**
+ * Prints the route table of the composed commit and of its base (section 34.1 contract check).
+ * The base is a detached worktree beside the checkout, read with the checkout's dependencies, so
+ * one install serves both. The worktree is removed afterwards.
+ */
+export async function runContractCheck(
+  env: CandidateEnv,
+  input: {
+    projectId: string;
+    candidateId: string;
+    commit: string;
+    baseCommit: string;
+    timeoutMs: number;
+  },
+): Promise<{ candidate: CheckRun; base: CheckRun; startedAt: string; completedAt: string }> {
+  if (!SHA.test(input.baseCommit)) throw new Error("invalid base commit");
+  const sandbox = sandboxFor(env, input.projectId);
+  const dir = await ensureCheckout(env, sandbox, input);
+  const base = `${dir}-base`;
+  const startedAt = new Date().toISOString();
+  try {
+    await must(sandbox, `rm -rf ${base} && git worktree prune`, dir);
+    await must(sandbox, `git worktree add -f --detach ${base} ${input.baseCommit}`, dir);
+    await must(sandbox, `ln -sfn ${dir}/node_modules ${base}/node_modules`, dir);
+    const candidate = await exec(sandbox, "bun run contract", {
+      cwd: dir,
+      timeoutMs: input.timeoutMs,
+    });
+    const baseRun = await exec(sandbox, "bun run contract", {
+      cwd: dir,
+      timeoutMs: input.timeoutMs,
+      env: { CONTRACT_ROOT: base },
+    });
+    return { candidate, base: baseRun, startedAt, completedAt: new Date().toISOString() };
+  } finally {
+    await exec(sandbox, `git worktree remove --force ${base}; rm -rf ${base}`, {
+      cwd: dir,
+      timeoutMs: GIT_TIMEOUT_MS,
+    });
+  }
+}
+
 /** Removes the Candidate directory. The fork keeps the composed source (cleanup: HOM-195). */
 export async function removeCandidateDir(
   env: CandidateEnv,

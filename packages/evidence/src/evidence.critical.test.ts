@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parseBenchOutput } from "./bench.ts";
 import { canAffectCandidate, type EvidenceSnapshot, validateCitations } from "./citations.ts";
 import { type ComposableChangeSet, checkCompatibility } from "./compatibility.ts";
+import { diffContract, parseRouteTable } from "./contract.ts";
 import { gateRequiredChecks } from "./gate.ts";
 import { buildVerificationPlan } from "./plan.ts";
 
@@ -302,5 +303,38 @@ describe("parseBenchOutput", () => {
     for (const out of ["", "error: crash", '{"p95Ms": "fast"}', '{"p95Ms": -1}', "{oops"]) {
       expect(parseBenchOutput(out)).toBeNull();
     }
+  });
+});
+
+describe("diffContract", () => {
+  const base = ["GET /api/cart", "POST /api/cart/items"];
+
+  it("passes an unchanged route table", () => {
+    expect(diffContract(base, [...base].reverse(), [])).toEqual({
+      added: [],
+      removed: [],
+      undeclared: [],
+    });
+  });
+
+  it("fails an added route that no ChangeSet declared", () => {
+    const diff = diffContract(base, [...base, "POST /api/wishlists"], []);
+    expect(diff.added).toEqual(["POST /api/wishlists"]);
+    expect(diff.undeclared).toEqual(["POST /api/wishlists"]);
+  });
+
+  it("accepts declared changes and still fails an undeclared removal", () => {
+    const diff = diffContract(
+      base,
+      ["GET /api/cart", "POST /api/wishlists/:id/items"],
+      ["POST /v1/wishlists/{wishlistId}/items - add a product"],
+    );
+    expect(diff.added).toEqual(["POST /api/wishlists/:id/items"]);
+    expect(diff.undeclared).toEqual(["POST /api/cart/items"]);
+  });
+
+  it("reads the last route table line and rejects missing output", () => {
+    expect(parseRouteTable('$ bun run contract\n{"routes":["GET /a"]}')).toEqual(["GET /a"]);
+    expect(parseRouteTable("error: Script not found")).toBeNull();
   });
 });
