@@ -240,10 +240,11 @@ module "web_worker" {
     { type = "service", name = "API", service = module.api_worker.name, environment = "production" },
   ]
 
-  custom_domains = local.attach_apex ? [{
-    hostname = local.hostnames.web
-    zone_id  = module.dns.zone_id
-  }] : []
+  # The apex serves the app; www redirects to it in the Worker (apps/web/src/server.ts).
+  custom_domains = local.attach_apex ? [
+    { hostname = local.hostnames.web, zone_id = module.dns.zone_id },
+    { hostname = "www.${local.hostnames.web}", zone_id = module.dns.zone_id },
+  ] : []
 }
 
 # K2 event streams (AGENTS.md section 19). Provider 5.27 has no K2 resource, so a temporary
