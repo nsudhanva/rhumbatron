@@ -43,7 +43,7 @@ async function reserveSeconds(db: D1Database, seconds: number): Promise<boolean>
 }
 
 async function settleSeconds(db: D1Database, seconds: number) {
-  if (seconds <= 0) return;
+  if (seconds === 0) return;
   await db
     .prepare(
       "UPDATE usage_counters SET count = count + ? WHERE day = ? AND counter = 'sandbox-seconds'",
@@ -119,26 +119,33 @@ export async function openWorkspace(
     using existing = await env.ARTIFACTS.get(fork);
     remote = (await existing.info()).remote;
   }
-  using repo = await env.ARTIFACTS.get(fork);
-  const token = await repo.createToken("write", 3600);
-  const secret = token.plaintext.split("?expires=")[0] ?? token.plaintext;
-  const sandbox = sandboxFor(env, input.projectId);
-  const auth = { GIT_AUTH: `Authorization: Bearer ${secret}` };
-  await sandbox.exec(`rm -rf ${dir} && mkdir -p ${dir}`);
-  const clone = await run(
-    sandbox,
-    `git -c "http.extraHeader=$GIT_AUTH" clone ${remote} .`,
-    dir,
-    auth,
-  );
-  if (!clone.ok) throw new Error(`clone failed (${clone.exitCode})`);
-  await run(
-    sandbox,
-    "git config user.name Rhumbatron && git config user.email bot@rhumbatron.com",
-    dir,
-  );
-  await run(sandbox, "bun install", dir);
-  await repo.revokeToken(token.id);
+  try {
+    using repo = await env.ARTIFACTS.get(fork);
+    const token = await repo.createToken("write", 3600);
+    const secret = token.plaintext.split("?expires=")[0] ?? token.plaintext;
+    const sandbox = sandboxFor(env, input.projectId);
+    const auth = { GIT_AUTH: `Authorization: Bearer ${secret}` };
+    await sandbox.exec(`rm -rf ${dir} && mkdir -p ${dir}`);
+    const clone = await run(
+      sandbox,
+      `git -c "http.extraHeader=$GIT_AUTH" clone ${remote} .`,
+      dir,
+      auth,
+    );
+    if (!clone.ok) throw new Error(`clone failed (${clone.exitCode})`);
+    await run(
+      sandbox,
+      "git config user.name Rhumbatron && git config user.email bot@rhumbatron.com",
+      dir,
+    );
+    await run(sandbox, "bun install", dir);
+    await repo.revokeToken(token.id);
+  } catch (error) {
+    // A failed open must not leave a fork or a reservation behind (cost report: leftovers).
+    await env.ARTIFACTS.delete(fork).catch(() => false);
+    await settleSeconds(env.DB, -OPEN_RESERVATION_SECONDS);
+    throw error;
+  }
   return {
     projectId: input.projectId,
     runId: input.runId,

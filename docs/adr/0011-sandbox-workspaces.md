@@ -31,15 +31,21 @@ Provider 5.27 has no container application resource.
   is per version (`resources.script_runtime.containers`) and is not inherited (~168204).
   `cloudflare_workers_script` (provider 5.27) has no `containers` attribute; `cloudflare_worker_version`
   has one, but ADR 0005 keeps Durable Object Workers on the script resource.
-- The adapter therefore (1) checks the deployed version; if it lacks the class, it re-uploads the
-  same bundle with the live settings, every binding as `{ type = "inherit" }` (secrets are never
+- The adapter therefore (1) always re-uploads (a pre-upload read of the deployments list can lag
+  and report the previous, attached version) the same bundle with the live settings, every binding as `{ type = "inherit" }` (secrets are never
   read), the `containers` entry, and no migrations; (2) creates or patches the application
-  `rhumbatron-sandbox-<env>` (`basic`, `max_instances = 1`) bound by namespace ID.
+  `rhumbatron-sandbox-<env>` (`basic`, `max_instances = 1`) bound by namespace ID. The API
+  returns sizes, not `instance_type`, so drift is compared by Wrangler's size table; a real change
+  patches and starts a rollout. Wrangler's first deploy does the same (upload, then create, no
+  rollout), and Cloudflare says containers can error for several minutes after it.
 - Drift: Terraform cannot see `containers`, so plans stay clean, but every Terraform upload of the
   agents script drops it. The triggers hash every input that makes Terraform re-upload (bundle
   hash, compatibility, secret, gateway, D1 and R2 bindings), so the adapter re-attaches in the same
   apply. A new agents binding input must be added to that hash, or run
-  `terraform apply -replace=terraform_data.sandbox_container`.
+  `terraform apply -replace=terraform_data.sandbox_container`. Between the Terraform upload and the
+  adapter upload (about 15 s) the class has no container, and provisioning can take minutes after
+  re-attachment. Moving the agents Worker to `cloudflare_worker_version` (`containers` attribute)
+  would remove this window.
 - Workspace: one Sandbox per Project, a directory per Task run. Each run forks the canonical
   Artifacts repo, clones it with a short-lived token passed as an environment variable (never in
   git config), and on `complete_task` commits and pushes to its fork. The result is a ChangeSet
