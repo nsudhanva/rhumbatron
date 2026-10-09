@@ -293,6 +293,15 @@ describe("checkCompatibility", () => {
         cs("b", { contracts: ["POST /api/wishlists - returns 200"] }),
       ]),
     ).toMatchObject({ ok: false, kind: "contract_conflict" });
+    const fullPatch =
+      "PATCH /api/wishlists/:id: update metadata (title, description) or add/remove items (403 for non-owner)";
+    const testPatch = "PATCH /api/wishlists/:id: update metadata (403 for non-owner)";
+    expect(
+      checkCompatibility(1841, [
+        cs("a", { contracts: [fullPatch] }),
+        cs("b", { contracts: [testPatch] }),
+      ]),
+    ).toEqual({ ok: true });
     expect(
       checkCompatibility(1841, [
         cs("a", { contracts: ["DELETE /api/cart/items/:id - remove the route"] }),

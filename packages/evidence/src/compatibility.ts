@@ -100,7 +100,14 @@ export function contractKey(change: string): string {
  */
 function signature(text: string) {
   return {
-    removes: /\b(remove|removes|delete the route|drop|drops|deprecate|deprecates)\b/.test(text),
+    // The declaration removes the contract itself, not something the endpoint does ("remove
+    // product from wishlist", "add/remove items"): the route, endpoint or contract is named.
+    removes:
+      /\b(remove|delete|drop|deprecate)s? (the |this )?(route|endpoint|api|contract)\b/.test(
+        text,
+      ) ||
+      /\b(route|endpoint|contract) (is |gets )?(removed|deleted|deprecated|dropped)\b/.test(text) ||
+      /\bno longer (exposed|available|supported)\b/.test(text),
     statuses: new Set(text.match(/\b[1-5]\d\d\b/g) ?? []),
     model: /append[- ]only|event log|immutable/.test(text)
       ? "append_only"
@@ -146,7 +153,7 @@ function migrationNumbers(cs: ComposableChangeSet): number[] {
  * 2: two declarations of one contract conflict only on removal vs not, disjoint status codes, or
  * append-only vs mutable data model, not on wording.
  */
-export const COMPOSITION_RULES_VERSION = 2;
+export const COMPOSITION_RULES_VERSION = 3;
 
 /**
  * Returns the first incompatibility, checked in this order: base generation, dependencies, protected
