@@ -1,6 +1,7 @@
 import type { ModelTier } from "@rhumbatron/protocol";
 import { z } from "zod";
-import { TIER_MODELS, TIER_REASONING_EFFORT, TIER_VERTEX_MODEL, VERTEX_PRICES } from "./models.ts";
+import { TIER_MODELS, TIER_REASONING_EFFORT, TIER_VERTEX_MODEL } from "./models.ts";
+import { classifyProviderFailure, type ModelProvider, vertexCostUsd } from "./provider.ts";
 
 /**
  * Chat completions through Cloudflare AI Gateway (ADR 0007). Runs in Workers and Bun.
@@ -67,8 +68,6 @@ export type CompletionRequest = {
   models?: readonly string[];
 };
 
-export type ModelProvider = "openrouter" | "google-vertex-ai";
-
 export type CompletionResult = {
   provider: ModelProvider;
   model: string;
@@ -84,8 +83,12 @@ export type CompletionResult = {
   gatewayLogId: string | null;
 };
 
-/** Failure classes for section 42.8: retry `rate_limited` and `transient` once at the same tier. */
+/**
+ * Failure classes for section 42.8: retry `rate_limited` and `transient` once at the same tier.
+ * `spend_limited` is the gateway Vertex spend cap: a budget stop, never retried (ADR 0016).
+ */
 export type ModelErrorKind =
+  | "spend_limited"
   | "rate_limited"
   | "transient"
   | "timeout"
@@ -121,18 +124,6 @@ function classify(status: number, code: number | string | undefined): ModelError
   if (effective === 408) return "timeout";
   if (effective >= 500) return "transient";
   return "invalid_request";
-}
-
-/** Vertex reports no cost. An unpriced model is charged at the highest known rate, never as $0. */
-function vertexCost(model: unknown, input: number, output: number): number {
-  const id = String(model).replace(/^google-vertex-ai\//, "");
-  const fallback = { input: 0, output: 0 };
-  for (const p of Object.values(VERTEX_PRICES)) {
-    fallback.input = Math.max(fallback.input, p.input);
-    fallback.output = Math.max(fallback.output, p.output);
-  }
-  const price = VERTEX_PRICES[id] ?? fallback;
-  return (input * price.input + output * price.output) / 1_000_000;
 }
 
 /** Failures that a different provider can avoid. */
@@ -233,8 +224,13 @@ async function call(
   const failure = ErrorSchema.safeParse(json);
   if (!response.ok || failure.success) {
     const err = failure.success ? failure.data.error : {};
+    // The gateway's Vertex spend cap answers 429 too; it must stop, not fall back or retry.
+    const spend =
+      provider === "google-vertex-ai" &&
+      classifyProviderFailure(provider, response.status, JSON.stringify(json)).kind ===
+        "spend_limited";
     throw new ModelCallError(
-      classify(response.status, err.code),
+      spend ? "spend_limited" : classify(response.status, err.code),
       err.message ?? `HTTP ${response.status}`,
       response.status,
     );
@@ -264,7 +260,7 @@ async function call(
     costUsd:
       provider === "openrouter"
         ? (usage?.cost ?? 0)
-        : vertexCost(providerFields.model, inputTokens, outputTokens + reasoningTokens),
+        : vertexCostUsd(String(providerFields.model), inputTokens, outputTokens + reasoningTokens),
     latencyMs,
     gatewayLogId: response.headers.get("cf-aig-log-id"),
   };

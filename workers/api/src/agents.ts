@@ -22,7 +22,7 @@ type AppEnv = { Bindings: Env; Variables: AuthVariables };
 const ProjectIdParam = z.object({ projectId: z.string().regex(/^proj_[a-z0-9-]+$/) });
 
 /** Mirrors AGENT_DAILY_CALL_CAP in packages/model-router budget.ts (account-wide, per UTC day). */
-const AGENT_DAILY_CALL_CAP = 40;
+const AGENT_DAILY_CALL_CAP = 400;
 /** Newest Tasks with an agent read per request. */
 const TASK_LIMIT = 200;
 /** Active agents listed one by one. */
@@ -62,6 +62,8 @@ const RunView = z.object({
   failureReason: z.string().nullable(),
   /** Decision Receipt: who routed this attempt and why (section 23.5). */
   decidedBy: z.string().nullable(),
+  /** Model provider of the attempt from its Decision Receipt; null on receipts before ADR 0016. */
+  provider: z.enum(["openrouter", "google-vertex-ai"]).nullable(),
   reasons: z.array(z.string()),
   /** The previous attempt's tier when this attempt moved up a tier. */
   escalatedFrom: ModelTier.nullable(),
@@ -221,7 +223,7 @@ function toRuns(rows: RunRow[]): z.infer<typeof RunView>[] {
         ? ModelTier.parse(previous.tier)
         : null;
     const outcome = parseJson<{ reason?: unknown }>(r.outcome_json);
-    const receipt = parseJson<{ reasons?: unknown }>(r.receipt_json);
+    const receipt = parseJson<{ reasons?: unknown; provider?: unknown }>(r.receipt_json);
     return {
       attempt: r.attempt,
       tier,
@@ -230,6 +232,10 @@ function toRuns(rows: RunRow[]): z.infer<typeof RunView>[] {
       failureReason:
         r.status === "failed" && typeof outcome?.reason === "string" ? outcome.reason : null,
       decidedBy: r.decided_by,
+      provider:
+        receipt?.provider === "openrouter" || receipt?.provider === "google-vertex-ai"
+          ? receipt.provider
+          : null,
       reasons: Array.isArray(receipt?.reasons)
         ? receipt.reasons.filter((x): x is string => typeof x === "string")
         : [],

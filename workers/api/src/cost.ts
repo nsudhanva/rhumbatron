@@ -14,8 +14,12 @@ import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
-/** Mirrors packages/model-router/src/budget.ts (AGENT_DAILY_CALL_CAP, MAX_CALLS_PER_RUN). */
-const AGENT_DAILY_CALL_CAP = 40;
+/**
+ * Mirrors packages/model-router/src/budget.ts (AGENT_DAILY_CALL_CAP, OPENROUTER_DAILY_CALL_CAP,
+ * MAX_CALLS_PER_RUN) and the `usage_counters` keys in provider.ts (ADR 0016).
+ */
+const AGENT_DAILY_CALL_CAP = 400;
+const OPENROUTER_DAILY_CALL_CAP = 45;
 const MAX_CALLS_PER_RUN = { haiku: 8, sonnet: 16, opus: 16 } as const;
 /** Mirrors CLEF_DAILY_CAP in workers/event-router/src/causal.ts. */
 const CLEF_DAILY_CAP = 200;
@@ -101,6 +105,12 @@ const CostView = z.object({
     month: z.string(),
     agentModelCallsToday: z.number().int(),
     agentDailyCallCap: z.number().int(),
+    /** Agent calls sent to OpenRouter today; past the cap (or a 429) runs use Gemini (ADR 0016). */
+    openrouterCallsToday: z.number().int(),
+    openrouterDailyCallCap: z.number().int(),
+    openrouterUsedUpToday: z.boolean(),
+    /** The gateway refused Gemini for its $9 per 30 days spend cap today. */
+    vertexSpendLimitedToday: z.boolean(),
     clefFlashCallsToday: z.number().int(),
     clefDailyCap: z.number().int(),
     sandboxSecondsMonth: z.number().int(),
@@ -186,7 +196,8 @@ export const cost = new Hono<AppEnv>().get(
       db
         .prepare(
           `SELECT day, counter, count FROM usage_counters
-           WHERE (day >= ? AND day <= ? AND counter IN ('agent-model-calls', 'clef-flash'))
+           WHERE (day >= ? AND day <= ? AND counter IN ('agent-model-calls', 'clef-flash',
+                    'openrouter-calls', 'openrouter-exhausted', 'vertex-spend-limited'))
               OR (day = ? AND counter = 'sandbox-seconds')`,
         )
         .bind(days[0], day, month),
@@ -347,6 +358,12 @@ export const cost = new Hono<AppEnv>().get(
           month,
           agentModelCallsToday: meter(day, "agent-model-calls"),
           agentDailyCallCap: AGENT_DAILY_CALL_CAP,
+          openrouterCallsToday: meter(day, "openrouter-calls"),
+          openrouterDailyCallCap: OPENROUTER_DAILY_CALL_CAP,
+          openrouterUsedUpToday:
+            meter(day, "openrouter-exhausted") > 0 ||
+            meter(day, "openrouter-calls") >= OPENROUTER_DAILY_CALL_CAP,
+          vertexSpendLimitedToday: meter(day, "vertex-spend-limited") > 0,
           clefFlashCallsToday: meter(day, "clef-flash"),
           clefDailyCap: CLEF_DAILY_CAP,
           sandboxSecondsMonth: meter(month, "sandbox-seconds"),

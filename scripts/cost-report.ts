@@ -5,6 +5,13 @@
  * Exit code 1 when any line is ALERT, so a loop can watch it.
  */
 
+import {
+  AGENT_DAILY_CALL_CAP,
+  OPENROUTER_DAILY_CALL_CAP,
+  USAGE_COUNTER,
+  VERTEX_SPEND_LIMIT,
+} from "@rhumbatron/model-router";
+
 const token = process.env.CLOUDFLARE_MONITOR_TOKEN;
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
 const d1Token = process.env.CLOUDFLARE_D1_TOKEN;
@@ -276,7 +283,25 @@ await section("rhumbatron meters", async () => {
     [today, today.slice(0, 7)],
   );
   const value = (counter: string) => rows.find((r) => r.counter === counter)?.count ?? 0;
-  usage("agent model calls today", value("agent-model-calls"), 40, "calls (daily cap)");
+  usage(
+    "agent model calls today",
+    value(USAGE_COUNTER.agentCalls),
+    AGENT_DAILY_CALL_CAP,
+    "calls, all providers (daily cap)",
+  );
+  // Reaching the OpenRouter cap is expected: runs overflow to Gemini, capped by the gateway (ADR 0016).
+  const openrouterUsedUp =
+    value(USAGE_COUNTER.openrouterExhausted) > 0 ||
+    value(USAGE_COUNTER.openrouterCalls) >= OPENROUTER_DAILY_CALL_CAP;
+  report(
+    openrouterUsedUp ? "WARN" : "OK",
+    "openrouter today",
+    `${value(USAGE_COUNTER.openrouterCalls)} / ${OPENROUTER_DAILY_CALL_CAP} calls${
+      openrouterUsedUp
+        ? `; used up, new runs use Gemini (Vertex, $${VERTEX_SPEND_LIMIT.usd} per ${VERTEX_SPEND_LIMIT.days} days cap)`
+        : ""
+    }${value(USAGE_COUNTER.vertexSpendLimited) > 0 ? "; Vertex spend cap reached today" : ""}`,
+  );
   usage("clef-flash calls today", value("clef-flash"), 200, "calls (daily cap)");
   usage("sandbox this month", value("sandbox-seconds") / 3600, 10, "hours (HOM-192 cap)");
 });

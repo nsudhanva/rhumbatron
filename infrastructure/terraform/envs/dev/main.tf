@@ -357,6 +357,8 @@ module "agents_worker" {
     { type = "plain_text", name = "AI_ACCOUNT_ID", text = var.account_id },
     { type = "plain_text", name = "AI_GATEWAY_ID", text = module.ai.gateway_id },
     { type = "secret_text", name = "OPENROUTER_API_KEY", text = var.openrouter_api_key },
+    # Gemini overflow when OpenRouter is used up for the day; spend capped by the gateway (ADR 0016).
+    { type = "secret_text", name = "VERTEX_SERVICE_ACCOUNT", text = var.vertex_service_account },
     { type = "ai", name = "AI" },
   ]
 

@@ -1,4 +1,12 @@
-import { AGENT_DAILY_CALL_CAP, type FailureKind, type NextStep } from "@rhumbatron/model-router";
+import {
+  AGENT_DAILY_CALL_CAP,
+  type FailureKind,
+  type NextStep,
+  type ProviderChoice,
+  selectProvider,
+  USAGE_COUNTER,
+  VERTEX_SPEND_LIMIT,
+} from "@rhumbatron/model-router";
 import type { ModelTier } from "@rhumbatron/protocol";
 
 /**
@@ -26,7 +34,9 @@ export type LimitKey =
   | "max_active_agents_per_change"
   | "max_active_sandboxes_per_change"
   | "max_attempts_per_tier"
-  | "daily_model_calls";
+  | "daily_model_calls"
+  | "vertex_spend_limit"
+  | "max_cost_usd_per_change";
 
 /** The minimum of D1 this module uses; D1Database satisfies it. */
 type Db = Pick<D1Database, "prepare">;
@@ -174,6 +184,18 @@ export function limitStop(reason: string): { limit: LimitKey; text: string } | n
       text: `Budget stop: the daily agent model call cap (${AGENT_DAILY_CALL_CAP} calls per UTC day) was reached, or the run was cancelled. No new model work starts until a person raises the budget or the day rolls over.`,
     };
   }
+  if (reason === "vertex_spend_limit") {
+    return {
+      limit: "vertex_spend_limit",
+      text: `Budget stop: the Gemini (Vertex AI) spend cap of $${VERTEX_SPEND_LIMIT.usd} per ${VERTEX_SPEND_LIMIT.days} days was reached at the AI Gateway, and today's OpenRouter free calls are used up. No new model work starts until the ${VERTEX_SPEND_LIMIT.days}-day window frees budget, the UTC day rolls over, or a person raises the cap in Terraform (modules/ai).`,
+    };
+  }
+  if (reason === "change_budget_exhausted") {
+    return {
+      limit: "max_cost_usd_per_change",
+      text: "Budget stop: this Change's recorded model spend reached its budget (max_cost_usd_per_change, AGENTS.md section 44). No new model work starts until a person raises the Change budget.",
+    };
+  }
   if (reason === "max_attempts_per_tier" || reason === "two_failures_at_opus") {
     return {
       limit: "max_attempts_per_tier",
@@ -181,4 +203,46 @@ export function limitStop(reason: string): { limit: LimitKey; text: string } | n
     };
   }
   return null;
+}
+
+/**
+ * Provider for a new run (ADR 0016): OpenRouter until today's OpenRouter is used up, then Gemini on
+ * Vertex. One read of today's `usage_counters` rows; the AI Gateway spend cap is the money ceiling.
+ */
+export async function chooseProvider(
+  db: Db,
+  input: { day: string; vertexConfigured: boolean },
+): Promise<ProviderChoice> {
+  const rows = await db
+    .prepare("SELECT counter, count FROM usage_counters WHERE day = ? AND counter IN (?, ?, ?)")
+    .bind(
+      input.day,
+      USAGE_COUNTER.openrouterCalls,
+      USAGE_COUNTER.openrouterExhausted,
+      USAGE_COUNTER.vertexSpendLimited,
+    )
+    .all<{ counter: string; count: number }>();
+  const count = (counter: string) =>
+    (rows.results ?? []).find((r) => r.counter === counter)?.count ?? 0;
+  return selectProvider({
+    openrouterCallsToday: count(USAGE_COUNTER.openrouterCalls),
+    openrouterExhaustedToday: count(USAGE_COUNTER.openrouterExhausted) > 0,
+    vertexSpendLimitedToday: count(USAGE_COUNTER.vertexSpendLimited) > 0,
+    vertexConfigured: input.vertexConfigured,
+  });
+}
+
+/** Marks a provider flag (`openrouter-exhausted`, `vertex-spend-limited`) for the day. Idempotent. */
+export async function markProviderFlag(
+  db: Db,
+  day: string,
+  counter: typeof USAGE_COUNTER.openrouterExhausted | typeof USAGE_COUNTER.vertexSpendLimited,
+) {
+  await db
+    .prepare(
+      `INSERT INTO usage_counters (day, counter, count) VALUES (?, ?, 1)
+       ON CONFLICT (day, counter) DO NOTHING`,
+    )
+    .bind(day, counter)
+    .run();
 }

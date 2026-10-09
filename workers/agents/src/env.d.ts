@@ -3,4 +3,6 @@
 interface Env {
   /** OpenRouter key for free models through the AI Gateway (ADR 0007). */
   OPENROUTER_API_KEY: string;
+  /** Base64 Vertex AI service account JSON: Gemini overflow through the gateway (ADR 0016). */
+  VERTEX_SERVICE_ACCOUNT?: string;
 }

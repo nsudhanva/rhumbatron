@@ -19,8 +19,16 @@ vi.mock("@rhumbatron/integration/events", () => ({
 }));
 vi.mock("@cloudflare/sandbox", () => ({ getSandbox: spies.getSandbox }));
 
-const { admitAgent, admitSandbox, CHANGE_LIMITS, limitAttempts, limitStop, releaseSandbox } =
-  await import("./limits.ts");
+const {
+  admitAgent,
+  admitSandbox,
+  CHANGE_LIMITS,
+  chooseProvider,
+  limitAttempts,
+  limitStop,
+  markProviderFlag,
+  releaseSandbox,
+} = await import("./limits.ts");
 const { handleWake } = await import("./wake-consumer.ts");
 const { openWorkspace } = await import("./workspace.ts");
 
@@ -250,7 +258,61 @@ describe("max model attempts per Task at one tier", () => {
   it("names the exact limit for a budget stop, and none for an ordinary failure", () => {
     expect(limitStop("max_attempts_per_tier")).toMatchObject({ limit: "max_attempts_per_tier" });
     expect(limitStop("two_failures_at_opus")?.text).toContain("2 attempts per Task per tier");
-    expect(limitStop("budget_exhausted")?.text).toContain("40 calls per UTC day");
+    expect(limitStop("budget_exhausted")?.text).toContain("400 calls per UTC day");
     expect(limitStop("repeated_transport_failure")).toBeNull();
+  });
+});
+
+// Gemini overflow (ADR 0016): the provider of a new run comes from today's D1 counters.
+describe("chooseProvider", () => {
+  const DAY = "2026-10-09";
+  const count = (db: DatabaseSync, counter: string, n: number, day = DAY) =>
+    db
+      .prepare("INSERT INTO usage_counters (day, counter, count) VALUES (?, ?, ?)")
+      .run(day, counter, n);
+
+  it("uses OpenRouter until it is used up today, then Vertex", async () => {
+    const { db, d1 } = fakeD1();
+    const choose = () => chooseProvider(d1, { day: DAY, vertexConfigured: true });
+    expect((await choose()).provider).toBe("openrouter");
+    count(db, "openrouter-calls", 44);
+    expect((await choose()).provider).toBe("openrouter");
+    db.prepare("UPDATE usage_counters SET count = 45 WHERE counter = 'openrouter-calls'").run();
+    expect(await choose()).toEqual({
+      provider: "google-vertex-ai",
+      reason: "openrouter_daily_cap",
+    });
+  });
+
+  it("moves to Vertex after a rate limit today, and back to OpenRouter the next day", async () => {
+    const { d1 } = fakeD1();
+    await markProviderFlag(d1, DAY, "openrouter-exhausted");
+    await markProviderFlag(d1, DAY, "openrouter-exhausted");
+    expect((await chooseProvider(d1, { day: DAY, vertexConfigured: true })).provider).toBe(
+      "google-vertex-ai",
+    );
+    expect((await chooseProvider(d1, { day: "2026-10-10", vertexConfigured: true })).provider).toBe(
+      "openrouter",
+    );
+  });
+
+  it("starts nothing once the Vertex spend cap was hit today, and names the $9 per 30 days cap", async () => {
+    const { d1 } = fakeD1();
+    await markProviderFlag(d1, DAY, "openrouter-exhausted");
+    await markProviderFlag(d1, DAY, "vertex-spend-limited");
+    const choice = await chooseProvider(d1, { day: DAY, vertexConfigured: true });
+    expect(choice).toEqual({ provider: null, reason: "vertex_spend_limit" });
+    const stop = limitStop(choice.reason);
+    expect(stop?.limit).toBe("vertex_spend_limit");
+    expect(stop?.text).toContain("$9 per 30 days");
+    // The spend-limit failure stops the Task; it never schedules a retry.
+    expect(nextStep("haiku", [{ tier: "haiku", kind: "spend_limited" }])).toEqual({
+      action: "stop",
+      reason: "vertex_spend_limit",
+    });
+    expect(limitAttempts({ action: "stop", reason: "vertex_spend_limit" }, [])).toEqual({
+      action: "stop",
+      reason: "vertex_spend_limit",
+    });
   });
 });

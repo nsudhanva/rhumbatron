@@ -16,11 +16,17 @@ import {
   AGENT_DAILY_CALL_CAP,
   CLEF_ROUTE_ABSTAIN_BELOW,
   checkRunBudget,
+  classifyProviderFailure,
   type Failure,
   type FailureKind,
   MAX_CALLS_PER_RUN,
+  type ModelProvider,
   nextStep,
+  OPENROUTER_DAILY_CALL_CAP,
   routeStep,
+  TIER_VERTEX_MODEL,
+  taskBudgetUsd,
+  USAGE_COUNTER,
   WorkersAiDecisionModel,
 } from "@rhumbatron/model-router";
 import type { ModelTier, RouteRequest, TaskStatus } from "@rhumbatron/protocol";
@@ -39,7 +45,7 @@ import {
   sqlRunClaimStore,
 } from "./claims-client.ts";
 import { declareIntentAndDetect } from "./conflicts.ts";
-import { limitAttempts, limitStop } from "./limits.ts";
+import { chooseProvider, limitAttempts, limitStop, markProviderFlag } from "./limits.ts";
 import { createTierModels, modelIdFor, PROVIDER_ID } from "./models.ts";
 import type {
   AgentResumeEvent,
@@ -109,6 +115,11 @@ const MAX_FILE_CHARS = 24_000;
 /** Run checks happen once a minute; after this many the run is treated as stuck. */
 const MAX_RUN_CHECKS = 15;
 
+/** Recorded run outcomes that end the run as that failure kind. */
+const STOP_OUTCOMES = new Set<string>(["budget_exhausted", "run_call_cap", "spend_limited"]);
+/** Provider failures seen during the run; the next model call clears them (Pi retried). */
+const TRANSPORT_OUTCOMES = new Set<string>(["rate_limited", "transient", "timeout"]);
+
 const log = (line: Record<string, unknown>) => console.warn(JSON.stringify(line));
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -130,6 +141,12 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   private prompt = "";
   /** The last tool step of the active run, for live progress. In memory: losing it is harmless. */
   private lastStep: string | null = null;
+  /**
+   * Recorded spend of each run as of its last progress write (one model call behind). In memory:
+   * reading Pi's transcript inside the request gate could wait on the turn itself. Losing it on
+   * eviction only loosens the per-run cap; the gateway spend cap stays the hard ceiling.
+   */
+  private readonly runSpendUsd = new Map<string, number>();
   /** Advisory Claims of the active run (ADR 0015). */
   private readonly runClaims: RunClaimStore;
 
@@ -142,7 +159,11 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
             accountId: this.env.AI_ACCOUNT_ID,
             gatewayId: this.env.AI_GATEWAY_ID,
             apiKey: this.env.OPENROUTER_API_KEY,
-            beforeCall: (tier) => this.beforeModelCall(tier),
+            ...(this.env.VERTEX_SERVICE_ACCOUNT
+              ? { vertexServiceAccount: this.env.VERTEX_SERVICE_ACCOUNT }
+              : {}),
+            beforeCall: (tier, provider) => this.beforeModelCall(tier, provider),
+            onFailure: (provider, status, body) => this.onModelFailure(provider, status, body),
           }),
           registry: this.registry,
           // One retry for transient errors; escalation is ours, not Pi's (section 23.3).
@@ -221,19 +242,42 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   }
 
   /** Budget gate before every model request (P6-09). Throwing fails the request, then the run. */
-  private async beforeModelCall(tier: ModelTier) {
+  private async beforeModelCall(tier: ModelTier, provider: ModelProvider) {
     const run = this.activeRun();
     if (!run) throw new Error("no active run");
+    // The gateway refused Vertex for its spend cap: never send another request in this run.
+    if (run.outcome === "spend_limited") throw new Error("Vertex spend cap reached");
+    // A new call after a provider failure means Pi retried; the failure no longer ends the run.
+    if (run.outcome && TRANSPORT_OUTCOMES.has(run.outcome)) {
+      this.ctx.storage.sql.exec(
+        "UPDATE agent_runs SET outcome = NULL WHERE run_id = ?",
+        run.run_id,
+      );
+    }
     const input = JSON.parse(run.input_json) as AgentRunInput & { budgetUsd: number };
     const budget = checkRunBudget({
       tier,
       callsSoFar: run.calls,
-      spentUsd: 0,
+      spentUsd: this.runSpendUsd.get(run.run_id) ?? 0,
       budgetUsd: input.budgetUsd,
     });
+    // Our OpenRouter ceiling (ADR 0016): at 45 calls today OpenRouter counts as used up, this run
+    // fails as rate_limited, and its same-tier retry (section 42.8) starts on Vertex.
+    if (
+      budget.ok &&
+      provider === "openrouter" &&
+      !(await takeQuota(this.env.DB, USAGE_COUNTER.openrouterCalls, OPENROUTER_DAILY_CALL_CAP))
+    ) {
+      await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.openrouterExhausted);
+      this.ctx.storage.sql.exec(
+        "UPDATE agent_runs SET outcome = 'rate_limited' WHERE run_id = ?",
+        run.run_id,
+      );
+      throw new Error(`OpenRouter daily cap reached (${OPENROUTER_DAILY_CALL_CAP} calls)`);
+    }
     // The run's own cap is a Task failure (retry or escalate); the daily cap stops the Change.
     const daily =
-      budget.ok && (await takeQuota(this.env.DB, "agent-model-calls", AGENT_DAILY_CALL_CAP));
+      budget.ok && (await takeQuota(this.env.DB, USAGE_COUNTER.agentCalls, AGENT_DAILY_CALL_CAP));
     if (!budget.ok || !daily) {
       this.ctx.storage.sql.exec(
         "UPDATE agent_runs SET outcome = ? WHERE run_id = ?",
@@ -247,7 +291,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       run.run_id,
     );
     this.env.METRICS.writeDataPoint({
-      blobs: ["model_call", tier, input.taskId],
+      blobs: ["model_call", tier, input.taskId, provider],
       doubles: [1],
       indexes: [input.projectId],
     });
@@ -255,6 +299,44 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     this.ctx.waitUntil(this.writeProgress(run.run_id, run.calls + 1));
     // Claim renewal rides on model calls too; it makes a request only at lease half-life.
     this.ctx.waitUntil(this.renewClaims(run.run_id, input));
+  }
+
+  /**
+   * A failed provider response (models.ts). Records the failure kind on the run so the run check
+   * ends it as that kind, and marks OpenRouter used up or the Vertex spend cap reached for the day
+   * so the next run picks its provider from that (ADR 0016). Never throws.
+   */
+  private async onModelFailure(provider: ModelProvider, status: number | null, body: string) {
+    try {
+      const run = this.activeRun();
+      const failure = classifyProviderFailure(provider, status, body);
+      if (failure.openrouterExhausted)
+        await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.openrouterExhausted);
+      if (failure.kind === "spend_limited")
+        await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.vertexSpendLimited);
+      const kind: FailureKind | null =
+        failure.kind === "spend_limited" || TRANSPORT_OUTCOMES.has(failure.kind)
+          ? (failure.kind as FailureKind)
+          : null;
+      if (run && kind) {
+        // A recorded stop outcome wins; the spend cap overrides a transport failure.
+        this.ctx.storage.sql.exec(
+          `UPDATE agent_runs SET outcome = ? WHERE run_id = ?
+             AND (outcome IS NULL OR outcome IN ('rate_limited', 'transient', 'timeout'))`,
+          kind,
+          run.run_id,
+        );
+      }
+      log({
+        event: "agent.model_failed",
+        runId: run?.run_id,
+        provider,
+        status,
+        kind: failure.kind,
+      });
+    } catch (error) {
+      log({ event: "agent.model_failure_record_failed", message: String(error).slice(0, 200) });
+    }
   }
 
   /** Records the tool step the agent is taking, then returns its result unchanged. */
@@ -272,6 +354,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   private async writeProgress(runId: string, calls: number) {
     try {
       const usage = await this.usage();
+      this.runSpendUsd.set(runId, usage.cost);
       await this.env.DB.prepare(
         `UPDATE task_runs SET model_calls = ?, input_tokens = ?, output_tokens = ?, cost_usd = ?,
            last_step = ?, progress_at = ?
@@ -331,12 +414,25 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       .map((r) => ({ tier: r.tier, kind: r.failure_kind as FailureKind }));
     const attempt = (previous.results?.length ?? 0) + 1;
     const flags = JSON.parse(task.route_json ?? "{}") as Record<string, boolean>;
-    const openTasks = await this.env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM tasks WHERE change_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')",
-    )
-      .bind(input.changeId)
-      .first<{ n: number }>();
-    const budgetUsd = task.budget_usd / Math.max(1, openTasks?.n ?? 1);
+    const [openTasks, spent] = await this.env.DB.batch<{ n: number }>([
+      this.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM tasks WHERE change_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')",
+      ).bind(input.changeId),
+      this.env.DB.prepare(
+        "SELECT COALESCE(SUM(r.cost_usd), 0) AS n FROM task_runs r JOIN tasks t ON t.id = r.task_id WHERE t.change_id = ?",
+      ).bind(input.changeId),
+    ]);
+    // Recorded spend (Gemini overflow is paid, ADR 0016) comes off the Change budget first.
+    const changeSpentUsd = spent?.results?.[0]?.n ?? 0;
+    const budgetUsd = taskBudgetUsd(
+      task.budget_usd,
+      changeSpentUsd,
+      Math.max(1, openTasks?.results?.[0]?.n ?? 1),
+    );
+    if (changeSpentUsd > 0 && budgetUsd <= 0) {
+      await this.failTask(input, task, "change_budget_exhausted");
+      return { runId: "", accepted: false, state: { status: "idle" } };
+    }
 
     // Route (P6-07): rules, then Clef-flash for the generic case; escalation decides retries (P6-10).
     let tier: ModelTier;
@@ -384,6 +480,27 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       tier = routed.decision.selectedTier;
       receipt = routed.receipt;
     }
+
+    // Provider per run (ADR 0016): OpenRouter until it is used up today, then Gemini on Vertex.
+    const choice = await chooseProvider(this.env.DB, {
+      day: today(),
+      vertexConfigured: Boolean(this.env.VERTEX_SERVICE_ACCOUNT),
+    });
+    if (choice.provider === null) {
+      await this.failTask(input, task, choice.reason);
+      return { runId: "", accepted: false, state: { status: "idle" } };
+    }
+    const provider = choice.provider;
+    receipt = {
+      ...receipt,
+      provider,
+      providerReason: choice.reason,
+      ...(provider === "google-vertex-ai" ? { model: TIER_VERTEX_MODEL[tier] } : {}),
+      reasons: [
+        ...((receipt.reasons as string[] | undefined) ?? []),
+        `provider:${provider}:${choice.reason}`,
+      ],
+    };
 
     const runId = `run_${input.taskId.slice(4)}_${attempt}`;
     const ctx = this.changeContext(input);
@@ -449,6 +566,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         ...input,
         taskKind: task.kind,
         budgetUsd,
+        provider,
         source: source ? { commit: source.commit, files: source.files } : null,
       }),
       this.prompt,
@@ -525,7 +643,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     this.lastStep = null;
     const session = this.harness.session();
     await session.reset();
-    await session.setModel({ provider: PROVIDER_ID, id: modelIdFor(tier) });
+    await session.setModel({ provider: PROVIDER_ID, id: modelIdFor(tier, provider) });
     await this.harness.submit(
       "Work on the Task described in your instructions, then call complete_task or fail_task.",
       {
@@ -539,6 +657,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       taskId: input.taskId,
       runId,
       tier,
+      provider,
       attempt,
     });
     return { runId, accepted: true, state: { status: "running", runId, attempt, tier } };
@@ -563,12 +682,17 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       return;
     }
     if (stillRunning) await this.harness.session().abort();
+    // A recorded stop wins; a stuck run is a timeout; a provider failure ends the run as itself
+    // (section 42.8: rate limits and outages retry once at the same tier, on the next provider).
+    const recorded = run.outcome;
     const kind: FailureKind =
-      run.outcome === "budget_exhausted" || run.outcome === "run_call_cap"
-        ? run.outcome
+      recorded && STOP_OUTCOMES.has(recorded)
+        ? (recorded as FailureKind)
         : stillRunning
           ? "timeout"
-          : "no_outcome";
+          : recorded && TRANSPORT_OUTCOMES.has(recorded)
+            ? (recorded as FailureKind)
+            : "no_outcome";
     await this.finishRun({ ok: false, kind, reason: kind });
   }
 

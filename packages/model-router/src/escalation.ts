@@ -15,7 +15,9 @@ export type FailureKind =
   | "rate_limited"
   | "timeout"
   | "transient"
-  | "budget_exhausted";
+  | "budget_exhausted"
+  /** The AI Gateway Vertex spend cap rejected the call (ADR 0016): a budget stop, never a retry. */
+  | "spend_limited";
 
 export type Failure = { tier: ModelTier; kind: FailureKind };
 
@@ -36,6 +38,7 @@ export function nextStep(currentTier: ModelTier, failures: readonly Failure[]): 
   const last = failures.at(-1);
   if (!last) return { action: "retry", tier: currentTier, reason: "first_attempt" };
   if (last.kind === "budget_exhausted") return { action: "stop", reason: "budget_exhausted" };
+  if (last.kind === "spend_limited") return { action: "stop", reason: "vertex_spend_limit" };
 
   if (TRANSPORT.has(last.kind)) {
     // One same-tier retry per transport failure streak; a second in a row stops (section 42.8).
