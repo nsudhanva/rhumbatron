@@ -21,7 +21,7 @@ locals {
   # First apply only: true breaks the coordinator <-> event router binding cycle and uploads the
   # first Durable Object migrations (v1). After the first successful apply, set false and apply
   # again: that adds the EVENT_ROUTER nudge binding and moves migrations to steady state v1 -> v1.
-  bootstrap = true
+  bootstrap = false
 
   # false until the legacy apex record is gone (ADR 0017 cutover). A Worker custom domain cannot
   # take over a hostname that still has its own DNS record, so the web Worker gets the apex only
