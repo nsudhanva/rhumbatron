@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { resolveDeadLetter } from "@rhumbatron/integration/dead-letters";
 import { type SandboxSmokeResult, sandboxSmoke } from "./sandbox-smoke.ts";
 import { handleWake } from "./wake-consumer.ts";
 
@@ -28,6 +29,7 @@ export default class Agents extends WorkerEntrypoint<Env> {
       try {
         // Invalid and stale wakes are acknowledged: retrying them cannot succeed.
         await handleWake(env, message.body);
+        await resolveDeadLetter(env.DB, message.body);
         message.ack();
       } catch (error) {
         console.error(

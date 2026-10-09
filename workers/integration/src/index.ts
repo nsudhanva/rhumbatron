@@ -5,6 +5,7 @@ import {
   type PromotionOutcome,
 } from "@rhumbatron/protocol";
 import { z } from "zod";
+import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { handleFixtureCommand } from "./fixture-changesets.ts";
 import { cleanupProject, forkRetentionDays, sweepForks } from "./project-cleanup.ts";
@@ -150,7 +151,10 @@ export default class Integration extends WorkerEntrypoint<Env> {
         const outcome = await handleCommand(this.env, message.body);
         if (outcome === "continue" && message.attempts < MAX_DELIVERIES) {
           message.retry({ delaySeconds: 10 });
-        } else message.ack();
+        } else {
+          await resolveDeadLetter(this.env.DB, message.body);
+          message.ack();
+        }
       } catch (error) {
         console.error(
           JSON.stringify({ event: "dispatch.failed", message: String(error).slice(0, 200) }),

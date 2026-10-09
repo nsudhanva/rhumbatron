@@ -875,7 +875,7 @@ export const getDeadLetters = createServerFn()
 
 type DeadLetterResolution = {
   id: string;
-  resolution: "retried" | "dismissed";
+  resolution: "retried" | "dismissed" | "succeeded";
   commandId: string;
   queue: string;
 };

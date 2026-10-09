@@ -30,6 +30,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./events": "./src/events.ts"
+    "./events": "./src/events.ts",
+    "./dead-letters": "./src/dead-letters.ts"
   }
 }
