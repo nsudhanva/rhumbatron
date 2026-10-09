@@ -1,13 +1,16 @@
 // Candidate creation is a retry boundary (AGENTS.md section 60) and enforces the fork rule
 // (section 32.4) and the Candidate limit (section 44). Invariants: a repeated trigger yields the
 // same Candidate IDs and no new rows; a fork conflict yields one Candidate per side, each with the
-// shared non-conflicting ChangeSets; a Change never holds more than MAX_CANDIDATES Candidates.
+// shared non-conflicting ChangeSets; a ChangeSet stacked on one side's ChangeSet joins only that
+// side's Candidate, and one stacked on both sides joins neither (deferred, with a reason); a Change
+// never holds more than MAX_CANDIDATES Candidates.
 import { COMPOSITION_RULES_VERSION } from "@rhumbatron/evidence";
 import { describe, expect, it } from "vitest";
 import {
   composeChangeCandidates,
   compositionKeyFor,
   createCandidate,
+  type ForkConflict,
   MAX_CANDIDATES,
   planCandidateSets,
 } from "./candidate-create.ts";
@@ -70,21 +73,98 @@ describe("planCandidateSets", () => {
     ]);
     expect(plan.sets).toEqual([["cs_t1_1"], ["cs_t2_1"]]);
     expect(plan.sets.length).toBeLessThanOrEqual(MAX_CANDIDATES);
-    expect(plan.deferred).toEqual(["cs_t3_1", "cs_t4_1"]);
+    expect(plan.deferred.map((d) => d.id)).toEqual(["cs_t3_1", "cs_t4_1"]);
+    expect(plan.deferred[0]?.reason).toContain("cf_2");
+  });
+
+  // t2 and t3 are the two designs; t1 is unstacked; t4 builds on t2 (stacked workspace).
+  const stacked = (over: Record<string, string[]>) =>
+    proposed.map((c) => ({ ...c, ...(over[c.id] ? { stackedOn: over[c.id] } : {}) }));
+  const fork: ForkConflict[] = [{ id: "cf_1", sides: [["tsk_t2"], ["tsk_t3"]] }];
+
+  it("puts a ChangeSet stacked on one side only in that side's Candidate", () => {
+    const plan = planCandidateSets(stacked({ cs_t4_1: ["cs_t2_1"] }), fork);
+    expect(plan.forkConflictId).toBe("cf_1");
+    expect(plan.sets).toEqual([
+      ["cs_t1_1", "cs_t2_1", "cs_t4_1"],
+      ["cs_t1_1", "cs_t3_1"],
+    ]);
+    expect(plan.deferred).toEqual([]);
+    // The same assignment for the other side, and through a transitive lineage.
+    const other = planCandidateSets(stacked({ cs_t1_1: ["cs_t4_1"], cs_t4_1: ["cs_t3_1"] }), fork);
+    expect(other.sets).toEqual([["cs_t2_1"], ["cs_t1_1", "cs_t3_1", "cs_t4_1"]]);
+  });
+
+  it("keeps an unstacked ChangeSet shared in both Candidates", () => {
+    const plan = planCandidateSets(stacked({ cs_t4_1: ["cs_t2_1"] }), fork);
+    for (const set of plan.sets) expect(set).toContain("cs_t1_1");
+    // Stacked on a shared ChangeSet only: still shared.
+    const onShared = planCandidateSets(stacked({ cs_t4_1: ["cs_t1_1"] }), fork);
+    expect(onShared.sets).toEqual([
+      ["cs_t1_1", "cs_t2_1", "cs_t4_1"],
+      ["cs_t1_1", "cs_t3_1", "cs_t4_1"],
+    ]);
+  });
+
+  it("defers a ChangeSet stacked on both sides, with a reason, and anything stacked on it", () => {
+    const plan = planCandidateSets(
+      stacked({ cs_t4_1: ["cs_t2_1", "cs_t3_1"], cs_t1_1: ["cs_t4_1"] }),
+      fork,
+    );
+    expect(plan.sets).toEqual([["cs_t2_1"], ["cs_t3_1"]]);
+    expect(plan.deferred.map((d) => d.id)).toEqual(["cs_t1_1", "cs_t4_1"]);
+    for (const d of plan.deferred) {
+      expect(d.reason).toContain("cf_1");
+      expect(d.reason).toContain("cs_t2_1");
+      expect(d.reason).toContain("cs_t3_1");
+    }
+    for (const set of plan.sets) for (const d of plan.deferred) expect(set).not.toContain(d.id);
+  });
+
+  it("defers a ChangeSet stacked on a later fork conflict's side, within MAX_CANDIDATES", () => {
+    const five = [...proposed, { id: "cs_t5_1", taskId: "tsk_t5", stackedOn: ["cs_t4_1"] }];
+    const plan = planCandidateSets(five, [
+      { id: "cf_1", sides: [["tsk_t1"], ["tsk_t2"]] },
+      { id: "cf_2", sides: [["tsk_t3"], ["tsk_t4"]] },
+    ]);
+    expect(plan.sets).toEqual([["cs_t1_1"], ["cs_t2_1"]]);
+    expect(plan.sets.length).toBeLessThanOrEqual(MAX_CANDIDATES);
+    expect(plan.deferred.map((d) => d.id)).toEqual(["cs_t3_1", "cs_t4_1", "cs_t5_1"]);
+    expect(plan.deferred[2]?.reason).toContain("stacked on cs_t4_1");
   });
 });
+
+/** A stored ChangeSet intent; only `changeSet.stackedOn` matters to the fork rule. */
+function intentWith(stackedOn: string[] | undefined) {
+  return {
+    summary: "change",
+    ...(stackedOn
+      ? {
+          changeSet: {
+            fork: "acme-fork",
+            commit: "a".repeat(40),
+            baseCommit: "b".repeat(40),
+            diffStat: "1 file changed",
+            files: ["src/x.ts"],
+            stackedOn,
+          },
+        }
+      : {}),
+  };
+}
 
 type CandidateRow = { id: string; change_id: string; change_set_ids_json: string };
 
 /** Minimal D1, ProjectRootDO, ResourceShardDO, and Workflow stand-ins, answering by SQL shape. */
 function fakeEnv(input: {
-  changeSets: { id: string; taskId: string }[];
+  changeSets: { id: string; taskId: string; stackedOn?: string[] }[];
   conflicts?: { id: string; taskIds: [string, string] }[];
   status?: string;
 }) {
   const candidates: CandidateRow[] = [];
   const workflows = new Set<string>();
   const events: string[] = [];
+  const payloads: Record<string, unknown>[] = [];
   const statement = (sql: string, args: unknown[] = []) => ({
     bind: (...next: unknown[]) => statement(sql, next),
     first: async () => {
@@ -106,7 +186,13 @@ function fakeEnv(input: {
     },
     all: async () => {
       if (sql.includes("FROM changesets cs")) {
-        return { results: input.changeSets.map((c) => ({ id: c.id, task_id: c.taskId })) };
+        return {
+          results: input.changeSets.map((c) => ({
+            id: c.id,
+            task_id: c.taskId,
+            intent_json: JSON.stringify(intentWith(c.stackedOn)),
+          })),
+        };
       }
       if (sql.includes("FROM conflicts")) {
         return {
@@ -145,8 +231,12 @@ function fakeEnv(input: {
     DB: { prepare: (sql: string) => statement(sql) },
     PROJECT_ROOT: namespace({ getCanonical: async () => ({ artifactRef: "artifacts://acme" }) }),
     RESOURCE_SHARD: namespace({
-      appendEvents: async (list: { eventId: string }[]) => {
-        for (const e of list) if (!events.includes(e.eventId)) events.push(e.eventId);
+      appendEvents: async (list: { eventId: string; payload: Record<string, unknown> }[]) => {
+        for (const e of list) {
+          if (events.includes(e.eventId)) continue;
+          events.push(e.eventId);
+          payloads.push(e.payload);
+        }
       },
     }),
     CANDIDATE_WORKFLOW: {
@@ -160,7 +250,7 @@ function fakeEnv(input: {
       },
     },
   } as unknown as Env;
-  return { env, candidates, workflows, events };
+  return { env, candidates, workflows, events, payloads };
 }
 
 const ids = (outcome: Awaited<ReturnType<typeof composeChangeCandidates>>) =>
@@ -204,6 +294,26 @@ describe("composeChangeCandidates", () => {
     expect(fake.workflows.size).toBe(2);
     expect(ids(await composeChangeCandidates(fake.env, CHANGE))).toEqual(ids(outcome));
     expect(fake.candidates).toHaveLength(2);
+  });
+
+  it("reads stackedOn from the stored intent and reports a both-sides ChangeSet as deferred", async () => {
+    const fake = fakeEnv({
+      changeSets: [
+        ...changeSets,
+        { id: "cs_t4_1", taskId: "tsk_t4", stackedOn: ["cs_t2_1"] },
+        { id: "cs_t5_1", taskId: "tsk_t5", stackedOn: ["cs_t2_1", "cs_t3_1"] },
+      ],
+      conflicts: [{ id: "cf_1", taskIds: ["tsk_t2", "tsk_t3"] }],
+    });
+    const outcome = await composeChangeCandidates(fake.env, CHANGE);
+    if (outcome.status !== "composed") throw new Error("expected composed");
+    expect(fake.candidates.map((c) => JSON.parse(c.change_set_ids_json))).toEqual([
+      ["cs_t1_1", "cs_t2_1", "cs_t4_1"],
+      ["cs_t1_1", "cs_t3_1"],
+    ]);
+    expect(outcome.deferred.map((d) => d.id)).toEqual(["cs_t5_1"]);
+    // The event of every Candidate of the round records the deferral and its reason.
+    for (const payload of fake.payloads) expect(payload.deferred).toEqual(outcome.deferred);
   });
 
   it("refuses a Candidate beyond MAX_CANDIDATES and starts no verification for it", async () => {

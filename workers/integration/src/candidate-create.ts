@@ -1,5 +1,6 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { COMPOSITION_RULES_VERSION } from "@rhumbatron/evidence";
+import { ChangeSetIntent } from "@rhumbatron/protocol";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 
 /**
@@ -33,31 +34,64 @@ export async function compositionKeyFor(
   return { compositionKey, candidateId: `cand_${compositionKey.slice(0, 24)}` };
 }
 
-/** A proposed ChangeSet and the Task whose run published it (null when no run row matches). */
-export type ProposedChangeSet = { id: string; taskId: string | null };
+/** A proposed ChangeSet, the Task whose run published it (null when no run row matches), and the
+ * ChangeSets whose commits it carries (`intent_json.changeSet.stackedOn`, transitive). */
+export type ProposedChangeSet = {
+  id: string;
+  taskId: string | null;
+  stackedOn?: readonly string[];
+};
 
 /** An open conflict whose recommended action is `fork_candidates`: the Task IDs of each side. */
 export type ForkConflict = { id: string; sides: readonly [readonly string[], readonly string[]] };
+
+/** A ChangeSet left out of every Candidate this round, and why. */
+export type DeferredChangeSet = { id: string; reason: string };
 
 export type CandidatePlan = {
   /** ChangeSet ID sets, one per Candidate, each sorted. */
   sets: string[][];
   /** The conflict the Candidates fork on, or null for a single Candidate. */
   forkConflictId: string | null;
-  /** ChangeSets on another fork conflict, left out of every Candidate for a later round. */
-  deferred: string[];
+  /** ChangeSets no Candidate of this round can include, sorted by ID. */
+  deferred: DeferredChangeSet[];
 };
+
+/** Each ChangeSet's lineage: itself plus every ChangeSet it is stacked on, transitively. */
+function lineages(proposed: readonly ProposedChangeSet[]): Map<string, Set<string>> {
+  const direct = new Map(proposed.map((c) => [c.id, c.stackedOn ?? []]));
+  const memo = new Map<string, Set<string>>();
+  const visit = (id: string, path: Set<string>): Set<string> => {
+    const known = memo.get(id);
+    if (known) return known;
+    const out = new Set([id]);
+    for (const parent of direct.get(id) ?? []) {
+      if (path.has(parent)) continue; // A cycle cannot come from real commits; do not loop.
+      for (const a of visit(parent, new Set([...path, parent]))) out.add(a);
+    }
+    memo.set(id, out);
+    return out;
+  };
+  for (const c of proposed) visit(c.id, new Set([c.id]));
+  return memo;
+}
 
 /**
  * Candidate fork rule (section 32.4). Selection, in order:
  * 1. A fork conflict counts only when both sides have at least one proposed ChangeSet; otherwise
  *    nothing competes and its ChangeSets compose normally.
  * 2. No counting fork conflict: one Candidate from every proposed ChangeSet.
- * 3. Otherwise the first counting conflict (input order: oldest first) is the fork axis. The shared
- *    part is every proposed ChangeSet that is on no side of any counting conflict. Each side gives
- *    one Candidate: shared part plus that side's ChangeSets. Two Candidates, within MAX_CANDIDATES.
- * 4. ChangeSets on a side of a further counting conflict, and not on the axis, are `deferred`: a
- *    third design cannot be paired without exceeding the limit, so it waits for a later round.
+ * 3. Otherwise the first counting conflict (input order: oldest first) is the fork axis. Every
+ *    ChangeSet goes where its lineage (itself plus its `stackedOn` ancestors) allows, because a
+ *    stacked commit already carries its ancestors' source and composition rejects it without them:
+ *    - lineage meets one axis side: that side's Candidate only;
+ *    - lineage meets both axis sides: deferred, it fits neither Candidate;
+ *    - lineage meets a side of a further counting conflict: deferred (rule 4);
+ *    - lineage meets no side: shared, in both Candidates.
+ *    Each axis side with at least one ChangeSet left gives one Candidate: shared plus that side.
+ *    Two Candidates at most, within MAX_CANDIDATES.
+ * 4. A further counting conflict is not paired: a third design would exceed the limit, so its
+ *    ChangeSets, and every ChangeSet stacked on them, wait for a later round.
  */
 export function planCandidateSets(
   proposed: readonly ProposedChangeSet[],
@@ -75,16 +109,47 @@ export function planCandidateSets(
   const axis = counting[0];
   if (!axis) return { sets: [all], forkConflictId: null, deferred: [] };
 
-  const contested = new Set(counting.flatMap((f) => [...f.a, ...f.b]));
-  const shared = all.filter((id) => !contested.has(id));
-  const sides = [axis.a, axis.b].map((side) => [...shared, ...side].sort());
-  const used = new Set(sides.flat());
+  const sideA = new Set(axis.a);
+  const sideB = new Set(axis.b);
+  // ChangeSets on a further conflict, and not on the axis: the first such conflict per ChangeSet.
+  const later = new Map<string, string>();
+  for (const f of counting.slice(1)) {
+    for (const id of [...f.a, ...f.b]) {
+      if (!sideA.has(id) && !sideB.has(id) && !later.has(id)) later.set(id, f.id);
+    }
+  }
+
+  const lineage = lineages(proposed);
+  const shared: string[] = [];
+  const own: [string[], string[]] = [[], []];
+  const deferred: DeferredChangeSet[] = [];
+  for (const id of all) {
+    const line = [...(lineage.get(id) ?? [id])].sort();
+    const inA = line.filter((x) => sideA.has(x));
+    const inB = line.filter((x) => sideB.has(x));
+    const waiting = line.filter((x) => later.has(x));
+    if (inA.length > 0 && inB.length > 0) {
+      deferred.push({
+        id,
+        reason: `carries both sides of fork conflict ${axis.id} (${inA.join(", ")} and ${inB.join(", ")}); no Candidate of the fork can include it`,
+      });
+    } else if (waiting.length > 0) {
+      const first = waiting[0] as string;
+      deferred.push({
+        id,
+        reason:
+          first === id
+            ? `on a side of fork conflict ${later.get(id)}, which waits for a later round`
+            : `stacked on ${waiting.join(", ")}, on a side of fork conflict ${later.get(first)}, which waits for a later round`,
+      });
+    } else if (inA.length > 0) own[0].push(id);
+    else if (inB.length > 0) own[1].push(id);
+    else shared.push(id);
+  }
+
+  const sides = own.filter((side) => side.length > 0).map((side) => [...shared, ...side].sort());
   const sets = sides.filter((s, i) => sides.findIndex((t) => t.join() === s.join()) === i);
-  return {
-    sets: sets.slice(0, MAX_CANDIDATES),
-    forkConflictId: axis.id,
-    deferred: [...contested].filter((id) => !used.has(id)).sort(),
-  };
+  return { sets: sets.slice(0, MAX_CANDIDATES), forkConflictId: axis.id, deferred };
 }
 
 export type CreateRefusal =
@@ -104,7 +169,7 @@ export type ComposeOutcome =
   | {
       status: "composed";
       forkConflictId: string | null;
-      deferred: string[];
+      deferred: DeferredChangeSet[];
       candidates: CreateCandidateOutcome[];
     };
 
@@ -136,15 +201,30 @@ const contextOf = (row: ChangeRow): ChangeContext => ({
   baseGeneration: row.base_generation,
 });
 
+/** `stackedOn` of a stored ChangeSet, or none for a row that does not parse (rejected later). */
+function stackedOnOf(intentJson: string | null): string[] {
+  try {
+    const parsed = ChangeSetIntent.safeParse(JSON.parse(intentJson ?? "null"));
+    return parsed.success ? (parsed.data.changeSet?.stackedOn ?? []) : [];
+  } catch {
+    return [];
+  }
+}
+
 async function loadProposed(env: Env, changeId: string): Promise<ProposedChangeSet[]> {
   // ChangeSet `cs_<run>` is published by run `run_<run>` (agents and the Wishlist fixture).
   const rows = await env.DB.prepare(
-    `SELECT cs.id, r.task_id FROM changesets cs LEFT JOIN task_runs r ON r.id = 'run_' || substr(cs.id, 4)
+    `SELECT cs.id, r.task_id, cs.intent_json FROM changesets cs
+     LEFT JOIN task_runs r ON r.id = 'run_' || substr(cs.id, 4)
      WHERE cs.change_id = ? AND cs.status = 'proposed' ORDER BY cs.id`,
   )
     .bind(changeId)
-    .all<{ id: string; task_id: string | null }>();
-  return (rows.results ?? []).map((r) => ({ id: r.id, taskId: r.task_id }));
+    .all<{ id: string; task_id: string | null; intent_json: string | null }>();
+  return (rows.results ?? []).map((r) => ({
+    id: r.id,
+    taskId: r.task_id,
+    stackedOn: stackedOnOf(r.intent_json),
+  }));
 }
 
 /** Open conflicts that call for competing Candidates, oldest first. */
@@ -191,7 +271,11 @@ async function insertCandidate(
   env: Env,
   change: ChangeRow,
   changeSetIds: string[],
-  trigger: { kind: "api" | "work_graph_completed"; forkConflictId: string | null },
+  trigger: {
+    kind: "api" | "work_graph_completed";
+    forkConflictId: string | null;
+    deferred?: readonly DeferredChangeSet[];
+  },
 ): Promise<CreateCandidateOutcome> {
   const sorted = [...changeSetIds].sort();
   const { compositionKey, candidateId } = await compositionKeyFor(
@@ -247,6 +331,8 @@ async function insertCandidate(
         compositionRulesVersion: COMPOSITION_RULES_VERSION,
         trigger: trigger.kind,
         forkConflictId: trigger.forkConflictId,
+        // ChangeSets of this Change that this round left out of every Candidate, with the reason.
+        ...(trigger.deferred?.length ? { deferred: trigger.deferred } : {}),
       },
       { key: candidateId, actor: ACTOR },
     ),
@@ -327,6 +413,7 @@ export async function composeChangeCandidates(env: Env, changeId: string): Promi
       await insertCandidate(env, change, set, {
         kind: "work_graph_completed",
         forkConflictId: plan.forkConflictId,
+        deferred: plan.deferred,
       }),
     );
   }
