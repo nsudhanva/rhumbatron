@@ -3,6 +3,7 @@ import {
   AnyCommandEnvelope,
   type ApprovalOutcome,
   type PromotionOutcome,
+  type ReleaseInjectionOutcome,
 } from "@rhumbatron/protocol";
 import { z } from "zod";
 import {
@@ -17,8 +18,10 @@ import { handleFixtureCommand } from "./fixture-changesets.ts";
 import { cleanupProject, forkRetentionDays, sweepForks } from "./project-cleanup.ts";
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
+import { injectReleaseFailure } from "./release.ts";
 
 export { ChangeWorkflow } from "./change-workflow.ts";
+export { ReleaseWorkflow } from "./release-workflow.ts";
 export { CandidateVerificationWorkflow } from "./verification-workflow.ts";
 
 type ChangeRow = {
@@ -191,6 +194,17 @@ export default class Integration extends WorkerEntrypoint<Env> {
     actorUserId: string;
   }): Promise<PromotionOutcome> {
     return promoteCandidate(this.env, input);
+  }
+
+  /**
+   * P13-12: a real smoke failure on the Project's latest deployed release, marked injected. The
+   * API checked membership and the FIXTURES_ENABLED guard. The Canonical Generation never moves.
+   */
+  async injectReleaseFailure(input: {
+    projectId: string;
+    actorUserId: string;
+  }): Promise<ReleaseInjectionOutcome> {
+    return injectReleaseFailure(this.env, input);
   }
 
   /** P11-01: one human decision on a gated Candidate (section 40.2). */

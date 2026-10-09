@@ -207,6 +207,9 @@ module "api_worker" {
     hostname = local.hostnames.api
     zone_id  = module.dns.zone_id
   }]
+
+  # New code may read tables a pending migration creates (for example `releases`, 0015).
+  depends_on = [terraform_data.d1_migrations]
 }
 
 module "web_worker" {
@@ -433,9 +436,17 @@ module "integration_worker" {
     { type = "browser", name = "BROWSER" },
     local.cap_bindings.browser,
     local.cap_bindings.sandbox,
+    # Self-binding to ReleaseWorkflow (AGENTS.md section 21.3, ADR 0018); literal name as above.
+    { type = "workflow", name = "RELEASE_WORKFLOW", workflow_name = "rhumbatron-release-${local.environment}", class_name = "ReleaseWorkflow" },
+    # Release observation only (ADR 0018): GET Workers Builds builds and triggers, and the release
+    # Worker's deployments. User-scoped token: Workers Builds Configuration Edit + Workers Scripts
+    # Read. Bound on this Worker only; never logged.
+    { type = "secret_text", name = "BUILDS_API_TOKEN", text = var.builds_api_token },
+    { type = "plain_text", name = "BUILDS_ACCOUNT_ID", text = var.account_id },
   ]
 
-  depends_on = [terraform_data.sandbox_worker]
+  # New code may read tables a pending migration creates (for example `releases`, 0015).
+  depends_on = [terraform_data.sandbox_worker, terraform_data.d1_migrations]
 }
 
 # Workflows: a Change uses about 7 steps.
@@ -451,6 +462,15 @@ resource "cloudflare_workflow" "candidate_verification" {
   account_id    = var.account_id
   workflow_name = "rhumbatron-candidate-verification-${local.environment}"
   class_name    = "CandidateVerificationWorkflow"
+  script_name   = module.integration_worker.name
+}
+
+# AGENTS.md section 21.3 (ADR 0018). One instance per promoted generation of a Project with a
+# release target; about 6 steps plus 2 per build poll (a 2-minute build is about 16 steps).
+resource "cloudflare_workflow" "release" {
+  account_id    = var.account_id
+  workflow_name = "rhumbatron-release-${local.environment}"
+  class_name    = "ReleaseWorkflow"
   script_name   = module.integration_worker.name
 }
 

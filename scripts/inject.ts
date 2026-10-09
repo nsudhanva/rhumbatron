@@ -10,8 +10,9 @@
  * creates is archived at the end (its Artifacts repos are deleted) unless `--keep` is given.
  *
  * Faults that need internal hooks (K2 outage, Sandbox loss, model timeout, poison command,
- * expired Claim, deployment failure) are proven by critical tests; see
- * docs/demo/failure-injection.md.
+ * expired Claim) are proven by critical tests; see docs/demo/failure-injection.md.
+ * `--only=release-smoke-failure` (P13-12) fails the smoke check of the demo Project's latest
+ * deployed release on purpose; it never runs by default.
  */
 import { connect } from "./inject/client.ts";
 import { type Check, Context, faults } from "./inject/faults.ts";
@@ -41,7 +42,10 @@ if (!secretKey || !userId) {
   process.exit(2);
 }
 
-const selected = faults.filter((f) => (only ? only.includes(f.id) : withSandbox || !f.sandbox));
+// `explicit` faults change shared demo state, so they run only when named with --only.
+const selected = faults.filter((f) =>
+  only ? only.includes(f.id) : !f.explicit && (withSandbox || !f.sandbox),
+);
 const session = await connect(api, secretKey, userId);
 const ctx = new Context(session, Date.now().toString(36));
 

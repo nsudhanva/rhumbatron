@@ -66,6 +66,12 @@
       "name": "rhumbatron-candidate-verification-local",
       "binding": "CANDIDATE_WORKFLOW",
       "class_name": "CandidateVerificationWorkflow"
+    },
+    // AGENTS.md section 21.3. One instance per promoted generation (ID = release ID, ADR 0018).
+    {
+      "name": "rhumbatron-release-local",
+      "binding": "RELEASE_WORKFLOW",
+      "class_name": "ReleaseWorkflow"
     }
   ],
   // Canonical source for managed Projects (AGENTS.md section 29). One repo per Project.

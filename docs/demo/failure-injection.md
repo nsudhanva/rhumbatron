@@ -47,6 +47,7 @@ bun run inject --keep               # do not archive the Projects it created
 | `approval-double-submit` | `--sandbox` | Two concurrent approvals, then a conflicting reject. | Without a gate: both `409 not_required`. With a gate: one decision, identical repeat accepted, reject `409 already_decided`. |
 | `promotion-double-submit` | `--sandbox` | Two concurrent promotions of the verified Candidate. | Both `200`; exactly one first promotion; generation advances once. |
 | `stale-candidate` | `--sandbox` | Promotes a Candidate built on the old base. | `409 stale`; Candidate marked `stale`; generation does not move. |
+| `release-smoke-failure` | `--only` | Probes the demo Project's latest deployed release with the normal smoke probes plus a route that does not exist (P13-12). | `200`; release `smoke_failed` with `release-s<N>-injected` Evidence; a repeat is `repeated`; generation does not move. |
 
 ### Known risk found while writing `change-double-submit`
 
@@ -70,7 +71,7 @@ retry contract (section 60) is broken for that caller. Expected fix in `workers/
 | P13-09 | Model timeout (42.8) | `packages/model-router/src/route.critical.test.ts` (timeout retries once at the same tier, a second transport failure stops, never escalates); `decision.critical.test.ts` (Clef abstains on malformed output); `workers/integration/src/root-planner.critical.test.ts` (planner repairs once, then gives up) | none | See [model timeout](#model-timeout). |
 | P13-10 | Poison command (20, 42.7) | `workers/agents/src/queue-poison.critical.test.ts` (a failing wake is retried, never acked; the rest of the batch is acked; invalid and stale wakes are acked); `scripts/inject/dead-letter.critical.test.ts` (every Terraform and local Queue consumer has a dead-letter Queue and 1 to 5 retries) | none | The event router consumes the dead-letter Queue (`workers/event-router/src/dead-letter.ts`, tested in `dead-letter.critical.test.ts`): the Task becomes blocked and the Project and Change pages show Retry and Dismiss. A live poison hook is still to build. See [poison command](#poison-command). |
 | P13-11 | Stale Candidate (36, 42.9) | `workers/coordinator/src/promotion-cas.critical.test.ts` (stale expected generation, changed tree, race loser marked stale); `packages/evidence/src/promotion.critical.test.ts` (base behind canonical reports stale) | `stale-candidate`, `promotion-double-submit`, `early-promotion`; also `bun run smoke:sandbox` | None. |
-| P13-12 | Deployment failure (21.3, 42.10) | Promotion never deletes history: `promotion-cas.critical.test.ts` only advances generations | none | Release is parked (P11-07/08). See [deployment failure](#deployment-failure). |
+| P13-12 | Deployment failure (21.3, 42.10) | `workers/integration/src/release.critical.test.ts` (one release per generation; a newer promotion supersedes an in-flight release, which can never deploy afterwards; a 404 feature probe or a probe without a response never marks a release deployed; only the build of the promoted commit counts); `promotion-cas.critical.test.ts` (generations only advance) | `release-smoke-failure` (`--only`) | See [deployment failure](#deployment-failure). |
 
 ## Hooks needed
 
@@ -137,7 +138,25 @@ operator action in the UI") is not implemented. Needed:
 
 ### Deployment failure
 
-The ReleaseWorkflow (P11-07/08) is parked: Workers Builds needs a one-time dashboard connection to
-the Artifacts repo (ADR 0014). Needed first: ReleaseWorkflow with a smoke step. Injection then is a
-promoted fixture commit whose `bun run build` fails. Expected: the release is marked failed, the
-Canonical Generation stays, and recovery is a new canonical transition, not a deleted one.
+ReleaseWorkflow (ADR 0018) observes the Workers Build of each promoted commit, confirms the
+deployment, and smoke checks the release URL. Injection:
+
+```sh
+bun run inject --only=release-smoke-failure     # dev; RELEASE_PROJECT_ID=<id> to pick a Project
+```
+
+- It needs a deployed release: the smoke user's `acme-shop-live` Project (`bun run demo:live`)
+  with its Workers Builds connection, and one promotion that deployed. It never runs by default,
+  because it changes the demo Project's release state.
+- What happens: `POST /v1/projects/:projectId/releases/inject-failure` (answers only where
+  `FIXTURES_ENABLED` is set, or in dev and local) probes the live release URL with the normal
+  smoke probes plus `/__rhumbatron/injected-missing-route`. The app returns a real 404, so the
+  smoke check fails through the normal path: release `smoke_failed`, event
+  `release.smoke_failed` with `injected: true`, Evidence `release-s<N>-injected` in R2 and D1.
+- Expected: the Candidate page and the inbox show the failed release; the Canonical Generation
+  stays; nothing is deleted.
+- Recovery is a new canonical transition (section 42.10): run a new Change and promote it. Its
+  release (`S<N+1>`) builds, deploys, and passes the smoke check.
+- A real build failure (a promoted commit whose build fails) takes the `failed` path with
+  `deployment.failed`. It is not injected live, because it needs a broken commit on canonical
+  `main`.

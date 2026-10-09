@@ -81,3 +81,9 @@ variable "model_provider" {
     error_message = "model_provider must be \"vertex\" or \"openrouter\"."
   }
 }
+
+variable "builds_api_token" {
+  description = "User-scoped token for the release path (ADR 0018): Workers Builds Configuration Edit and Workers Scripts Read. Bound as BUILDS_API_TOKEN on the integration Worker only. Loaded from the Keychain (`rhumbatron-cloudflare-builds-token`) by `bun run tf prod`."
+  type        = string
+  sensitive   = true
+}

@@ -14,6 +14,8 @@ type Fault = {
   sections: string;
   /** Uses Sandbox minutes (one Candidate verification). No fault calls a model. */
   sandbox: boolean;
+  /** Changes shared demo state: runs only when named with `--only`. */
+  explicit?: boolean;
   run(ctx: Context): Promise<Check[]>;
 };
 
@@ -26,6 +28,15 @@ type CandidateView = {
   approvalRequired: boolean;
   approval: { decision: string } | null;
 };
+type ReleaseData = {
+  id: string;
+  generation: number;
+  status: string;
+  failureReason: string | null;
+  evidenceId: string | null;
+  url: string | null;
+};
+type ReleasesData = { target: { url: string } | null; releases: ReleaseData[] };
 type PromotionData = {
   status: string;
   fromGeneration: number;
@@ -158,6 +169,22 @@ async function verified(ctx: Context, run: SandboxRun) {
     );
   }
   return read;
+}
+
+/**
+ * The release demo Project: `RELEASE_PROJECT_ID`, else the smoke user's `acme-shop-live` Project
+ * (created by `bun run demo:live`). Only that Project has a release target (migration 0015).
+ */
+async function releaseProject(ctx: Context): Promise<string> {
+  const fromEnv = process.env.RELEASE_PROJECT_ID;
+  if (fromEnv) return fromEnv;
+  const reply = await ctx.api.request<{ id: string; slug: string }[]>(
+    "GET",
+    "/v1/projects?limit=200",
+  );
+  const found = reply.data?.find((p) => p.slug === "acme-shop-live");
+  if (!found) throw new Error(`no acme-shop-live Project for the smoke user (${said(reply)})`);
+  return found.id;
 }
 
 export const faults: Fault[] = [
@@ -445,6 +472,58 @@ export const faults: Fault[] = [
           "the Canonical Generation did not move again",
           after.canonical.generation === project.canonical.generation,
           `S${after.canonical.generation}`,
+        ),
+      ];
+    },
+  },
+  {
+    // P13-12. Honest failure: the release URL is really probed, including a route that does not
+    // exist; its 404 fails the smoke check through the normal failure path, marked injected.
+    id: "release-smoke-failure",
+    title: "A deployed release fails its smoke check (injected missing route)",
+    sections: "21.3, 42.10",
+    sandbox: false,
+    explicit: true,
+    async run(ctx) {
+      const projectId = await releaseProject(ctx);
+      const before = await ctx.project(projectId);
+      const listed = await ctx.api.request<ReleasesData>(
+        "GET",
+        `/v1/projects/${projectId}/releases?limit=1`,
+      );
+      const latest = listed.data?.releases[0];
+      if (!listed.data?.target || !latest) {
+        return [check("a deployed release exists", false, said(listed))];
+      }
+      const reply = await ctx.api.request<{ status: string; release: ReleaseData }>(
+        "POST",
+        `/v1/projects/${projectId}/releases/inject-failure`,
+      );
+      const again = await ctx.api.request<{ status: string; repeated: boolean }>(
+        "POST",
+        `/v1/projects/${projectId}/releases/inject-failure`,
+      );
+      const after = await ctx.project(projectId);
+      const release = reply.data?.release;
+      return [
+        check("injection is recorded (200)", reply.status === 200, said(reply)),
+        check(
+          "the latest release is smoke_failed with injected Evidence",
+          release?.id === latest.id &&
+            release.status === "smoke_failed" &&
+            !!release.evidenceId?.endsWith("-injected") &&
+            !!release.failureReason?.startsWith("Injected"),
+          `${release?.status ?? "none"} ${release?.evidenceId ?? ""}`,
+        ),
+        check(
+          "a repeat changes nothing",
+          again.status === 200 && again.data?.repeated === true,
+          said(again),
+        ),
+        check(
+          "the Canonical Generation did not move (recovery is a new promotion)",
+          after.canonical.generation === before.canonical.generation,
+          `S${before.canonical.generation} -> S${after.canonical.generation}`,
         ),
       ];
     },

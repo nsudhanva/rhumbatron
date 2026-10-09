@@ -213,6 +213,7 @@ export const verification = new Hono<AppEnv>().get(
         `SELECT id, candidate_id, check_id, kind, status, coverage, summary, r2_key, content_hash,
            started_at, completed_at, created_at, metrics_json, source_refs_json
          FROM evidence_index WHERE candidate_id IN (${ids.map(() => "?").join(", ")})
+           AND COALESCE(check_id, '') NOT LIKE 'release-%'
          ORDER BY created_at DESC LIMIT ${EVIDENCE_LIMIT + 1}`,
       )
         .bind(...ids)

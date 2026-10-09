@@ -20,8 +20,9 @@ Phase 7 completion (indexer, stored Product Graph, Vectorize) and the production
 - Production environment Terraform.
 
 ## Blocked
-- P11-07 and P11-08: Release via Workers Builds (parked; ADR 0014).
-- P13 deployment-failure injection (depends on the parked release workflow).
+- P11-07, P11-08, P13-12: ReleaseWorkflow, release registry (migration 0015), release API, UI, and
+  injection are built (ADR 0018) but not applied. Needs the one-time `cf builds workers create`
+  connection for Acme Shop Live, then a dev plan and apply.
 
 ## Cost
 - Workers Paid account shared with other projects. Rhumbatron stays within free and included limits.
@@ -35,10 +36,10 @@ Phase 7 completion (indexer, stored Product Graph, Vectorize) and the production
 - Terraform owns remote control-plane changes. Never `wrangler deploy`.
 - Deployment sequence: `bun run cf:bundle`, `bun run tf:plan:dev`, `bun run tf:apply:dev`, and `bun run tf:drift`.
 - Artifacts is canonical source for managed Projects (ADR 0010).
-- Release via Workers Builds remains parked (ADR 0014).
+- Release via Workers Builds: promotion push, observed by ReleaseWorkflow (ADR 0018).
 - CI runs checks only and needs no credentials. Deployment stays local through Terraform.
 
 ## Next
 - Complete Phase 7 stored Product Graph and indexer.
 - Complete production environment Terraform.
-- Unpark P11-07 and P11-08 release workflow when the release path is ready.
+- Connect Workers Builds for Acme Shop Live, apply dev, promote once, run `bun run smoke:release`.

@@ -18,6 +18,7 @@ const KEEP = [
   "agentId",
   "approvalId",
   "attempt",
+  "buildUuid",
   "candidateId",
   "challengeId",
   "changeSetId",
@@ -30,6 +31,8 @@ const KEEP = [
   "fork",
   "from",
   "fromGeneration",
+  "generation",
+  "injected",
   "intentId",
   "key",
   "kind",
@@ -37,6 +40,7 @@ const KEEP = [
   "policyVersion",
   "promotable",
   "reason",
+  "releaseId",
   "resolution",
   "riskTier",
   "runId",
@@ -48,6 +52,8 @@ const KEEP = [
   "title",
   "to",
   "toGeneration",
+  "url",
+  "versionId",
 ] as const;
 
 export type FeedRow = {
@@ -115,6 +121,17 @@ function summarize(event: EventEnvelope, data: FeedData): string {
       return `Canonical S${data.fromGeneration ?? "?"} → S${data.toGeneration ?? "?"}`;
     case "intent.declared":
       return `Intent declared${on}${s("summary") ? `: ${s("summary")}` : ""}`;
+    // Release path (ADR 0018).
+    case "build.started":
+      return `Release of S${data.generation ?? "?"}: Workers Build started`;
+    case "build.completed":
+      return `Release of S${data.generation ?? "?"}: build ${s("status") ?? "finished"}${s("buildUuid") ? ` (${s("buildUuid")?.slice(0, 8)})` : ""}`;
+    case "deployment.completed":
+      return `Deployed S${data.generation ?? "?"}${s("versionId") ? ` as version ${s("versionId")?.slice(0, 8)}` : ""}`;
+    case "deployment.failed":
+      return `Release of S${data.generation ?? "?"} did not deploy${s("reason") ? `: ${s("reason")}` : ""}`;
+    case "release.smoke_failed":
+      return `Release of S${data.generation ?? "?"} failed its smoke check${data.injected === true ? " (injected)" : ""}${s("reason") ? `: ${s("reason")}` : ""}`;
     default:
       return `${event.eventType}${on}${s("reason") ? `: ${s("reason")}` : ""}`;
   }

@@ -19,7 +19,7 @@ type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
 const DEV_ENVIRONMENTS: readonly string[] = ["dev", "local"];
 
-const fixturesEnabled = (env: Env) =>
+export const fixturesEnabled = (env: Env) =>
   env.FIXTURES_ENABLED === "true" || DEV_ENVIRONMENTS.includes(env.ENVIRONMENT as string);
 
 const ChangeIdParam = z.object({ changeId: z.string().regex(/^chg_[a-z0-9-]+$/) });

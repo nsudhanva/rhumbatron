@@ -20,6 +20,7 @@ import { candidateFork } from "./candidate-sandbox.ts";
 import { syncCanonicalSource } from "./canonical-source.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
+import { startRelease } from "./release.ts";
 
 /**
  * Human approval and promotion (AGENTS.md sections 36, 40.2, 42.9, 60; ADR 0013). Called only by
@@ -227,6 +228,16 @@ async function promoted(
         detail: sync.detail,
       }),
     );
+  } else {
+    // Canonical `main` is at the promoted commit, so Workers Builds builds it (ADR 0018). Only a
+    // Project with a release target releases. Idempotent per generation; never fails promotion.
+    await startRelease(env, {
+      projectId: row.project_id,
+      changeId: row.change_id,
+      candidateId: row.id,
+      generation,
+      commit: sync.commit,
+    });
   }
   return {
     status: "promoted",

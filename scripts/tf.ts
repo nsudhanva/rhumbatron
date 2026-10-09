@@ -27,6 +27,8 @@ const rootKeychain: Record<string, Record<string, string>> = {
     TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-dev",
     TF_VAR_openrouter_api_key: "rhumbatron-openrouter-api-key",
     TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-dev",
+    // ADR 0018: release observation (Builds API GETs) on the integration Worker.
+    TF_VAR_builds_api_token: "rhumbatron-cloudflare-builds-token",
   },
   // ADR 0017. Prod reuses dev's items for now (no new tokens): the K2 Consume-only token, the
   // Vertex service account (one GCP project; the per-gateway caps split the budget), the OpenRouter
@@ -37,6 +39,7 @@ const rootKeychain: Record<string, Record<string, string>> = {
     TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-dev",
     TF_VAR_openrouter_api_key: "rhumbatron-openrouter-api-key",
     TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-dev",
+    TF_VAR_builds_api_token: "rhumbatron-cloudflare-builds-token",
   },
 };
 

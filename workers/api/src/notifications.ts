@@ -15,7 +15,7 @@ import { ensureIdentity } from "./identity.ts";
  * Access: every query joins `memberships` on the caller's user ID, the same rule as
  * `canAccessProject`, so a user never sees another tenant's rows. Archived Projects are skipped.
  *
- * Cost: one D1 batch of 7 capped SELECTs per read (list and count share it), plus the 3-statement
+ * Cost: one D1 batch of 8 capped SELECTs per read (list and count share it), plus the 3-statement
  * `ensureIdentity` batch. Each SELECT starts from a rare state (verified Candidates, open dead
  * letters, blocked Changes, confirmed conflicts) or a 7-day window through an index, so rows read
  * scale with open and recent items, not with history. Marking read writes one row per new mark.
@@ -33,6 +33,8 @@ const NotificationKind = z.enum([
   "conflict_open",
   "change_completed",
   "promoted",
+  "release_failed",
+  "release_deployed",
 ]);
 type NotificationKind = z.infer<typeof NotificationKind>;
 
@@ -198,6 +200,24 @@ ${read("r", `'change_completed:' || ch.id`)}
 WHERE ch.status = 'completed' AND ch.updated_at >= ?2
 ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
 
+/**
+ * Releases that finished within the window (ADR 0018): deployed, or failed (no build, failed
+ * build, unconfirmed deployment, or smoke failure). Superseded releases are not news. `?2` = since.
+ * Starts from `idx_releases_status_finished`.
+ */
+const RELEASES_SQL = `
+SELECT r.id, r.project_id, p.name AS project_name, r.change_id, r.candidate_id, r.generation,
+       r.status, r.failure_reason, r.version_id, r.finished_at, rt.url, r.read_at
+FROM (
+  SELECT rel.*, rr.read_at FROM releases rel
+  LEFT JOIN notification_reads rr ON rr.user_id = ?1 AND rr.notification_id =
+    (CASE WHEN rel.status = 'deployed' THEN 'release_deployed:' ELSE 'release_failed:' END) || rel.id
+  WHERE rel.status IN ('deployed', 'failed', 'smoke_failed') AND rel.finished_at >= ?2
+) r
+${MINE("r.project_id")}
+LEFT JOIN release_targets rt ON rt.project_id = r.project_id
+ORDER BY r.finished_at DESC LIMIT ${PER_KIND}`;
+
 type Base = { project_id: string; project_name: string; read_at?: string | null };
 type VerifiedRow = Base & {
   candidate_id: string;
@@ -249,6 +269,17 @@ type ConflictRow = Base & {
   right_summary: string | null;
 };
 type CompletedRow = Base & { id: string; goal: string; updated_at: string };
+type ReleaseRow = Base & {
+  id: string;
+  change_id: string;
+  candidate_id: string;
+  generation: number;
+  status: "deployed" | "failed" | "smoke_failed";
+  failure_reason: string | null;
+  version_id: string | null;
+  finished_at: string;
+  url: string | null;
+};
 
 const clip = (text: string, max = 180) =>
   text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
@@ -406,6 +437,45 @@ function completedItem(row: CompletedRow): NotificationView {
   };
 }
 
+function releaseItem(row: ReleaseRow): NotificationView {
+  const base = {
+    ...project(row),
+    changeId: row.change_id,
+    candidateId: row.candidate_id,
+    href: `/candidates/${row.candidate_id}`,
+    createdAt: row.finished_at,
+    read: !!row.read_at,
+  };
+  if (row.status === "deployed") {
+    return {
+      ...base,
+      id: `release_deployed:${row.id}`,
+      kind: "release_deployed",
+      severity: "info",
+      title: `Released S${row.generation}`,
+      body: joinParts(
+        row.version_id ? `Version ${row.version_id.slice(0, 8)}` : null,
+        row.url,
+        "Smoke check passed",
+      ),
+    };
+  }
+  return {
+    ...base,
+    id: `release_failed:${row.id}`,
+    kind: "release_failed",
+    severity: "attention",
+    title:
+      row.status === "smoke_failed"
+        ? `Release of S${row.generation} failed its smoke check`
+        : `Release of S${row.generation} did not deploy`,
+    body: joinParts(
+      clip(row.failure_reason ?? "No reason recorded", 160),
+      `S${row.generation} stays canonical; recover with a new promotion`,
+    ),
+  };
+}
+
 const RANK: Record<NotificationSeverity, number> = { action: 0, attention: 1, info: 2 };
 
 /**
@@ -421,15 +491,17 @@ export async function deriveNotifications(
   // Each statement binds only the ordinals it declares: ?1 user, ?2 window start.
   const statement = (sql: string) => db.prepare(sql).bind(userId, since);
   const userOnly = (sql: string) => db.prepare(sql).bind(userId);
-  const [verified, letters, blocked, rejected, promoted, conflicts, completed] = await db.batch([
-    userOnly(VERIFIED_SQL),
-    userOnly(DEAD_LETTER_SQL),
-    userOnly(BLOCKED_SQL),
-    statement(finishedCandidates("rejected", "candidate_rejected")),
-    statement(finishedCandidates("promoted", "promoted")),
-    userOnly(CONFLICT_SQL),
-    statement(COMPLETED_SQL),
-  ]);
+  const [verified, letters, blocked, rejected, promoted, conflicts, completed, released] =
+    await db.batch([
+      userOnly(VERIFIED_SQL),
+      userOnly(DEAD_LETTER_SQL),
+      userOnly(BLOCKED_SQL),
+      statement(finishedCandidates("rejected", "candidate_rejected")),
+      statement(finishedCandidates("promoted", "promoted")),
+      userOnly(CONFLICT_SQL),
+      statement(COMPLETED_SQL),
+      statement(RELEASES_SQL),
+    ]);
   const rows = <T>(result: D1Result | undefined) => (result?.results ?? []) as T[];
   const items: NotificationView[] = [
     ...rows<VerifiedRow>(verified)
@@ -441,6 +513,7 @@ export async function deriveNotifications(
     ...rows<ConflictRow>(conflicts).map(conflictItem),
     ...rows<FinishedRow>(promoted).map(promotedItem),
     ...rows<CompletedRow>(completed).map(completedItem),
+    ...rows<ReleaseRow>(released).map(releaseItem),
   ];
   return items.sort(
     (a, b) =>

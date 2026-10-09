@@ -45,6 +45,10 @@ export const EVENT_TYPES = [
   "build.completed",
   "deployment.started",
   "deployment.completed",
+  /** A release did not deploy: no build, a failed build, or an unconfirmed deployment (ADR 0018). */
+  "deployment.failed",
+  /** A release deployed, but its smoke check did not pass (sections 21.3, 42.10). */
+  "release.smoke_failed",
   "test.failed",
   "security.check.failed",
   "performance.check.failed",

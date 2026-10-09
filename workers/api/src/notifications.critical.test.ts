@@ -155,6 +155,29 @@ describe("notification derivation", () => {
     change("chg_old", "proj_a", "completed", OLD);
     expect(await kinds("usr_a")).toEqual(["change_completed:chg_new"]);
   });
+
+  it("finished releases: failed is attention, deployed is info, superseded and old are silent", async () => {
+    const { db, list } = setup();
+    const release = (id: string, generation: number, status: string, finishedAt = T) =>
+      db
+        .prepare(
+          `INSERT INTO releases (id, project_id, change_id, candidate_id, generation, commit_sha,
+             status, started_at, finished_at, failure_reason)
+           VALUES (?, 'proj_a', 'chg_1', 'cand_1', ?, 'abc1234', ?, ?, ?, ?)`,
+        )
+        .run(id, generation, status, T, finishedAt, status === "deployed" ? null : "404");
+    release("rel_1", 1, "deployed");
+    release("rel_2", 2, "smoke_failed");
+    release("rel_3", 3, "superseded");
+    release("rel_0", 0, "failed", OLD);
+    release("rel_4", 4, "building");
+    const items = await list("usr_a");
+    expect(items.map((i) => [i.id, i.severity])).toEqual([
+      ["release_failed:rel_2", "attention"],
+      ["release_deployed:rel_1", "info"],
+    ]);
+    expect(await list("usr_b")).toEqual([]);
+  });
 });
 
 describe("notification read state", () => {

@@ -13,6 +13,7 @@ import { live } from "./live.ts";
 import { notifications } from "./notifications.ts";
 import { productGraph } from "./product-graph.ts";
 import { projects } from "./projects.ts";
+import { releases } from "./releases.ts";
 import { screenshots } from "./screenshots.ts";
 import { verification } from "./verification.ts";
 import { workspace } from "./workspace.ts";
@@ -48,6 +49,7 @@ app.route("/", productGraph);
 app.route("/", deadLetters);
 app.route("/", decisions);
 app.route("/", notifications);
+app.route("/", releases);
 app.route("/", projects);
 
 app.notFound((c) => fail(c, 404, "not_found", "Route not found"));

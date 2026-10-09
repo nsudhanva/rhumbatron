@@ -54,3 +54,9 @@ variable "vertex_spend_limit_usd" {
   type        = number
   default     = 40
 }
+
+variable "builds_api_token" {
+  description = "User-scoped token for the release path (ADR 0018): Workers Builds Configuration Edit and Workers Scripts Read. Bound as BUILDS_API_TOKEN on the integration Worker only. Loaded from the Keychain (`rhumbatron-cloudflare-builds-token`) by `bun run tf dev`."
+  type        = string
+  sensitive   = true
+}

@@ -1,6 +1,7 @@
 # ADR 0014: Workers Builds connection to an Artifacts repo is a one-time dashboard step
 
-Status: accepted (2026-10-09)
+Status: accepted (2026-10-09). Superseded in part by ADR 0018: the connection is made once with
+`cf builds workers create`, and the release workflow is implemented.
 
 ## Context
 
