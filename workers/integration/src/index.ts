@@ -50,7 +50,11 @@ async function isArchived(env: Env, projectId: string) {
  * Handles one command. Unknown commands and Changes are acknowledged and dropped. Returns
  * "continue" when a bounded command has more work for another delivery.
  */
-async function handleCommand(env: Env, body: unknown): Promise<"continue" | undefined> {
+async function handleCommand(
+  env: Env,
+  body: unknown,
+  attempts = 1,
+): Promise<"continue" | "wait" | undefined> {
   const command = AnyCommandEnvelope.safeParse(body);
   if (!command.success) return;
   if (command.data.commandType === "project.cleanup") {
@@ -101,11 +105,14 @@ async function handleCommand(env: Env, body: unknown): Promise<"continue" | unde
   // Section 21.1 step 7: the Work Graph completed; compose its Candidates (Causal Router).
   if (command.data.commandType === "candidate.create") {
     if (!command.data.changeId) return;
-    const result = await composeChangeCandidates(env, command.data.changeId);
+    // The last delivery composes anyway: a stuck review must not hold the Change forever.
+    const result = await composeChangeCandidates(env, command.data.changeId, {
+      force: attempts >= MAX_DELIVERIES,
+    });
     console.warn(
       JSON.stringify({ event: "candidate.create", changeId: command.data.changeId, ...result }),
     );
-    return;
+    return result.status === "waiting" ? "wait" : undefined;
   }
   if (command.data.commandType !== "change.dispatch" || !command.data.changeId) return;
   const { changeId } = command.data;
@@ -150,9 +157,9 @@ export default class Integration extends WorkerEntrypoint<Env> {
   override async queue(batch: MessageBatch): Promise<void> {
     for (const message of batch.messages) {
       try {
-        const outcome = await handleCommand(this.env, message.body);
-        if (outcome === "continue" && message.attempts < MAX_DELIVERIES) {
-          message.retry({ delaySeconds: 10 });
+        const outcome = await handleCommand(this.env, message.body, message.attempts);
+        if (outcome && message.attempts < MAX_DELIVERIES) {
+          message.retry({ delaySeconds: outcome === "wait" ? 45 : 10 });
         } else {
           await resolveDeadLetter(this.env.DB, message.body);
           message.ack();

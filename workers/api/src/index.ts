@@ -10,6 +10,7 @@ import { decisions } from "./decisions.ts";
 import { fixtures } from "./fixtures.ts";
 import { errorBody, fail, respond } from "./http.ts";
 import { live } from "./live.ts";
+import { notifications } from "./notifications.ts";
 import { productGraph } from "./product-graph.ts";
 import { projects } from "./projects.ts";
 import { screenshots } from "./screenshots.ts";
@@ -46,6 +47,7 @@ app.route("/", workspace);
 app.route("/", productGraph);
 app.route("/", deadLetters);
 app.route("/", decisions);
+app.route("/", notifications);
 app.route("/", projects);
 
 app.notFound((c) => fail(c, 404, "not_found", "Route not found"));

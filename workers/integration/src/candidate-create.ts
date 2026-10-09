@@ -166,6 +166,8 @@ export type CreateCandidateOutcome =
 
 export type ComposeOutcome =
   | { status: "skipped"; reason: string }
+  /** A conflict review is still running; composing now could miss its fork decision. */
+  | { status: "waiting"; reason: string }
   | {
       status: "composed";
       forkConflictId: string | null;
@@ -395,11 +397,36 @@ export async function createCandidate(
  * Applies the fork rule (`planCandidateSets`). Safe to repeat: every Candidate ID is its
  * composition key. A Change with no proposed ChangeSet is skipped: there is nothing to compose.
  */
-export async function composeChangeCandidates(env: Env, changeId: string): Promise<ComposeOutcome> {
+export async function composeChangeCandidates(
+  env: Env,
+  changeId: string,
+  options: { force?: boolean } = {},
+): Promise<ComposeOutcome> {
   const change = await openChange(env, changeId);
   if ("reason" in change) return { status: "skipped", reason: change.reason };
   if (change.status !== "verifying") {
     return { status: "skipped", reason: `change is ${change.status}` };
+  }
+  // A model review can turn a suspected conflict into a fork (section 32.4). Wait for reviews
+  // reserved in the last 10 minutes; an older reservation is a lost review and does not block.
+  if (!options.force) {
+    const pending = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM conflicts WHERE change_id = ? AND state IN ('suspected', 'confirmed')
+         AND ((json_extract(review_json, '$.reviews.sonnet.status') = 'reserved'
+               AND json_extract(review_json, '$.reviews.sonnet.at') > ?)
+           OR (json_extract(review_json, '$.reviews.opus.status') = 'reserved'
+               AND json_extract(review_json, '$.reviews.opus.at') > ?))`,
+    )
+      .bind(
+        change.id,
+        new Date(Date.now() - 600_000).toISOString(),
+        new Date(Date.now() - 600_000).toISOString(),
+      )
+      .first<{ n: number }>()
+      .catch(() => null);
+    if ((pending?.n ?? 0) > 0) {
+      return { status: "waiting", reason: `${pending?.n} conflict review(s) still running` };
+    }
   }
   const [proposed, forks] = await Promise.all([
     loadProposed(env, change.id),

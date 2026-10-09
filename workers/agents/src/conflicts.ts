@@ -1,11 +1,13 @@
 import {
   type ClaimContention,
+  type ConflictReviewRecord,
   type DeclaredIntent,
   detectConflicts,
   type ForkDecision,
   forkDecision,
   type IntentMeta,
   intentFromDeclaration,
+  type ReviewTier,
 } from "@rhumbatron/conflict";
 import type { ResourceShardDO } from "@rhumbatron/coordinator";
 import { shardKey } from "@rhumbatron/coordinator/shard-key";
@@ -22,26 +24,34 @@ import type {
  * Intent declaration and semantic-conflict detection for one Change (AGENTS.md sections 26 and 32,
  * P9-04 and P9-07). Every Intent of a Change lives on the ResourceShardDO that owns
  * `change:<id>`, so one `listIntents` call sees the whole Change. Detection is deterministic: no
- * model call decides a conflict here. A model review plugs in through `ConflictReviewer`.
+ * model call decides a conflict here. The model review runs later (conflict-review.ts).
  */
 
 /** Protected resources until Project policies are stored (section 53 example policy). */
-const DEFAULT_PROTECTED_RESOURCES = ["cart", "checkout", "identity"];
+export const DEFAULT_PROTECTED_RESOURCES = ["cart", "checkout", "identity"];
 
 /** Candidate statuses that no longer count against `max_candidate_count` (section 44). */
-const INACTIVE_CANDIDATE_STATUSES = ["rejected", "stale", "promoted"];
+export const INACTIVE_CANDIDATE_STATUSES = ["rejected", "stale", "promoted"];
 
+/**
+ * `conflicts.review_json`. `decidedBy` names who set the current state. `reviews` holds the model
+ * reviews (P9-05, P9-06; conflict-review.ts), applied or not, so unsupported findings stay visible.
+ */
 export type ConflictReview = {
   state: ConflictState;
   recommendedAction: ConflictAction;
   decidedBy: "rules" | "sonnet" | "opus";
   rationale?: string;
+  /** A review asked a person to decide. Not a conflict state; nothing else changes. */
+  attention?: "human";
+  reviews?: Partial<Record<ReviewTier, ConflictReviewRecord>>;
 };
 
 /**
- * Second opinion on a deterministic report (section 32.3 steps 6-7). A reviewer can dismiss or
- * downgrade a report, or ask for review; it must not confirm a conflict without a hard signal
- * from the detector. Sonnet review (P9-05) and Opus escalation (P9-06) implement this type.
+ * Synchronous second opinion on a deterministic report at detection time (section 32.3 steps
+ * 6-7). It must not confirm a conflict without a hard signal from the detector. The model review
+ * (Sonnet, P9-05; Opus escalation, P9-06) does not use this hook: it runs after the conflict is
+ * recorded, off the agent's run path (conflict-review.ts).
  */
 export type ConflictReviewer = (
   report: ConflictReport,

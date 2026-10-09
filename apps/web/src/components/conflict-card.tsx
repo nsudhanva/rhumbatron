@@ -45,6 +45,83 @@ function nextStep(conflict: ConflictDetail): { label: string; detail: string } {
   return { label: "No fork", detail: "No fork is needed." };
 }
 
+/** One model review as the agents Worker stores it (`review_json.reviews.<tier>`, P9-05, P9-06). */
+type ModelReview = {
+  status: "reserved" | "done" | "failed" | "refused";
+  reason?: string;
+  verdict?: string | null;
+  rationale?: string;
+  citations?: string[];
+  support?: "supported" | "unsupported";
+  outcome?: string;
+  deferred?: boolean;
+};
+
+type ReviewWithModels = ConflictDetail["review"] & {
+  attention?: "human";
+  reviews?: Partial<Record<"sonnet" | "opus", ModelReview>>;
+};
+
+const VERDICT_LABEL: Record<string, string> = {
+  benign_overlap: "Benign overlap",
+  confirmed_conflict: "Confirmed conflict",
+  fork_candidates: "Fork Candidates",
+  needs_more_evidence: "Needs more evidence",
+  escalate_to_human: "Escalate to a person",
+};
+
+/** What code did with the verdict. A model verdict never changes state on its own. */
+function reviewEffect(review: ModelReview): string {
+  if (review.status === "reserved") return "Review running.";
+  if (review.status === "refused") return `Not run: ${review.reason ?? "limit reached"}.`;
+  if (review.status === "failed") return `Call failed (${review.reason ?? "error"}). Rules decide.`;
+  if (!review.verdict) return "Output did not match the contract. Ignored.";
+  if (review.deferred) return "Recorded; Opus decides.";
+  if (review.support === "unsupported") return "Unsupported citations. State unchanged.";
+  return review.outcome?.startsWith("rejected_")
+    ? `Not applied (${review.outcome.slice(9).replace(/_/g, " ")}).`
+    : `Applied (${(review.outcome ?? "").replace(/_/g, " ")}).`;
+}
+
+function ModelReviews({ review }: { review: ReviewWithModels }) {
+  const rows = (["sonnet", "opus"] as const).flatMap((tier) => {
+    const r = review.reviews?.[tier];
+    return r ? [{ tier, r }] : [];
+  });
+  if (rows.length === 0 && !review.attention) return null;
+  return (
+    <div className="grid gap-1">
+      <h4 className="type-label text-kumo-subtle">Model review</h4>
+      {review.attention === "human" && (
+        <p className="text-[12px] font-semibold text-kumo-accent">
+          A person must decide this conflict.
+        </p>
+      )}
+      <ul className="grid">
+        {rows.map(({ tier, r }) => (
+          <li
+            key={tier}
+            className="grid gap-1 border-b border-kumo-rule py-1.5 text-[12px] last:border-b-0"
+          >
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-[11px]">{tier}</span>
+              {r.verdict && <Tag variant="outline">{VERDICT_LABEL[r.verdict] ?? r.verdict}</Tag>}
+              {r.support === "unsupported" && <Tag variant="accent">Unsupported</Tag>}
+              <span className="text-kumo-subtle">{reviewEffect(r)}</span>
+            </span>
+            {r.rationale && <span className="min-w-0">{r.rationale}</span>}
+            {r.citations && r.citations.length > 0 && (
+              <span className="font-mono text-[11px] break-all text-kumo-subtle">
+                cites {r.citations.join(", ")}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function IntentColumn({ intent }: { intent: ConflictIntent }) {
   return (
     <div className="grid min-w-0 content-start gap-2 bg-kumo-base p-3">
@@ -129,6 +206,8 @@ export function ConflictCard({ conflict }: { conflict: ConflictDetail }) {
           <p className="text-[12px] text-kumo-subtle">{conflict.review.rationale}</p>
         )}
       </div>
+
+      <ModelReviews review={conflict.review as ReviewWithModels} />
     </article>
   );
 }

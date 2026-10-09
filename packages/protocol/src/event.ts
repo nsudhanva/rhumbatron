@@ -23,6 +23,8 @@ export const EVENT_TYPES = [
   "intent.changed",
   "challenge.created",
   "challenge.resolved",
+  /** A model review (Sonnet, then Opus on escalation) of one semantic conflict (P9-05, P9-06). */
+  "conflict.reviewed",
   "changeset.proposed",
   "changeset.accepted",
   "changeset.rejected",

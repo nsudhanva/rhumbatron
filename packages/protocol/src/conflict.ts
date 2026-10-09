@@ -142,3 +142,52 @@ export const ConflictReport = z.object({
   recommendedAction: ConflictAction,
 });
 export type ConflictReport = z.infer<typeof ConflictReport>;
+
+/**
+ * Closed verdict vocabulary of a model conflict review (AGENTS.md sections 22.4, 22.5, 32.3,
+ * P9-05, P9-06). Application code rejects any other value. A verdict is a hypothesis: code applies
+ * it only when its citations are valid (section 34.4.2) and the deterministic rules allow it.
+ */
+export const ConflictReviewVerdict = z.enum([
+  "benign_overlap",
+  "confirmed_conflict",
+  "fork_candidates",
+  "needs_more_evidence",
+  "escalate_to_human",
+]);
+export type ConflictReviewVerdict = z.infer<typeof ConflictReviewVerdict>;
+
+/** The only output a review model may return. Free text lives in `rationale` only. */
+export const ConflictReviewOutput = z.object({
+  verdict: ConflictReviewVerdict,
+  rationale: z.string().min(1).max(2000),
+  /** Context Packet item IDs the model received, for example `intent:<id>:data:0`. */
+  citations: z.array(z.string().min(1).max(300)).max(20),
+});
+export type ConflictReviewOutput = z.infer<typeof ConflictReviewOutput>;
+
+/** Decision Receipt of one model conflict review (section 23.5). No private reasoning. */
+export const ConflictReviewReceipt = z.object({
+  decisionType: z.literal("CONFLICT_REVIEW"),
+  conflictId: Id,
+  changeId: Id,
+  /** The tier was chosen by deterministic rules: Sonnet first, Opus on escalation (section 22.4). */
+  decidedBy: z.literal("rules"),
+  selectedTier: z.enum(["sonnet", "opus"]),
+  provider: z.string(),
+  model: z.string(),
+  escalationReasons: z.array(z.string()),
+  verdict: ConflictReviewVerdict.nullable(),
+  support: z.enum(["supported", "unsupported"]).nullable(),
+  citations: z.array(z.string()),
+  citationErrors: z.array(z.object({ id: z.string().nullable(), reason: z.string() })),
+  /** What code did with the verdict, for example `dismissed` or `rejected_unsupported`. */
+  outcome: z.string(),
+  stateBefore: ConflictState,
+  stateAfter: ConflictState,
+  costUsd: z.number().nonnegative(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  createdAt: Timestamp,
+});
+export type ConflictReviewReceipt = z.infer<typeof ConflictReviewReceipt>;

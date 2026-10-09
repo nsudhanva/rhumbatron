@@ -44,6 +44,11 @@ import {
   renewRunClaims,
   sqlRunClaimStore,
 } from "./claims-client.ts";
+import {
+  CONFLICT_REVIEW_SPEND_SQL,
+  type ConflictReviewJob,
+  runConflictReviews,
+} from "./conflict-review.ts";
 import { declareIntentAndDetect } from "./conflicts.ts";
 import { chooseProvider, limitAttempts, limitStop, markProviderFlag } from "./limits.ts";
 import { createTierModels, modelIdFor, PROVIDER_ID } from "./models.ts";
@@ -415,16 +420,18 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       .map((r) => ({ tier: r.tier, kind: r.failure_kind as FailureKind }));
     const attempt = (previous.results?.length ?? 0) + 1;
     const flags = JSON.parse(task.route_json ?? "{}") as Record<string, boolean>;
-    const [openTasks, spent] = await this.env.DB.batch<{ n: number }>([
+    const [openTasks, spent, reviewSpent] = await this.env.DB.batch<{ n: number }>([
       this.env.DB.prepare(
         "SELECT COUNT(*) AS n FROM tasks WHERE change_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')",
       ).bind(input.changeId),
       this.env.DB.prepare(
         "SELECT COALESCE(SUM(r.cost_usd), 0) AS n FROM task_runs r JOIN tasks t ON t.id = r.task_id WHERE t.change_id = ?",
       ).bind(input.changeId),
+      // Conflict reviews (P9-05, P9-06) spend from the same Change budget.
+      this.env.DB.prepare(CONFLICT_REVIEW_SPEND_SQL).bind(input.changeId),
     ]);
     // Recorded spend (Gemini overflow is paid, ADR 0016) comes off the Change budget first.
-    const changeSpentUsd = spent?.results?.[0]?.n ?? 0;
+    const changeSpentUsd = (spent?.results?.[0]?.n ?? 0) + (reviewSpent?.results?.[0]?.n ?? 0);
     const budgetUsd = taskBudgetUsd(
       task.budget_usd,
       changeSpentUsd,
@@ -865,12 +872,16 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
           },
           contentions,
         );
-        if (conflicts.length > 0)
+        if (conflicts.length > 0) {
           log({
             event: "agent.conflicts_detected",
             taskId: input.taskId,
             conflicts: conflicts.map((c) => `${c.id}:${c.review.state}`),
           });
+          // Model review (P9-05, P9-06) runs from a durable schedule, never on this run's path.
+          const job: ConflictReviewJob = { ctx, conflictIds: conflicts.map((c) => c.id) };
+          await this.schedule(1, "reviewConflicts", job);
+        }
       } catch (error) {
         log({
           event: "agent.intent_declare_failed",
@@ -967,6 +978,11 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
 
   async retryTask(input: AgentRunInput) {
     await this.start(input);
+  }
+
+  /** Scheduled after conflict detection: Sonnet, then Opus on escalation. Never throws. */
+  async reviewConflicts(job: ConflictReviewJob) {
+    await runConflictReviews(this.env, job);
   }
 
   /** Conflict and dependency resumes arrive in Phase 9; until then the event is only recorded. */

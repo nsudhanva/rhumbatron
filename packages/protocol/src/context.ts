@@ -18,6 +18,11 @@ export const ContextSource = z.enum([
   "file",
   "symbol",
   "product_graph",
+  /** Conflict review packets (P9-05): typed Intent fields, ChangeSet stats, detector signals. */
+  "intent",
+  "changeset",
+  "conflict_signal",
+  "conflict_review",
 ]);
 export type ContextSource = z.infer<typeof ContextSource>;
 

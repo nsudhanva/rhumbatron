@@ -27,6 +27,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { type ShellLiveState, useShellLiveState } from "../../lib/live-status";
 import { type ColorMode, useColorMode } from "../../lib/mode";
 import { setViewMode, useViewMode, type ViewMode } from "../../lib/view-mode";
+import { NotificationBell } from "../notifications/notification-bell";
 import { type Crumb, usePageTrail } from "./page-meta";
 import {
   PROJECT_PAGES,
@@ -338,6 +339,10 @@ function Header({ context }: { context: ShellContext }) {
     <header className="col-start-2 row-start-1 flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b-2 border-kumo-divider bg-kumo-base px-7 py-2 max-[720px]:col-start-1 max-[720px]:row-start-2 max-[720px]:px-4">
       <Breadcrumbs crumbs={[...context.trail, ...extra]} />
       <div className="flex flex-wrap items-center gap-2">
+        {/* Left of the toggles: when it appears after sign-in, nothing to its right moves. */}
+        <Show when="signed-in">
+          <NotificationBell />
+        </Show>
         <ViewToggle />
         <ModeToggle />
       </div>

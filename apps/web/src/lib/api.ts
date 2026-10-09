@@ -931,3 +931,55 @@ export type ChangeDecisions = { receipts: DecisionReceiptView[]; truncated: bool
 export const getChangeDecisions = createServerFn()
   .inputValidator((changeId: string) => changeId)
   .handler(({ data }) => call<ChangeDecisions>(`/v1/changes/${data}/decisions`));
+
+/* Inbox (apps/web/src/components/notifications): derived from D1 state by workers/api notifications.ts. */
+
+export type NotificationKind =
+  | "approval_required"
+  | "promotion_ready"
+  | "dead_letter"
+  | "budget_blocked"
+  | "candidate_rejected"
+  | "conflict_open"
+  | "change_completed"
+  | "promoted";
+
+/** `action`: needs a person until its condition clears. `attention`: stopped or rejected work. */
+export type NotificationSeverity = "action" | "attention" | "info";
+
+export type AppNotification = {
+  /** Stable: `<kind>:<entity id>`, plus an occurrence suffix for items that can reopen. */
+  id: string;
+  kind: NotificationKind;
+  severity: NotificationSeverity;
+  title: string;
+  body: string;
+  projectId: string;
+  projectName: string;
+  changeId?: string;
+  candidateId?: string;
+  /** App path, for example `/candidates/<id>`. */
+  href: string;
+  createdAt: string;
+  read: boolean;
+};
+
+/** `unread`: items without a read mark. `action`: open action items, read or not. */
+export type NotificationCount = { unread: number; action: number };
+
+export type NotificationInbox = NotificationCount & { items: AppNotification[] };
+
+export const getNotificationCount = createServerFn().handler(() =>
+  call<NotificationCount>("/v1/notifications/count"),
+);
+
+export const listNotifications = createServerFn().handler(() =>
+  call<NotificationInbox>("/v1/notifications?limit=50"),
+);
+
+/** Read marks clear the unread dot only: an action item stays until its condition clears. */
+export const markNotificationsRead = createServerFn({ method: "POST" })
+  .inputValidator((ids: string[] | "all") => ids)
+  .handler(({ data }) =>
+    call<{ marked: number }>("/v1/notifications/read", { method: "POST", body: { ids: data } }),
+  );

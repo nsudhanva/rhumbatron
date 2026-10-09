@@ -63,6 +63,8 @@
       "name": "@rhumbatron/conflict",
       "version": "0.0.0",
       "dependencies": {
+        "@rhumbatron/context-compiler": "workspace:*",
+        "@rhumbatron/evidence": "workspace:*",
         "@rhumbatron/protocol": "workspace:*",
       },
       "devDependencies": {

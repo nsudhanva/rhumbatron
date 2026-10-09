@@ -11,6 +11,8 @@
     "test:critical": "vitest run --dir src"
   },
   "dependencies": {
+    "@rhumbatron/context-compiler": "workspace:*",
+    "@rhumbatron/evidence": "workspace:*",
     "@rhumbatron/protocol": "workspace:*"
   },
   "devDependencies": {
