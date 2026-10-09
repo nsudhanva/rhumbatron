@@ -14,9 +14,11 @@ import { Route as DesignRouteImport } from './routes/design'
 import { Route as CandidatesCandidateIdRouteImport } from './routes/candidates.$candidateId'
 import { Route as ChangesChangeIdRouteImport } from './routes/changes.$changeId'
 import { Route as CompareChangeIdRouteImport } from './routes/compare.$changeId'
+import { Route as DesignFlightRouteImport } from './routes/design_.flight'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
+import { Route as ChangesChangeIdFlightRouteImport } from './routes/changes_.$changeId.flight'
 import { Route as LiveProjectsProjectIdRouteImport } from './routes/live.projects.$projectId'
 import { Route as ProjectsProjectIdAgentsRouteImport } from './routes/projects_.$projectId.agents'
 import { Route as ProjectsProjectIdCostsRouteImport } from './routes/projects_.$projectId.costs'
@@ -24,6 +26,7 @@ import { Route as ProjectsProjectIdEventsRouteImport } from './routes/projects_.
 import { Route as ProjectsProjectIdGraphRouteImport } from './routes/projects_.$projectId.graph'
 import { Route as ProjectsProjectIdVerificationRouteImport } from './routes/projects_.$projectId.verification'
 import { Route as ProjectsProjectIdWorkspaceRouteImport } from './routes/projects_.$projectId.workspace'
+import { Route as EvidenceCandidateIdCheckIdNRouteImport } from './routes/evidence.$candidateId.$checkId.$n'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -50,6 +53,11 @@ const CompareChangeIdRoute = CompareChangeIdRouteImport.update({
   path: '/compare/$changeId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DesignFlightRoute = DesignFlightRouteImport.update({
+  id: '/design_/flight',
+  path: '/design/flight',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
   id: '/projects/$projectId',
   path: '/projects/$projectId',
@@ -63,6 +71,11 @@ const SignInSplatRoute = SignInSplatRouteImport.update({
 const SignUpSplatRoute = SignUpSplatRouteImport.update({
   id: '/sign-up/$',
   path: '/sign-up/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChangesChangeIdFlightRoute = ChangesChangeIdFlightRouteImport.update({
+  id: '/changes_/$changeId/flight',
+  path: '/changes/$changeId/flight',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LiveProjectsProjectIdRoute = LiveProjectsProjectIdRouteImport.update({
@@ -102,6 +115,12 @@ const ProjectsProjectIdWorkspaceRoute =
     path: '/projects/$projectId/workspace',
     getParentRoute: () => rootRouteImport,
   } as any)
+const EvidenceCandidateIdCheckIdNRoute =
+  EvidenceCandidateIdCheckIdNRouteImport.update({
+    id: '/evidence/$candidateId/$checkId/$n',
+    path: '/evidence/$candidateId/$checkId/$n',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -109,9 +128,11 @@ export interface FileRoutesByFullPath {
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/compare/$changeId': typeof CompareChangeIdRoute
+  '/design/flight': typeof DesignFlightRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/changes/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
   '/projects/$projectId/costs': typeof ProjectsProjectIdCostsRoute
@@ -119,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId/graph': typeof ProjectsProjectIdGraphRoute
   '/projects/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
   '/projects/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
+  '/evidence/$candidateId/$checkId/$n': typeof EvidenceCandidateIdCheckIdNRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -126,9 +148,11 @@ export interface FileRoutesByTo {
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/compare/$changeId': typeof CompareChangeIdRoute
+  '/design/flight': typeof DesignFlightRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/changes/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
   '/projects/$projectId/costs': typeof ProjectsProjectIdCostsRoute
@@ -136,6 +160,7 @@ export interface FileRoutesByTo {
   '/projects/$projectId/graph': typeof ProjectsProjectIdGraphRoute
   '/projects/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
   '/projects/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
+  '/evidence/$candidateId/$checkId/$n': typeof EvidenceCandidateIdCheckIdNRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -144,9 +169,11 @@ export interface FileRoutesById {
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/compare/$changeId': typeof CompareChangeIdRoute
+  '/design_/flight': typeof DesignFlightRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/changes_/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects_/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
   '/projects_/$projectId/costs': typeof ProjectsProjectIdCostsRoute
@@ -154,6 +181,7 @@ export interface FileRoutesById {
   '/projects_/$projectId/graph': typeof ProjectsProjectIdGraphRoute
   '/projects_/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
   '/projects_/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
+  '/evidence/$candidateId/$checkId/$n': typeof EvidenceCandidateIdCheckIdNRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -163,9 +191,11 @@ export interface FileRouteTypes {
     | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/compare/$changeId'
+    | '/design/flight'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/changes/$changeId/flight'
     | '/live/projects/$projectId'
     | '/projects/$projectId/agents'
     | '/projects/$projectId/costs'
@@ -173,6 +203,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/graph'
     | '/projects/$projectId/verification'
     | '/projects/$projectId/workspace'
+    | '/evidence/$candidateId/$checkId/$n'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -180,9 +211,11 @@ export interface FileRouteTypes {
     | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/compare/$changeId'
+    | '/design/flight'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/changes/$changeId/flight'
     | '/live/projects/$projectId'
     | '/projects/$projectId/agents'
     | '/projects/$projectId/costs'
@@ -190,6 +223,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/graph'
     | '/projects/$projectId/verification'
     | '/projects/$projectId/workspace'
+    | '/evidence/$candidateId/$checkId/$n'
   id:
     | '__root__'
     | '/'
@@ -197,9 +231,11 @@ export interface FileRouteTypes {
     | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/compare/$changeId'
+    | '/design_/flight'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/changes_/$changeId/flight'
     | '/live/projects/$projectId'
     | '/projects_/$projectId/agents'
     | '/projects_/$projectId/costs'
@@ -207,6 +243,7 @@ export interface FileRouteTypes {
     | '/projects_/$projectId/graph'
     | '/projects_/$projectId/verification'
     | '/projects_/$projectId/workspace'
+    | '/evidence/$candidateId/$checkId/$n'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -215,9 +252,11 @@ export interface RootRouteChildren {
   CandidatesCandidateIdRoute: typeof CandidatesCandidateIdRoute
   ChangesChangeIdRoute: typeof ChangesChangeIdRoute
   CompareChangeIdRoute: typeof CompareChangeIdRoute
+  DesignFlightRoute: typeof DesignFlightRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
+  ChangesChangeIdFlightRoute: typeof ChangesChangeIdFlightRoute
   LiveProjectsProjectIdRoute: typeof LiveProjectsProjectIdRoute
   ProjectsProjectIdAgentsRoute: typeof ProjectsProjectIdAgentsRoute
   ProjectsProjectIdCostsRoute: typeof ProjectsProjectIdCostsRoute
@@ -225,6 +264,7 @@ export interface RootRouteChildren {
   ProjectsProjectIdGraphRoute: typeof ProjectsProjectIdGraphRoute
   ProjectsProjectIdVerificationRoute: typeof ProjectsProjectIdVerificationRoute
   ProjectsProjectIdWorkspaceRoute: typeof ProjectsProjectIdWorkspaceRoute
+  EvidenceCandidateIdCheckIdNRoute: typeof EvidenceCandidateIdCheckIdNRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -264,6 +304,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CompareChangeIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/design_/flight': {
+      id: '/design_/flight'
+      path: '/design/flight'
+      fullPath: '/design/flight'
+      preLoaderRoute: typeof DesignFlightRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projects/$projectId': {
       id: '/projects/$projectId'
       path: '/projects/$projectId'
@@ -283,6 +330,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-up/$'
       fullPath: '/sign-up/$'
       preLoaderRoute: typeof SignUpSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/changes_/$changeId/flight': {
+      id: '/changes_/$changeId/flight'
+      path: '/changes/$changeId/flight'
+      fullPath: '/changes/$changeId/flight'
+      preLoaderRoute: typeof ChangesChangeIdFlightRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/live/projects/$projectId': {
@@ -334,6 +388,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectIdWorkspaceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/evidence/$candidateId/$checkId/$n': {
+      id: '/evidence/$candidateId/$checkId/$n'
+      path: '/evidence/$candidateId/$checkId/$n'
+      fullPath: '/evidence/$candidateId/$checkId/$n'
+      preLoaderRoute: typeof EvidenceCandidateIdCheckIdNRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -343,9 +404,11 @@ const rootRouteChildren: RootRouteChildren = {
   CandidatesCandidateIdRoute: CandidatesCandidateIdRoute,
   ChangesChangeIdRoute: ChangesChangeIdRoute,
   CompareChangeIdRoute: CompareChangeIdRoute,
+  DesignFlightRoute: DesignFlightRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
+  ChangesChangeIdFlightRoute: ChangesChangeIdFlightRoute,
   LiveProjectsProjectIdRoute: LiveProjectsProjectIdRoute,
   ProjectsProjectIdAgentsRoute: ProjectsProjectIdAgentsRoute,
   ProjectsProjectIdCostsRoute: ProjectsProjectIdCostsRoute,
@@ -353,6 +416,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsProjectIdGraphRoute: ProjectsProjectIdGraphRoute,
   ProjectsProjectIdVerificationRoute: ProjectsProjectIdVerificationRoute,
   ProjectsProjectIdWorkspaceRoute: ProjectsProjectIdWorkspaceRoute,
+  EvidenceCandidateIdCheckIdNRoute: EvidenceCandidateIdCheckIdNRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

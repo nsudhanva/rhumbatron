@@ -11,9 +11,8 @@ import {
 } from "@cloudflare/kumo";
 import { Plus } from "@phosphor-icons/react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AgentActivityPreview } from "../components/agents/agent-activity";
-import { usePageMeta } from "../components/shell/page-meta";
 import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../components/ui/data-table";
 import { EmptyState } from "../components/ui/empty-state";
 import { KeyValue } from "../components/ui/key-value";
@@ -44,7 +43,19 @@ import { MOTION, usePrefersReducedMotion } from "../lib/motion";
  * page, in the current mode. Not linked from the navigation. Check it in both modes and at
  * 720 / 1024 / 1280 / 1600px after any change to theme.css or components/ui.
  */
-export const Route = createFileRoute("/design")({ component: DesignReference });
+export const Route = createFileRoute("/design")({
+  head: () => ({
+    meta: [
+      { title: "Design reference · Rhumbatron" },
+      {
+        name: "description",
+        content: "Rhumbatron design reference: tokens, primitives and Kumo components.",
+      },
+      { name: "robots", content: "noindex" },
+    ],
+  }),
+  component: DesignReference,
+});
 
 const STATUSES = [
   "completed",
@@ -67,7 +78,10 @@ const STATUSES = [
 
 function DesignReference() {
   const [checked, setChecked] = useState(true);
-  usePageMeta({ trail: [{ label: "Design reference" }] });
+  // Wall-clock examples render after hydration: the server's clock and time zone differ from
+  // the browser's, and a mismatch would make React discard the server HTML.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => setNow(Date.now()), []);
   return (
     <Page>
       <PageTitle
@@ -145,8 +159,15 @@ function DesignReference() {
               { label: "Duration", value: formatDuration(192) },
               { label: "Delta", value: formatDelta(-12, "ms") },
               { label: "Budget", value: formatFraction(formatUsd(1.42), formatUsd(3)) },
-              { label: "Age", value: formatAge(new Date(Date.now() - 7 * 60_000).toISOString()) },
-              { label: "Clock", value: formatClock(new Date().toISOString()), mono: true },
+              {
+                label: "Age",
+                value: now === null ? null : formatAge(new Date(now - 7 * 60_000).toISOString()),
+              },
+              {
+                label: "Clock",
+                value: now === null ? null : formatClock(new Date(now).toISOString()),
+                mono: true,
+              },
               { label: "Unknown", value: null },
             ]}
           />
@@ -329,11 +350,14 @@ function DesignReference() {
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">Kumo badge</Badge>
             <Badge variant="info">Info is active</Badge>
-            <Tooltip content="Full value: cand_7f3a9c2e1b">
-              <Button variant="ghost" size="sm">
-                Hover for tooltip
-              </Button>
-            </Tooltip>
+            <Tooltip
+              content="Full value: cand_7f3a9c2e1b"
+              render={
+                <Button variant="ghost" size="sm">
+                  Hover for tooltip
+                </Button>
+              }
+            />
           </div>
         </Section>
         <Section label="Agent motion">

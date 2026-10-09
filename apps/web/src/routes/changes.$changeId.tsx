@@ -1,7 +1,8 @@
 import { Show } from "@clerk/tanstack-react-start";
-import { cn } from "@cloudflare/kumo";
+import { buttonVariants, cn } from "@cloudflare/kumo";
+import { Airplane } from "@phosphor-icons/react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deriveActivity } from "../components/agents/activity-model";
 import { AgentActivity } from "../components/agents/agent-activity";
@@ -284,6 +285,16 @@ function ChangeView() {
             <Mono subtle>{data.id}</Mono>
             {liveOpen && <StatusPill status="live" />}
           </>
+        }
+        actions={
+          <Link
+            to="/changes/$changeId/flight"
+            params={{ changeId }}
+            className={cn(buttonVariants({ variant: "primary" }), "gap-1.5")}
+          >
+            <Airplane size={16} aria-hidden />
+            Open Flight Control
+          </Link>
         }
       />
 

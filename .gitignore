@@ -64,3 +64,6 @@ infrastructure/terraform/modules/**/.terraform.lock.hcl
 
 # Offline Terraform check data
 infrastructure/terraform/.terraform-check/
+
+# TanStack Start generated files
+.tanstack/

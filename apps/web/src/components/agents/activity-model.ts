@@ -35,7 +35,7 @@ import { candidateLabels } from "../candidate/model";
  */
 
 /** Model calls a run may make per tier. Mirrors MAX_CALLS_PER_RUN in packages/model-router. */
-export const CALLS_PER_RUN: Record<TaskRun["tier"], number> = { haiku: 8, sonnet: 16, opus: 16 };
+export const CALLS_PER_RUN: Record<TaskRun["tier"], number> = { haiku: 16, sonnet: 32, opus: 32 };
 
 export type LaneSpec = {
   id: string;

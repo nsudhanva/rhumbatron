@@ -17,21 +17,25 @@ import { type ReactNode, useId } from "react";
 
 /**
  * The page's <main> landmark: max 1320px, padding 24 top / 28 sides / 48 bottom (16px sides
- * on narrow screens), 28px between sections. Pass `gap="tight"` for 24px.
+ * on narrow screens), 28px between sections. Pass `gap="tight"` for 24px. Pass `width="full"`
+ * for a full-bleed console (Flight Control) that keeps the same padding without the max width.
  */
 export function Page({
   children,
   gap = "normal",
+  width = "page",
   className,
 }: {
   children: ReactNode;
   gap?: "normal" | "tight";
+  width?: "page" | "full";
   className?: string;
 }) {
   return (
     <main
       className={cn(
-        "mx-auto grid w-full max-w-[1320px] content-start px-7 pt-6 pb-12 max-[720px]:px-4",
+        "mx-auto grid w-full content-start px-7 pt-6 pb-12 max-[720px]:px-4",
+        width === "page" && "max-w-[1320px]",
         gap === "normal" ? "gap-7" : "gap-6",
         className,
       )}

@@ -279,6 +279,8 @@ function Attempt({ run }: { run: AgentRunView }) {
           <span className="font-semibold">#{run.attempt}</span>
           <span>{run.escalatedFrom ? `${run.escalatedFrom} → ${run.tier}` : run.tier}</span>
           {run.escalatedFrom && <Tag variant="outline">Escalated</Tag>}
+          {/* Paid overflow on Vertex AI (ADR 0016). */}
+          {run.provider === "google-vertex-ai" && <Tag variant="outline">Gemini</Tag>}
         </p>
         <StatusPill status={run.status} />
       </div>

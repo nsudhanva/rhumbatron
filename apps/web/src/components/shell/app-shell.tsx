@@ -1,6 +1,7 @@
 import { Show, SignInButton, SignUpButton, UserButton, useUser } from "@clerk/tanstack-react-start";
 import { Button, cn } from "@cloudflare/kumo";
 import {
+  Airplane,
   CaretUpDown,
   CurrencyDollar,
   Desktop,
@@ -133,6 +134,14 @@ function navItems(context: ShellContext): NavItem[] {
         : { unavailable: NEEDS_PROJECT }),
     },
     { label: "Changes", icon: GitDiff, section: "changes", ...changes },
+    {
+      label: "Flight Control",
+      icon: Airplane,
+      section: "flight",
+      ...(changeId
+        ? { link: { to: "/changes/$changeId/flight", params: { changeId } } }
+        : { unavailable: projectId ? "Open a Change first" : NEEDS_PROJECT }),
+    },
     projectPageItem(projectId, "graph", Graph),
     { label: "Candidates", icon: GitFork, section: "candidates", ...candidates },
     { label: "Environments", icon: Stack, unavailable: SOON },
@@ -222,12 +231,7 @@ function Sidebar({ context }: { context: ShellContext }) {
 
 function BrandMark() {
   return (
-    <Link
-      to="/"
-      activeOptions={EXACT}
-      className="flex items-center gap-2"
-      aria-label="Rhumbatron home"
-    >
+    <Link to="/" activeOptions={EXACT} className="flex items-center gap-2">
       <span
         aria-hidden
         className="grid size-[22px] shrink-0 place-items-center bg-accent-500 text-[13px] leading-none font-extrabold text-kumo-inverse"
@@ -235,6 +239,8 @@ function BrandMark() {
         R
       </span>
       <span className="text-[17px] leading-none font-extrabold tracking-[-0.01em]">Rhumbatron</span>
+      {/* The name starts with the visible word (WCAG 2.5.3, label in name). */}
+      <span className="sr-only"> home</span>
     </Link>
   );
 }
@@ -306,7 +312,10 @@ function SignedInIdentity() {
   const name = user?.fullName || user?.primaryEmailAddress?.emailAddress;
   return (
     <div className="flex min-w-0 items-center gap-2.5">
-      <UserButton />
+      {/* Clerk mounts the 28px avatar after its script loads; reserve the box so the name does not shift. */}
+      <span className="grid size-7 shrink-0 place-items-center">
+        <UserButton />
+      </span>
       <div className="grid min-w-0">
         <span className="truncate text-[13px] font-semibold">{name ?? "Signed in"}</span>
         {name && user?.fullName && (

@@ -6,6 +6,7 @@ import { candidates } from "./candidates.ts";
 import { conflicts } from "./conflicts.ts";
 import { cost } from "./cost.ts";
 import { deadLetters } from "./dead-letters.ts";
+import { decisions } from "./decisions.ts";
 import { fixtures } from "./fixtures.ts";
 import { errorBody, fail, respond } from "./http.ts";
 import { live } from "./live.ts";
@@ -44,6 +45,7 @@ app.route("/", cost);
 app.route("/", workspace);
 app.route("/", productGraph);
 app.route("/", deadLetters);
+app.route("/", decisions);
 app.route("/", projects);
 
 app.notFound((c) => fail(c, 404, "not_found", "Route not found"));

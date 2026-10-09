@@ -447,6 +447,10 @@ export type ProjectCost = {
     month: string;
     agentModelCallsToday: number;
     agentDailyCallCap: number;
+    openrouterCallsToday: number;
+    openrouterDailyCallCap: number;
+    openrouterUsedUpToday: boolean;
+    vertexSpendLimitedToday: boolean;
     clefFlashCallsToday: number;
     clefDailyCap: number;
     sandboxSecondsMonth: number;
@@ -693,6 +697,8 @@ export type AgentRunView = {
   failureKind: string | null;
   failureReason: string | null;
   decidedBy: string | null;
+  /** Model provider from the Decision Receipt (ADR 0016); null on older receipts. */
+  provider: "openrouter" | "google-vertex-ai" | null;
   reasons: string[];
   /** The previous attempt's tier when this attempt moved up a tier. */
   escalatedFrom: TaskRun["tier"] | null;
@@ -893,3 +899,35 @@ export const dismissDeadLetter = createServerFn({ method: "POST" })
   .handler(({ data }) =>
     call<DeadLetterResolution>(`/v1/dead-letters/${data}/dismiss`, { method: "POST", body: {} }),
   );
+
+/* Flight Control (apps/web/src/components/flight): Decision Receipts of one Change. */
+
+/**
+ * One Decision Receipt (D1 decision_receipts, AGENTS.md 23.5): routing inputs and outputs only,
+ * never reasoning. Served by workers/api decisions.ts, capped and read through the task index.
+ */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export type DecisionReceiptView = {
+  id: string;
+  taskId: string;
+  agentId: string;
+  decisionType: string;
+  decidedBy: "rules" | "clef";
+  selectedTier: TaskRun["tier"];
+  /** The stored receipt JSON: `signals`, `probabilities`, `reasons`, `escalateOn`, ... */
+  receipt: { [key: string]: JsonValue };
+  createdAt: string;
+};
+
+export type ChangeDecisions = { receipts: DecisionReceiptView[]; truncated: boolean };
+
+export const getChangeDecisions = createServerFn()
+  .inputValidator((changeId: string) => changeId)
+  .handler(({ data }) => call<ChangeDecisions>(`/v1/changes/${data}/decisions`));

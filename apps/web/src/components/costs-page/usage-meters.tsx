@@ -10,6 +10,8 @@ const formatHours = (h: number) => formatUnit(h, "h", 1);
 /**
  * Free-tier meters (AGENTS.md sections 7.3, 44) from `usage_counters`, plus the Project's
  * recorded spend over the Changes on this page. The call and Sandbox counters are account-wide.
+ * OpenRouter is free up to its daily cap; then runs overflow to Gemini, whose spend the AI Gateway
+ * caps at $9 per 30 days (ADR 0016). Gemini spend shows in "Project model spend".
  */
 export function UsageMeters({
   meters,
@@ -48,6 +50,29 @@ export function UsageMeters({
             last {days.length} days · peak {formatNumber(Math.max(0, ...days.map((d) => d.count)))}
           </p>
         </div>
+      </StatCell>
+      <StatCell
+        label="OpenRouter today"
+        value={formatNumber(meters.openrouterCallsToday)}
+        unit={`/ ${formatNumber(meters.openrouterDailyCallCap)}`}
+        footnote={
+          meters.vertexSpendLimitedToday
+            ? "Gemini spend cap reached · $9 per 30 days"
+            : meters.openrouterUsedUpToday
+              ? "used up · new runs use Gemini (paid, capped)"
+              : "free models · then Gemini overflow"
+        }
+      >
+        <CapMeter
+          label="free cap"
+          value={
+            meters.openrouterUsedUpToday
+              ? meters.openrouterDailyCallCap
+              : meters.openrouterCallsToday
+          }
+          cap={meters.openrouterDailyCallCap}
+          format={(n) => formatNumber(n)}
+        />
       </StatCell>
       <StatCell
         label="Sandbox this month"

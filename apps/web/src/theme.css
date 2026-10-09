@@ -153,7 +153,10 @@
   --rh-row-hover: color-mix(in srgb, var(--rh-ink) 4%, transparent);
   --rh-hover: color-mix(in srgb, var(--rh-ink) 7%, transparent);
   --rh-press: color-mix(in srgb, var(--rh-ink) 14%, transparent);
-  --rh-subtle: color-mix(in srgb, var(--rh-ink) 62%, transparent);
+  /* DESIGN.md 2.2 sets 62% as the floor. 62% measures 4.49:1 on the light ground and 4.37:1
+     on elevated, under the 4.5:1 text rule (section 14); 66% holds >= 4.65:1 on ground,
+     elevated, recessed and the hover/selection fills in both modes. */
+  --rh-subtle: color-mix(in srgb, var(--rh-ink) 66%, transparent);
 
   --rh-ok: light-dark(oklch(0.5 0.11 152), oklch(0.78 0.12 152));
   --rh-ok-fill: light-dark(oklch(0.93 0.04 152), oklch(0.3 0.05 152));
@@ -704,11 +707,15 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
     opacity var(--rh-dur-greyout) var(--rh-ease-out),
     filter var(--rh-dur-greyout) var(--rh-ease-out);
 }
-/* Greyed out, but text stays at the 62% floor so the failing reason reads. */
+/* Greyed out, but the failing reason still reads (section 11, "in words"; section 14, 4.5:1).
+   An opacity fade multiplies into every nested text role (subtle inside a 62% fade measures
+   2.4:1), so the loser loses its hue and drops its ink to the subtle role instead. */
 .rh-greyout[data-state="rejected"],
 .rh-greyout[data-state="superseded"] {
-  opacity: 0.62;
   filter: grayscale(1);
+  color: var(--rh-subtle);
+  --text-color-kumo-default: var(--rh-subtle);
+  --text-color-kumo-strong: var(--rh-subtle);
 }
 
 /* Section 11: remove translations and pulses, cut durations, keep live bars updating without a

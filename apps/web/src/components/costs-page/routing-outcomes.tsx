@@ -9,12 +9,14 @@ const TIERS: Tier[] = ["haiku", "sonnet", "opus"];
 const FAILURE_LABEL: Record<string, string> = {
   run_call_cap: "Run call cap",
   budget_exhausted: "Budget stop",
+  spend_limited: "Gemini spend cap",
+  rate_limited: "Rate limited",
 };
 
 /**
  * Routing outcomes of one Change (AGENTS.md sections 23.5, 56): Decision Receipts by selected
  * tier, which layer decided, and what the attempts show about escalation and retries. Counts
- * only: free models price at $0, so no savings figure is claimed.
+ * only: no savings figure is claimed.
  */
 export function RoutingOutcomes({ routing }: { routing: SelectedCost["routing"] }) {
   const total = TIERS.reduce((sum, t) => sum + routing.receipts[t], 0);

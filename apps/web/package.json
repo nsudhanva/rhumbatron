@@ -21,7 +21,8 @@
     "@tanstack/react-start": "1.168.60",
     "@xyflow/react": "12.12.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zustand": "5.0.15"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.63.1",

@@ -31,6 +31,7 @@ export type ShellSection =
   | "projects"
   | "overview"
   | "changes"
+  | "flight"
   | "candidates"
   | ProjectPage
   | "other";
@@ -40,6 +41,7 @@ function sectionFor(routeId: string | undefined): ShellSection {
   const path = routeId?.replace(/_(?=\/|$)/g, "") ?? "";
   if (path === "/") return "projects";
   if (path === "/projects/$projectId") return "overview";
+  if (path.startsWith("/changes/") && path.endsWith("/flight")) return "flight";
   if (path.startsWith("/changes/$changeId")) return "changes";
   if (path.startsWith("/candidates/$candidateId") || path.startsWith("/compare/$changeId")) {
     return "candidates";
@@ -118,6 +120,9 @@ export function useShellContext(): ShellContext {
   if (projectId && isProjectPage(section)) {
     trail.push({ label: PROJECT_PAGES[section], link: projectPageLink(projectId, section) });
   }
+  // A static crumb belongs here, not in `usePageMeta`: the server renders it, so the header
+  // does not grow after hydration (a client-only crumb shifted /design by 27px at 412px wide).
+  if (routeId === "/design") trail.push({ label: "Design reference" });
 
   return {
     section,

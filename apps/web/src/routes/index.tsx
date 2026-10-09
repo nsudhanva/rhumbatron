@@ -13,7 +13,19 @@ import { Page, PageTitle, Section } from "../components/ui/page";
 import { createProject, listProjects } from "../lib/api";
 import { formatAge, formatNumber, generation } from "../lib/format";
 
-export const Route = createFileRoute("/")({ component: Home });
+export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "Projects · Rhumbatron" },
+      {
+        name: "description",
+        content:
+          "Your Rhumbatron projects: one canonical state per codebase, advanced only by verified evidence.",
+      },
+    ],
+  }),
+  component: Home,
+});
 
 function Home() {
   return (

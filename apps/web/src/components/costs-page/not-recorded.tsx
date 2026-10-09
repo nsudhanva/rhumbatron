@@ -22,8 +22,9 @@ export function NotRecorded() {
         <span className="font-semibold">Not recorded:</span> {NOT_RECORDED.join(" · ")}.
       </p>
       <p>
-        Spend is the sum of recorded attempt cost. Models run on free variants (ADR 0007), so a
-        recorded $0.00 is real, and no routing savings are claimed. Call, Clef-flash and Sandbox
+        Spend is the sum of recorded attempt cost. OpenRouter free models record $0.00 (ADR 0007);
+        Gemini overflow attempts record their token cost at Vertex prices (ADR 0016), capped at the
+        gateway at $9 per 30 days. No routing savings are claimed. Call, Clef-flash and Sandbox
         meters are account-wide, across every Project.
       </p>
     </footer>

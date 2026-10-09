@@ -55,7 +55,7 @@ export function CandidateList({
           {canCompose && (
             <Button
               size="sm"
-              variant="primary"
+              variant="secondary"
               icon={GitFork}
               loading={compose.isPending}
               onClick={() => compose.mutate()}
