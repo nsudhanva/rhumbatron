@@ -41,6 +41,12 @@ module "ai" {
 
 # Vectorize (P1-10) is deferred: provider 5.27 has no resource. See docs/adr/0003.
 
+# Pause switch: true stops everything that can run on its own (cron sweep, Sandbox starts) while
+# keeping all data. Set to false to resume.
+locals {
+  paused = true
+}
+
 # Worker bundles come from `bun run cf:bundle`. Run it before plan.
 locals {
   repo_root = "${path.module}/../../../.."
@@ -235,7 +241,8 @@ module "event_router_worker" {
     { type = "ai", name = "AI" },
   ]
 
-  cron_schedules = ["* * * * *"]
+  # Paused: no safety-net sweep; publish nudges still deliver events.
+  cron_schedules = local.paused ? [] : ["* * * * *"]
 }
 
 # Candidate, verification, and Change orchestration (AGENTS.md section 12.6). Phase 5 runs
@@ -340,7 +347,8 @@ locals {
     name          = "rhumbatron-sandbox-${local.environment}"
     image         = "docker.io/cloudflare/sandbox:0.12.6"
     instance_type = "basic"
-    max_instances = 1
+    # Paused: no Sandbox can start.
+    max_instances = local.paused ? 0 : 1
     class_name    = "Sandbox"
     script_name   = module.agents_worker.name
   }

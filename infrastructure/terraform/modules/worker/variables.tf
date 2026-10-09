@@ -104,7 +104,7 @@ variable "extra_tags" {
 }
 
 variable "cron_schedules" {
-  description = "Cron Trigger expressions. Keep equal to wrangler.jsonc triggers.crons."
+  description = "Cron Trigger expressions. Keep equal to wrangler.jsonc triggers.crons. Null: no trigger resource; [] clears schedules."
   type        = list(string)
-  default     = []
+  default     = null
 }

@@ -81,8 +81,10 @@ resource "cloudflare_workers_custom_domain" "this" {
   depends_on = [cloudflare_workers_deployment.this]
 }
 
+# Managed whenever the Worker ever had crons (var.cron_schedules non-null): an empty list clears the
+# schedules remotely. Destroying the resource would only drop it from state and leave crons running.
 resource "cloudflare_workers_cron_trigger" "this" {
-  count = length(var.cron_schedules) > 0 ? 1 : 0
+  count = var.cron_schedules == null ? 0 : 1
 
   account_id  = var.account_id
   script_name = cloudflare_worker.this.name
