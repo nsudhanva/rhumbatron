@@ -4,3 +4,4 @@ export * from "./common.ts";
 export * from "./event.ts";
 export * from "./model.ts";
 export * from "./project.ts";
+export * from "./work-graph.ts";

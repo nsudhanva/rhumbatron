@@ -89,5 +89,7 @@ export const CreateChangeRequest = z.object({
   goal: Change.shape.goal,
   budgetUsd: z.number().positive().max(100).default(3),
   clientRequestId: Id.optional(),
+  /** false skips the Root Planner, for example in smoke checks that must not spend model calls. */
+  startPlanning: z.boolean().default(true),
 });
 export type CreateChangeRequest = z.infer<typeof CreateChangeRequest>;

@@ -1,11 +1,12 @@
 /**
  * Remote smoke check for a deployed environment.
- * Usage: bun scripts/smoke.ts <dev|prod>
+ * Usage: bun scripts/smoke.ts <dev|prod> [--plan]
  *
  * Public checks are read-only. When CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID are set
  * (`bun run smoke:dev` loads them from the Keychain), it also runs the authenticated flow:
  * create a Project and a Change, read them back, and check idempotency and the snapshot.
  * Each authenticated run writes about five D1 rows.
+ * `--plan` also submits a real goal and waits for the Work Graph: 1 to 4 model calls (ADR 0007).
  */
 
 const hosts: Record<string, { web: string; api: string }> = {
@@ -109,6 +110,8 @@ if (secretKey && smokeUserId) {
     goal: "Smoke change",
     budgetUsd: 1,
     clientRequestId: `req-${slug}`,
+    // Smoke runs must not spend the 50 free model requests per day.
+    startPlanning: false,
   });
   const change = (await expectStatus(
     "create change",
@@ -156,6 +159,48 @@ if (secretKey && smokeUserId) {
     headers,
     body: JSON.stringify({ name: "", slug: "BAD SLUG" }),
   });
+
+  if (process.argv.includes("--plan")) {
+    const planned = (await expectStatus(
+      "create planned change",
+      `${target.api}/v1/projects/${projectId}/changes`,
+      201,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          goal: "Add shared wishlists. Users can create a wishlist, share it with a link, and let collaborators add or remove products. Keep existing cart behavior unchanged. Keep API p95 below 200 ms.",
+          budgetUsd: 3,
+        }),
+      },
+    )) as { data?: { id: string } } | undefined;
+    const changeId = planned?.data?.id ?? "missing";
+    type PlannedTask = { key: string; title: string; status: string; dependsOn: string[] };
+    let status = "created";
+    let tasks: PlannedTask[] = [];
+    const deadline = Date.now() + 5 * 60_000;
+    while (Date.now() < deadline && ["created", "compiling"].includes(status)) {
+      await Bun.sleep(5000);
+      const read = await fetch(`${target.api}/v1/changes/${changeId}`, { headers });
+      status = ((await read.json()) as { data?: { status: string } }).data?.status ?? "missing";
+    }
+    // Give the wake consumer a moment to assign the ready Tasks.
+    await Bun.sleep(5000);
+    const listed = await fetch(`${target.api}/v1/changes/${changeId}/tasks`, { headers });
+    tasks = ((await listed.json()) as { data?: PlannedTask[] }).data ?? [];
+    report("change compiled", status === "running", `status ${status}`);
+    report("work graph has tasks", tasks.length >= 2, `${tasks.length} tasks`);
+    const roots = tasks.filter((t) => t.dependsOn.length === 0);
+    report(
+      "only root tasks dispatched",
+      roots.length > 0 &&
+        tasks.every(
+          (t) => (t.dependsOn.length === 0) === ["ready", "assigned", "running"].includes(t.status),
+        ),
+    );
+    for (const t of tasks)
+      console.log(`      ${t.key} ${t.status.padEnd(9)} ${t.title}  deps=${t.dependsOn.length}`);
+  }
 
   await clerk(`/sessions/${session.id}/revoke`, {});
 } else {

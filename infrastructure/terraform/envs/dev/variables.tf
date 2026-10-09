@@ -25,3 +25,15 @@ variable "k2_consumer_token" {
   type        = string
   sensitive   = true
 }
+
+variable "openrouter_api_key" {
+  description = "OpenRouter key for free models (ADR 0007). Loaded from the Keychain by `bun run tf dev`."
+  type        = string
+  sensitive   = true
+}
+
+variable "vertex_service_account" {
+  description = "Base64 Vertex AI service account JSON with region (ADR 0007). Loaded from the Keychain."
+  type        = string
+  sensitive   = true
+}

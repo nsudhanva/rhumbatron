@@ -45,6 +45,17 @@
         "wrangler": "4.149.0",
       },
     },
+    "packages/causal-router": {
+      "name": "@rhumbatron/causal-router",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rhumbatron/protocol": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "7.0.2",
+        "vitest": "5.0.3",
+      },
+    },
     "packages/model-router": {
       "name": "@rhumbatron/model-router",
       "version": "0.0.0",
@@ -65,11 +76,17 @@
       },
       "devDependencies": {
         "typescript": "7.0.2",
+        "vitest": "5.0.3",
       },
     },
     "workers/agents": {
       "name": "@rhumbatron/agents",
       "version": "0.0.0",
+      "dependencies": {
+        "@rhumbatron/causal-router": "workspace:*",
+        "@rhumbatron/integration": "workspace:*",
+        "@rhumbatron/protocol": "workspace:*",
+      },
       "devDependencies": {
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
@@ -109,6 +126,8 @@
       "name": "@rhumbatron/event-router",
       "version": "0.0.0",
       "dependencies": {
+        "@rhumbatron/causal-router": "workspace:*",
+        "@rhumbatron/model-router": "workspace:*",
         "@rhumbatron/protocol": "workspace:*",
         "zod": "4.6.5",
       },
@@ -131,8 +150,16 @@
     "workers/integration": {
       "name": "@rhumbatron/integration",
       "version": "0.0.0",
+      "dependencies": {
+        "@rhumbatron/causal-router": "workspace:*",
+        "@rhumbatron/coordinator": "workspace:*",
+        "@rhumbatron/model-router": "workspace:*",
+        "@rhumbatron/protocol": "workspace:*",
+        "zod": "4.6.5",
+      },
       "devDependencies": {
         "typescript": "7.0.2",
+        "vitest": "5.0.3",
         "wrangler": "4.149.0",
       },
     },
@@ -491,6 +518,8 @@
     "@rhumbatron/agents": ["@rhumbatron/agents@workspace:workers/agents"],
 
     "@rhumbatron/api": ["@rhumbatron/api@workspace:workers/api"],
+
+    "@rhumbatron/causal-router": ["@rhumbatron/causal-router@workspace:packages/causal-router"],
 
     "@rhumbatron/coordinator": ["@rhumbatron/coordinator@workspace:workers/coordinator"],
 

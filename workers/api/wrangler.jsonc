@@ -37,5 +37,14 @@
         "script_name": "rhumbatron-coordinator"
       }
     ]
-  }
+  },
+  // ChangeWorkflow runs in the integration Worker (AGENTS.md section 21.1).
+  "workflows": [
+    {
+      "name": "rhumbatron-change-workflow-local",
+      "binding": "CHANGE_WORKFLOW",
+      "class_name": "ChangeWorkflow",
+      "script_name": "rhumbatron-integration"
+    }
+  ]
 }

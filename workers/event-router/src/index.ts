@@ -2,6 +2,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type { ProjectViewDO } from "@rhumbatron/coordinator";
 import type { EventEnvelope } from "@rhumbatron/protocol";
 import { buildArchive, writeArchive } from "./archive.ts";
+import { routeCausalBatch } from "./causal.ts";
 import { claimEvents, releaseEvents } from "./dedupe.ts";
 import {
   APPLY_DELTA_CAP,
@@ -18,7 +19,7 @@ import { decodeEnvelope, groupByProject, planProjects, toViewDelta } from "./pro
 
 /**
  * K2 pull consumer (AGENTS.md sections 12.5, 19, 31.1). Two subscriptions per stream:
- * `project-view-projector` updates ProjectViewDO; `causal-router` only dedupes for now.
+ * `project-view-projector` updates ProjectViewDO; `causal-router` wakes affected agents (section 31).
  * Subrequest budget per invocation, worst case, both subscriptions on one stream:
  *   per subscription: 1 resolve + 2 consume + 2 ack/nack + 2 D1 claim batches + 2 D1 release batches
  *   shared: at most APPLY_DELTA_CAP (15) applyDelta calls
@@ -80,9 +81,20 @@ async function handleBatch(
   });
 
   if (sub === "causal-router") {
-    // Deterministic routing to Queues arrives in Phase 5. Record only.
-    log({ event: "router.batch", stream: run.streamIndex, count: records.length });
-    return { fresh: fresh.length, ack: true };
+    try {
+      const routed = await routeCausalBatch(run.env, fresh);
+      log({ event: "router.routed", stream: run.streamIndex, count: records.length, ...routed });
+      return { fresh: fresh.length, ack: true };
+    } catch (error) {
+      // Release the claims so the redelivered batch is routed again, not skipped as a duplicate.
+      await releaseEvents(
+        run.env.DB,
+        sub,
+        fresh.map((e) => e.eventId),
+      );
+      log({ event: "router.route_failed", stream: run.streamIndex, ...errorInfo(error) });
+      return { fresh: 0, ack: false };
+    }
   }
 
   const { selected, deferred } = planProjects(groupByProject(fresh), run.applyBudget.remaining);

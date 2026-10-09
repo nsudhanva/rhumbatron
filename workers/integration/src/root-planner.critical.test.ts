@@ -1,0 +1,85 @@
+// The planner output is untrusted model text. Only a schema-valid, acyclic graph may reach D1.
+import type { CompletionRequest, CompletionResult } from "@rhumbatron/model-router";
+import { describe, expect, it } from "vitest";
+import { PlannerError, parsePlan, planChange } from "./root-planner.ts";
+
+const task = (key: string, dependsOn: string[] = []) => ({
+  key,
+  title: `Task ${key}`,
+  kind: "implement",
+  objective: "Implement the shared wishlist storage.",
+  semanticResources: ["wishlist:membership"],
+  dependsOn,
+  acceptanceCriteria: ["Owner can create a wishlist"],
+  riskTier: "medium",
+  complexity: "medium",
+  touchesAuthorization: false,
+  touchesBilling: false,
+  touchesMigration: false,
+});
+const plan = (tasks: unknown[]) =>
+  JSON.stringify({
+    acceptanceCriteria: ["Wishlists can be shared"],
+    invariants: [],
+    riskTier: "medium",
+    tasks,
+  });
+
+function reply(args: string | null): CompletionResult {
+  return {
+    provider: "openrouter",
+    model: "test",
+    content: null,
+    toolCalls:
+      args === null
+        ? []
+        : [
+            {
+              id: "c1",
+              type: "function",
+              function: { name: "submit_work_graph", arguments: args },
+            },
+          ],
+    finishReason: "tool_calls",
+    inputTokens: 1,
+    outputTokens: 1,
+    reasoningTokens: 0,
+    cachedInputTokens: 0,
+    costUsd: 0,
+    latencyMs: 1,
+    gatewayLogId: null,
+  };
+}
+
+describe("parsePlan", () => {
+  it("accepts a valid DAG and rejects cycles, bad JSON, and schema errors", () => {
+    expect(parsePlan(plan([task("t1"), task("t2", ["t1"])]))).toMatchObject({
+      ok: true,
+      order: ["t1", "t2"],
+    });
+    expect(parsePlan(plan([task("t1", ["t2"]), task("t2", ["t1"])])).ok).toBe(false);
+    expect(parsePlan("{not json").ok).toBe(false);
+    expect(parsePlan(plan([{ ...task("t1"), riskTier: "extreme" }])).ok).toBe(false);
+    expect(parsePlan(undefined).ok).toBe(false);
+  });
+});
+
+describe("planChange", () => {
+  it("repairs once with the validation errors, then succeeds", async () => {
+    const seen: CompletionRequest[] = [];
+    const replies = [reply(plan([task("t1", ["t9"])])), reply(plan([task("t1")]))];
+    const result = await planChange({ goal: "Add wishlists", projectName: "Acme" }, async (req) => {
+      seen.push(structuredClone(req));
+      return replies.shift() ?? reply(null);
+    });
+    expect(result.attempts).toBe(2);
+    expect(seen[0]?.tier).toBe("opus");
+    expect(JSON.stringify(seen[1]?.messages.at(-1))).toContain("unknown task t9");
+  });
+
+  it("gives up after two invalid answers", async () => {
+    await expect(
+      planChange({ goal: "Add wishlists", projectName: "Acme" }, async () => reply(null)),
+    ).rejects.toBeInstanceOf(PlannerError);
+  });
+});

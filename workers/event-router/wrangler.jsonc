@@ -34,5 +34,14 @@
         "script_name": "rhumbatron-coordinator"
       }
     ]
-  }
+  },
+  "queues": {
+    "producers": [
+      { "binding": "AGENT_WAKEUPS", "queue": "rhumbatron-agent-wakeups-local" },
+      // The Causal Router hands newly ready Tasks to the integration Worker's dispatcher.
+      { "binding": "INTEGRATION_COMMANDS", "queue": "rhumbatron-integration-local" }
+    ]
+  },
+  // Clef-flash for ambiguous wakeups only (AGENTS.md section 31.2), capped per day.
+  "ai": { "binding": "AI" }
 }

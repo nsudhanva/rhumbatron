@@ -73,6 +73,8 @@ module "api_worker" {
     module.state.bindings.DB,
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = module.coordinator_worker.name },
+    # Starts one ChangeWorkflow per Change (AGENTS.md section 21.1).
+    { type = "workflow", name = "CHANGE_WORKFLOW", workflow_name = cloudflare_workflow.change.workflow_name, class_name = "ChangeWorkflow", script_name = module.integration_worker.name },
   ]
 
   custom_domains = [{
@@ -220,9 +222,112 @@ module "event_router_worker" {
     module.state.bindings.EVIDENCE,
     # Literal name (not a module output) avoids a cycle: the coordinator binds back to this Worker.
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = "rhumbatron-coordinator-${local.environment}" },
+    # Causal Router (AGENTS.md section 31): wake commands, ready-task dispatch, Clef-flash.
+    { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
+    { type = "queue", name = "INTEGRATION_COMMANDS", queue_name = module.async.queues["integration"].name },
+    # Workers AI for Clef-flash only, capped at 200 calls per day in code (rule 50).
+    { type = "ai", name = "AI" },
   ]
 
   cron_schedules = ["* * * * *"]
+}
+
+# Candidate, verification, and Change orchestration (AGENTS.md section 12.6). Phase 5 runs
+# ChangeWorkflow: Root Planner, Task persistence, ready-task dispatch.
+module "integration_worker" {
+  source      = "../../modules/worker"
+  account_id  = var.account_id
+  component   = "integration"
+  environment = local.environment
+
+  main_module         = local.bundles.integration.main_module
+  bundle_sha256       = local.bundles.integration.bundle_sha256
+  compatibility_date  = local.bundles.integration.compatibility_date
+  compatibility_flags = local.bundles.integration.compatibility_flags
+  modules = [for m in local.bundles.integration.modules : {
+    name         = m.name
+    content_file = "${local.repo_root}/${m.content_file}"
+    content_type = m.content_type
+  }]
+
+  bindings = [
+    { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
+    { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-integration-${local.environment}" },
+    module.state.bindings.DB,
+    module.state.bindings.EVIDENCE,
+    { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
+    { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
+    # Models go through the AI Gateway (ADR 0007): OpenRouter free models, Vertex AI backup.
+    { type = "plain_text", name = "AI_ACCOUNT_ID", text = var.account_id },
+    { type = "plain_text", name = "AI_GATEWAY_ID", text = module.ai.gateway_id },
+    { type = "secret_text", name = "OPENROUTER_API_KEY", text = var.openrouter_api_key },
+    { type = "secret_text", name = "VERTEX_SERVICE_ACCOUNT", text = var.vertex_service_account },
+  ]
+}
+
+# Workflows free plan: 3,000 steps per day. A Change uses about 7 steps.
+resource "cloudflare_workflow" "change" {
+  account_id    = var.account_id
+  workflow_name = "rhumbatron-change-workflow-${local.environment}"
+  class_name    = "ChangeWorkflow"
+  script_name   = module.integration_worker.name
+}
+
+# Agent Plane (AGENTS.md section 12.4). Phase 5 consumes wake commands; AgentDO arrives in Phase 6.
+module "agents_worker" {
+  source      = "../../modules/worker"
+  account_id  = var.account_id
+  component   = "agents"
+  environment = local.environment
+
+  main_module         = local.bundles.agents.main_module
+  bundle_sha256       = local.bundles.agents.bundle_sha256
+  compatibility_date  = local.bundles.agents.compatibility_date
+  compatibility_flags = local.bundles.agents.compatibility_flags
+  modules = [for m in local.bundles.agents.modules : {
+    name         = m.name
+    content_file = "${local.repo_root}/${m.content_file}"
+    content_type = m.content_type
+  }]
+
+  bindings = [
+    { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
+    { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-agents-${local.environment}" },
+    module.state.bindings.DB,
+    { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
+    # Analytics Engine datasets are created on first write. Wakeup and false-wakeup points (P5-10).
+    { type = "analytics_engine", name = "METRICS", dataset = "rhumbatron_metrics_${local.environment}" },
+  ]
+}
+
+# One consumer for all wake commands. Poison commands go to the dead-letter Queue (section 42.7).
+resource "cloudflare_queue_consumer" "agent_wakeups" {
+  account_id        = var.account_id
+  queue_id          = module.async.queues["agent-wakeups"].id
+  script_name       = module.agents_worker.name
+  type              = "worker"
+  dead_letter_queue = module.async.queues["dead-letter"].name
+  settings = {
+    batch_size       = 10
+    max_retries      = 3
+    max_wait_time_ms = 1000
+    retry_delay      = 30
+  }
+}
+
+# `change.dispatch` commands from the Causal Router to the integration Worker.
+resource "cloudflare_queue_consumer" "integration" {
+  account_id        = var.account_id
+  queue_id          = module.async.queues["integration"].id
+  script_name       = module.integration_worker.name
+  type              = "worker"
+  dead_letter_queue = module.async.queues["dead-letter"].name
+  settings = {
+    batch_size       = 10
+    max_retries      = 3
+    max_wait_time_ms = 1000
+    retry_delay      = 30
+  }
 }
 
 # D1 schema migrations (AGENTS.md section 11.6). Re-runs when any migration file changes.

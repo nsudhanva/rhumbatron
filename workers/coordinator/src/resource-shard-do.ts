@@ -248,6 +248,30 @@ export class ResourceShardDO extends DurableObject<Env> {
     await this.rescheduleAlarm();
   }
 
+  /**
+   * Appends events that another component built, for example Work Graph events from ChangeWorkflow.
+   * Idempotent on `eventId`, so a retried caller cannot publish an event twice.
+   */
+  async appendEvents(events: EventEnvelope[]): Promise<{ inserted: number }> {
+    for (const event of events) AnyEventEnvelope.parse(event);
+    const now = new Date().toISOString();
+    const inserted = this.ctx.storage.transactionSync(() => {
+      let count = 0;
+      for (const event of events) {
+        count += this.sql.exec(
+          "INSERT OR IGNORE INTO outbox (event_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
+          event.eventId,
+          event.eventType,
+          JSON.stringify(event),
+          now,
+        ).rowsWritten;
+      }
+      return count;
+    });
+    if (inserted > 0) await this.rescheduleAlarm();
+    return { inserted };
+  }
+
   /** Unpublished outbox rows (pending or failed), oldest first. */
   async pendingOutbox(limit = 50) {
     return this.outbox.pending(limit);

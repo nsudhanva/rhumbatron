@@ -11,6 +11,46 @@
   },
   "vars": {
     "ENVIRONMENT": "local",
-    "SERVICE_NAME": "rhumbatron-integration"
-  }
+    "SERVICE_NAME": "rhumbatron-integration",
+    "AI_ACCOUNT_ID": "",
+    "AI_GATEWAY_ID": "rhumbatron-models-dev"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rhumbatron-control-local",
+      "database_id": "local",
+      "migrations_dir": "../../migrations/d1"
+    }
+  ],
+  "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
+  "queues": {
+    "producers": [{ "binding": "AGENT_WAKEUPS", "queue": "rhumbatron-agent-wakeups-local" }],
+    // `change.dispatch` commands from the Causal Router.
+    "consumers": [
+      {
+        "queue": "rhumbatron-integration-local",
+        "max_batch_size": 10,
+        "max_retries": 3,
+        "dead_letter_queue": "rhumbatron-dead-letter-local"
+      }
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RESOURCE_SHARD",
+        "class_name": "ResourceShardDO",
+        "script_name": "rhumbatron-coordinator"
+      }
+    ]
+  },
+  // AGENTS.md section 21.1. The API starts one instance per Change (instance ID = Change ID).
+  "workflows": [
+    {
+      "name": "rhumbatron-change-workflow-local",
+      "binding": "CHANGE_WORKFLOW",
+      "class_name": "ChangeWorkflow"
+    }
+  ]
 }

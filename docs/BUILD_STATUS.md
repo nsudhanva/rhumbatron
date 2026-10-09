@@ -1,7 +1,7 @@
 # Build Status
 
 ## Current phase
-Phase 4 complete; Phase 5 - Work Graph and causal scheduling next
+Phase 5 complete on dev; Phase 6 - Agent runtime and model routing next
 
 ## Completed
 - P0-01 through P0-10
@@ -20,6 +20,11 @@ Phase 4 complete; Phase 5 - Work Graph and causal scheduling next
   P6-05 OpenRouter free-model client, P6-06 deterministic routing rules (`packages/model-router`)
   - `bun run smoke:models`: one tool call per tier through the gateway ($0), plus one Vertex fallback call
   - Gemini on Vertex AI is the paid backup, capped at $9 per 30 days by the gateway (ADR 0007)
+
+- P5-01 to P5-10: ChangeWorkflow, Root Planner, D1 Work Graph, scheduler, Causal Router, Clef-flash
+  (capped), wake consumer, false-wakeup metric (ADR 0008)
+  - verified on dev: the Wishlist goal compiled into 7 Tasks; only the root Task was dispatched and assigned
+  - `bun run smoke:plan` runs this end to end (1 to 4 free model calls)
 
 ## Active
 - P3-05 ResourceShardDO in review: deployed, first live use is Phase 9 claims
@@ -43,10 +48,11 @@ Phase 4 complete; Phase 5 - Work Graph and causal scheduling next
 - Naming rhumbatron-<component>-<env>; bootstrap credentials via cf CLI: docs/adr/0004.
 - Provider cloudflare 5.27 has no Vectorize, Artifacts, K2, Containers, or resource-tagging resource. Section 11.4 applies.
 - Durable Object Workers deploy via cloudflare_workers_script: docs/adr/0005.
+- ChangeWorkflow, Work Graph persistence, causal routing: docs/adr/0008.
 - envs/global owns zone-wide settings. Prod is planned only until the first E2E Change.
 - Models: OpenRouter free models through AI Gateway, Gemini (Vertex, GCP credit) as a capped backup: docs/adr/0007.
 - P1-11: Analytics Engine datasets are created on first write and Workers Logs are per-Worker, so no standalone resource exists yet.
 
 ## Next
-- Phase 5: Work Graph schema, root planning contract, Task persistence, dependency scheduler, causal router.
+- Phase 6: AgentRuntime, PiAgentRuntime, AgentDO, Decision Receipts, budgets, escalation.
 - Tracking: Linear project Rhumbatron (AGENTS.md rule 49).

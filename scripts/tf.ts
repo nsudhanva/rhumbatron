@@ -25,6 +25,8 @@ const rootKeychain: Record<string, Record<string, string>> = {
   dev: {
     TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-dev",
     TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-dev",
+    TF_VAR_openrouter_api_key: "rhumbatron-openrouter-api-key",
+    TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-dev",
   },
 };
 

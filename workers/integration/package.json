@@ -7,10 +7,23 @@
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run --outdir dist",
     "cf:types": "wrangler types",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test:critical": "vitest run --dir src"
   },
   "devDependencies": {
     "typescript": "7.0.2",
+    "vitest": "5.0.3",
     "wrangler": "4.149.0"
+  },
+  "dependencies": {
+    "@rhumbatron/causal-router": "workspace:*",
+    "@rhumbatron/coordinator": "workspace:*",
+    "@rhumbatron/model-router": "workspace:*",
+    "@rhumbatron/protocol": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./events": "./src/events.ts"
   }
 }

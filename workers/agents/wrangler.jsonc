@@ -12,5 +12,34 @@
   "vars": {
     "ENVIRONMENT": "local",
     "SERVICE_NAME": "rhumbatron-agents"
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rhumbatron-control-local",
+      "database_id": "local",
+      "migrations_dir": "../../migrations/d1"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RESOURCE_SHARD",
+        "class_name": "ResourceShardDO",
+        "script_name": "rhumbatron-coordinator"
+      }
+    ]
+  },
+  // AGENTS.md section 20: one consumer for all agent wakeups, never one Queue per Agent.
+  "queues": {
+    "consumers": [
+      {
+        "queue": "rhumbatron-agent-wakeups-local",
+        "max_batch_size": 10,
+        "max_retries": 3,
+        "dead_letter_queue": "rhumbatron-dead-letter-local"
+      }
+    ]
+  },
+  "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "rhumbatron_metrics_local" }]
 }
