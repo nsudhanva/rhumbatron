@@ -37,3 +37,14 @@ variable "vertex_service_account" {
   type        = string
   sensitive   = true
 }
+
+variable "model_provider" {
+  description = "Model provider mode for agents and the Root Planner: \"vertex\" sends every call to Gemini (ADR 0016); \"openrouter\" tries free models first."
+  type        = string
+  default     = "vertex"
+
+  validation {
+    condition     = contains(["vertex", "openrouter"], var.model_provider)
+    error_message = "model_provider must be \"vertex\" or \"openrouter\"."
+  }
+}

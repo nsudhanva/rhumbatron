@@ -28,6 +28,8 @@ export type ProviderState = {
   vertexSpendLimitedToday: boolean;
   /** The Worker has a Vertex credential. */
   vertexConfigured: boolean;
+  /** Operator setting `MODEL_PROVIDER=vertex`: use Gemini from the first call. */
+  preferVertex?: boolean;
 };
 
 export type ProviderChoice =
@@ -36,6 +38,10 @@ export type ProviderChoice =
   | { provider: null; reason: "vertex_spend_limit" };
 
 export function selectProvider(state: ProviderState): ProviderChoice {
+  if (state.preferVertex && state.vertexConfigured) {
+    if (state.vertexSpendLimitedToday) return { provider: null, reason: "vertex_spend_limit" };
+    return { provider: "google-vertex-ai", reason: "vertex_preferred" };
+  }
   const exhausted =
     state.openrouterExhaustedToday || state.openrouterCallsToday >= OPENROUTER_DAILY_CALL_CAP;
   if (!exhausted) return { provider: "openrouter", reason: "openrouter_free" };

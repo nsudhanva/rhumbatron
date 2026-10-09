@@ -89,6 +89,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
                 ...(this.env.VERTEX_SERVICE_ACCOUNT
                   ? { vertexServiceAccount: this.env.VERTEX_SERVICE_ACCOUNT }
                   : {}),
+                preferVertex: this.env.MODEL_PROVIDER === "vertex",
               },
               { ...req, metadata: { ...req.metadata, changeId } },
             ),

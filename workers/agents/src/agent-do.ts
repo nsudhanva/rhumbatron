@@ -485,6 +485,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const choice = await chooseProvider(this.env.DB, {
       day: today(),
       vertexConfigured: Boolean(this.env.VERTEX_SERVICE_ACCOUNT),
+      preferVertex: this.env.MODEL_PROVIDER === "vertex",
     });
     if (choice.provider === null) {
       await this.failTask(input, task, choice.reason);

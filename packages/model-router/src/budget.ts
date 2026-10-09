@@ -8,7 +8,7 @@ import type { ModelTier } from "@rhumbatron/protocol";
 
 /** Hard cap on model calls in one Task run, by tier. */
 /** Coding Tasks read, write, and test, so sonnet and opus get more room than haiku. */
-export const MAX_CALLS_PER_RUN: Record<ModelTier, number> = { haiku: 8, sonnet: 16, opus: 16 };
+export const MAX_CALLS_PER_RUN: Record<ModelTier, number> = { haiku: 16, sonnet: 32, opus: 32 };
 
 /** Daily cap on agent model calls on every provider. Vertex spend is capped by the gateway. */
 export const AGENT_DAILY_CALL_CAP = 400;

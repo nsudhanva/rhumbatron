@@ -211,7 +211,7 @@ export function limitStop(reason: string): { limit: LimitKey; text: string } | n
  */
 export async function chooseProvider(
   db: Db,
-  input: { day: string; vertexConfigured: boolean },
+  input: { day: string; vertexConfigured: boolean; preferVertex?: boolean },
 ): Promise<ProviderChoice> {
   const rows = await db
     .prepare("SELECT counter, count FROM usage_counters WHERE day = ? AND counter IN (?, ?, ?)")
@@ -229,6 +229,7 @@ export async function chooseProvider(
     openrouterExhaustedToday: count(USAGE_COUNTER.openrouterExhausted) > 0,
     vertexSpendLimitedToday: count(USAGE_COUNTER.vertexSpendLimited) > 0,
     vertexConfigured: input.vertexConfigured,
+    preferVertex: input.preferVertex === true,
   });
 }
 

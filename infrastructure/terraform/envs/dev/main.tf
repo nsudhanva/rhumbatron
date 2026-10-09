@@ -298,6 +298,7 @@ module "integration_worker" {
     { type = "plain_text", name = "AI_GATEWAY_ID", text = module.ai.gateway_id },
     { type = "secret_text", name = "OPENROUTER_API_KEY", text = var.openrouter_api_key },
     { type = "secret_text", name = "VERTEX_SERVICE_ACCOUNT", text = var.vertex_service_account },
+    { type = "plain_text", name = "MODEL_PROVIDER", text = var.model_provider },
     # Browser Run for the Candidate browser check (AGENTS.md section 35). Capped in code: one
     # session of at most 55 s per check, 2 per Candidate, 500 browser-seconds per UTC day (D1).
     { type = "browser", name = "BROWSER" },
@@ -359,6 +360,7 @@ module "agents_worker" {
     { type = "secret_text", name = "OPENROUTER_API_KEY", text = var.openrouter_api_key },
     # Gemini overflow when OpenRouter is used up for the day; spend capped by the gateway (ADR 0016).
     { type = "secret_text", name = "VERTEX_SERVICE_ACCOUNT", text = var.vertex_service_account },
+    { type = "plain_text", name = "MODEL_PROVIDER", text = var.model_provider },
     { type = "ai", name = "AI" },
   ]
 

@@ -113,6 +113,8 @@ export type GatewayConfig = {
   apiKey: string;
   /** Base64 service account JSON with a `region` field. Enables the Vertex backup when set. */
   vertexServiceAccount?: string;
+  /** `MODEL_PROVIDER=vertex`: call Gemini directly instead of OpenRouter first. */
+  preferVertex?: boolean;
   timeoutMs?: number;
   fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 };
@@ -134,6 +136,19 @@ export async function complete(
   req: CompletionRequest,
 ): Promise<CompletionResult> {
   const base = `https://gateway.ai.cloudflare.com/v1/${config.accountId}/${config.gatewayId}`;
+  const vertex = () =>
+    call(
+      config,
+      "google-vertex-ai",
+      `${base}/compat/chat/completions`,
+      config.vertexServiceAccount ?? "",
+      {
+        model: `google-vertex-ai/${TIER_VERTEX_MODEL[req.tier]}`,
+        reasoning_effort: TIER_REASONING_EFFORT[req.tier],
+      },
+      req,
+    );
+  if (config.preferVertex && config.vertexServiceAccount && !req.models) return vertex();
   try {
     return await call(
       config,

@@ -20,7 +20,7 @@ type AppEnv = { Bindings: Env; Variables: AuthVariables };
  */
 const AGENT_DAILY_CALL_CAP = 400;
 const OPENROUTER_DAILY_CALL_CAP = 45;
-const MAX_CALLS_PER_RUN = { haiku: 8, sonnet: 16, opus: 16 } as const;
+const MAX_CALLS_PER_RUN = { haiku: 16, sonnet: 32, opus: 32 } as const;
 /** Mirrors CLEF_DAILY_CAP in workers/event-router/src/causal.ts. */
 const CLEF_DAILY_CAP = 200;
 /** Mirrors MONTHLY_SECONDS in workers/agents/src/workspace.ts and integration candidate-sandbox.ts. */

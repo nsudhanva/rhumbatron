@@ -5,4 +5,6 @@ interface Env {
   OPENROUTER_API_KEY: string;
   /** Base64 Vertex AI service account JSON: Gemini overflow through the gateway (ADR 0016). */
   VERTEX_SERVICE_ACCOUNT?: string;
+  /** `vertex` routes every model call to Gemini (ADR 0016); anything else keeps OpenRouter first. */
+  MODEL_PROVIDER?: string;
 }
