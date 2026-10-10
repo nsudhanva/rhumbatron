@@ -38,8 +38,28 @@ export const Project = z.object({
   status: ProjectStatus,
   canonical: CanonicalRef,
   policies: ProjectPolicies,
+  /** The caller's role, when the route knows the caller (docs/plans/phase-17a-shared-projects.md). */
+  role: z.enum(["owner", "collaborator"]).optional(),
 });
 export type Project = z.infer<typeof Project>;
+
+/** Who asked for a Change. Rank orders requesters for the priority_wins policy: 0 is the owner. */
+export const Requester = z.object({
+  userId: Id,
+  name: z.string().nullable(),
+  rank: z.number().int().nonnegative().nullable(),
+  isYou: z.boolean(),
+});
+export type Requester = z.infer<typeof Requester>;
+
+/** How a request ended up after the cross-request conflict check (phase 17a, decisions S-09..S-12). */
+export const RequestOutcome = z.object({
+  kind: z.enum(["selected", "partially_selected", "not_selected", "replaces", "overridden"]),
+  reason: z.string().nullable(),
+  winnerChangeId: Id.nullable(),
+  decidedBy: z.string().nullable(),
+});
+export type RequestOutcome = z.infer<typeof RequestOutcome>;
 
 export const ChangeStatus = z.enum([
   "created",
@@ -89,6 +109,9 @@ export const ChangeDetail = Change.extend({
   riskTier: RiskTier.nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
+  requester: Requester.nullable().optional(),
+  outcome: RequestOutcome.nullable().optional(),
+  supersedesChangeId: Id.nullable().optional(),
 });
 export type ChangeDetail = z.infer<typeof ChangeDetail>;
 

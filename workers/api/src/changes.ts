@@ -8,7 +8,8 @@ import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { errorBody, fail, respond, validate } from "./http.ts";
-import { canAccessProject, ensureIdentity } from "./identity.ts";
+import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
+import { type RequestColumns, requestFields } from "./members.ts";
 
 /**
  * `GET /v1/changes/:changeId` with the planned risk tier and record times (AGENTS.md section 16.1).
@@ -48,9 +49,9 @@ type ChangeRow = {
   blocked_reason: string | null;
   created_at: string;
   updated_at: string;
-};
+} & RequestColumns;
 
-function toDetail(row: ChangeRow): ChangeDetail {
+function toDetail(row: ChangeRow, viewerUserId: string): ChangeDetail {
   return {
     id: row.id,
     projectId: row.project_id,
@@ -66,15 +67,17 @@ function toDetail(row: ChangeRow): ChangeDetail {
     riskTier: ChangeDetail.shape.riskTier.parse(row.risk_tier),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...requestFields(row, viewerUserId),
   };
 }
 
-/** The Change's Project, when the signed-in user is a member. Same check as every Change route. */
+/** The Change's Project and the caller's role, when the caller can open the Project. */
 async function memberChange(env: Env, userId: string, changeId: string) {
-  const row = await env.DB.prepare("SELECT project_id FROM changes WHERE id = ?")
+  const row = await env.DB.prepare("SELECT project_id, created_by FROM changes WHERE id = ?")
     .bind(changeId)
-    .first<{ project_id: string }>();
-  return row && (await canAccessProject(env.DB, userId, row.project_id)) ? row : null;
+    .first<{ project_id: string; created_by: string }>();
+  const role = row ? await projectRole(env.DB, userId, row.project_id) : null;
+  return row && role ? { ...row, role } : null;
 }
 
 /** A refused command: 404 when the Change is gone, 409 when its status does not allow it. */
@@ -89,17 +92,19 @@ export const changeDetail = new Hono<AppEnv>()
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { changeId } = c.req.valid("param");
     const row = await c.env.DB.prepare(
-      `SELECT id, project_id, goal, status, base_generation, risk_tier, budget_usd,
-              acceptance_criteria_json, invariants_json, work_graph_ref, blocked_reason,
-              created_at, updated_at
-       FROM changes WHERE id = ?`,
+      `SELECT c.id, c.project_id, c.goal, c.status, c.base_generation, c.risk_tier, c.budget_usd,
+              c.acceptance_criteria_json, c.invariants_json, c.work_graph_ref, c.blocked_reason,
+              c.created_at, c.updated_at, c.created_by, c.requester_rank, c.outcome,
+              c.outcome_reason, c.outcome_winner_change_id, c.outcome_decided_by,
+              c.supersedes_change_id, u.display_name, u.email
+       FROM changes c LEFT JOIN users u ON u.id = c.created_by WHERE c.id = ?`,
     )
       .bind(changeId)
       .first<ChangeRow>();
-    if (!row || !(await canAccessProject(c.env.DB, userId, row.project_id))) {
+    if (!row || !(await projectRole(c.env.DB, userId, row.project_id))) {
       return fail(c, 404, "not_found", "Change not found");
     }
-    return respond(c, apiData(ChangeDetail), { data: toDetail(row) });
+    return respond(c, apiData(ChangeDetail), { data: toDetail(row, userId) });
   })
 
   /** Cancels the Change before promotion starts; no new Task is dispatched. Safe to repeat. */
@@ -110,8 +115,11 @@ export const changeDetail = new Hono<AppEnv>()
     async (c) => {
       const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
       const { changeId } = c.req.valid("param");
-      if (!(await memberChange(c.env, userId, changeId))) {
-        return fail(c, 404, "not_found", "Change not found");
+      const change = await memberChange(c.env, userId, changeId);
+      if (!change) return fail(c, 404, "not_found", "Change not found");
+      // A collaborator can cancel only their own request (phase 17a, decision S-04).
+      if (change.role !== "owner" && change.created_by !== userId) {
+        return fail(c, 403, "forbidden", ownerOnlyMessage("cancel another person's request"));
       }
       const outcome = ChangeCommandOutcome.parse(
         await integration(c.env).cancelChange({ changeId, actorUserId: userId }),
@@ -134,8 +142,10 @@ export const changeDetail = new Hono<AppEnv>()
       const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
       const { changeId } = c.req.valid("param");
       const { budgetUsd } = c.req.valid("json");
-      if (!(await memberChange(c.env, userId, changeId))) {
-        return fail(c, 404, "not_found", "Change not found");
+      const change = await memberChange(c.env, userId, changeId);
+      if (!change) return fail(c, 404, "not_found", "Change not found");
+      if (change.role !== "owner") {
+        return fail(c, 403, "forbidden", ownerOnlyMessage("raise a budget"));
       }
       const outcome = ChangeCommandOutcome.parse(
         await integration(c.env).raiseChangeBudget({ changeId, budgetUsd, actorUserId: userId }),

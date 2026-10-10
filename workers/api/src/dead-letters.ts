@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { fail, respond, validate } from "./http.ts";
-import { canAccessProject, ensureIdentity } from "./identity.ts";
+import { canAccessProject, ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
 
 /**
  * Operator actions for poison commands and section 44 limit stops (AGENTS.md sections 20, 42.7,
@@ -356,6 +356,9 @@ export const deadLetters = new Hono<AppEnv>()
       if (!row?.project_id || !(await canAccessProject(c.env.DB, userId, row.project_id))) {
         return fail(c, 404, "not_found", "Dead letter not found");
       }
+      if ((await projectRole(c.env.DB, userId, row.project_id)) !== "owner") {
+        return fail(c, 403, "forbidden", ownerOnlyMessage("resolve stopped work"));
+      }
       const outcome = await retryDeadLetter(c.env, row, userId, new Date().toISOString());
       if (!outcome.ok) {
         return outcome.status === 409
@@ -378,6 +381,9 @@ export const deadLetters = new Hono<AppEnv>()
       const row = await loadRow(c.env.DB, id);
       if (!row?.project_id || !(await canAccessProject(c.env.DB, userId, row.project_id))) {
         return fail(c, 404, "not_found", "Dead letter not found");
+      }
+      if ((await projectRole(c.env.DB, userId, row.project_id)) !== "owner") {
+        return fail(c, 403, "forbidden", ownerOnlyMessage("resolve stopped work"));
       }
       if (!(await dismissDeadLetter(c.env.DB, row, userId, new Date().toISOString()))) {
         return fail(c, 409, "conflict", "This command was already retried or dismissed");

@@ -91,8 +91,8 @@ const ReadBody = z.object({
 /* ------------------------------------------------------------------------------------------ */
 
 /**
- * Caller scope, joined after the driving table. `?1` is the user ID. Membership is a primary-key
- * lookup on (org_id, user_id), the same rule as `canAccessProject`.
+ * Caller scope, joined after the driving table. `?1` is the user ID. Organization membership or a
+ * shared-Project membership, both primary-key lookups: the same rule as `canAccessProject`.
  *
  * `CROSS JOIN` pins SQLite's join order (it never reorders across one). D1 has no statistics for
  * the planner, which otherwise starts from every active Project of every tenant. Each query
@@ -101,7 +101,8 @@ const ReadBody = z.object({
  */
 const MINE = (projectColumn: string) => `CROSS JOIN projects p ON p.id = ${projectColumn}
   AND +p.status = 'active'
-CROSS JOIN memberships m ON m.org_id = p.org_id AND m.user_id = ?1`;
+  AND (EXISTS (SELECT 1 FROM memberships m WHERE m.org_id = p.org_id AND m.user_id = ?1)
+    OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?1))`;
 /** Change statuses after which nothing in the Change can still be decided or promoted. */
 const CLOSED = `('completed', 'cancelled', 'failed', 'promoting', 'releasing')`;
 const ENDED = `('completed', 'cancelled', 'failed')`;

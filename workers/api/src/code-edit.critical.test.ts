@@ -11,7 +11,8 @@ function setup(options: { member?: boolean } = {}) {
   const { member = true } = options;
   const statement = (sql: string) => ({
     bind: () => statement(sql),
-    first: async () => (sql.includes("JOIN memberships") && member ? { member: 1 } : null),
+    first: async () =>
+      sql.includes("JOIN memberships") && member ? { member: 1, org_member: 1 } : null,
     run: async () => ({ meta: { changes: 0 } }),
   });
   const getCanonical = vi.fn(async () => ({

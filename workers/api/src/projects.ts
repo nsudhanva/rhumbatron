@@ -13,7 +13,15 @@ import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { fixturesEnabled } from "./fixtures.ts";
 import { fail, respond, validate } from "./http.ts";
-import { canAccessProject, ensureIdentity } from "./identity.ts";
+import {
+  canAccessProject,
+  ensureIdentity,
+  ownerOnlyMessage,
+  PROJECT_VISIBLE_SQL,
+  type ProjectRole,
+  projectRole,
+} from "./identity.ts";
+import { ensureProfile, type RequestColumns, requestFields } from "./members.ts";
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
@@ -110,21 +118,21 @@ async function loadProject(env: Env, projectId: string): Promise<Project | null>
 }
 
 /**
- * Membership check plus the Project status, in one D1 read. Null when the caller cannot open it.
- * Reads only columns from 0001_init, so it works before and after migration 0009.
+ * The caller's role plus the Project status. Null when the caller cannot open the Project.
  */
 async function projectAccess(
   db: D1Database,
   userId: string,
   projectId: string,
-): Promise<{ status: string } | null> {
-  return db
-    .prepare(
-      `SELECT p.status FROM projects p JOIN memberships m ON m.org_id = p.org_id
-       WHERE p.id = ? AND m.user_id = ? LIMIT 1`,
-    )
-    .bind(projectId, userId)
-    .first<{ status: string }>();
+): Promise<{ status: string; role: ProjectRole } | null> {
+  const [role, row] = await Promise.all([
+    projectRole(db, userId, projectId),
+    db
+      .prepare("SELECT status FROM projects WHERE id = ?")
+      .bind(projectId)
+      .first<{ status: string }>(),
+  ]);
+  return role && row ? { status: row.status, role } : null;
 }
 
 const ARCHIVED = "Project is archived";
@@ -197,6 +205,13 @@ async function createProject(
   if (inserted.meta.changes === 0) {
     return fail(c, 409, "conflict", `Project slug "${body.slug}" already exists`);
   }
+  // The creator owns the Project; sharing adds collaborators (phase 17a).
+  await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO project_members (project_id, user_id, role, rank, added_by, created_at)
+     VALUES (?, ?, 'owner', 0, ?, ?)`,
+  )
+    .bind(projectId, userId, userId, now)
+    .run();
 
   // Both initializers are idempotent, so a retry after a partial failure is safe. The view goes
   // first: ProjectRootDO emits project.created, and the projector needs the view to exist.
@@ -245,12 +260,13 @@ export const projects = new Hono<AppEnv>()
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { limit, include } = c.req.valid("query");
     const rows = await c.env.DB.prepare(
-      `SELECT p.id, p.name, p.slug, p.status, p.canonical_generation, p.created_at
-       FROM projects p JOIN memberships m ON m.org_id = p.org_id
-       WHERE m.user_id = ? AND (p.status = 'active' OR ? = 1)
+      `SELECT p.id, p.name, p.slug, p.status, p.canonical_generation, p.created_at,
+              (SELECT role FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?) AS member_role
+       FROM projects p
+       WHERE ${PROJECT_VISIBLE_SQL} AND (p.status = 'active' OR ? = 1)
        ORDER BY p.created_at DESC LIMIT ?`,
     )
-      .bind(userId, include === "archived" ? 1 : 0, limit)
+      .bind(userId, userId, userId, include === "archived" ? 1 : 0, limit)
       .all<{
         id: string;
         name: string;
@@ -258,6 +274,7 @@ export const projects = new Hono<AppEnv>()
         status: string;
         canonical_generation: number;
         created_at: string;
+        member_role: string | null;
       }>();
     return c.json({
       data: (rows.results ?? []).map((p) => ({
@@ -267,6 +284,7 @@ export const projects = new Hono<AppEnv>()
         status: p.status,
         canonicalGeneration: p.canonical_generation,
         createdAt: p.created_at,
+        role: p.member_role === "collaborator" ? "collaborator" : "owner",
       })),
     });
   })
@@ -279,22 +297,27 @@ export const projects = new Hono<AppEnv>()
       return fail(c, 404, "not_found", "Project not found");
     }
     const rows = await c.env.DB.prepare(
-      `SELECT c.id, c.goal, c.status, c.risk_tier, c.budget_usd, c.created_at,
+      `SELECT c.id, c.goal, c.status, c.risk_tier, c.budget_usd, c.created_at, c.created_by,
+              c.requester_rank, c.outcome, c.outcome_reason, c.outcome_winner_change_id,
+              c.outcome_decided_by, c.supersedes_change_id, u.display_name, u.email,
               (SELECT COUNT(*) FROM tasks t WHERE t.change_id = c.id) AS task_count,
               (SELECT COUNT(*) FROM tasks t WHERE t.change_id = c.id AND t.status = 'completed') AS completed_count
-       FROM changes c WHERE c.project_id = ? ORDER BY c.created_at DESC LIMIT 20`,
+       FROM changes c LEFT JOIN users u ON u.id = c.created_by
+       WHERE c.project_id = ? ORDER BY c.created_at DESC LIMIT 50`,
     )
       .bind(projectId)
-      .all<{
-        id: string;
-        goal: string;
-        status: string;
-        risk_tier: string | null;
-        budget_usd: number;
-        created_at: string;
-        task_count: number;
-        completed_count: number;
-      }>();
+      .all<
+        {
+          id: string;
+          goal: string;
+          status: string;
+          risk_tier: string | null;
+          budget_usd: number;
+          created_at: string;
+          task_count: number;
+          completed_count: number;
+        } & RequestColumns
+      >();
     return c.json({
       data: (rows.results ?? []).map((r) => ({
         id: r.id,
@@ -305,6 +328,7 @@ export const projects = new Hono<AppEnv>()
         createdAt: r.created_at,
         taskCount: r.task_count,
         completedCount: r.completed_count,
+        ...requestFields(r, userId),
       })),
     });
   })
@@ -316,6 +340,7 @@ export const projects = new Hono<AppEnv>()
     const { projectId } = c.req.valid("param");
     const access = await projectAccess(c.env.DB, userId, projectId);
     if (!access) return fail(c, 404, "not_found", "Project not found");
+    if (access.role !== "owner") return fail(c, 403, "forbidden", ownerOnlyMessage("provision it"));
     if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
     await sendProvision(c.env, projectId);
     return c.json({ data: { queued: true } }, 202);
@@ -327,6 +352,7 @@ export const projects = new Hono<AppEnv>()
     const { projectId } = c.req.valid("param");
     const access = await projectAccess(c.env.DB, userId, projectId);
     if (!access) return fail(c, 404, "not_found", "Project not found");
+    if (access.role !== "owner") return fail(c, 403, "forbidden", ownerOnlyMessage("run checks"));
     if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
     const agents = c.env.AGENTS as unknown as {
       sandboxSmoke(id: string): Promise<{ ok: boolean; steps: unknown[] }>;
@@ -343,8 +369,10 @@ export const projects = new Hono<AppEnv>()
   .delete("/v1/projects/:projectId", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");
-    if (!(await projectAccess(c.env.DB, userId, projectId))) {
-      return fail(c, 404, "not_found", "Project not found");
+    const access = await projectAccess(c.env.DB, userId, projectId);
+    if (!access) return fail(c, 404, "not_found", "Project not found");
+    if (access.role !== "owner") {
+      return fail(c, 403, "forbidden", ownerOnlyMessage("remove the project"));
     }
     const now = new Date().toISOString();
     await c.env.DB.prepare(
@@ -375,12 +403,11 @@ export const projects = new Hono<AppEnv>()
   .get("/v1/projects/:projectId", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");
-    if (!(await canAccessProject(c.env.DB, userId, projectId))) {
-      return fail(c, 404, "not_found", "Project not found");
-    }
+    const role = await projectRole(c.env.DB, userId, projectId);
+    if (!role) return fail(c, 404, "not_found", "Project not found");
     const project = await loadProject(c.env, projectId);
     if (!project) return fail(c, 404, "not_found", "Project not found");
-    return respond(c, apiData(Project), { data: project });
+    return respond(c, apiData(Project), { data: { ...project, role } });
   })
 
   // P3-10: human-scale read model from ProjectViewDO.
@@ -408,11 +435,13 @@ export const projects = new Hono<AppEnv>()
       if (!access) return fail(c, 404, "not_found", "Project not found");
       if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
 
-      if (body.clientRequestId) {
+      // A request ID is unique per requester, so two users never collide (phase 17a).
+      const requestKey = body.clientRequestId ? `${userId}:${body.clientRequestId}` : null;
+      if (requestKey) {
         const existing = await c.env.DB.prepare(
           "SELECT * FROM changes WHERE project_id = ? AND client_request_id = ?",
         )
-          .bind(projectId, body.clientRequestId)
+          .bind(projectId, requestKey)
           .first<ChangeRow>();
         if (existing) return respond(c, apiData(Change), { data: toChange(existing) });
       }
@@ -425,8 +454,8 @@ export const projects = new Hono<AppEnv>()
       // ON CONFLICT closes the race between two retries that both missed the lookup above.
       const inserted = await c.env.DB.prepare(
         `INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd,
-           client_request_id, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)
+           client_request_id, created_by, requester_rank, created_at, updated_at)
+         VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (project_id, client_request_id) DO NOTHING`,
       )
         .bind(
@@ -435,19 +464,28 @@ export const projects = new Hono<AppEnv>()
           body.goal,
           canonical.generation,
           body.budgetUsd,
-          body.clientRequestId ?? null,
+          requestKey,
           userId,
+          access.role === "owner" ? 0 : 10,
           now,
           now,
         )
         .run();
-      if (inserted.meta.changes === 0 && body.clientRequestId) {
+      if (inserted.meta.changes === 0 && requestKey) {
         const winner = await c.env.DB.prepare(
           "SELECT * FROM changes WHERE project_id = ? AND client_request_id = ?",
         )
-          .bind(projectId, body.clientRequestId)
+          .bind(projectId, requestKey)
           .first<ChangeRow>();
         if (winner) return respond(c, apiData(Change), { data: toChange(winner) });
+      }
+
+      // The request shows a person's name, not an internal ID (phase 17a). Display data only.
+      const profile = ensureProfile(c.env, userId, c.get("authSubject"));
+      try {
+        c.executionCtx.waitUntil(profile);
+      } catch {
+        await profile; // No ExecutionContext (tests): finish inline.
       }
 
       // ChangeWorkflow compiles the Work Graph asynchronously (AGENTS.md section 58). The instance

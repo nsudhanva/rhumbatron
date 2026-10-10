@@ -9,7 +9,7 @@ import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { fixturesEnabled } from "./fixtures.ts";
 import { errorBody, fail, respond, validate } from "./http.ts";
-import { canAccessProject, ensureIdentity } from "./identity.ts";
+import { canAccessProject, ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
 
 /**
  * Releases of a Project (AGENTS.md sections 21.3, 37, 42.10; ADR 0018). Read-only from D1: the
@@ -121,6 +121,9 @@ export const releases = new Hono<AppEnv>()
       const { projectId } = c.req.valid("param");
       const userId = await member(c.env, c.get("authSubject"), projectId);
       if (!userId) return fail(c, 404, "not_found", "Project not found");
+      if ((await projectRole(c.env.DB, userId, projectId)) !== "owner") {
+        return fail(c, 403, "forbidden", ownerOnlyMessage("inject a release failure"));
+      }
       const outcome = ReleaseInjectionOutcome.parse(
         await integration(c.env).injectReleaseFailure({ projectId, actorUserId: userId }),
       );

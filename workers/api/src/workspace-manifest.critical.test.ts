@@ -51,7 +51,7 @@ function setup(member = true) {
       sql.startsWith("SELECT t.change_id")
         ? { project_id: "proj_1", change_id: "chg_1" }
         : member
-          ? { member: 1 }
+          ? { member: 1, org_member: 1 }
           : null,
   });
   const env = {

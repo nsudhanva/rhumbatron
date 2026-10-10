@@ -11,7 +11,7 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { errorBody, fail, respond, validate } from "./http.ts";
-import { canAccessProject, ensureIdentity } from "./identity.ts";
+import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
 
 /**
  * `POST /v1/projects/:projectId/code/edits` (P16-19): a person saves one file on the Code page.
@@ -79,8 +79,10 @@ export const codeEdit = new Hono<AppEnv>().post(
   async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");
-    if (!(await canAccessProject(c.env.DB, userId, projectId))) {
-      return fail(c, 404, "not_found", "Project not found");
+    const role = await projectRole(c.env.DB, userId, projectId);
+    if (!role) return fail(c, 404, "not_found", "Project not found");
+    if (role !== "owner") {
+      return fail(c, 403, "forbidden", ownerOnlyMessage("edit code directly"));
     }
     const body = c.req.valid("json");
     const canonical = await projectRoot(c.env, projectId).getCanonical();
