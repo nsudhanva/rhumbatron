@@ -160,6 +160,21 @@ if (secretKey && smokeUserId) {
     (snapshot?.data?.snapshot.activeChanges.length ?? 0) === 1 &&
       (snapshot?.data?.sequence ?? 0) >= 1,
   );
+
+  // Section 16.1 cancel: the unplanned smoke Change cancels, and a repeat is a no-op.
+  const cancelUrl = `${target.api}/v1/changes/${change?.data?.id ?? "missing"}/cancel`;
+  type Outcome = { data?: { changeStatus?: string; repeated?: boolean } } | undefined;
+  const cancelled = (await expectStatus("cancel change", cancelUrl, 200, {
+    method: "POST",
+    headers,
+  })) as Outcome;
+  report("change is cancelled", cancelled?.data?.changeStatus === "cancelled");
+  const cancelledAgain = (await expectStatus("cancel is idempotent", cancelUrl, 200, {
+    method: "POST",
+    headers,
+  })) as Outcome;
+  report("repeat cancel is recorded as a repeat", cancelledAgain?.data?.repeated === true);
+
   await expectStatus("invalid body rejected", `${target.api}/v1/projects`, 400, {
     method: "POST",
     headers,
