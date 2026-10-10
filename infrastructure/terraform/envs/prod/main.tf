@@ -459,7 +459,7 @@ module "integration_worker" {
     { type = "plain_text", name = "BUILDS_ACCOUNT_ID", text = var.account_id },
     # Live apps (ADR 0020): bundle builds over RPC to the apps Worker. Prod only; without this
     # binding (dev) `app.provision` is a no-op.
-    { type = "service", name = "APPS", service = local.apps_worker.script_name, entrypoint = "AppBuilder" },
+    { type = "service", name = "APPS", service = local.apps_worker.script_name, entrypoint = "AppBuilder", environment = "production" },
   ]
 
   # New code may read tables a pending migration creates (for example `releases`, 0015).
