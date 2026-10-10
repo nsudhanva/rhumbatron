@@ -146,6 +146,8 @@ Notes:
 
 - Promotion is a human action in the UI, except under policy `autoPromoteRiskTiers`. When the verified Candidate needs no human approval and the Change risk tier is listed (`low` in `policy-1`), the verification workflow calls the same `promoteCandidate` path with actor `system:auto-promotion`. `canonical.promotion.requested` then records `trigger: "auto"`. All section 36 preconditions still apply. A Candidate that needs approval never promotes automatically (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
 - The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a release target, else `completed`. The release then ends the Change as `completed` (deployed or superseded) or `failed`.
+- Every end after promotion records `change.completed` or `change.failed`, and `build.started` records `releasing`, so ProjectViewDO leaves `promoting` (section 13.3).
+- A Change still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change. The integration Worker marks a queued or building release `failed`, records a release that never started as a `failed` release row, and fails the Change. Without a release target it completes the Change. The reason is on the release row and in the event. The generation stays promoted; the next promotion releases as usual.
 - After `canonical.advanced`, the causal router marks every other in-flight Candidate on an older base `stale`.
 
 ## Status state machines
@@ -172,8 +174,9 @@ stateDiagram-v2
   promoting --> releasing: advanced, release target exists
   promoting --> completed: advanced, no release target
   releasing --> completed: deployed or superseded
-  releasing --> failed: release failed
+  releasing --> failed: release failed or stuck
   created --> cancelled: person cancels
+  compiling --> cancelled: person cancels
   running --> cancelled: person cancels
   verifying --> cancelled: person cancels
   awaiting_approval --> cancelled: person cancels
@@ -188,7 +191,9 @@ A refused compare-and-swap returns the Change to its status before `promoting`.
 A verified Candidate can also promote from `running` or `budget_blocked`.
 
 - `POST /v1/changes/:changeId/cancel` works until promotion starts.
-  It cancels the open Tasks and rejects the open Candidates.
+  It cancels the open Tasks and rejects the open Candidates (reason `change cancelled`).
+  A cancel during `compiling` stores the planned Tasks as `cancelled` and records no compile.
+  A running CandidateVerificationWorkflow checks the Change at each step boundary and stops before more Sandbox or Browser Run time.
   Dispatch runs only for a `running` Change.
   A running agent run stops at its next one-minute run check.
 - `POST /v1/changes/:changeId/budget` raises `budget_usd`. The budget can never go down.
