@@ -93,12 +93,19 @@ function protectsExistingEndpoints(invariant: string): boolean {
 }
 
 /**
- * True when the invariant keeps some other app behavior as it is ("Todos stay saved per day").
- * On a generated app the agents' own project tests are the deterministic Evidence for that.
+ * True for any other app-behavior invariant ("Todos stay saved per day", "Todos are separate per
+ * day"). On a generated app the agents' own project tests are the deterministic Evidence for it.
  */
 function protectsAppBehavior(invariant: string): boolean {
-  return PRESERVE.test(invariant);
+  return !OUTSIDE_TESTS.test(invariant);
 }
+
+/**
+ * Invariants a unit test cannot prove: delivery outside the app, wall-clock timing, uptime. These
+ * stay visible required gaps (AGENTS.md section 34.4.1). Latency maps to the performance check.
+ */
+const OUTSIDE_TESTS =
+  /\b(e-?mails?|sms|text messages?|push notifications?|notifications? (are|is) (sent|delivered)|within \d+\s*(ms|milliseconds?|seconds?|minutes?|hours?)|uptime|availability|sla)\b/i;
 
 function unitCheck(reason: string): VerificationCheck {
   return {
@@ -197,7 +204,7 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
     }
     if (isCart || isRegression) return;
     if (protectsAppBehavior(invariant)) {
-      const note = `Protected invariant (mapped: app behavior -> unit): ${invariant}`;
+      const note = `Protected invariant (mapped: app behavior -> project tests): ${invariant}`;
       const unit = checks.find((c) => c.checkId === "unit");
       if (unit) unit.reason += ` ${note}`;
       else checks.push(unitCheck(note));

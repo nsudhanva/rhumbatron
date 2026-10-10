@@ -100,8 +100,14 @@ describe("buildVerificationPlan", () => {
     const behavior = plan("low", { protectedInvariants: ["Todos stay saved for each day"] });
     expect(ids(behavior)).toContain("unit");
     expect(behavior.checks.find((c) => c.checkId === "unit")?.reason).toContain(
-      "app behavior -> unit",
+      "app behavior -> project tests",
     );
+    // cand_8af0bc96 (same prod Change) was rejected on this plain requirement.
+    const plain = plan("low", {
+      protectedInvariants: ["Todos are strictly separate per day (Oct 16, 17, 18)"],
+    });
+    expect(ids(plain)).toContain("unit");
+    expect(plain.checks.filter((c) => c.kind === "protected-invariant")).toEqual([]);
     expect(behavior.checks.filter((c) => c.kind === "protected-invariant")).toEqual([]);
   });
 
