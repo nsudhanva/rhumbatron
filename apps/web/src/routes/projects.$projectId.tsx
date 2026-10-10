@@ -454,7 +454,7 @@ function ChangesTable({
                           </Button>
                         )}
                       </div>
-                      <ChangeOutcomeLine change={change} />
+                      <ChangeOutcomeLine change={change} all={changes} />
                       <span className="truncate font-mono text-[11px] text-kumo-subtle tabular-nums">
                         {change.id}
                       </span>
@@ -502,7 +502,7 @@ function RequestedByCell({ requester }: { requester: ChangeRequester }) {
   );
 }
 
-function ChangeOutcomeLine({ change }: { change: ChangeSummary }) {
+function ChangeOutcomeLine({ change, all }: { change: ChangeSummary; all: ChangeSummary[] }) {
   if (change.status === "awaiting_owner") {
     return (
       <span className="text-[12px] font-medium text-accent-700">
@@ -535,11 +535,38 @@ function ChangeOutcomeLine({ change }: { change: ChangeSummary }) {
   if (outcome.kind === "partially_selected") {
     return <span className="text-[12px] text-kumo-subtle">Partially selected</span>;
   }
+  if (change.supersedesChangeId) {
+    return (
+      <span className="text-[12px] text-kumo-subtle inline-flex flex-wrap items-center gap-1">
+        <span>Owner's choice, replaces an earlier request</span>
+        <Link
+          to="/changes/$changeId"
+          params={{ changeId: change.supersedesChangeId }}
+          className="relative z-10 font-semibold text-kumo-link hover:underline"
+        >
+          (view earlier)
+        </Link>
+      </span>
+    );
+  }
   if (outcome.kind === "replaces") {
     return <span className="text-[12px] text-kumo-subtle">Replaces earlier request</span>;
   }
   if (outcome.kind === "overridden") {
-    return <span className="text-[12px] text-kumo-subtle">Replaced by owner</span>;
+    const rebuilt = all.find((c) => c.supersedesChangeId === change.id);
+    if (!rebuilt) return <span className="text-[12px] text-kumo-subtle">Chosen by the owner</span>;
+    return (
+      <span className="text-[12px] text-kumo-subtle inline-flex flex-wrap items-center gap-1">
+        <span>Chosen by the owner: rebuilt as</span>
+        <Link
+          to="/changes/$changeId"
+          params={{ changeId: rebuilt.id }}
+          className="relative z-10 font-semibold text-kumo-link hover:underline"
+        >
+          the new Change
+        </Link>
+      </span>
+    );
   }
   return <span className="text-[12px] text-kumo-subtle">{outcome.kind}</span>;
 }

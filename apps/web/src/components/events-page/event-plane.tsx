@@ -11,6 +11,7 @@ const FEED_MAX_ROWS = 20_000;
 const SOCKET: Record<LiveStatus, string> = {
   open: "open · ProjectViewDO deltas",
   connecting: "connecting",
+  reconnecting: "reconnecting",
   closed: "closed · polling",
 };
 

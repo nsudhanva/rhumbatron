@@ -487,7 +487,8 @@ function ModeToggle() {
 function liveView(state: ShellLiveState): { dot: string; text: string } {
   if (state.status === "idle" || !state.enabled) return { dot: "bg-tone-400", text: "live off" };
   if (state.status === "open") return { dot: "bg-kumo-success", text: "live" };
-  if (state.status === "connecting") return { dot: "bg-kumo-warning", text: "reconnecting" };
+  if (state.status === "connecting") return { dot: "bg-kumo-warning", text: "connecting" };
+  if (state.status === "reconnecting") return { dot: "bg-kumo-warning", text: "reconnecting" };
   return { dot: "bg-kumo-danger", text: "offline · retrying" };
 }
 

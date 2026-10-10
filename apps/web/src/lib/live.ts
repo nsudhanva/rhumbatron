@@ -9,7 +9,11 @@ import { useLiveStatusReporter } from "./live-status";
  * one refetch and never shows wrong data.
  */
 
-export type LiveStatus = "connecting" | "open" | "closed";
+/**
+ * `connecting`: first connect. `reconnecting`: a retry after a failed attempt. A quick reconnect
+ * after a normal close (deploy, object eviction, idle timeout) keeps the status at `open`.
+ */
+export type LiveStatus = "connecting" | "reconnecting" | "open" | "closed";
 
 type ListName =
   | "activeChanges"
@@ -95,6 +99,8 @@ export function useProjectLive(
     let socket: WebSocket | undefined;
     let stopped = false;
     let attempt = 0;
+    let failures = 0;
+    let wasOpen = false;
     let lastSequence = -1;
     let awaitingSnapshot = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -128,7 +134,9 @@ export function useProjectLive(
     };
 
     async function connect() {
-      setStatus("connecting");
+      // A first retry right after a socket that was open is silent: the footer must not flash.
+      if (failures > 0) setStatus("reconnecting");
+      else if (!wasOpen) setStatus("connecting");
       // Refreshes the short-lived Clerk session cookie that the upgrade request carries.
       // The token itself is never put in the socket URL.
       await tokenRef.current().catch(() => null);
@@ -140,8 +148,12 @@ export function useProjectLive(
       const ws = new WebSocket(url);
       socket = ws;
       awaitingSnapshot = false;
+      let opened = false;
       ws.onopen = () => {
         attempt = 0;
+        failures = 0;
+        wasOpen = true;
+        opened = true;
         setStatus("open");
         // The object answers "ping" without waking from hibernation.
         pingTimer = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send("ping"), PING_MS);
@@ -154,7 +166,11 @@ export function useProjectLive(
         clearInterval(pingTimer);
         if (socket !== ws || stopped) return;
         socket = undefined;
-        setStatus("closed");
+        if (!opened) {
+          failures += 1;
+          setStatus("closed");
+        }
+        opened = false;
         scheduleRetry();
       };
     }
