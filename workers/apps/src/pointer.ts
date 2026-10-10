@@ -62,7 +62,7 @@ export function selectDeployment(host: AppHost, rows: DeploymentRow[]): Selectio
       projectId: target.project_id,
       commit: target.commit_sha,
       bundleKey: target.bundle_key,
-      loaderId: loaderId(target.project_id, target.commit_sha, target.bundle_key),
+      loaderId: loaderId(target.project_id, target.commit_sha, channel),
       storeName:
         channel === APP_PRODUCTION_CHANNEL ? target.project_id : `${target.project_id}#${channel}`,
     };
@@ -99,11 +99,13 @@ export async function cachedDeployments(
   db: D1Database,
   host: AppHost,
   now = Date.now(),
+  /** Skip the cache read (release smoke probes): a just-moved pointer is seen at once. */
+  fresh = false,
 ): Promise<DeploymentRow[]> {
   if (host.kind !== "production" && host.kind !== "preview") return [];
   const key = host.kind === "preview" ? `${host.previewId}--${host.label}` : host.label;
   const hit = cache.get(key);
-  if (hit && now - hit.at < POINTER_TTL_MS) return hit.rows;
+  if (!fresh && hit && now - hit.at < POINTER_TTL_MS) return hit.rows;
   const rows = await readDeployments(db, host);
   if (cache.size >= MAX_CACHED_HOSTS) cache.clear();
   cache.set(key, { at: now, rows });

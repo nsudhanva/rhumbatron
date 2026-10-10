@@ -1,6 +1,12 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { buildAssetManifest, createWorker } from "@cloudflare/worker-bundler";
-import { type AppBuildInput, type AppBuildResult, isAppBuildInput } from "@rhumbatron/protocol";
+import {
+  type AppBuildInput,
+  type AppBuildResult,
+  type AppProbeInput,
+  type AppProbeResult,
+  isAppBuildInput,
+} from "@rhumbatron/protocol";
 import {
   type AppBundle,
   assetObjectKey,
@@ -16,6 +22,8 @@ import {
   modulesSize,
   readAppSettings,
 } from "./bundle.ts";
+import type { AppDataDO } from "./data.ts";
+import { routeAppRequest } from "./router.ts";
 
 /**
  * Bundle builder (P16-06, ADR 0020). Runs in this Worker with `@cloudflare/worker-bundler`
@@ -132,9 +140,16 @@ async function buildApp(env: Env, input: AppBuildInput): Promise<AppBuildResult>
     reused: false,
     modules: Object.keys(modules).length,
     assets: assetEntries.length,
-    bytes,
+    // Stored size: modules plus assets (the cost report sums it per bundle).
+    bytes: bytes + bundle.assets.reduce((n, a) => n + a.size, 0),
   };
 }
+
+/** Probe body cap: enough for a JSON check, small enough for an RPC reply. */
+const PROBE_BODY_BYTES = 64 * 1024;
+/** Stores wiped per `wipeData` call (one Durable Object call each). */
+const MAX_WIPES = 50;
+const LABEL = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 /**
  * RPC entrypoint for the integration Worker (service binding `APPS`, entrypoint `AppBuilder`).
@@ -143,5 +158,47 @@ async function buildApp(env: Env, input: AppBuildInput): Promise<AppBuildResult>
 export class AppBuilder extends WorkerEntrypoint<Env> {
   async build(input: AppBuildInput): Promise<AppBuildResult> {
     return buildApp(this.env, input);
+  }
+
+  /**
+   * One GET through the router for the app's host (P16-11 smoke check), with a fresh pointer
+   * read. It never leaves Cloudflare, so it works whatever the public route state is, and it runs
+   * the app under the same limits as a visitor's request.
+   */
+  async probe(input: AppProbeInput): Promise<AppProbeResult> {
+    const domain = this.env.APPS_DOMAIN;
+    if (!domain || !LABEL.test(input.label)) return { status: null, error: "invalid host" };
+    if (input.previewId !== undefined && !/^[a-z0-9]{8}$/.test(input.previewId)) {
+      return { status: null, error: "invalid preview id" };
+    }
+    if (!input.path.startsWith("/")) return { status: null, error: "invalid path" };
+    const host = `${input.previewId ? `${input.previewId}--` : ""}${input.label}.${domain}`;
+    try {
+      const response = await routeAppRequest(
+        new Request(`https://${host}${input.path}`, {
+          headers: { "cache-control": "no-cache", ...input.headers },
+        }),
+        this.env,
+        this.ctx,
+        { fresh: true },
+      );
+      const text = await response.text();
+      return { status: response.status, body: text.slice(0, PROBE_BODY_BYTES) };
+    } catch (error) {
+      return { status: null, error: String(error).slice(0, 200) };
+    }
+  }
+
+  /**
+   * Deletes app data stores (P16-20 app removal, expired previews). Store names are the ones the
+   * router derives: the Project ID for production, `<project>#preview:<id>` for a preview.
+   */
+  async wipeData(storeNames: string[]): Promise<{ wiped: number }> {
+    const ns = this.env.APP_DATA as DurableObjectNamespace<AppDataDO>;
+    const names = storeNames
+      .filter((n) => /^proj_[a-z0-9-]+(#preview:[a-z0-9]{8})?$/.test(n))
+      .slice(0, MAX_WIPES);
+    for (const name of names) await ns.get(ns.idFromName(name)).wipe();
+    return { wiped: names.length };
   }
 }

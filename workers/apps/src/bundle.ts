@@ -29,9 +29,13 @@ export function bundleKey(channel: BundleChannel, projectId: string, commit: str
 export const bundleObjectKey = (key: string) => `${key}/bundle.json`;
 export const assetObjectKey = (key: string, path: string) => `${key}/assets${path}`;
 
-/** Dynamic Worker ID: one per Project commit (and per preview channel), stable across requests. */
-export function loaderId(projectId: string, commit: string, key: string): string {
-  return key.startsWith("apps/") ? `${projectId}@${commit}` : `${projectId}@${commit}:preview`;
+/**
+ * Dynamic Worker ID: one per Project commit and channel, stable across requests. A loaded isolate
+ * keeps the env it was created with, including its DATA store, so every non-production channel
+ * (a preview, or a version host that serves the same commit as production) needs its own ID.
+ */
+export function loaderId(projectId: string, commit: string, channel: string): string {
+  return channel === "production" ? `${projectId}@${commit}` : `${projectId}@${commit}#${channel}`;
 }
 
 /** A module as stored in JSON. Binary modules are base64. */

@@ -39,8 +39,20 @@ describe("selectDeployment", () => {
     expect(selectDeployment(preview, rows)).toMatchObject({
       kind: "serve",
       commit: C2,
-      loaderId: `${P}@${C2}:preview`,
+      loaderId: `${P}@${C2}#preview:0123abcd`,
       storeName: `${P}#preview:0123abcd`,
+    });
+  });
+
+  it("gives a version host of the live commit its own isolate and store, never production's", () => {
+    const version = { kind: "preview", label: "acme", previewId: "v0000001" } as const;
+    const rows = [row({}), row({ channel: "preview:v0000001" })];
+    expect(selectDeployment(version, rows)).toMatchObject({
+      kind: "serve",
+      commit: C1,
+      bundleKey: `apps/${P}/${C1}`,
+      loaderId: `${P}@${C1}#preview:v0000001`,
+      storeName: `${P}#preview:v0000001`,
     });
   });
 

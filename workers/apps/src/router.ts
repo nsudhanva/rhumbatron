@@ -34,6 +34,8 @@ export async function routeAppRequest(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
+  /** `fresh`: read the pointer from D1, not the isolate cache (release smoke probes). */
+  options: { fresh?: boolean } = {},
 ): Promise<Response> {
   // Dev has no APPS_DOMAIN (and no route): nothing is served.
   const domain: string | undefined = env.APPS_DOMAIN;
@@ -41,7 +43,10 @@ export async function routeAppRequest(
   const host = parseAppHost(new URL(request.url).hostname, domain);
   if (host.kind !== "production" && host.kind !== "preview") return notFoundPage();
 
-  const selection = selectDeployment(host, await cachedDeployments(env.DB, host));
+  const selection = selectDeployment(
+    host,
+    await cachedDeployments(env.DB, host, Date.now(), options.fresh === true),
+  );
   if (selection.kind === "not_found") return notFoundPage();
   if (selection.kind === "removed") return removedPage();
   if (selection.kind === "building") return buildingPage();
