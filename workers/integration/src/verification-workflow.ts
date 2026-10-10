@@ -15,6 +15,7 @@ import {
   type VerificationCheck,
   type VerificationPlan,
 } from "@rhumbatron/protocol";
+import { canonicalCommitOf, publishPreview } from "./app-release.ts";
 import { runBrowserCheck } from "./browser-check.ts";
 import {
   type ChangeSetRow,
@@ -44,7 +45,8 @@ import { CHANGE_CANCELLED_REASON, verificationHalt } from "./change-status.ts";
 import { classifyBrowser, classifySecurity } from "./check-semantics.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
-import { promoteCandidate } from "./promotion.ts";
+import { markCandidateStale, promoteCandidate } from "./promotion.ts";
+import { recomposeQuietly } from "./recompose.ts";
 
 /**
  * CandidateVerificationWorkflow (AGENTS.md sections 21.2, 33, 34). One instance per Candidate
@@ -81,6 +83,8 @@ type Loaded = {
   acceptanceCriteria: string[];
   touchesAuthorization: boolean;
   canonical: { generation: number; treeSha: string; commit: string | null } | null;
+  /** P16-14: depth of recomposition; absent in a step result cached before this field existed. */
+  recomposeCount?: number;
   changeSets: ChangeSetRow[];
   /** ChangeSet IDs the Candidate was created with. */
   changeSetIds: string[];
@@ -102,6 +106,7 @@ type CandidateRow = {
   acceptance_criteria_json: string;
   org_id: string;
   slug: string;
+  recompose_count: number | null;
 };
 
 const evidenceIdFor = (candidateId: string, checkId: string) =>
@@ -131,7 +136,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         const row = await this.env.DB.prepare(
           `SELECT c.id, c.change_id, c.base_generation, c.status, c.change_set_ids_json, c.created_at,
                 ch.status AS change_status, ch.project_id, ch.goal, ch.risk_tier,
-                ch.invariants_json, ch.acceptance_criteria_json, p.org_id, p.slug
+                ch.invariants_json, ch.acceptance_criteria_json, p.org_id, p.slug,
+                c.recompose_count
          FROM candidates c JOIN changes ch ON ch.id = c.change_id
          JOIN projects p ON p.id = ch.project_id WHERE c.id = ?`,
         )
@@ -166,11 +172,22 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
           if (!index && snapshot.generation > 0 && row.base_generation === snapshot.generation) {
             throw new Error(`Canonical source of S${snapshot.generation} is not synced yet`);
           }
-          const commit = index ? ((await index.json()) as { commit?: string }).commit : undefined;
+          const indexed = index ? ((await index.json()) as { commit?: string }).commit : undefined;
+          // A rollback reuses an earlier tree with a new commit (P16-13). The canonical ref names
+          // the commit on `main`; until the source sync points the tree's index at it, wait.
+          const named = canonicalCommitOf(snapshot.artifactRef);
+          if (
+            named &&
+            indexed &&
+            named !== indexed &&
+            row.base_generation === snapshot.generation
+          ) {
+            throw new Error(`Canonical source of S${snapshot.generation} is not synced yet`);
+          }
           canonical = {
             generation: snapshot.generation,
             treeSha: snapshot.treeSha,
-            commit: commit ?? null,
+            commit: named ?? indexed ?? null,
           };
         }
         const touchesAuthorization = ((routes?.results ?? []) as { route_json: string | null }[])
@@ -193,6 +210,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
           acceptanceCriteria: JSON.parse(row.acceptance_criteria_json) as string[],
           touchesAuthorization,
           canonical,
+          recomposeCount: row.recompose_count ?? 0,
           changeSets: (sets?.results ?? []) as ChangeSetRow[],
           changeSetIds: ids,
           edges: (edges?.results ?? []) as TaskEdge[],
@@ -242,7 +260,11 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         "stale",
         `Base S${ctx.baseGeneration} is behind canonical S${loaded.canonical.generation}.`,
       );
-      return { status: "stale" };
+      // P16-14: compose the same ChangeSets again on the new canonical state (bounded).
+      const recomposed = await step.do("recompose stale", () =>
+        recomposeQuietly(this.env, candidateId),
+      );
+      return { status: "stale", recomposed };
     }
     const baseCommit = loaded.canonical.commit;
 
@@ -262,7 +284,17 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       await finish("rejected", `Malformed ChangeSet: ${String(error).slice(0, 200)}`);
       return { status: "rejected", reason: "malformed_changeset" };
     }
-    const { composable, sources } = parsed;
+    const { sources } = parsed;
+    // P16-14: a recomposed Candidate carries ChangeSets written on an older canonical state. The
+    // real merge onto the new base and the full check run decide; the base-generation rule does not.
+    const composable =
+      (loaded.recomposeCount ?? 0) > 0
+        ? parsed.composable.map((c) =>
+            c.baseGeneration < ctx.baseGeneration
+              ? { ...c, baseGeneration: ctx.baseGeneration }
+              : c,
+          )
+        : parsed.composable;
     const compatibility = checkCompatibility(ctx.baseGeneration, composable, {
       protectedResources: DEFAULT_POLICY.protectedResources,
     });
@@ -326,6 +358,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
 
     let lastSandboxAt = reservation.at;
     let gated: { status: string; promotable: boolean; gaps: CheckGap[] } | null = null;
+    /** The composed source, for the live preview after the checks (P16-10). */
+    let composedRef: { commit: string; tree: string } | null = null;
     let humanApprovalRequired = false;
     let halt: Halt | null = null;
     try {
@@ -385,6 +419,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         return { status: "rejected", reason: "file_conflict" };
       }
       const { commit, tree } = composed;
+      composedRef = { commit, tree };
 
       // Step 3: the risk-based Verification Plan (sections 34.1, 34.2, 53).
       const planned = await step.do("record composition and plan", () =>
@@ -551,10 +586,60 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         return candidateFork(candidateId);
       });
     }
+
+    // P16-10: a live preview of the composed source (prod only), after the checks and only when
+    // the build passed. Never changes the verification result; a failure marks only the preview.
+    const preview = composedRef;
+    const verdict = gated;
+    if (preview && verdict && this.env.APPS) {
+      await step.do(
+        "publish preview",
+        { retries: { limit: 1, delay: "30 seconds", backoff: "constant" }, timeout: "5 minutes" },
+        async () => {
+          try {
+            if (!verdict.promotable) {
+              const build = await this.env.DB.prepare(
+                `SELECT 1 AS ok FROM evidence_index WHERE candidate_id = ? AND kind = 'build'
+                   AND status = 'pass' AND coverage = 'checked_supported' LIMIT 1`,
+              )
+                .bind(candidateId)
+                .first<{ ok: number }>();
+              if (!build) return { status: "skipped" as const };
+            }
+            return await publishPreview(this.env, ctx, {
+              candidateId,
+              commit: preview.commit,
+              treeSha: preview.tree,
+            });
+          } catch (error) {
+            console.error(
+              JSON.stringify({
+                event: "preview.failed",
+                candidateId,
+                message: String(error).slice(0, 200),
+              }),
+            );
+            return { status: "error" as const };
+          }
+        },
+      );
+    }
     if (!gated?.promotable) return gated;
 
     // After the gate (section 21.1 steps 9-11): a gated Candidate waits for a person; a Candidate
     // that policy `autoPromoteRiskTiers` allows promotes through the same path as a manual promote.
+    // Canonical moved while the checks ran: this Candidate can no longer promote. Mark it stale and
+    // recompose it on the new canonical state (P16-14) instead of waiting for a person.
+    const moved = await step.do("check canonical", async () => {
+      const root = this.env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
+      const snapshot = await root.get(root.idFromName(ctx.projectId)).getCanonical();
+      const generation = snapshot?.generation ?? ctx.baseGeneration;
+      if (generation === ctx.baseGeneration) return null;
+      await markCandidateStale(this.env, candidateId, generation);
+      return generation;
+    });
+    if (moved !== null) return { ...gated, status: "stale", canonicalGeneration: moved };
+
     const decision = await step.do("settle change", async () => {
       const [change, candidate] = await Promise.all([
         this.env.DB.prepare("SELECT risk_tier FROM changes WHERE id = ?")

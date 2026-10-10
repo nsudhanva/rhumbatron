@@ -5,6 +5,7 @@ import type {
   ReleaseStatus,
   ReleaseView,
 } from "@rhumbatron/protocol";
+import { hasLiveApp, probeApp, productionRow } from "./app-release.ts";
 import { changeAfterRelease, releaseRecovery } from "./change-status.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import {
@@ -59,6 +60,11 @@ export type ReleaseTarget = {
 export type LoadedRelease = {
   release: ReleaseRow;
   target: ReleaseTarget | null;
+  /**
+   * The Project's live app (prod, ADR 0020). A Project with an app releases by moving its
+   * production pointer; Workers Builds stays only for the legacy dev release target (P16-15).
+   */
+  app: { label: string } | null;
   ctx: ChangeContext;
 };
 
@@ -90,9 +96,12 @@ const loadTarget = (env: Env, projectId: string) =>
     .bind(projectId)
     .first<ReleaseTarget>();
 
-/** Whether a promotion of this Project starts a release (ADR 0018). */
+/**
+ * Whether a promotion of this Project starts a release: it has a live app (prod, ADR 0020), or
+ * the legacy Workers Builds release target (dev Acme Shop Live, ADR 0018).
+ */
 export const hasReleaseTarget = async (env: Env, projectId: string) =>
-  (await loadTarget(env, projectId)) !== null;
+  (await hasLiveApp(env, projectId)) || (await loadTarget(env, projectId)) !== null;
 
 /**
  * The fact that a Change ended after promotion (`change.completed` or `change.failed`), so the
@@ -129,16 +138,18 @@ export async function loadRelease(env: Env, releaseId: string): Promise<LoadedRe
     .bind(releaseId)
     .first<ReleaseRow>();
   if (!release) return null;
-  const [target, project] = await Promise.all([
+  const [target, project, app] = await Promise.all([
     loadTarget(env, release.project_id),
     env.DB.prepare("SELECT org_id, slug FROM projects WHERE id = ?")
       .bind(release.project_id)
       .first<{ org_id: string; slug: string }>(),
+    env.APPS ? productionRow(env, release.project_id) : Promise.resolve(null),
   ]);
   if (!project) return null;
   return {
     release,
     target,
+    app: app && app.status !== "removed" ? { label: app.slug } : null,
     ctx: {
       projectId: release.project_id,
       orgId: project.org_id,
@@ -166,8 +177,7 @@ export async function startRelease(
   },
 ): Promise<{ releaseId: string } | null> {
   try {
-    const target = await loadTarget(env, input.projectId);
-    if (!target) return null;
+    if (!(await hasReleaseTarget(env, input.projectId))) return null;
     const releaseId = releaseIdFor(input.projectId, input.generation);
     const now = new Date().toISOString();
     const [, , supersededChanges] = await env.DB.batch([
@@ -384,7 +394,9 @@ export async function recoverStuckRelease(
 ): Promise<{ status: string; recovery?: string }> {
   const row = await env.DB.prepare(
     `SELECT c.id, c.project_id, c.status, c.updated_at, c.base_generation, p.org_id, p.slug,
-            EXISTS (SELECT 1 FROM release_targets t WHERE t.project_id = c.project_id) AS has_target
+            (EXISTS (SELECT 1 FROM release_targets t WHERE t.project_id = c.project_id)
+              OR EXISTS (SELECT 1 FROM app_deployments d WHERE d.project_id = c.project_id
+                AND d.channel = 'production' AND d.status != 'removed')) AS has_target
      FROM changes c JOIN projects p ON p.id = c.project_id WHERE c.id = ?`,
   )
     .bind(changeId)
@@ -575,7 +587,9 @@ async function recordReleaseEvidence(
   const completedAt = new Date().toISOString();
   const output = [
     `release ${release.id} · S${release.generation} · commit ${release.commit_sha}`,
-    `target ${loaded.target?.url ?? "none"} · build ${release.build_uuid ?? "none"} · version ${release.version_id ?? "none"}`,
+    loaded.app
+      ? `app ${loaded.app.label} (production host, through the apps router) · bundle ${release.version_id ?? "none"}`
+      : `target ${loaded.target?.url ?? "none"} · build ${release.build_uuid ?? "none"} · version ${release.version_id ?? "none"}`,
     ...(input.injected ? ["injected: true (P13-12 failure injection)"] : []),
     `attempt ${input.attempt}`,
     ...input.results.map(
@@ -604,7 +618,9 @@ async function recordReleaseEvidence(
     sourceRefs: [
       `artifacts://${ctx.projectId}@${release.commit_sha}`,
       ...(release.build_uuid ? [`workers-builds://${release.build_uuid}`] : []),
-      ...(release.version_id ? [`worker-version://${release.version_id}`] : []),
+      ...(release.version_id
+        ? [loaded.app ? `r2://${release.version_id}` : `worker-version://${release.version_id}`]
+        : []),
     ],
   };
   await env.EVIDENCE.put(`${prefix}/stdout.txt`, output, {
@@ -620,6 +636,7 @@ async function recordReleaseEvidence(
         injected: input.injected,
         attempt: input.attempt,
         url: loaded.target?.url ?? null,
+        app: loaded.app?.label ?? null,
         probes: input.results.map((r) => ({
           name: r.probe.name,
           path: r.probe.path,
@@ -676,7 +693,12 @@ export async function smokeRelease(
     await addedRoutes(env, loaded.release.candidate_id),
     options.injectedPath,
   );
-  const results = url ? await runProbes(url, probes) : [];
+  // A live app is probed through the apps router (no public route needed); else the release URL.
+  const results = loaded.app
+    ? await probeApp(env, loaded.app.label, probes)
+    : url
+      ? await runProbes(url, probes)
+      : [];
   const outcome = classifySmoke(results);
   const record = await recordReleaseEvidence(env, loaded, {
     outcome,

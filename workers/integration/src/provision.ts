@@ -45,7 +45,17 @@ export async function ensureSourceIndex(
   const key = sourceIndexKey(projectId, head.treeSha);
   let written = 0;
   let entries: Awaited<ReturnType<typeof walkTree>> | undefined;
-  if (!(await env.EVIDENCE.head(key))) {
+  const existing = await env.EVIDENCE.get(key);
+  if (existing) {
+    // A rollback (P16-13) makes an earlier tree canonical again under a new commit. Readers resolve
+    // the canonical commit from this index, so it must name the commit now on `main`.
+    const index = (await existing.json().catch(() => null)) as SourceIndex | null;
+    if (index && index.commit !== head.commit) {
+      await env.EVIDENCE.put(key, JSON.stringify({ ...index, commit: head.commit }), {
+        httpMetadata: { contentType: "application/json" },
+      });
+    }
+  } else {
     entries = await walkTree(repo, head.treeSha);
     const index: SourceIndex = {
       commit: head.commit,

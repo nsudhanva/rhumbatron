@@ -6,6 +6,13 @@ import {
   appLabelCandidates,
   isAppBuildInput,
 } from "@rhumbatron/protocol";
+import {
+  APP_BUILDS_PER_DAY,
+  canonicalCommitOf,
+  reserveAppBuild,
+  toSourceFile,
+  upsertVersionRow,
+} from "./app-release.ts";
 import type { SourceIndex } from "./provision.ts";
 
 /**
@@ -60,23 +67,13 @@ async function readSource(env: Env, projectId: string, index: SourceIndex) {
   using repo = await env.ARTIFACTS.get(projectId);
   const files: AppSourceFile[] = [];
   let bytes = 0;
-  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
   for (const path of index.files.filter(isAppBuildInput).slice(0, MAX_FILES)) {
     const blob = await repo.readFile({ ref: index.commit, path });
     if (!blob) continue;
     const buffer = await blob.arrayBuffer();
     bytes += buffer.byteLength;
     if (bytes > MAX_SOURCE_BYTES) throw new Error("source is larger than 8 MB");
-    try {
-      files.push({ path, text: decoder.decode(buffer) });
-    } catch {
-      let binary = "";
-      const view = new Uint8Array(buffer);
-      for (let i = 0; i < view.length; i += 0x8000) {
-        binary += String.fromCharCode(...view.subarray(i, i + 0x8000));
-      }
-      files.push({ path, base64: btoa(binary) });
-    }
+    files.push(toSourceFile(path, buffer));
   }
   return files;
 }
@@ -93,7 +90,10 @@ export async function provisionApp(env: Env, projectId: string): Promise<AppProv
   if (!canonical || canonical.artifactRef === "unassigned") return { status: "no_source" };
   const indexObject = await env.EVIDENCE.get(`source/${projectId}/${canonical.treeSha}/index.json`);
   if (!indexObject) return { status: "no_source" };
-  const index = (await indexObject.json()) as SourceIndex;
+  const stored = (await indexObject.json()) as SourceIndex;
+  // After a rollback the tree's index can still name the older commit with the same tree; the
+  // canonical ref names the commit on `main` (app-release.ts).
+  const index = { ...stored, commit: canonicalCommitOf(canonical.artifactRef) ?? stored.commit };
 
   const now = new Date().toISOString();
   const existing = await env.DB.prepare(
@@ -109,6 +109,9 @@ export async function provisionApp(env: Env, projectId: string): Promise<AppProv
 
   let result: AppBuildResult;
   try {
+    if (!(await reserveAppBuild(env.DB))) {
+      throw new Error(`the daily app build cap (${APP_BUILDS_PER_DAY}) is reached; retry tomorrow`);
+    }
     const files = await readSource(env, projectId, index);
     result = await env.APPS.build({
       projectId,
@@ -124,18 +127,30 @@ export async function provisionApp(env: Env, projectId: string): Promise<AppProv
   if (result.ok) {
     await env.DB.prepare(
       `UPDATE app_deployments SET commit_sha = ?, generation = ?, bundle_key = ?, status = 'ready',
-         failure_reason = NULL, updated_at = ?
+         failure_reason = NULL, bundle_bytes = ?, updated_at = ?
        WHERE project_id = ? AND channel = ? AND status != 'removed'`,
     )
       .bind(
         index.commit,
         canonical.generation,
         result.bundleKey,
+        result.bytes,
         now,
         projectId,
         APP_PRODUCTION_CHANNEL,
       )
       .run();
+    // The version host of this generation (Versions page "Open").
+    await upsertVersionRow(env, {
+      projectId,
+      label,
+      target: {
+        commit: index.commit,
+        bundleKey: result.bundleKey,
+        generation: canonical.generation,
+      },
+      bytes: result.bytes,
+    });
     return { status: "ready", label, commit: index.commit, reused: result.reused };
   }
   // A row that already serves a bundle keeps it; only the status and reason change.

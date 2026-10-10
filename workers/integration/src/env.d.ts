@@ -25,5 +25,11 @@ interface Env {
     build(
       input: import("@rhumbatron/protocol").AppBuildInput,
     ): Promise<import("@rhumbatron/protocol").AppBuildResult>;
+    /** One GET through the apps router for an app host, fresh pointer read (release smoke). */
+    probe(
+      input: import("@rhumbatron/protocol").AppProbeInput,
+    ): Promise<import("@rhumbatron/protocol").AppProbeResult>;
+    /** Deletes app data stores (app removal, expired previews). */
+    wipeData(storeNames: string[]): Promise<{ wiped: number }>;
   };
 }
