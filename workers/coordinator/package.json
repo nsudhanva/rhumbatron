@@ -22,6 +22,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./alarm-guard": "./src/alarm-guard.ts",
     "./shard-key": "./src/shard-key.ts"
   }
 }

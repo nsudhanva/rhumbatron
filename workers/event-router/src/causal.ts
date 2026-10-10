@@ -29,6 +29,13 @@ type TaskRow = {
   blocked_limit: string | null;
 };
 
+/**
+ * Hard bound on amplification (AGENTS.md sections 44, 61): commands (wakes, dispatches, composes)
+ * one Change can produce per UTC day. A Change of 8 agents uses far less than 100. An event to
+ * wake to event cycle, whatever its shape, stops here; the dropped commands are logged as errors.
+ */
+const CHANGE_DAILY_COMMAND_CAP = 1_000;
+
 /** Events after which a Task of the Change no longer holds a reasoning agent slot (section 44). */
 const SLOT_FREEING = new Set(["task.completed", "task.failed"]);
 
@@ -58,6 +65,52 @@ async function takeDailyQuota(db: D1Database, counter: string, cap: number): Pro
     .bind(day, counter, cap)
     .first<{ count: number }>();
   return row !== null;
+}
+
+/**
+ * Takes `count` commands from each Change's daily budget in one D1 batch. Returns the Changes whose
+ * budget is spent: their commands must not be sent. All or nothing per Change and batch.
+ */
+async function overBudgetChanges(
+  db: D1Database,
+  counts: Map<string, number>,
+): Promise<Set<string>> {
+  const entries = [...counts].filter(([, n]) => n > 0);
+  if (entries.length === 0) return new Set();
+  const day = new Date().toISOString().slice(0, 10);
+  const results = await db.batch<{ count: number }>(
+    entries.map(([changeId, n]) =>
+      db
+        .prepare(
+          `INSERT INTO usage_counters (day, counter, count) SELECT ?, ?, ? WHERE ? <= ?
+           ON CONFLICT (day, counter) DO UPDATE SET count = count + excluded.count
+           WHERE count + excluded.count <= ?
+           RETURNING count`,
+        )
+        .bind(
+          day,
+          `router-commands:${changeId}`,
+          n,
+          n,
+          CHANGE_DAILY_COMMAND_CAP,
+          CHANGE_DAILY_COMMAND_CAP,
+        ),
+    ),
+  );
+  const over = new Set<string>();
+  entries.forEach(([changeId, n], i) => {
+    if ((results[i]?.results?.length ?? 0) > 0) return;
+    over.add(changeId);
+    console.error(
+      JSON.stringify({
+        event: "router.change_command_cap_reached",
+        changeId,
+        dropped: n,
+        cap: CHANGE_DAILY_COMMAND_CAP,
+      }),
+    );
+  });
+  return over;
 }
 
 async function loadTasks(env: Env, changeIds: string[], projectIds: string[]) {
@@ -317,19 +370,33 @@ export async function routeCausalBatch(
       ),
     );
   }
-  const integrationCommands = [...dispatches.values(), ...composes];
+  // Per-Change daily command budget, taken before any send (CHANGE_DAILY_COMMAND_CAP).
+  const perChange = new Map<string, number>();
+  for (const c of [...dispatches.values(), ...composes, ...commands]) {
+    perChange.set(c.changeId ?? "", (perChange.get(c.changeId ?? "") ?? 0) + 1);
+  }
+  const over = await overBudgetChanges(env.DB, perChange);
+  const withinBudget = <T extends { changeId?: string | undefined }>(c: T) =>
+    !over.has(c.changeId ?? "");
+  const integrationCommands = [...dispatches.values(), ...composes].filter(withinBudget);
   if (integrationCommands.length > 0) {
     await env.INTEGRATION_COMMANDS.sendBatch(
       integrationCommands.map((body) => ({ body, contentType: "json" })),
     );
   }
-  if (commands.length > 0) {
-    await env.AGENT_WAKEUPS.sendBatch(commands.map((body) => ({ body, contentType: "json" })));
+  const wakeCommands = commands.filter(withinBudget);
+  if (wakeCommands.length > 0) {
+    await env.AGENT_WAKEUPS.sendBatch(wakeCommands.map((body) => ({ body, contentType: "json" })));
   }
   const indexing = indexCommands(relevant);
   if (indexing.length > 0) {
     await env.INDEXING.sendBatch(indexing.map((body) => ({ body, contentType: "json" })));
   }
   const staled = await settleCandidates(env, relevant);
-  return { woke: commands.length, dispatched: dispatches.size, composed: composes.length, staled };
+  return {
+    woke: wakeCommands.length,
+    dispatched: integrationCommands.length - composes.filter(withinBudget).length,
+    composed: composes.filter(withinBudget).length,
+    staled,
+  };
 }

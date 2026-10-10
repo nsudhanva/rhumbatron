@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { AnyEventEnvelope, type EventEnvelope } from "@rhumbatron/protocol";
+import { AlarmGuard } from "./alarm-guard.ts";
 import { migrateOutbox, OutboxPublisher } from "./outbox.ts";
 import {
   type CanonicalState,
@@ -67,11 +68,13 @@ type RootRow = {
 export class ProjectRootDO extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly outbox: OutboxPublisher;
+  private readonly alarms: AlarmGuard;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.outbox = new OutboxPublisher(this.sql, env);
+    this.alarms = new AlarmGuard(this.sql, ctx.storage, "ProjectRootDO");
     // Schema setup runs before any request reaches this instance.
     ctx.blockConcurrencyWhile(async () => this.migrate());
   }
@@ -94,6 +97,7 @@ export class ProjectRootDO extends DurableObject<Env> {
       );
     `);
     migrateOutbox(this.sql);
+    this.alarms.migrate();
   }
 
   private row(): RootRow | null {
@@ -326,16 +330,19 @@ export class ProjectRootDO extends DurableObject<Env> {
     };
   }
 
-  /** Publishes due outbox rows to K2, then schedules the next attempt if any remain. */
+  /**
+   * Publishes due outbox rows to K2, then schedules the next attempt if any remain. The guard
+   * (alarm-guard.ts) counts the fire, keeps a retry at least 1 s out, and stops at the daily cap.
+   */
   override async alarm(): Promise<void> {
-    await this.outbox.publishAllDue(Date.now());
-    await this.scheduleAlarm();
+    const now = Date.now();
+    this.alarms.countFire(now);
+    const published = await this.outbox.publishAllDue(now);
+    await this.alarms.schedule(this.outbox.nextDueAt(), Date.now(), published > 0);
   }
 
   private async scheduleAlarm() {
-    const at = this.outbox.nextDueAt();
-    if (at === null) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(Math.max(at, Date.now()));
+    await this.alarms.schedule(this.outbox.nextDueAt(), Date.now());
   }
 
   /**

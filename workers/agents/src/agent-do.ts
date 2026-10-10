@@ -8,6 +8,7 @@ import {
   renderPacket,
 } from "@rhumbatron/context-compiler";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
+import { AlarmGuard, MIN_ALARM_DELAY_MS } from "@rhumbatron/coordinator/alarm-guard";
 import {
   appendChangeEvents,
   type ChangeContext,
@@ -148,6 +149,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   private readonly runSpendUsd = new Map<string, number>();
   /** Advisory Claims of the active run (ADR 0015). */
   private readonly runClaims: RunClaimStore;
+  /** Daily cap on self-scheduled callbacks (alarm-guard.ts): a runaway loop stops, logged. */
+  private readonly alarmGuard: AlarmGuard;
 
   readonly harness = new PiHarness({
     harness: ({ storage, context }) =>
@@ -175,6 +178,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.alarmGuard = new AlarmGuard(ctx.storage.sql, ctx.storage, "AgentDO");
+    this.alarmGuard.migrate();
     ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS agent_runs (
         run_id TEXT PRIMARY KEY,
@@ -743,7 +748,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         operationId: runId,
       },
     );
-    await this.schedule(60, "checkRun", { runId });
+    await this.scheduleGuarded(60, "checkRun", { runId });
     log({
       event: "agent.run_started",
       agentId: input.agentId,
@@ -769,7 +774,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         "UPDATE agent_runs SET checks = checks + 1 WHERE run_id = ?",
         run.run_id,
       );
-      await this.schedule(60, "checkRun", payload);
+      await this.scheduleGuarded(60, "checkRun", payload);
       // The one-minute run check is the main renewal tick: the lease is two minutes.
       await this.renewClaims(run.run_id, JSON.parse(run.input_json) as AgentRunInput);
       return;
@@ -953,7 +958,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
           });
           // Model review (P9-05, P9-06) runs from a durable schedule, never on this run's path.
           const job: ConflictReviewJob = { ctx, conflictIds: conflicts.map((c) => c.id) };
-          await this.schedule(1, "reviewConflicts", job);
+          await this.scheduleGuarded(1, "reviewConflicts", job);
         }
       } catch (error) {
         log({
@@ -1000,7 +1005,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     });
     // The next attempt re-reads every prior failure from D1 and applies the escalation rules.
     if (step.action === "retry" || step.action === "escalate") {
-      await this.schedule(5, "retryTask", input);
+      await this.scheduleGuarded(5, "retryTask", input);
       if (step.action === "escalate") {
         await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
           await changeEvent(
@@ -1047,6 +1052,21 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         indexes: [input.projectId],
       });
     }
+  }
+
+  /**
+   * Every callback this agent schedules for itself goes through here: at least 1 s out, and at most
+   * DAILY_ALARM_CAP per object per UTC day. Past the cap the callback is dropped and logged; the
+   * run check's own limit (MAX_RUN_CHECKS) and the attempt limit bound normal use far below it.
+   */
+  private async scheduleGuarded<T>(
+    delaySeconds: number,
+    callback: "checkRun" | "retryTask" | "reviewConflicts",
+    payload: T,
+  ): Promise<boolean> {
+    if (!this.alarmGuard.admitSchedule(Date.now(), callback)) return false;
+    await this.schedule(Math.max(delaySeconds, MIN_ALARM_DELAY_MS / 1000), callback, payload);
+    return true;
   }
 
   async retryTask(input: AgentRunInput) {

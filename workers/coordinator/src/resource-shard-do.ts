@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { AnyEventEnvelope, type EventEnvelope, SemanticResource } from "@rhumbatron/protocol";
+import { AlarmGuard } from "./alarm-guard.ts";
 import {
   type AcquireRequest,
   type ClaimRecord,
@@ -120,12 +121,14 @@ export class ResourceShardDO extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly outbox: OutboxPublisher;
   private readonly intents: IntentStore;
+  private readonly alarms: AlarmGuard;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.outbox = new OutboxPublisher(this.sql, env);
     this.intents = new IntentStore(this.sql);
+    this.alarms = new AlarmGuard(this.sql, ctx.storage, "ResourceShardDO");
     // Schema setup runs before any request reaches this instance.
     ctx.blockConcurrencyWhile(async () => this.migrate());
   }
@@ -160,6 +163,7 @@ export class ResourceShardDO extends DurableObject<Env> {
     `);
     migrateOutbox(this.sql);
     migrateIntents(this.sql);
+    this.alarms.migrate();
   }
 
   /**
@@ -387,8 +391,9 @@ export class ResourceShardDO extends DurableObject<Env> {
   /** Expires overdue claims, prunes old finished rows, publishes the outbox, sets the next alarm. */
   override async alarm(): Promise<void> {
     const now = Date.now();
-    this.ctx.storage.transactionSync(() => {
-      this.expireOverdue(now);
+    this.alarms.countFire(now);
+    const expired = this.ctx.storage.transactionSync(() => {
+      const count = this.expireOverdue(now);
       this.sql.exec(
         "DELETE FROM claims WHERE status != 'active' AND ended_at IS NOT NULL AND ended_at < ?",
         now - TERMINAL_RETENTION_MS,
@@ -397,9 +402,10 @@ export class ResourceShardDO extends DurableObject<Env> {
         "DELETE FROM claim_contentions WHERE observed_at < ?",
         now - CONTENTION_RETENTION_MS,
       );
+      return count;
     });
-    await this.outbox.publishAllDue(now);
-    await this.rescheduleAlarm();
+    const published = await this.outbox.publishAllDue(now);
+    await this.rescheduleAlarm(expired + published > 0);
   }
 
   /**
@@ -465,12 +471,13 @@ export class ResourceShardDO extends DurableObject<Env> {
    * Marks overdue claims expired and writes `claim.expired` to the outbox.
    * Call it inside a transaction so state and events commit together.
    */
-  private expireOverdue(now: number) {
+  private expireOverdue(now: number): number {
     const active = this.sql
       .exec<ClaimRow>("SELECT * FROM claims WHERE status = 'active' AND lease_expires_at <= ?", now)
       .toArray()
       .map(fromRow);
-    for (const claim of findOverdue(active, now)) {
+    const overdue = findOverdue(active, now);
+    for (const claim of overdue) {
       this.sql.exec(
         "UPDATE claims SET status = 'expired', ended_at = ? WHERE claim_id = ?",
         now,
@@ -478,6 +485,7 @@ export class ResourceShardDO extends DurableObject<Env> {
       );
       this.enqueue("claim.expired", claim, { kind: "system", id: SYSTEM_ACTOR_ID }, now);
     }
+    return overdue.length;
   }
 
   /** Idempotent on (Change, resource, agent, holder). Call it inside a transaction. */
@@ -503,7 +511,11 @@ export class ResourceShardDO extends DurableObject<Env> {
     }
   }
 
-  private async rescheduleAlarm() {
+  /**
+   * `progressed` is given only by `alarm()`. The guard (alarm-guard.ts) deletes the alarm when no
+   * work is pending, keeps an alarm-driven retry at least 1 s out, and stops at the daily cap.
+   */
+  private async rescheduleAlarm(progressed?: boolean) {
     const active = this.sql
       .exec<ClaimRow>("SELECT * FROM claims WHERE status = 'active'")
       .toArray()
@@ -512,8 +524,8 @@ export class ResourceShardDO extends DurableObject<Env> {
     const candidates = [nextAlarmAt(active), this.outbox.nextDueAt()].filter(
       (t): t is number => t !== null,
     );
-    if (candidates.length === 0) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(Math.max(Math.min(...candidates), Date.now()));
+    const dueAt = candidates.length === 0 ? null : Math.min(...candidates);
+    await this.alarms.schedule(dueAt, Date.now(), progressed);
   }
 
   /**
