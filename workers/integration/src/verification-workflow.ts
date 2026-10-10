@@ -1,6 +1,7 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import {
+  autoPromoteDecision,
   buildVerificationPlan,
   type CheckGap,
   checkCompatibility,
@@ -42,6 +43,7 @@ import {
 import { classifyBrowser, classifySecurity } from "./check-semantics.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
+import { promoteCandidate } from "./promotion.ts";
 
 /**
  * CandidateVerificationWorkflow (AGENTS.md sections 21.2, 33, 34). One instance per Candidate
@@ -54,6 +56,8 @@ import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
 export type CandidateVerificationParams = { candidateId: string };
 
 const ACTOR = { kind: "system", id: "candidate-verification" } as const;
+/** Policy `autoPromoteRiskTiers` promotes as the system, never as a person (section 53). */
+const AUTO_PROMOTION_ACTOR = { kind: "system", id: "auto-promotion" } as const;
 /** States after which this workflow has nothing to do. */
 const FINAL = new Set(["verified", "rejected", "stale", "promoted"]);
 /** Remove the checkout only while the Sandbox is still awake; a sleeping one already lost it. */
@@ -295,6 +299,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     }
 
     let lastSandboxAt = reservation.at;
+    let gated: { status: string; promotable: boolean; gaps: CheckGap[] } | null = null;
+    let humanApprovalRequired = false;
     try {
       // Step 2 (P10-03): compose the ChangeSets in Work Graph order.
       let composed: Composition & { at: number };
@@ -443,7 +449,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       }
 
       // Steps 9-10: gate on authoritative Evidence rows.
-      return await step.do("gate required checks", async () => {
+      gated = await step.do("gate required checks", async () => {
         const rows = await this.env.DB.prepare(
           "SELECT * FROM evidence_index WHERE candidate_id = ?",
         )
@@ -489,6 +495,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, events);
         return { status, promotable: gate.promotable, gaps: gate.gaps };
       });
+      humanApprovalRequired = plan.humanApprovalRequired;
     } finally {
       await step.do("settle sandbox", async () => {
         await settleSandbox(this.env.DB, reservation.at);
@@ -497,6 +504,63 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         }
         return candidateFork(candidateId);
       });
+    }
+    if (!gated?.promotable) return gated;
+
+    // After the gate (section 21.1 steps 9-11): a gated Candidate waits for a person; a Candidate
+    // that policy `autoPromoteRiskTiers` allows promotes through the same path as a manual promote.
+    const decision = await step.do("settle change", async () => {
+      const [change, candidate] = await Promise.all([
+        this.env.DB.prepare("SELECT risk_tier FROM changes WHERE id = ?")
+          .bind(ctx.changeId)
+          .first<{ risk_tier: string | null }>(),
+        this.env.DB.prepare("SELECT status FROM candidates WHERE id = ?")
+          .bind(candidateId)
+          .first<{ status: string }>(),
+      ]);
+      const riskTier = change?.risk_tier ?? null;
+      const decided = autoPromoteDecision({
+        candidateStatus: candidate?.status ?? "missing",
+        promotable: true,
+        plan: { humanApprovalRequired },
+        riskTier: riskTier === null ? null : RiskTier.catch("medium").parse(riskTier),
+        policy: DEFAULT_POLICY,
+      });
+      if (decided.kind === "manual" && decided.reason === "approval_required") {
+        await this.env.DB.prepare(
+          `UPDATE changes SET status = 'awaiting_approval', updated_at = ?
+           WHERE id = ? AND status = 'verifying'`,
+        )
+          .bind(new Date().toISOString(), ctx.changeId)
+          .run();
+      }
+      return decided;
+    });
+    if (decision.kind !== "auto_promote") return { ...gated, promotion: decision.reason };
+    try {
+      // Every section 36 precondition is re-checked from authoritative rows inside; a CAS failure
+      // marks the Candidate stale. A retried step returns `alreadyPromoted`, never a second advance.
+      const outcome = await step.do(
+        "auto promote",
+        { retries: { limit: 2, delay: "15 seconds", backoff: "exponential" } },
+        () =>
+          promoteCandidate(this.env, {
+            candidateId,
+            trigger: "auto",
+            actor: AUTO_PROMOTION_ACTOR,
+          }),
+      );
+      return { ...gated, promotion: outcome.status };
+    } catch (error) {
+      // The Candidate stays verified; a person can still promote it.
+      console.error(
+        JSON.stringify({
+          event: "promotion.auto_failed",
+          candidateId,
+          message: String(error).slice(0, 200),
+        }),
+      );
+      return { ...gated, promotion: "auto_failed" };
     }
   }
 

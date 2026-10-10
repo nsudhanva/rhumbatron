@@ -37,6 +37,45 @@ export function approvalRequired(
   return plan.humanApprovalRequired || policy.humanGateRiskTiers.includes(riskTier);
 }
 
+export type AutoPromoteDecision =
+  | { kind: "auto_promote" }
+  | {
+      kind: "manual";
+      reason:
+        | "not_verified"
+        | "evidence_gap"
+        | "approval_required"
+        | "unknown_risk"
+        | "tier_not_auto";
+    };
+
+/**
+ * Policy `autoPromoteRiskTiers` (AGENTS.md section 53). A verified Candidate whose required checks
+ * pass promotes without a person only when the Change risk tier is listed and no human gate applies.
+ * An unknown risk tier is never automatic. The decision only selects the trigger: promotion still
+ * re-checks every section 36 precondition from authoritative rows (`checkPromotion`).
+ */
+export function autoPromoteDecision(input: {
+  candidateStatus: string;
+  /** Gate result from authoritative Evidence rows; never a cached or model score. */
+  promotable: boolean;
+  plan: Pick<VerificationPlan, "humanApprovalRequired">;
+  riskTier: RiskTier | null;
+  policy: Pick<ProjectPolicy, "humanGateRiskTiers" | "autoPromoteRiskTiers">;
+}): AutoPromoteDecision {
+  if (input.candidateStatus !== "verified") return { kind: "manual", reason: "not_verified" };
+  if (!input.promotable) return { kind: "manual", reason: "evidence_gap" };
+  const gated =
+    input.plan.humanApprovalRequired ||
+    (input.riskTier !== null && approvalRequired(input.plan, input.riskTier, input.policy));
+  if (gated) return { kind: "manual", reason: "approval_required" };
+  if (input.riskTier === null) return { kind: "manual", reason: "unknown_risk" };
+  if (!input.policy.autoPromoteRiskTiers.includes(input.riskTier)) {
+    return { kind: "manual", reason: "tier_not_auto" };
+  }
+  return { kind: "auto_promote" };
+}
+
 /** A human rejection always blocks. A grant counts only for the tree that was approved. */
 export function approvalState(
   required: boolean,
