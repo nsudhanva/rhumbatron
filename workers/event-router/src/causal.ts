@@ -228,7 +228,8 @@ async function decideAmbiguous(
  * P11-06 (AGENTS.md sections 42.9, 59). After `canonical.advanced`, every other in-flight Candidate
  * of the Project on an older base can never promote: mark it stale, so nobody verifies or approves
  * it further. The promoted Candidate itself is marked promoted, which repairs the D1 mirror if the
- * integration Worker stopped between the compare-and-swap and its own write. One D1 batch.
+ * integration Worker stopped between the compare-and-swap and its own write. A Change left in
+ * `awaiting_approval` with no verified Candidate returns to `verifying`. One D1 batch.
  */
 async function settleCandidates(env: Env, events: EventEnvelope[]): Promise<number> {
   const now = new Date().toISOString();
@@ -256,12 +257,19 @@ async function settleCandidates(env: Env, events: EventEnvelope[]): Promise<numb
         generation,
         event.projectId,
       ),
+      // A Change that waited for approval of a now-stale Candidate has no decision pending.
+      env.DB.prepare(
+        `UPDATE changes SET status = 'verifying', updated_at = ?
+         WHERE project_id = ? AND status = 'awaiting_approval'
+           AND NOT EXISTS (SELECT 1 FROM candidates c
+             WHERE c.change_id = changes.id AND c.status = 'verified')`,
+      ).bind(now, event.projectId),
     );
   }
   if (statements.length === 0) return 0;
   const results = await env.DB.batch(statements);
-  // Every second statement is a stale sweep.
-  return results.reduce((n, r, i) => n + (i % 2 === 1 ? (r.meta.changes ?? 0) : 0), 0);
+  // Every third statement, starting at the second, is a stale sweep.
+  return results.reduce((n, r, i) => n + (i % 3 === 1 ? (r.meta.changes ?? 0) : 0), 0);
 }
 
 /** Routes one batch of fresh events. Throws on failure so the caller can release and redeliver. */
