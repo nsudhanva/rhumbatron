@@ -12,6 +12,7 @@ import {
   WorkGraphPlan,
 } from "@rhumbatron/protocol";
 import { z } from "zod";
+import { normalizeToolArgs } from "./plan-normalize.ts";
 
 /**
  * Root Planner contract (AGENTS.md sections 22.1 and 47 P5-02). The model must answer with one
@@ -165,7 +166,8 @@ export function parsePlan(
   } catch {
     return { ok: false, errors: ["arguments are not valid JSON"] };
   }
-  const parsed = WorkGraphPlan.safeParse(json);
+  // Undo harmless encoding slips first, for example `"riskTier": "\"low\""` (seen on prod).
+  const parsed = WorkGraphPlan.safeParse(normalizeToolArgs(json));
   if (!parsed.success) {
     return {
       ok: false,
