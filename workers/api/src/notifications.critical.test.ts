@@ -258,3 +258,65 @@ describe("notification access", () => {
     expect(await list("usr_a")).toEqual([]);
   });
 });
+
+describe("shared Project request notifications", () => {
+  function shared() {
+    const ctx = setup();
+    ctx.db.exec(`
+      INSERT INTO users (id, auth_subject, created_at, updated_at)
+        VALUES ('usr_c', 'c', '${T}', '${T}');
+      INSERT INTO project_members (project_id, user_id, role, rank, added_by, created_at) VALUES
+        ('proj_a', 'usr_a', 'owner', 0, 'test', '${T}'),
+        ('proj_a', 'usr_c', 'collaborator', 10, 'test', '${T}');
+    `);
+    const request = (id: string, status: string, outcome: string | null, updatedAt = T) =>
+      ctx.db
+        .prepare(
+          `INSERT INTO changes (id, project_id, goal, status, base_generation, risk_tier, budget_usd,
+             created_by, outcome, outcome_reason, created_at, updated_at)
+           VALUES (?, 'proj_a', 'Add dark mode', ?, 1841, 'low', 3, 'usr_c', ?, 'Another request won', ?, ?)`,
+        )
+        .run(id, status, outcome, T, updatedAt);
+    return { ...ctx, request };
+  }
+
+  it("only the requester sees request_not_selected, and an overridden request produces none", async () => {
+    const { request, kinds, list } = shared();
+    request("chg_ns", "not_selected", "not_selected");
+    request("chg_ov", "not_selected", "overridden");
+
+    expect(await kinds("usr_c")).toEqual(["request_not_selected:chg_ns"]);
+    expect((await list("usr_c"))[0]).toMatchObject({
+      severity: "attention",
+      href: "/changes/chg_ns",
+      body: expect.stringContaining("Another request won"),
+    });
+    expect(await kinds("usr_a")).toEqual([]);
+    expect(await kinds("usr_b")).toEqual([]);
+  });
+
+  it("request_not_selected leaves after the window, and a read mark clears unread", async () => {
+    const { d1, request, list } = shared();
+    request("chg_ns", "not_selected", "not_selected");
+    request("chg_old", "not_selected", "not_selected", OLD);
+    await markNotificationsRead(d1, "usr_c", ["request_not_selected:chg_ns"], NOW);
+    expect((await list("usr_c")).map((i) => [i.id, i.read])).toEqual([
+      ["request_not_selected:chg_ns", true],
+    ]);
+  });
+
+  it("only the owner sees request_awaiting_owner, and a read mark never hides it", async () => {
+    const { d1, request, kinds, list } = shared();
+    request("chg_wait", "awaiting_owner", null);
+
+    expect(await kinds("usr_a")).toEqual(["request_awaiting_owner:chg_wait"]);
+    expect(await kinds("usr_c")).toEqual([]);
+    expect(await kinds("usr_b")).toEqual([]);
+
+    await markNotificationsRead(d1, "usr_a", "all", NOW);
+    const after = await list("usr_a");
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ read: true, severity: "action" });
+    expect(countNotifications(after)).toEqual({ unread: 0, action: 1 });
+  });
+});

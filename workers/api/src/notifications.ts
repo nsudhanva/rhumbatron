@@ -15,9 +15,9 @@ import { ensureIdentity } from "./identity.ts";
  * Access: every query joins `memberships` on the caller's user ID, the same rule as
  * `canAccessProject`, so a user never sees another tenant's rows. Archived Projects are skipped.
  *
- * Cost: one D1 batch of 8 capped SELECTs per read (list and count share it), plus the 3-statement
+ * Cost: one D1 batch of 10 capped SELECTs per read (list and count share it), plus the 3-statement
  * `ensureIdentity` batch. Each SELECT starts from a rare state (verified Candidates, open dead
- * letters, blocked Changes, confirmed conflicts) or a 7-day window through an index, so rows read
+ * letters, blocked Changes, confirmed conflicts, requests awaiting the owner) or a 7-day window through an index, so rows read
  * scale with open and recent items, not with history. Marking read writes one row per new mark.
  * Promotion still re-checks everything (section 36): a notification is a pointer, never a gate.
  */
@@ -35,6 +35,8 @@ const NotificationKind = z.enum([
   "promoted",
   "release_failed",
   "release_deployed",
+  "request_not_selected",
+  "request_awaiting_owner",
 ]);
 type NotificationKind = z.infer<typeof NotificationKind>;
 
@@ -219,6 +221,36 @@ ${MINE("r.project_id")}
 LEFT JOIN release_targets rt ON rt.project_id = r.project_id
 ORDER BY r.finished_at DESC LIMIT ${PER_KIND}`;
 
+/**
+ * Shared-Project requests (ADR shared-projects). Starts from the Change status index.
+ * `request_not_selected`: the requester only (`ch.created_by = ?1`); `overridden` outcomes are
+ * the owner's choice and are not news here. Within the window. `?2` = since.
+ */
+const NOT_SELECTED_SQL = `
+SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.outcome_reason, ch.updated_at,
+       r.read_at
+FROM changes ch
+${MINE("ch.project_id")}
+${read("r", `'request_not_selected:' || ch.id`)}
+WHERE ch.status = 'not_selected' AND ch.outcome = 'not_selected' AND ch.created_by = ?1
+  AND ch.updated_at >= ?2
+ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
+
+/**
+ * request_awaiting_owner: the Project owner only (owner member row, or organization member:
+ * the `projectRole` rule). A collaborator never sees it. An action item while the status holds.
+ */
+const AWAITING_OWNER_SQL = `
+SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.updated_at, r.read_at
+FROM changes ch
+${MINE("ch.project_id")}
+${read("r", `'request_awaiting_owner:' || ch.id`)}
+WHERE ch.status = 'awaiting_owner'
+  AND (EXISTS (SELECT 1 FROM memberships m WHERE m.org_id = p.org_id AND m.user_id = ?1)
+    OR EXISTS (SELECT 1 FROM project_members pm
+               WHERE pm.project_id = p.id AND pm.user_id = ?1 AND pm.role = 'owner'))
+ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
+
 type Base = { project_id: string; project_name: string; read_at?: string | null };
 type VerifiedRow = Base & {
   candidate_id: string;
@@ -280,6 +312,13 @@ type ReleaseRow = Base & {
   version_id: string | null;
   finished_at: string;
   url: string | null;
+};
+
+type NotSelectedRow = Base & {
+  id: string;
+  goal: string;
+  outcome_reason: string | null;
+  updated_at: string;
 };
 
 const clip = (text: string, max = 180) =>
@@ -477,6 +516,39 @@ function releaseItem(row: ReleaseRow): NotificationView {
   };
 }
 
+function notSelectedItem(row: NotSelectedRow): NotificationView {
+  return {
+    ...project(row),
+    changeId: row.id,
+    id: `request_not_selected:${row.id}`,
+    kind: "request_not_selected",
+    severity: "attention",
+    title: "Your request was not selected",
+    body: joinParts(
+      clip(row.outcome_reason ?? "Another request was chosen instead", 160),
+      clip(row.goal, 100),
+    ),
+    href: `/changes/${row.id}`,
+    createdAt: row.updated_at,
+    read: !!row.read_at,
+  };
+}
+
+function awaitingOwnerItem(row: CompletedRow): NotificationView {
+  return {
+    ...project(row),
+    changeId: row.id,
+    id: `request_awaiting_owner:${row.id}`,
+    kind: "request_awaiting_owner",
+    severity: "action",
+    title: "A request needs your choice",
+    body: clip(row.goal, 160),
+    href: `/changes/${row.id}`,
+    createdAt: row.updated_at,
+    read: !!row.read_at,
+  };
+}
+
 const RANK: Record<NotificationSeverity, number> = { action: 0, attention: 1, info: 2 };
 
 /**
@@ -492,17 +564,29 @@ export async function deriveNotifications(
   // Each statement binds only the ordinals it declares: ?1 user, ?2 window start.
   const statement = (sql: string) => db.prepare(sql).bind(userId, since);
   const userOnly = (sql: string) => db.prepare(sql).bind(userId);
-  const [verified, letters, blocked, rejected, promoted, conflicts, completed, released] =
-    await db.batch([
-      userOnly(VERIFIED_SQL),
-      userOnly(DEAD_LETTER_SQL),
-      userOnly(BLOCKED_SQL),
-      statement(finishedCandidates("rejected", "candidate_rejected")),
-      statement(finishedCandidates("promoted", "promoted")),
-      userOnly(CONFLICT_SQL),
-      statement(COMPLETED_SQL),
-      statement(RELEASES_SQL),
-    ]);
+  const [
+    verified,
+    letters,
+    blocked,
+    rejected,
+    promoted,
+    conflicts,
+    completed,
+    released,
+    notSelected,
+    awaiting,
+  ] = await db.batch([
+    userOnly(VERIFIED_SQL),
+    userOnly(DEAD_LETTER_SQL),
+    userOnly(BLOCKED_SQL),
+    statement(finishedCandidates("rejected", "candidate_rejected")),
+    statement(finishedCandidates("promoted", "promoted")),
+    userOnly(CONFLICT_SQL),
+    statement(COMPLETED_SQL),
+    statement(RELEASES_SQL),
+    statement(NOT_SELECTED_SQL),
+    userOnly(AWAITING_OWNER_SQL),
+  ]);
   const rows = <T>(result: D1Result | undefined) => (result?.results ?? []) as T[];
   const items: NotificationView[] = [
     ...rows<VerifiedRow>(verified)
@@ -515,6 +599,8 @@ export async function deriveNotifications(
     ...rows<FinishedRow>(promoted).map(promotedItem),
     ...rows<CompletedRow>(completed).map(completedItem),
     ...rows<ReleaseRow>(released).map(releaseItem),
+    ...rows<NotSelectedRow>(notSelected).map(notSelectedItem),
+    ...rows<CompletedRow>(awaiting).map(awaitingOwnerItem),
   ];
   return items.sort(
     (a, b) =>

@@ -1102,7 +1102,9 @@ export type NotificationKind =
   | "candidate_rejected"
   | "conflict_open"
   | "change_completed"
-  | "promoted";
+  | "promoted"
+  | "request_not_selected"
+  | "request_awaiting_owner";
 
 /** `action`: needs a person until its condition clears. `attention`: stopped or rejected work. */
 export type NotificationSeverity = "action" | "attention" | "info";

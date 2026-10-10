@@ -43,12 +43,15 @@ const ICONS: Record<NotificationKind, Icon> = {
   conflict_open: ArrowsSplit,
   change_completed: CheckSquare,
   promoted: GitMerge,
+  request_not_selected: XSquare,
+  request_awaiting_owner: UserCheck,
 };
 
 /** Inline action for items whose next step is a decision on another page. */
 const ACTIONS: Partial<Record<NotificationKind, string>> = {
   approval_required: "Review",
   promotion_ready: "Open",
+  request_awaiting_owner: "Choose",
 };
 
 /** The icon is the status here (DESIGN.md 7), paired with the title's words. */
