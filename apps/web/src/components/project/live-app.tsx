@@ -10,7 +10,16 @@ const LINK = "text-kumo-link underline-offset-2 hover:underline";
  * live apps are off (dev). A Project from before live apps gets a "Deploy app" action. "Remove
  * app" (P16-20) confirms in place; the Project and its history stay.
  */
-export function LiveAppLine({ projectId, hasSource }: { projectId: string; hasSource: boolean }) {
+export function LiveAppLine({
+  projectId,
+  hasSource,
+  canManage = true,
+}: {
+  projectId: string;
+  hasSource: boolean;
+  /** Owner only: deploy, retry and remove (a collaborator sees the app but cannot manage it). */
+  canManage?: boolean;
+}) {
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: ["project-app", projectId],
@@ -37,16 +46,17 @@ export function LiveAppLine({ projectId, hasSource }: { projectId: string; hasSo
   });
   const view = query.data;
   if (!view?.enabled) return null;
-  const action = (label: string) => (
-    <button
-      type="button"
-      className={LINK}
-      disabled={deploy.isPending}
-      onClick={() => deploy.mutate()}
-    >
-      {deploy.isPending || deploy.isSuccess ? "Queued" : label}
-    </button>
-  );
+  const action = (label: string) =>
+    canManage ? (
+      <button
+        type="button"
+        className={LINK}
+        disabled={deploy.isPending}
+        onClick={() => deploy.mutate()}
+      >
+        {deploy.isPending || deploy.isSuccess ? "Queued" : label}
+      </button>
+    ) : null;
 
   const app = view.app;
   if (!app) {
@@ -99,8 +109,8 @@ export function LiveAppLine({ projectId, hasSource }: { projectId: string; hasSo
           {action("Retry")}
         </>
       )}
-      <span aria-hidden>·</span>
-      {confirming ? (
+      {canManage && <span aria-hidden>·</span>}
+      {!canManage ? null : confirming ? (
         <span className="flex items-center gap-x-3">
           <span>Remove the app and delete its data?</span>
           <button

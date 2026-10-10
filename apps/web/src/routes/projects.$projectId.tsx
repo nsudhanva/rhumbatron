@@ -155,7 +155,11 @@ function Overview() {
               ) : (
                 <span>No source yet</span>
               )}
-              <LiveAppLine projectId={projectId} hasSource={assigned} />
+              <LiveAppLine
+                projectId={projectId}
+                hasSource={assigned}
+                canManage={project.data?.role !== "collaborator"}
+              />
             </>
           )
         }
