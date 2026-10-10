@@ -535,9 +535,27 @@ async function clearPrefix(bucket: R2Bucket, prefix: string) {
 }
 
 /**
+ * True for a removed production row whose cleanup finished: no commit and no bundle. It stays so
+ * the app's hosts keep answering 410 (not 404), and it keeps the label. "Deploy app" revives it
+ * (workers/api/src/apps.ts).
+ */
+const isAppTombstone = (row: {
+  channel?: string;
+  status: string;
+  commit_sha: string | null;
+  bundle_key: string | null;
+}) =>
+  (row.channel ?? APP_PRODUCTION_CHANNEL) === APP_PRODUCTION_CHANNEL &&
+  row.status === "removed" &&
+  row.commit_sha === null &&
+  row.bundle_key === null;
+
+/**
  * Removes a Project's app and keeps the Project (P16-20). The API already marked every row
- * `removed`, so the hosts answer 410 at once. This deletes the data stores, the bundles, and then
- * the rows. Bounded per delivery; `partial` asks for another delivery. Safe to repeat.
+ * `removed`, so the hosts answer 410 at once. This deletes the data stores, the bundles, and the
+ * preview and version rows, then reduces the production row to a tombstone (`isAppTombstone`), so
+ * the hosts keep answering 410. Bounded per delivery; `partial` asks for another delivery. Safe
+ * to repeat: a tombstone alone means done.
  */
 export async function removeApp(env: Env, projectId: string): Promise<AppRemoval> {
   const result: AppRemoval = { status: "partial", wiped: 0, objectsDeleted: 0 };
@@ -549,12 +567,20 @@ export async function removeApp(env: Env, projectId: string): Promise<AppRemoval
     .bind(now, projectId)
     .run();
   const { results } = await env.DB.prepare(
-    `SELECT channel FROM app_deployments WHERE project_id = ?
+    `SELECT channel, status, commit_sha, bundle_key FROM app_deployments WHERE project_id = ?
      ORDER BY channel = ? , channel LIMIT ?`,
   )
     .bind(projectId, APP_PRODUCTION_CHANNEL, WIPES_PER_PASS + 1)
-    .all<{ channel: string }>();
-  if (results.length === 0) return { ...result, status: "done" };
+    .all<{
+      channel: string;
+      status: string;
+      commit_sha: string | null;
+      bundle_key: string | null;
+    }>();
+  const only = results.length === 1 ? results[0] : undefined;
+  if (results.length === 0 || (only && isAppTombstone(only))) {
+    return { ...result, status: "done" };
+  }
 
   // Data stores first (production last), then their rows, so a retry never loses track of a store.
   const batch = results.slice(0, WIPES_PER_PASS);
@@ -580,8 +606,13 @@ export async function removeApp(env: Env, projectId: string): Promise<AppRemoval
     more ||= cleared.more;
   }
   if (more) return result;
-  await env.DB.prepare("DELETE FROM app_deployments WHERE project_id = ? AND status = 'removed'")
-    .bind(projectId)
+  await env.DB.prepare(
+    `UPDATE app_deployments SET commit_sha = NULL, generation = NULL, bundle_key = NULL,
+       failure_reason = NULL, bundle_bytes = NULL, candidate_id = NULL, change_id = NULL,
+       updated_at = ?
+     WHERE project_id = ? AND channel = ? AND status = 'removed'`,
+  )
+    .bind(now, projectId, APP_PRODUCTION_CHANNEL)
     .run();
   return { ...result, status: "done" };
 }
