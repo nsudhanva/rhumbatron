@@ -18,12 +18,13 @@ Reliability and cost hardening on dev and prod. Phases 0 through 13 are complete
 - Milestone: A real model-driven Change ran end to end on dev (`https://dev.rhumbatron.com`). The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically, passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. It was approved and promoted from S0 to S1. Model cost was about 0.91 USD.
 
 ## Active
-- Durable Object alarm error rate (ResourceShardDO, AgentDO, Sandbox). Bounded for cost; root cause under investigation.
+- None.
 
 ## Blocked
 - Live release of Acme Shop Live (P11-07, P11-08, P13-12 live run): the Workers Builds connection for
   `rhumbatron-acme-shop-dev` has no build configuration or trigger.
-- Clerk production instance: prod uses the dev Clerk instance until `clerk deploy` is run.
+- Google sign-in on prod: the Clerk production instance (rhumbatron.com) has email and password only
+  until a Google Cloud OAuth client exists.
 
 ## Cost
 - Workers Paid account shared with other projects. Rhumbatron stays within free and included limits.
@@ -41,5 +42,4 @@ Reliability and cost hardening on dev and prod. Phases 0 through 13 are complete
 - CI runs checks only and needs no credentials. Deployment stays local through Terraform.
 
 ## Next
-- Fix the alarm error causes, then deploy dev and prod.
 - Connect Workers Builds for Acme Shop Live, promote once, run `bun run smoke:release`.
