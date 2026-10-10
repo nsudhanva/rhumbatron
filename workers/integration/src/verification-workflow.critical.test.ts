@@ -53,6 +53,9 @@ vi.mock("./events.ts", () => ({
   appendChangeEvents: vi.fn(),
 }));
 vi.mock("./promotion.ts", () => ({ promoteCandidate: vi.fn(), markCandidateStale: vi.fn() }));
+vi.mock("./recompose.ts", () => ({
+  recomposeQuietly: vi.fn(async () => ({ status: "recomposed", candidateId: "cand_next" })),
+}));
 vi.mock("./app-release.ts", async (original) => {
   const actual = await original<typeof import("./app-release.ts")>();
   return { ...actual, publishPreview: vi.fn() };
@@ -62,6 +65,7 @@ const { CandidateVerificationWorkflow } = await import("./verification-workflow.
 const { publishPreview, probeApp } = await import("./app-release.ts");
 const { promoteCandidate } = await import("./promotion.ts");
 const { appendChangeEvents } = await import("./events.ts");
+const { recomposeQuietly } = await import("./recompose.ts");
 const P = "proj_1111";
 const C = "cand_0123abcd";
 const COMMIT = "2".repeat(40);
@@ -76,6 +80,9 @@ function harness(
     publication?: string;
     appStatus?: string;
     noTable?: boolean;
+    /** The event router marks the Candidate stale just before this step runs. */
+    staleAt?: string;
+    initialStatus?: string;
   } = {},
 ) {
   vi.clearAllMocks();
@@ -90,7 +97,7 @@ function harness(
     INSERT INTO changes (id, project_id, goal, status, base_generation, risk_tier, budget_usd, created_by, created_at, updated_at)
     VALUES ('chg_1', '${P}', 'Add recipes', 'verifying', 0, 'low', 3, 'user_1', '${T}', '${T}');
     INSERT INTO candidates (id, change_id, base_generation, status, change_set_ids_json, created_at, updated_at)
-    VALUES ('${C}', 'chg_1', 0, 'composing', '["cs_1"]', '${T}', '${T}');`);
+    VALUES ('${C}', 'chg_1', 0, '${options.initialStatus ?? "composing"}', '["cs_1"]', '${T}', '${T}');`);
   db.prepare(`INSERT INTO changesets (id, change_id, agent_id, base_generation, intent_json, status, created_at)
     VALUES ('cs_1', 'chg_1', 'agent_1', 0, ?, 'accepted', ?)`).run(
     JSON.stringify({
@@ -175,6 +182,7 @@ function harness(
   const step = {
     async do(name: string, configOrCallback: unknown, callback?: () => Promise<unknown>) {
       steps.push(name);
+      if (name === options.staleAt) db.exec("UPDATE candidates SET status = 'stale'");
       const value = await (callback ?? (configOrCallback as () => Promise<unknown>))();
       return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
     },
@@ -325,6 +333,58 @@ describe("required preview smoke before promotion", () => {
         { status: null, ok: false, detail: expect.stringContaining("timed out") },
       ]);
       expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      h.db.close();
+    }
+  });
+});
+
+describe("a Candidate the event router marks stale", () => {
+  it("mid-check: the run halts and composes it again instead of leaving the Change verifying", async () => {
+    const h = harness({ staleAt: "check contract", status: 200 });
+    try {
+      expect(await h.run()).toMatchObject({
+        skipped: "candidate_final",
+        recomposed: { status: "recomposed" },
+      });
+      expect(recomposeQuietly).toHaveBeenCalledWith(h.env, C);
+      expect(h.steps).toContain("recompose if stale");
+      expect(h.steps).not.toContain("gate required checks");
+    } finally {
+      h.db.close();
+    }
+  });
+
+  it("before the run starts: the load step composes it again", async () => {
+    const h = harness({ initialStatus: "stale" });
+    try {
+      expect(await h.run()).toMatchObject({
+        skipped: "stale",
+        recomposed: { status: "recomposed" },
+      });
+      expect(recomposeQuietly).toHaveBeenCalledWith(h.env, C);
+    } finally {
+      h.db.close();
+    }
+  });
+
+  it("a rejected Candidate halts without recomposition", async () => {
+    const h = harness({ staleAt: "check contract", status: 200 });
+    try {
+      h.steps.length = 0;
+      await new CandidateVerificationWorkflow({} as ExecutionContext, h.env).run(
+        { payload: { candidateId: C } } as Parameters<
+          InstanceType<typeof CandidateVerificationWorkflow>["run"]
+        >[0],
+        {
+          async do(name: string, a: unknown, b?: () => Promise<unknown>) {
+            if (name === "check contract") h.db.exec("UPDATE candidates SET status = 'rejected'");
+            const value = await (b ?? (a as () => Promise<unknown>))();
+            return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+          },
+        } as Parameters<InstanceType<typeof CandidateVerificationWorkflow>["run"]>[1],
+      );
+      expect(recomposeQuietly).not.toHaveBeenCalled();
     } finally {
       h.db.close();
     }

@@ -10,6 +10,7 @@ import {
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { recoverSourceConflicts } from "./rebase.ts";
+import { recoverStaleCandidates } from "./recompose.ts";
 import { startWorkflowOnce } from "./workflow-commands.ts";
 
 /**
@@ -268,8 +269,11 @@ export async function raiseChangeBudget(
   await env.DB.batch(statements);
   // An owner can repair a source-conflicted Change through the existing budget API, even with
   // the current budget unchanged. The same bound and guarded reset apply as automatic recovery.
-  if (["verifying", "blocked", "awaiting_approval"].includes(row.status))
+  if (["verifying", "blocked", "awaiting_approval"].includes(row.status)) {
     await recoverSourceConflicts(env, row.id);
+    // The same owner action composes a Change's stale Candidate again when nothing else runs.
+    await recoverStaleCandidates(env, row.id);
+  }
   const after = await loadChange(env, row.id);
   if (!after) return notFound(row.id);
   const raised = after.budget_usd > row.budget_usd;

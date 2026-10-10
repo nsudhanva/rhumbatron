@@ -234,6 +234,14 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       },
     );
     if (!loaded) return { skipped: "missing" };
+    // A Candidate marked stale before this run (the event router's `canonical.advanced` sweep) is
+    // composed again here; recomposition is idempotent per composition key (P16-14).
+    if (loaded.status === "stale") {
+      const recomposed = await step.do("recompose stale", () =>
+        recomposeQuietly(this.env, candidateId),
+      );
+      return { skipped: loaded.status, recomposed };
+    }
     if (FINAL.has(loaded.status)) return { skipped: loaded.status };
     const { ctx } = loaded;
 
@@ -260,6 +268,18 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     // Section 44: a cancelled Change starts no Sandbox or Browser Run time. Each later step checks
     // again before its work (`guard`), so an in-flight run stops at its next step boundary.
     const stop = async (halt: Halt) => {
+      if (halt.halted === "candidate_final") {
+        // The event router marks an in-flight Candidate stale after `canonical.advanced`, and
+        // only this run notices it. Without a recomposition here the Change would sit in
+        // `verifying` with nothing running (P16-14).
+        const recomposed = await step.do("recompose if stale", async () => {
+          const row = await this.env.DB.prepare("SELECT status FROM candidates WHERE id = ?")
+            .bind(candidateId)
+            .first<{ status: string }>();
+          return row?.status === "stale" ? recomposeQuietly(this.env, candidateId) : null;
+        });
+        return { skipped: halt.halted, ...(recomposed ? { recomposed } : {}) };
+      }
       if (halt.halted !== "change_cancelled") return { skipped: halt.halted };
       await finish("rejected", CHANGE_CANCELLED_REASON);
       return { status: "rejected", reason: "change_cancelled" };

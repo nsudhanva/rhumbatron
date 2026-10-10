@@ -151,6 +151,14 @@ export async function recomposeStaleCandidate(
       row.id,
     )
     .run();
+  // A Change this module blocked for its stale Candidate is checking again (owner recovery).
+  await env.DB.prepare(
+    `UPDATE changes SET status = 'verifying', blocked_reason = NULL, updated_at = ?
+     WHERE id = ? AND status = 'blocked' AND blocked_limit IS NULL
+       AND blocked_reason IN (SELECT value FROM json_each(?))`,
+  )
+    .bind(now, row.change_id, JSON.stringify(STALE_BLOCKED_REASONS))
+    .run();
   const nextCtx = { ...ctx, baseGeneration: canonical.generation };
   await appendChangeEvents(env.RESOURCE_SHARD, nextCtx, [
     await changeEvent(
@@ -181,12 +189,79 @@ export async function recomposeStaleCandidate(
   };
 }
 
-/** Recomposition never fails its caller (a promotion or a verification step): it logs instead. */
-export async function recomposeQuietly(env: Env, candidateId: string) {
+/** Change reason when its stale Candidate could not be composed again on the new canonical state. */
+export const STALE_BLOCKED_REASON =
+  "Newer changes landed while this request was checked, and it could not be rebuilt on them. Raise the budget (the same amount is fine) to try again, or submit it again.";
+/** Change reason when the stale Candidate already reached the recomposition bound. */
+export const STALE_BOUND_REASON = `Newer changes landed again after this request was rebuilt ${MAX_RECOMPOSES} times. Submit it again.`;
+const STALE_BLOCKED_REASONS = [STALE_BLOCKED_REASON, STALE_BOUND_REASON];
+
+/**
+ * A stale Candidate that was not composed again leaves its Change with nothing to verify. Unless
+ * another Candidate of the Change is still active or promoted, or a Task still runs, the Change
+ * leaves `verifying` for `blocked` with a plain reason (section 44: a visible stop, never a
+ * silent wait). One guarded statement; safe to repeat.
+ */
+async function blockStaleChange(
+  env: Pick<Env, "DB" | "RESOURCE_SHARD">,
+  candidateId: string,
+  reason: string,
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const updated = await env.DB.prepare(
+    `UPDATE changes SET status = 'blocked', blocked_limit = NULL, blocked_reason = ?, updated_at = ?
+     WHERE id = (SELECT change_id FROM candidates WHERE id = ? AND status = 'stale')
+       AND status = 'verifying'
+       AND NOT EXISTS (SELECT 1 FROM candidates c WHERE c.change_id = changes.id
+         AND c.status IN ('composing', 'composed', 'verifying', 'verified', 'promoted'))
+       AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.change_id = changes.id
+         AND t.status IN ('pending', 'ready', 'assigned', 'running'))`,
+  )
+    .bind(reason, now, candidateId)
+    .run();
+  if ((updated.meta.changes ?? 0) === 0) return false;
+  const row = await env.DB.prepare(
+    `SELECT c.change_id, c.base_generation, ch.project_id, p.org_id, p.slug
+     FROM candidates c JOIN changes ch ON ch.id = c.change_id JOIN projects p ON p.id = ch.project_id
+     WHERE c.id = ?`,
+  )
+    .bind(candidateId)
+    .first<{
+      change_id: string;
+      base_generation: number;
+      project_id: string;
+      org_id: string;
+      slug: string;
+    }>();
+  if (row) {
+    const ctx: ChangeContext = {
+      projectId: row.project_id,
+      orgId: row.org_id,
+      projectSlug: row.slug,
+      changeId: row.change_id,
+      baseGeneration: row.base_generation,
+    };
+    await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+      await changeEvent(
+        ctx,
+        "candidate.stale",
+        { candidateId, status: "stale", blocked: true, changeStatus: "blocked", reason },
+        { key: `${candidateId}:change_blocked:${now}`, actor: ACTOR },
+      ),
+    ]);
+  }
+  return true;
+}
+
+/**
+ * Recomposition never fails its caller (a promotion or a verification step): it logs instead.
+ * When it does not compose a new Candidate, `blockStaleChange` makes the stop visible.
+ */
+export async function recomposeQuietly(env: Env, candidateId: string): Promise<RecomposeOutcome> {
+  let outcome: RecomposeOutcome;
   try {
-    const outcome = await recomposeStaleCandidate(env, candidateId);
+    outcome = await recomposeStaleCandidate(env, candidateId);
     console.warn(JSON.stringify({ event: "candidate.recompose", candidateId, ...outcome }));
-    return outcome;
   } catch (error) {
     console.error(
       JSON.stringify({
@@ -195,6 +270,44 @@ export async function recomposeQuietly(env: Env, candidateId: string) {
         message: String(error).slice(0, 200),
       }),
     );
-    return { status: "skipped" as const, reason: "error" };
+    outcome = { status: "skipped", reason: "error" };
   }
+  if (outcome.status === "recomposed") return outcome;
+  try {
+    await blockStaleChange(
+      env,
+      candidateId,
+      outcome.status === "blocked" ? STALE_BOUND_REASON : STALE_BLOCKED_REASON,
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "candidate.stale_block_failed",
+        candidateId,
+        message: String(error).slice(0, 200),
+      }),
+    );
+  }
+  return outcome;
+}
+
+/**
+ * Owner recovery (the budget API) for a Change left with only a stale Candidate: compose its
+ * newest stale Candidate again on the current canonical state. Only a `verifying` Change, or one
+ * this module blocked, and only when no Candidate of the Change is active or promoted. Bounded
+ * by MAX_RECOMPOSES per lineage, like the automatic path.
+ */
+export async function recoverStaleCandidates(env: Env, changeId: string) {
+  const row = await env.DB.prepare(
+    `SELECT c.id FROM candidates c JOIN changes ch ON ch.id = c.change_id
+     WHERE ch.id = ? AND c.status = 'stale'
+       AND (ch.status = 'verifying' OR (ch.status = 'blocked' AND ch.blocked_limit IS NULL
+         AND ch.blocked_reason IN (SELECT value FROM json_each(?))))
+       AND NOT EXISTS (SELECT 1 FROM candidates s WHERE s.change_id = ch.id
+         AND s.status IN ('composing', 'composed', 'verifying', 'verified', 'promoted'))
+     ORDER BY c.created_at DESC, c.id DESC LIMIT 1`,
+  )
+    .bind(changeId, JSON.stringify(STALE_BLOCKED_REASONS))
+    .first<{ id: string }>();
+  return row ? recomposeQuietly(env, row.id) : null;
 }

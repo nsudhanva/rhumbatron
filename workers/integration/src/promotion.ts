@@ -231,8 +231,9 @@ export async function markCandidateStale(
   canonicalGeneration: number,
 ) {
   const row = await loadCandidate(env, candidateId);
-  if (!row || ["stale", "promoted", "rejected"].includes(row.status)) return;
-  await markStale(env, row, canonicalGeneration);
+  if (!row || ["promoted", "rejected"].includes(row.status)) return;
+  // Already stale (the event router's sweep got there first): still recompose it, or nothing will.
+  if (row.status !== "stale") await markStale(env, row, canonicalGeneration);
   await settleAwaitingApproval(env, row.change_id, new Date().toISOString()).run();
   await recomposeQuietly(env, candidateId);
 }
