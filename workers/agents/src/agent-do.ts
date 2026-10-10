@@ -792,6 +792,17 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     if (run?.status !== "running") return stop();
     const pending = await this.harness.pending();
     const stillRunning = pending.some((p) => p.operationId === run.run_id);
+    // A cancelled Change cancels its Tasks (integration change-commands.ts): stop the run now
+    // instead of spending more model calls. One indexed D1 read per run check.
+    const { taskId } = JSON.parse(run.input_json) as AgentRunInput;
+    const task = await this.env.DB.prepare("SELECT status FROM tasks WHERE id = ?")
+      .bind(taskId)
+      .first<{ status: string }>();
+    if (task?.status === "cancelled") {
+      await stop();
+      await this.cancel(run.run_id);
+      return;
+    }
     if (stillRunning && run.checks < MAX_RUN_CHECKS) {
       if (interval && !this.alarmGuard.admitSchedule(Date.now(), "checkRun")) return stop();
       this.ctx.storage.sql.exec(
