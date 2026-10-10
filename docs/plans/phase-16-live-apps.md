@@ -109,17 +109,17 @@ sequenceDiagram
 
 ### 4.2 Domain (decided 2026-10-10)
 
-Apps run on subdomains of rhumbatron.com. No new zone.
+Apps run on subdomains of rhumbatron.com. No new zone. **Live apps run in prod only** (decided 2026-10-10): dev keeps building, checking and promoting Projects, but it does not host apps.
 
-| Environment | Production | Preview |
-|---|---|---|
-| prod | `<slug>.rhumbatron.com` | `<candidate-short-id>--<slug>.rhumbatron.com` |
-| dev | `<slug>-dev.rhumbatron.com` | `<candidate-short-id>--<slug>-dev.rhumbatron.com` |
+| Host | Meaning |
+|---|---|
+| `<slug>.rhumbatron.com` | Production version of the app |
+| `<candidate-short-id>--<slug>.rhumbatron.com` | Preview of one Candidate |
 
 - All hosts are one level deep, so Universal SSL (`*.rhumbatron.com`) covers them. A two-level host such as `x.apps.rhumbatron.com` would need a paid certificate.
-- Terraform adds a proxied wildcard DNS record `*` and a Worker route per environment. Explicit records keep priority: Workers custom domains (`dev`, `api`, `api-dev`, `www`, the apex) win over routes, and the Clerk CNAMEs (`clerk`, `accounts`, `clkmail`, DKIM) are DNS-only, so no route touches them.
-- P16-02 must verify that a route pattern such as `*-dev.rhumbatron.com/*` can send dev hosts to the dev router while `*.rhumbatron.com/*` goes to prod. If it cannot, dev uses a path-based host on its workers.dev URL.
-- Slugs that clash with Rhumbatron hosts are reserved: `www`, `api`, `dev`, `api-dev`, `clerk`, `accounts`, `clkmail`, and anything ending in `-dev` for prod.
+- Terraform adds, in `envs/prod` only, a proxied wildcard DNS record `*` and one Worker route `*.rhumbatron.com/*` to the apps router. Explicit records keep priority: Workers custom domains (`dev`, `api`, `api-dev`, `www`, the apex) win over routes, and the Clerk CNAMEs (`clerk`, `accounts`, `clkmail`, DKIM) are DNS-only, so no route touches them.
+- Because dev has no apps runtime, P16 work is tested on prod with test Projects that the e2e suite archives. Each step is small and reversible: the route and the wildcard record can be removed with one apply.
+- Slugs that clash with Rhumbatron hosts are reserved: `www`, `api`, `dev`, `api-dev`, `clerk`, `accounts`, `clkmail`, and the DKIM hosts.
 
 Cookie safety without a separate zone. The router is the only path in and out of an app:
 
@@ -190,7 +190,7 @@ Each task is small and verifiable. The model column follows AGENTS.md section 22
 | ID | Task | Model | Acceptance |
 |---|---|---|---|
 | P16-01 | ADR 0020: live apps on Dynamic Workers, rhumbatron.com subdomains, cookie isolation, fake identity, data model | Opus | ADR merged |
-| P16-02 | Terraform: wildcard DNS record, Worker routes per environment (verify `*-dev` pattern), R2 prefix lifecycle, D1 migration `app_deployments` | Sonnet | Plan shows only these; no drift after apply; existing hosts unaffected |
+| P16-02 | Terraform (prod only): wildcard DNS record, Worker route `*.rhumbatron.com/*`, R2 prefix lifecycle, D1 migration `app_deployments` (both envs, harmless on dev) | Sonnet | Plan shows only these; no drift after apply; existing hosts unaffected |
 | P16-03 | Terraform adapter for the `workers/apps` deploy: provider 5.27 has no `worker_loader` binding type; same pattern as `sandbox-deploy.ts` | Sonnet | `terraform apply` deploys it; re-run is a no-op |
 | P16-04 | `workers/apps` router: host parse, pointer lookup (cached), `LOADER.get(project@commit)`, 404, 410 and "building" pages | Sonnet | Unit tests for host parsing; live request serves S0 |
 | P16-05 | Security defaults: `globalOutbound: null`, CPU and subrequest limits, no Rhumbatron bindings, Cookie strip and `Set-Cookie` Domain drop, Clerk cookie host-only check, real-auth static check | Opus review | Test app cannot fetch the Internet, cannot read or set rhumbatron.com cookies; limit hit returns 503 |
@@ -208,7 +208,7 @@ Each task is small and verifiable. The model column follows AGENTS.md section 22
 | P16-12 | Smoke failure rolls the pointer back as a new transition | Sonnet | Injected smoke failure leaves the old version live |
 | P16-13 | Versions page and **Roll back to Sk** (new canonical transition, approval by policy) | Sonnet | Rollback S5 -> S6 (= S3 tree) serves S3 code |
 | P16-14 | Stale Candidate auto-recompose and re-verify (max 2) | Opus design, Sonnet | Two parallel Changes both ship without manual steps |
-| P16-15 | Retire the Workers Builds path for Acme Shop Live, or keep it as an optional export | Sonnet | One deploy path in docs |
+| P16-15 | Retire the Workers Builds path for Acme Shop Live on dev (dev has no live apps after P16) | Sonnet | One deploy path in docs |
 
 ### Milestone P16-C: Code view and edit
 
@@ -226,7 +226,7 @@ Each task is small and verifiable. The model column follows AGENTS.md section 22
 | P16-20 | **Remove app**: 410 at once; cleanup deletes bundles, facets and rows | Sonnet | Host returns 410; R2 prefix empty after sweep |
 | P16-21 | Cost: count Dynamic Workers created, requests and CPU in `cost:report`; daily caps; alert at 80% | Haiku | Cost report shows the apps meters |
 | P16-22 | Bundle retention: keep bundles for each promoted generation; delete preview bundles after 7 days | Haiku | Lifecycle rule in Terraform |
-| P16-23 | Extend `bun run e2e` and the smoke tests: provision, preview, promote, rollback, remove, code routes | Sonnet | e2e passes on dev and prod |
+| P16-23 | Extend `bun run e2e` and the smoke tests: provision, preview, promote, rollback, remove, code routes (prod; dev skips the app checks) | Sonnet | e2e passes on prod; dev passes with app checks skipped |
 | P16-24 | Docs: architecture page "Live apps", runbook updates, diagrams | Haiku | Diagrams parse |
 
 ### Order and parallel work
@@ -284,10 +284,10 @@ Streams A/B and C can run in parallel with separate file ownership. C touches `w
 Decided 2026-10-10:
 
 - **Domain:** subdomains of rhumbatron.com (section 4.2).
+- **Environments:** live apps in prod only; dev does not host apps.
 - **Login:** generated apps have no real login; a fake identity when asked (section 4.3).
 
 Still open:
 
 - **D2, edit in v1:** yes (P16-19 in this phase), or view only first. Default in this plan: yes.
-- **D3, Workers Builds path:** retire it (one deploy path), or keep it for Acme Shop Live. Default: retire after P16-11 works.
 - **D4, tracking:** load this plan into Linear as milestone "P16 Live Apps" with one issue per task.
