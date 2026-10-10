@@ -39,6 +39,8 @@ Call ${SUBMIT_TOOL} exactly once. Do not write any other text.`;
 
 export type PlannerInput = {
   goal: string;
+  excludedCriteria?: { id: string; text: string }[];
+  selectedCriteria?: { id: string; text: string }[];
   projectName: string;
   /** Current canonical tree's file paths; null when the source is unavailable. */
   files?: string[] | null;
@@ -86,6 +88,7 @@ function repositoryLine(files: readonly string[] | null | undefined): string {
 
 export type PlannerResult = {
   plan: WorkGraphPlan;
+  criteria: { id: string; text: string }[];
   /** Topological order of Task keys. */
   order: string[];
   attempts: number;
@@ -195,7 +198,7 @@ export async function planChange(
     { role: "system", content: SYSTEM_PROMPT },
     {
       role: "user",
-      content: `Project: ${input.projectName}\n${repositoryLine(input.files)}\nGoal:\n${input.goal}`,
+      content: `Project: ${input.projectName}\n${repositoryLine(input.files)}\nGoal:\n${input.goal}${input.excludedCriteria?.length ? `\nExcluded criteria (must not implement, even incidentally):\n${JSON.stringify(input.excludedCriteria)}\nPlan only these selected criteria:\n${JSON.stringify(input.selectedCriteria)}` : ""}`,
     },
   ];
   const emptyRepository = isEmptyRepository(input.files);
@@ -224,7 +227,12 @@ export async function planChange(
     const outcome = parsePlan(call?.function.arguments, { emptyRepository });
     if (outcome.ok) {
       return {
-        plan: outcome.plan,
+        plan: input.selectedCriteria
+          ? { ...outcome.plan, acceptanceCriteria: input.selectedCriteria.map((c) => c.text) }
+          : outcome.plan,
+        criteria:
+          input.selectedCriteria ??
+          outcome.plan.acceptanceCriteria.map((text, index) => ({ id: `c${index + 1}`, text })),
         order: outcome.order,
         attempts: attempt,
         calls,

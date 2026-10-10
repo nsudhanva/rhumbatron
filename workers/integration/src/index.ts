@@ -18,7 +18,12 @@ import {
   createCandidate,
   startCandidateVerification,
 } from "./candidate-create.ts";
-import { cancelChange, raiseChangeBudget } from "./change-commands.ts";
+import {
+  cancelChange,
+  type OverrideRequestOutcome,
+  overrideRequest,
+  raiseChangeBudget,
+} from "./change-commands.ts";
 import { backfillTreeCode, type CodeBackfill } from "./code-store.ts";
 import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
@@ -285,6 +290,14 @@ export default class Integration extends WorkerEntrypoint<Env> {
     actorUserId: string;
   }): Promise<ChangeCommandOutcome> {
     return raiseChangeBudget(this.env, input);
+  }
+
+  /** The API authenticated the actor and authorized the Project owner. */
+  async overrideRequest(input: {
+    changeId: string;
+    actorUserId: string;
+  }): Promise<OverrideRequestOutcome> {
+    return overrideRequest(this.env, input);
   }
 
   /**

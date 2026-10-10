@@ -19,6 +19,7 @@ import {
 } from "@rhumbatron/protocol";
 import { candidateFork } from "./candidate-sandbox.ts";
 import { syncCanonicalSource } from "./canonical-source.ts";
+import { releaseRequestScope } from "./change-commands.ts";
 import { changeAfterPromotion, PROMOTABLE_FROM } from "./change-status.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
@@ -261,6 +262,7 @@ async function recordPromoted(env: Env, row: CandidateRow, generation: number) {
   // `promoting` (section 13.3). A `releasing` Change ends with its release (release.ts).
   const status = (results.at(-1)?.results?.[0] as { status?: string } | undefined)?.status;
   if (next === "completed" && status === "completed") {
+    await releaseRequestScope(env, row.project_id, row.change_id);
     const ctx = contextOf(row);
     await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
       await changeEndedEvent(ctx, "completed", { candidateId: row.id, generation }),

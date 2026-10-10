@@ -6,6 +6,7 @@ import type {
   ReleaseView,
 } from "@rhumbatron/protocol";
 import { hasLiveApp, probeApp, productionRow } from "./app-release.ts";
+import { releaseRequestScope } from "./change-commands.ts";
 import { changeAfterRelease, releaseRecovery } from "./change-status.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import {
@@ -130,9 +131,11 @@ async function endReleasingChange(env: Env, changeId: string, next: "completed" 
     env.DB.prepare(
       "UPDATE changes SET status = ?, updated_at = ? WHERE id = ? AND status = 'releasing'",
     ).bind(next, new Date().toISOString(), changeId),
-    env.DB.prepare("SELECT status FROM changes WHERE id = ?").bind(changeId),
+    env.DB.prepare("SELECT status, project_id FROM changes WHERE id = ?").bind(changeId),
   ]);
-  return (after?.results?.[0] as { status?: string } | undefined)?.status === next;
+  const settled = after?.results?.[0] as { status: string; project_id: string } | undefined;
+  if (settled?.status === next) await releaseRequestScope(env, settled.project_id, changeId);
+  return settled?.status === next;
 }
 
 export async function loadRelease(env: Env, releaseId: string): Promise<LoadedRelease | null> {
@@ -247,6 +250,7 @@ async function recordSupersededChanges(
       .first<{ org_id: string; slug: string }>();
     if (!project) return;
     for (const change of changes) {
+      await releaseRequestScope(env, input.projectId, change.id);
       const ctx: ChangeContext = {
         projectId: input.projectId,
         orgId: project.org_id,

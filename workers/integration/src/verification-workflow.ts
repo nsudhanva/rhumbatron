@@ -258,7 +258,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       await finish("rejected", CHANGE_CANCELLED_REASON);
       return { status: "rejected", reason: "change_cancelled" };
     };
-    if (loaded.changeStatus === "cancelled") return stop({ halted: "change_cancelled" });
+    if (["cancelled", "not_selected", "awaiting_owner"].includes(loaded.changeStatus ?? ""))
+      return stop({ halted: "change_cancelled" });
 
     if (!loaded.canonical?.commit) {
       await finish("rejected", "Project has no canonical source to compose on.");

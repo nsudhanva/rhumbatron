@@ -1,6 +1,7 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { COMPOSITION_RULES_VERSION } from "@rhumbatron/evidence";
 import { ChangeSetIntent, MAX_TASKS_PER_CHANGE } from "@rhumbatron/protocol";
+import { requestCannotShip } from "./app-release-model.ts";
 import type { TaskEdge } from "./candidate-composer.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import {
@@ -218,11 +219,12 @@ type ChangeRow = {
   org_id: string;
   slug: string;
   project_status: string;
+  outcome: string | null;
 };
 
 async function loadChange(env: Env, changeId: string) {
   return env.DB.prepare(
-    `SELECT c.id, c.project_id, c.status, c.base_generation, p.org_id, p.slug,
+    `SELECT c.id, c.project_id, c.status, c.outcome, c.base_generation, p.org_id, p.slug,
             p.status AS project_status
      FROM changes c JOIN projects p ON p.id = c.project_id WHERE c.id = ?`,
   )
@@ -402,7 +404,10 @@ async function openChange(
     return { status: "refused", reason: "archived", detail: "Project is archived" };
   }
   // Past promotion, the Change already advanced canonical once: no second Candidate composes.
-  if (["cancelled", "failed", "completed", "promoting", "releasing"].includes(change.status)) {
+  if (
+    requestCannotShip(change.status, change.outcome) ||
+    ["failed", "completed", "promoting", "releasing"].includes(change.status)
+  ) {
     return { status: "refused", reason: "change_closed", detail: `Change is ${change.status}` };
   }
   const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;

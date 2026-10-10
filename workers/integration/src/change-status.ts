@@ -141,7 +141,8 @@ export function verificationHalt(
   changeStatus: string | null,
   candidateStatus: string | null,
 ): "change_cancelled" | "candidate_final" | null {
-  if (changeStatus === "cancelled") return "change_cancelled";
+  if (changeStatus && ["cancelled", "not_selected", "awaiting_owner"].includes(changeStatus))
+    return "change_cancelled";
   if (candidateStatus === null || ["rejected", "stale", "promoted"].includes(candidateStatus)) {
     return "candidate_final";
   }

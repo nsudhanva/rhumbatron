@@ -1,3 +1,4 @@
+import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import type { ChangeCommandOutcome, ChangeStatus, TaskStatus } from "@rhumbatron/protocol";
 import {
   CANCELLABLE_FROM,
@@ -8,6 +9,7 @@ import {
 } from "./change-status.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
+import { startWorkflowOnce } from "./workflow-commands.ts";
 
 /**
  * A person's cancel and budget raise on one Change (AGENTS.md sections 16.1, 44, 60). Called only
@@ -70,11 +72,38 @@ const recorded = (
 export async function cancelChange(
   env: Env,
   input: { changeId: string; actorUserId: string },
+  selection?: { reason: string; winnerChangeId: string; decidedBy: string },
 ): Promise<ChangeCommandOutcome> {
   const row = await loadChange(env, input.changeId);
   if (!row) return notFound(input.changeId);
-  if (row.status === "cancelled") return recorded(row, true);
-  if (!canCancel(row.status)) {
+  const target = selection ? "not_selected" : "cancelled";
+  if (row.status === target) {
+    const ctx = contextOf(row);
+    // Repair an event delivery that failed after the guarded D1 batch committed.
+    await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+      await changeEvent(
+        ctx,
+        "change.cancelled",
+        {
+          status: target,
+          outcome: selection ? "not_selected" : null,
+          reason: selection?.reason ?? CHANGE_CANCELLED_REASON,
+        },
+        {
+          actor: {
+            kind: selection?.decidedBy === "policy:priority_wins" ? "system" : "user",
+            id: input.actorUserId,
+          },
+        },
+      ),
+    ]);
+    await releaseRequestScope(env, row.project_id, row.id);
+    return recorded(row, true);
+  }
+  if (
+    !canCancel(row.status) &&
+    !(selection && ["awaiting_owner", "failed", "completed"].includes(row.status))
+  ) {
     return {
       status: "refused",
       reason: "not_cancellable",
@@ -84,12 +113,33 @@ export async function cancelChange(
   const now = new Date().toISOString();
   // One batch is one transaction. The Task and Candidate updates apply only once the Change is
   // cancelled, so a lost race against promotion changes nothing.
-  const cancelled = `EXISTS (SELECT 1 FROM changes WHERE id = ? AND status = 'cancelled')`;
+  const cancelled = `EXISTS (SELECT 1 FROM changes WHERE id = ? AND status = '${target}')`;
   const [change, tasks, candidates] = await env.DB.batch([
     env.DB.prepare(
-      `UPDATE changes SET status = 'cancelled', updated_at = ?
-       WHERE id = ? AND status IN (SELECT value FROM json_each(?))`,
-    ).bind(now, row.id, JSON.stringify(CANCELLABLE_FROM)),
+      `UPDATE changes SET status = ?, updated_at = ?,
+         outcome = CASE WHEN ? THEN 'not_selected' ELSE outcome END,
+         outcome_reason = CASE WHEN ? THEN ? ELSE outcome_reason END,
+         outcome_winner_change_id = CASE WHEN ? THEN ? ELSE outcome_winner_change_id END,
+         outcome_decided_by = CASE WHEN ? THEN ? ELSE outcome_decided_by END
+       WHERE id = ? AND status IN (SELECT value FROM json_each(?))
+         AND NOT EXISTS (SELECT 1 FROM candidates WHERE change_id = changes.id AND status = 'promoted')`,
+    ).bind(
+      target,
+      now,
+      selection ? 1 : 0,
+      selection ? 1 : 0,
+      selection?.reason ?? null,
+      selection ? 1 : 0,
+      selection?.winnerChangeId ?? null,
+      selection ? 1 : 0,
+      selection?.decidedBy ?? null,
+      row.id,
+      JSON.stringify(
+        selection
+          ? [...CANCELLABLE_FROM, "awaiting_owner", "failed", "completed"]
+          : CANCELLABLE_FROM,
+      ),
+    ),
     env.DB.prepare(
       `UPDATE tasks SET status = 'cancelled', updated_at = ?
        WHERE change_id = ? AND status IN ('pending', 'ready', 'assigned', 'running', 'blocked')
@@ -97,15 +147,15 @@ export async function cancelChange(
     ).bind(now, row.id, row.id),
     env.DB.prepare(
       `UPDATE candidates SET status = 'rejected', status_reason = ?, updated_at = ?
-       WHERE change_id = ? AND status IN ('composing', 'composed', 'verifying', 'verified')
+       WHERE change_id = ? AND status IN ('composing', 'composed', 'verifying', 'verified', 'stale')
          AND ${cancelled}`,
-    ).bind(CHANGE_CANCELLED_REASON, now, row.id, row.id),
+    ).bind(selection?.reason ?? CHANGE_CANCELLED_REASON, now, row.id, row.id),
   ]);
   const after = await loadChange(env, row.id);
   if (!after) return notFound(row.id);
   if (!change?.meta.changes) {
     // Another request moved the Change first.
-    return after.status === "cancelled"
+    return after.status === target
       ? recorded(after, true)
       : {
           status: "refused",
@@ -119,13 +169,22 @@ export async function cancelChange(
       ctx,
       "change.cancelled",
       {
+        status: target,
+        outcome: selection ? "not_selected" : null,
+        reason: selection?.reason ?? CHANGE_CANCELLED_REASON,
         fromStatus: row.status,
         cancelledTasks: tasks?.meta.changes ?? 0,
         rejectedCandidates: candidates?.meta.changes ?? 0,
       },
-      { actor: { kind: "user", id: input.actorUserId } },
+      {
+        actor: {
+          kind: selection?.decidedBy === "policy:priority_wins" ? "system" : "user",
+          id: input.actorUserId,
+        },
+      },
     ),
   ]);
+  await releaseRequestScope(env, row.project_id, row.id);
   return recorded(after, false);
 }
 
@@ -229,4 +288,161 @@ export async function raiseChangeBudget(
     );
   }
   return recorded(after, !raised && !resumed, dispatched);
+}
+
+/** Remove a terminal request from future scope registrations. Safe on a repeat. */
+export async function releaseRequestScope(
+  env: Pick<Env, "PROJECT_ROOT">,
+  projectId: string,
+  changeId: string,
+) {
+  const roots = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
+  await roots.get(roots.idFromName(projectId)).release(changeId);
+}
+
+export type OverrideRequestOutcome =
+  | { status: "recorded"; changeId: string; repeated: boolean }
+  | { status: "refused"; reason: "not_found" | "not_overridable"; detail: string };
+
+/** Fixed-length identity, stable across retries and concurrent owner choices. */
+export async function overrideChangeId(changeId: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`owner-override:${changeId}`)),
+  );
+  return `chg_${[...digest.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Internal RPC. The API must authorize the owner before calling this command. */
+export async function overrideRequest(
+  env: Env,
+  input: { changeId: string; actorUserId: string },
+): Promise<OverrideRequestOutcome> {
+  const old = await env.DB.prepare(
+    `SELECT c.*, p.org_id, p.slug FROM changes c JOIN projects p ON p.id = c.project_id WHERE c.id = ?`,
+  )
+    .bind(input.changeId)
+    .first<
+      ChangeRow & {
+        goal: string;
+        created_by: string;
+        requester_rank: number | null;
+        outcome: string | null;
+      }
+    >();
+  if (!old) return { status: "refused", reason: "not_found", detail: "Request not found" };
+  const changeId = await overrideChangeId(old.id);
+  const existing = await env.DB.prepare(
+    "SELECT id FROM changes WHERE id = ? AND supersedes_change_id = ?",
+  )
+    .bind(changeId, old.id)
+    .first<{ id: string }>();
+  if (!existing && !["not_selected", "awaiting_owner"].includes(old.status))
+    return { status: "refused", reason: "not_overridable", detail: `Request is ${old.status}` };
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`INSERT OR IGNORE INTO changes (id, project_id, goal, status, base_generation, budget_usd,
+      created_by, requester_rank, supersedes_change_id, outcome, outcome_decided_by, created_at, updated_at)
+      SELECT ?, project_id, goal, 'created', (SELECT canonical_generation FROM projects WHERE id = changes.project_id),
+        budget_usd, created_by, requester_rank, id, 'selected', ?, ?, ? FROM changes
+      WHERE id = ? AND status IN ('not_selected', 'awaiting_owner')`).bind(
+      changeId,
+      input.actorUserId,
+      now,
+      now,
+      old.id,
+    ),
+    env.DB.prepare(`UPDATE changes AS old SET status = 'not_selected', outcome = 'overridden', outcome_decided_by = ?, updated_at = ?
+      WHERE id = ? AND EXISTS (SELECT 1 FROM changes WHERE id = ? AND supersedes_change_id = old.id)`).bind(
+      input.actorUserId,
+      now,
+      old.id,
+      changeId,
+    ),
+  ]);
+  const created = await env.DB.prepare(
+    "SELECT id, base_generation FROM changes WHERE id = ? AND supersedes_change_id = ?",
+  )
+    .bind(changeId, old.id)
+    .first<{ id: string; base_generation: number }>();
+  if (!created)
+    return {
+      status: "refused",
+      reason: "not_overridable",
+      detail: "Request changed before the owner choice was recorded",
+    };
+  const conflicts =
+    await env.DB.prepare(`SELECT COALESCE(winner_change_id, CASE WHEN change_a = ? THEN change_b ELSE change_a END) AS winner_change_id FROM request_conflicts WHERE (change_a = ? OR change_b = ?)
+    AND verdict = 'conflicting' AND (loser_change_id = ? OR winner_change_id IS NULL)`)
+      .bind(old.id, old.id, old.id, old.id)
+      .all<{ winner_change_id: string | null }>();
+  for (const conflict of conflicts.results) {
+    if (!conflict.winner_change_id) continue;
+    const [first, second] = [changeId, conflict.winner_change_id].sort();
+    const conflictId = `rc_${first}_${second}`;
+    // Record the human decision as a new pair. The original pair remains immutable history.
+    await env.DB.prepare(`INSERT OR IGNORE INTO request_conflicts
+      (id, project_id, change_a, change_b, verdict, criteria_json, review_json, policy,
+       winner_change_id, loser_change_id, decided_by, decided_at, created_at)
+      VALUES (?, ?, ?, ?, 'conflicting', '[]', ?, 'owner_override', ?, ?, ?, ?, ?)`)
+      .bind(
+        conflictId,
+        old.project_id,
+        first,
+        second,
+        JSON.stringify({
+          review: { verdict: "conflicting", conflicts: [], supported: true },
+          receipt: {
+            method: "owner-override",
+            supersedesChangeId: old.id,
+            actorUserId: input.actorUserId,
+          },
+          costUsd: 0,
+        }),
+        changeId,
+        conflict.winner_change_id,
+        input.actorUserId,
+        now,
+        now,
+      )
+      .run();
+    await cancelChange(
+      env,
+      { changeId: conflict.winner_change_id, actorUserId: input.actorUserId },
+      {
+        reason: "Replaced by the owner's choice",
+        winnerChangeId: changeId,
+        decidedBy: input.actorUserId,
+      },
+    );
+  }
+  await releaseRequestScope(env, old.project_id, old.id);
+  await appendChangeEvents(env.RESOURCE_SHARD, contextOf(old), [
+    await changeEvent(
+      contextOf(old),
+      "conflict.reviewed",
+      {
+        status: "not_selected",
+        outcome: "overridden",
+        supersededBy: changeId,
+        decidedBy: input.actorUserId,
+      },
+      { key: "owner-override", actor: { kind: "user", id: input.actorUserId } },
+    ),
+  ]);
+  const nextCtx = { ...contextOf(old), changeId, baseGeneration: created.base_generation };
+  await appendChangeEvents(env.RESOURCE_SHARD, nextCtx, [
+    await changeEvent(
+      nextCtx,
+      "change.created",
+      {
+        goal: old.goal,
+        supersedesChangeId: old.id,
+        requesterUserId: old.created_by,
+        requesterRank: old.requester_rank,
+      },
+      { actor: { kind: "user", id: input.actorUserId } },
+    ),
+  ]);
+  await startWorkflowOnce(env.CHANGE_WORKFLOW, changeId, { changeId });
+  return { status: "recorded", changeId, repeated: !!existing };
 }

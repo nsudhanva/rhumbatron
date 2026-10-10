@@ -77,6 +77,8 @@ function setup(cancelDuringPlanning = false) {
     PROJECT_ROOT: {
       idFromName: (name: string) => name,
       get: () => ({
+        admit: async () => 1,
+        release: async () => undefined,
         getCanonical: async () => ({ treeSha, artifactRef: "artifacts://proj_1@main" }),
       }),
     },

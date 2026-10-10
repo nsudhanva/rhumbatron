@@ -263,11 +263,17 @@ export const MAX_RECOMPOSES = 2;
 
 const CLOSED_CHANGE: ReadonlySet<string> = new Set([
   "cancelled",
+  "not_selected",
+  "awaiting_owner",
   "failed",
   "completed",
   "promoting",
   "releasing",
 ]);
+
+export const requestCannotShip = (status: string, outcome?: string | null) =>
+  ["not_selected", "cancelled", "awaiting_owner"].includes(status) ||
+  ["not_selected", "overridden"].includes(outcome ?? "");
 
 export type RecomposeDecision =
   | { kind: "recompose"; nextCount: number }
@@ -286,6 +292,7 @@ export function recomposeDecision(input: {
   candidateStatus: string;
   recomposeCount: number;
   changeStatus: string;
+  changeOutcome?: string | null;
   baseGeneration: number;
   canonicalGeneration: number;
   isRollback: boolean;
@@ -294,7 +301,11 @@ export function recomposeDecision(input: {
   if (input.candidateStatus !== "stale") return { kind: "skip", reason: "not_stale" };
   if (input.isRollback) return { kind: "skip", reason: "rollback" };
   if (input.siblingPromoted) return { kind: "skip", reason: "promoted_sibling" };
-  if (CLOSED_CHANGE.has(input.changeStatus)) return { kind: "skip", reason: "change_closed" };
+  if (
+    CLOSED_CHANGE.has(input.changeStatus) ||
+    requestCannotShip(input.changeStatus, input.changeOutcome)
+  )
+    return { kind: "skip", reason: "change_closed" };
   if (input.canonicalGeneration <= input.baseGeneration) {
     return { kind: "skip", reason: "not_behind" };
   }

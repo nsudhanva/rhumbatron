@@ -80,6 +80,10 @@ function harness(withTarget = true) {
       batch: async (list: { sql: string; params: unknown[] }[]) =>
         list.map((s) => exec(s.sql.trim(), s.params)),
     },
+    PROJECT_ROOT: {
+      idFromName: (name: string) => name,
+      get: () => ({ release: async (_changeId: string) => undefined }),
+    },
     RELEASE_WORKFLOW: {
       create: async ({ id }: { id: string }) => {
         if (created.includes(id)) throw new Error("instance already exists");

@@ -1,5 +1,10 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
-import { MAX_RECOMPOSES, recomposeBlockedReason, recomposeDecision } from "./app-release-model.ts";
+import {
+  MAX_RECOMPOSES,
+  recomposeBlockedReason,
+  recomposeDecision,
+  requestCannotShip,
+} from "./app-release-model.ts";
 import { compositionKeyFor } from "./candidate-create.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { requestWorkflowStart, verificationCommand } from "./workflow-commands.ts";
@@ -27,6 +32,7 @@ type Row = {
   recomposed_from: string | null;
   rollback_of_generation: number | null;
   change_status: string;
+  change_outcome: string | null;
   project_id: string;
   project_status: string;
   org_id: string;
@@ -38,11 +44,14 @@ export type RecomposeOutcome =
   | { status: "recomposed"; candidateId: string; baseGeneration: number; count: number }
   | { status: "blocked" | "skipped"; reason?: string };
 
-async function recomposeStaleCandidate(env: Env, candidateId: string): Promise<RecomposeOutcome> {
+export async function recomposeStaleCandidate(
+  env: Env,
+  candidateId: string,
+): Promise<RecomposeOutcome> {
   const row = await env.DB.prepare(
     `SELECT c.id, c.change_id, c.status, c.base_generation, c.change_set_ids_json,
             c.recompose_count, c.recomposed_from, c.rollback_of_generation,
-            ch.status AS change_status, ch.project_id, p.status AS project_status, p.org_id, p.slug,
+            ch.status AS change_status, ch.outcome AS change_outcome, ch.project_id, p.status AS project_status, p.org_id, p.slug,
             EXISTS (SELECT 1 FROM candidates s WHERE s.change_id = c.change_id
                       AND s.status = 'promoted') AS sibling_promoted
      FROM candidates c JOIN changes ch ON ch.id = c.change_id JOIN projects p ON p.id = ch.project_id
@@ -51,6 +60,8 @@ async function recomposeStaleCandidate(env: Env, candidateId: string): Promise<R
     .bind(candidateId)
     .first<Row>();
   if (!row) return { status: "skipped", reason: "missing" };
+  if (requestCannotShip(row.change_status, row.change_outcome))
+    return { status: "skipped", reason: "change_closed" };
   if (row.project_status !== "active") return { status: "skipped", reason: "archived" };
   const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
   const canonical = await root.get(root.idFromName(row.project_id)).getCanonical();
@@ -61,6 +72,7 @@ async function recomposeStaleCandidate(env: Env, candidateId: string): Promise<R
     candidateStatus: row.status,
     recomposeCount: row.recompose_count,
     changeStatus: row.change_status,
+    changeOutcome: row.change_outcome,
     baseGeneration: row.base_generation,
     canonicalGeneration: canonical.generation,
     isRollback: row.rollback_of_generation !== null,
@@ -111,7 +123,7 @@ async function recomposeStaleCandidate(env: Env, candidateId: string): Promise<R
   await env.DB.prepare(
     `INSERT INTO candidates (id, change_id, base_generation, status, created_at, updated_at,
        composition_key, change_set_ids_json, recomposed_from, recompose_count)
-     VALUES (?, ?, ?, 'composing', ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+     SELECT ?, ?, ?, 'composing', ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM changes WHERE id = ? AND status NOT IN ('not_selected', 'cancelled', 'awaiting_owner') AND COALESCE(outcome, '') NOT IN ('not_selected', 'overridden')) ON CONFLICT DO NOTHING`,
   )
     .bind(
       next,
@@ -123,8 +135,13 @@ async function recomposeStaleCandidate(env: Env, candidateId: string): Promise<R
       JSON.stringify([...ids].sort()),
       row.recomposed_from ?? row.id,
       decision.nextCount,
+      row.change_id,
     )
     .run();
+  const created = await env.DB.prepare("SELECT id FROM candidates WHERE id = ?")
+    .bind(next)
+    .first<{ id: string }>();
+  if (!created) return { status: "skipped", reason: "change_closed" };
   await env.DB.prepare(
     `UPDATE candidates SET status_reason = ?, updated_at = ? WHERE id = ? AND status = 'stale'`,
   )
