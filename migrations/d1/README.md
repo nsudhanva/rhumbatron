@@ -1,7 +1,7 @@
 # D1 migrations
 
 SQL migrations for the control database (`rhumbatron-control-<env>`). Files `0001_init.sql`
-through `0016_k2_batch_failures.sql` exist today.
+through `0018_app_deployments.sql` exist today.
 
 - Name files `NNNN_description.sql` (lowercase letters, digits, and underscores). The runner
   rejects other names.
