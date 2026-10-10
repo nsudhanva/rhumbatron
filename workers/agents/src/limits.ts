@@ -198,7 +198,7 @@ export function limitStop(
   if (reason === "budget_exhausted") {
     return {
       limit: "daily_model_calls",
-      text: `Budget stop: the daily agent model call cap (${AGENT_DAILY_CALL_CAP} calls per UTC day) was reached, or the run was cancelled. No new model work starts until a person raises the budget or the day rolls over.`,
+      text: `Paused: today's limit of ${AGENT_DAILY_CALL_CAP} model calls is used up, or the run was cancelled. Work continues after midnight UTC.`,
     };
   }
   if (reason === "monthly_model_spend") {
@@ -206,19 +206,19 @@ export function limitStop(
     const shown = Number.isInteger(usd) ? String(usd) : usd.toFixed(2);
     return {
       limit: "monthly_model_spend",
-      text: `Budget stop: this environment's Anthropic model budget of $${shown} per calendar month is used up, or Anthropic or the AI Gateway refused the call for spend or billing. No other provider is tried. No new model work starts until the next month or until a person raises ANTHROPIC_MONTHLY_BUDGET_USD in Terraform.`,
+      text: `Paused: this month's model budget of $${shown} is used up, or Anthropic refused the call for billing. Work continues next month, or when an operator raises the budget.`,
     };
   }
   if (reason === "change_budget_exhausted") {
     return {
       limit: "max_cost_usd_per_change",
-      text: "Budget stop: this Change's recorded model spend reached its budget (max_cost_usd_per_change, AGENTS.md section 44). No new model work starts until a person raises the Change budget.",
+      text: "Paused: this Change spent its whole budget. Raise the Change budget to continue.",
     };
   }
   if (reason === "max_attempts_per_tier" || /^two_failures_at_(sonnet|opus)$/.test(reason)) {
     return {
       limit: "max_attempts_per_tier",
-      text: `Budget stop: ${CHANGE_LIMITS.maxAttemptsPerTier} model attempts at one tier failed and no stronger tier is allowed (limit ${CHANGE_LIMITS.maxAttemptsPerTier} attempts per Task per tier, AGENTS.md section 44). The Task needs a re-plan.`,
+      text: `Stopped: this task failed ${CHANGE_LIMITS.maxAttemptsPerTier} times, so Rhumbatron stopped it to save cost. Open the Change to see why it failed, then submit a clearer or smaller request.`,
     };
   }
   return null;

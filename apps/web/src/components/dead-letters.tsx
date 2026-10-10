@@ -56,7 +56,12 @@ export function DeadLetters({
   });
 
   const letters = state.data?.deadLetters ?? [];
-  const limits = state.data?.limits ?? [];
+  // One row per stop: a Task stop already names its Change, so skip that Change's own row.
+  const allLimits = state.data?.limits ?? [];
+  const stoppedChanges = new Set(
+    allLimits.filter((b) => b.scope === "task").map((b) => b.changeId),
+  );
+  const limits = allLimits.filter((b) => b.scope === "task" || !stoppedChanges.has(b.changeId));
   if (letters.length === 0 && limits.length === 0) return null;
   const actionError = retry.error ?? dismiss.error;
 
@@ -181,7 +186,6 @@ function LimitRow({ block, showChange }: { block: LimitBlock; showChange: boolea
           {block.scope === "task" && block.title ? ` · ${block.title}` : ""}
         </span>
         {showChange && <ChangeLink changeId={block.changeId} />}
-        <Mono subtle>{block.limit}</Mono>
       </span>
       <span>{block.reason}</span>
     </li>
