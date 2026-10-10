@@ -221,7 +221,14 @@ export async function complete(
             ? {}
             : { output_config: { effort: TIER_REASONING_EFFORT[resolved.tier] } }),
         },
-        req.metadata ? { headers: { "cf-aig-metadata": JSON.stringify(req.metadata) } } : {},
+        {
+          headers: {
+            // Agent and planner turns must never be served from the AI Gateway response cache: a
+            // repair turn after a rejected answer would get the same stored answer back.
+            "cf-aig-skip-cache": "true",
+            ...(req.metadata ? { "cf-aig-metadata": JSON.stringify(req.metadata) } : {}),
+          },
+        },
       )
       .withResponse();
     message = data;
