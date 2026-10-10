@@ -155,6 +155,49 @@ describe("toViewDelta lifecycle", () => {
     expect(delta.upsert?.activeChanges).toEqual([{ id: "c1", status: "verifying" }]);
   });
 
+  it("moves a promoted Change to releasing and drops it when it completes or fails (HOM-204)", () => {
+    const system = { kind: "system", id: "release" } as const;
+    const delta = toViewDelta([
+      event({
+        eventId: "p1",
+        eventType: "canonical.promotion.requested",
+        changeId: "c1",
+        timestamp: at(1),
+        actor: system,
+      }),
+      event({
+        eventId: "b1",
+        eventType: "build.started",
+        changeId: "c1",
+        timestamp: at(2),
+        actor: system,
+      }),
+      event({
+        eventId: "p2",
+        eventType: "canonical.promotion.requested",
+        changeId: "c2",
+        timestamp: at(1),
+        actor: system,
+      }),
+      event({
+        eventId: "d2",
+        eventType: "change.completed",
+        changeId: "c2",
+        timestamp: at(3),
+        actor: system,
+      }),
+      event({
+        eventId: "f3",
+        eventType: "change.failed",
+        changeId: "c3",
+        timestamp: at(4),
+        actor: system,
+      }),
+    ]);
+    expect(delta.upsert?.activeChanges).toEqual([{ id: "c1", status: "releasing" }]);
+    expect(delta.remove?.activeChanges).toEqual(["c2", "c3"]);
+  });
+
   it("adds no list updates for events outside the lifecycle", () => {
     const delta = toViewDelta([event({ eventId: "e1", changeId: "c1", taskId: "t1" })]);
     expect(delta.upsert).toBeUndefined();

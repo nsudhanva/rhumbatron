@@ -18,7 +18,12 @@ import {
   type SubscriptionName,
   sweepStreamIndex,
 } from "./k2-consumer.ts";
-import { isMaintenanceTick, queueMaintenance } from "./maintenance.ts";
+import {
+  isMaintenanceTick,
+  isReleaseSweepTick,
+  queueMaintenance,
+  queueReleaseRecovery,
+} from "./maintenance.ts";
 import { batchKey, countBatchFailure, deadLetterBatch, shouldSkipBatch } from "./poison-batch.ts";
 import { decodeEnvelope, groupByProject, planProjects, toViewDelta } from "./projector.ts";
 
@@ -335,7 +340,10 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
     return new Response("Not Found", { status: 404 });
   }
 
-  /** Safety-net sweep: one stream per tick. Once a day it also queues fork and Project cleanup. */
+  /**
+   * Safety-net sweep: one stream per tick. Once a day it also queues fork and Project cleanup;
+   * every 5 minutes it queues recovery of Changes stuck in `releasing` (2 more subrequests).
+   */
   override async scheduled(controller: ScheduledController): Promise<void> {
     if (isMaintenanceTick(controller.scheduledTime)) {
       try {
@@ -345,6 +353,14 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
         });
       } catch (error) {
         log({ event: "router.maintenance_failed", ...errorInfo(error) });
+      }
+    }
+    if (isReleaseSweepTick(controller.scheduledTime)) {
+      try {
+        const swept = await queueReleaseRecovery(this.env, controller.scheduledTime);
+        if (swept.stuck > 0) log({ event: "router.release_sweep", ...swept });
+      } catch (error) {
+        log({ event: "router.release_sweep_failed", ...errorInfo(error) });
       }
     }
     const count = parseStreamIds(this.env.K2_STREAM_IDS).length;

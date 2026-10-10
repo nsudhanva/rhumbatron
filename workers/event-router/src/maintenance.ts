@@ -1,4 +1,4 @@
-import type { CommandEnvelope } from "@rhumbatron/protocol";
+import { type CommandEnvelope, RELEASE_STUCK_AFTER_MS } from "@rhumbatron/protocol";
 
 /**
  * Daily maintenance on the existing safety-net cron (AGENTS.md section 43, HOM-195). Once a day it
@@ -86,4 +86,52 @@ export async function queueMaintenance(
     await env.INDEXING.sendBatch(indexing.map((body) => ({ body, contentType: "json" as const })));
   }
   return { cleanups: commands.length - 1 };
+}
+
+/**
+ * Stuck-release sweep (HOM-204, AGENTS.md section 42.10). Every 5 minutes (minute 4, 9, ... of the
+ * hour, never the daily maintenance tick) one indexed read (`idx_changes_status_updated`) finds
+ * Changes still `releasing` after RELEASE_STUCK_AFTER_MS, oldest first, and queues one
+ * `release.recover` per Change for the integration Worker, which re-checks and decides.
+ * Cost: 288 D1 reads per day; Queue messages only for stuck Changes. Subrequests: at most 2.
+ */
+const RELEASE_SWEEP_EVERY_MINUTES = 5;
+const MAX_RELEASE_RECOVERIES_PER_SWEEP = 10;
+
+export function isReleaseSweepTick(scheduledTime: number): boolean {
+  const minute = new Date(scheduledTime).getUTCMinutes();
+  return (
+    minute % RELEASE_SWEEP_EVERY_MINUTES === RELEASE_SWEEP_EVERY_MINUTES - 1 &&
+    !isMaintenanceTick(scheduledTime)
+  );
+}
+
+export async function queueReleaseRecovery(
+  env: Pick<Env, "DB" | "INTEGRATION_COMMANDS">,
+  scheduledTime: number,
+): Promise<{ stuck: number }> {
+  const cutoff = new Date(scheduledTime - RELEASE_STUCK_AFTER_MS).toISOString();
+  const rows = await env.DB.prepare(
+    `SELECT id, project_id FROM changes WHERE status = 'releasing' AND updated_at < ?
+     ORDER BY updated_at LIMIT ?`,
+  )
+    .bind(cutoff, MAX_RELEASE_RECOVERIES_PER_SWEEP)
+    .all<{ id: string; project_id: string }>();
+  const stuck = rows.results ?? [];
+  if (stuck.length === 0) return { stuck: 0 };
+  const createdAt = new Date(scheduledTime).toISOString();
+  const tick = createdAt.slice(0, 16).replace(/[-:T]/g, "");
+  const commands: CommandEnvelope<Record<string, never>>[] = stuck.map((row) => ({
+    commandId: `cmd_${row.id.slice(4)}_release-recover_${tick}`,
+    commandType: "release.recover",
+    projectId: row.project_id,
+    changeId: row.id,
+    attempt: 0,
+    createdAt,
+    payload: {},
+  }));
+  await env.INTEGRATION_COMMANDS.sendBatch(
+    commands.map((body) => ({ body, contentType: "json" as const })),
+  );
+  return { stuck: stuck.length };
 }
