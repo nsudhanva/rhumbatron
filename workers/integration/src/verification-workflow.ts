@@ -342,7 +342,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     if (isHalt(forked)) return stop(forked);
     const fork = forked;
 
-    // Reserve before the Sandbox opens (HOM-192). A retried reservation can only over-count.
+    // Reserve before the Sandbox opens (ADR 0017). A retried reservation can only over-count.
     const reserved = await step.do("reserve sandbox", () =>
       this.guard(candidateId, async () => ({
         ok: await reserveSandbox(this.env.DB, this.env.SANDBOX_MONTHLY_SECONDS),
@@ -733,7 +733,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       completedAt: run.completedAt,
       output: [
         `$ CONTRACT_ROOT=<base ${commits.baseCommit.slice(0, 12)}> bun run contract`,
-        run.base.output,
+        run.base?.output ?? "(not run: the base is an empty repository with no app)",
         `$ bun run contract`,
         run.candidate.output,
         `declared: ${JSON.stringify(declared)}`,

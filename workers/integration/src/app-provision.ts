@@ -29,6 +29,7 @@ import type { SourceIndex } from "./provision.ts";
 export type AppProvisionOutcome =
   | { status: "disabled" | "archived" | "no_source" | "current" }
   | { status: "ready"; label: string; commit: string; reused: boolean }
+  | { status: "empty"; label: string; commit: string }
   | { status: "failed"; label: string; reason: string };
 
 type Row = {
@@ -40,6 +41,14 @@ type Row = {
 
 const MAX_FILES = 400;
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * True when a tree has app code to build. An empty repository (only a `.gitignore`) has none: the
+ * app is "nothing built yet" until a Change adds code.
+ */
+function hasAppCode(files: readonly string[]): boolean {
+  return files.some((f) => isAppBuildInput(f) && /\.[cm]?[jt]sx?$/.test(f));
+}
 
 /** Inserts the production row with the first free label (labels are unique across Projects). */
 async function claimLabel(env: Env, projectId: string, slug: string, now: string) {
@@ -106,6 +115,19 @@ export async function provisionApp(env: Env, projectId: string): Promise<AppProv
     return { status: "current" };
   }
   const label = existing?.slug ?? (await claimLabel(env, projectId, project.slug, now));
+
+  if (!hasAppCode(index.files)) {
+    // Nothing to build: the row is `ready` with no bundle, which the router shows as "Nothing built
+    // yet". The first release moves it to a bundle. A row that serves a bundle keeps it.
+    await env.DB.prepare(
+      `UPDATE app_deployments SET status = 'ready', commit_sha = ?, generation = ?,
+         failure_reason = NULL, updated_at = ?
+       WHERE project_id = ? AND channel = ? AND status != 'removed' AND bundle_key IS NULL`,
+    )
+      .bind(index.commit, canonical.generation, now, projectId, APP_PRODUCTION_CHANNEL)
+      .run();
+    return { status: "empty", label, commit: index.commit };
+  }
 
   let result: AppBuildResult;
   try {

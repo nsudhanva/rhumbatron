@@ -1,7 +1,7 @@
 // The planner output is untrusted model text. Only a schema-valid, acyclic graph may reach D1.
 import type { CompletionRequest, CompletionResult } from "@rhumbatron/model-router";
 import { describe, expect, it } from "vitest";
-import { PlannerError, parsePlan, planChange } from "./root-planner.ts";
+import { isEmptyRepository, PlannerError, parsePlan, planChange } from "./root-planner.ts";
 
 const task = (key: string, dependsOn: string[] = []) => ({
   key,
@@ -58,6 +58,29 @@ describe("parsePlan", () => {
     expect(parsePlan("{not json").ok).toBe(false);
     expect(parsePlan(plan([{ ...task("t1"), riskTier: "extreme" }])).ok).toBe(false);
     expect(parsePlan(undefined).ok).toBe(false);
+  });
+});
+
+describe("bootstrap Task for an empty repository", () => {
+  it("knows an empty repository by its missing package.json", () => {
+    expect(isEmptyRepository([".gitignore"])).toBe(true);
+    expect(isEmptyRepository([".gitignore", "package.json", "src/app.ts"])).toBe(false);
+    expect(isEmptyRepository(null)).toBe(false);
+  });
+
+  it("requires t1 as an implement Task that every other Task reaches", () => {
+    const empty = { emptyRepository: true };
+    expect(parsePlan(plan([task("t1"), task("t2", ["t1"]), task("t3", ["t2"])]), empty).ok).toBe(
+      true,
+    );
+    // t3 runs in parallel with the bootstrap: rejected.
+    const parallel = parsePlan(plan([task("t1"), task("t2", ["t1"]), task("t3")]), empty);
+    expect(parallel).toMatchObject({ ok: false });
+    expect(JSON.stringify(parallel)).toContain("t3 must depend on the bootstrap Task t1");
+    // t1 is a design Task: rejected.
+    expect(parsePlan(plan([{ ...task("t1"), kind: "design" }]), empty).ok).toBe(false);
+    // A repository with an app needs no bootstrap.
+    expect(parsePlan(plan([task("t1"), task("t2")])).ok).toBe(true);
   });
 });
 

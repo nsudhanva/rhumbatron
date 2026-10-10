@@ -120,7 +120,7 @@ export type BrowserStep = {
 };
 
 /** Wishlist UI flow, Wishlist API flow from the page (no UI yet), or the minimal cart flow. */
-export type BrowserScenario = "wishlist" | "wishlist-api" | "cart";
+export type BrowserScenario = "wishlist" | "wishlist-api" | "cart" | "app";
 
 export type BrowserRun =
   | { kind: "refused"; reason: string }

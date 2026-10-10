@@ -277,6 +277,26 @@ async function cartTotal(page: Page) {
   };
 }
 
+/**
+ * Generic flow for an app built from an empty repository: the home page renders visible text and
+ * the API answers its health route (the app conventions, packages/protocol APP_CONVENTIONS).
+ */
+const APP_STEPS = 2;
+async function appScenario(s: Session) {
+  const { page } = s;
+  await step(s, "home page shows content", async () => {
+    const text = await page.$eval(
+      "body",
+      (el) => (el as unknown as { innerText?: string }).innerText ?? "",
+    );
+    assert(text.trim().length > 0, "the home page has no visible text");
+  });
+  await step(s, "API health answers", async () => {
+    const res = await api(s, "GET", "/api/health");
+    assert(res.status === 200, `GET /api/health returned ${res.status}`);
+  });
+}
+
 /** Minimal flow on the existing shop UI: catalog, add to cart, total, remove. */
 const CART_STEPS = 4;
 async function cartScenario(s: Session) {
@@ -624,12 +644,19 @@ export async function runBrowserCheck(
     let scenario: BrowserScenario = "cart";
     let total = 1 + CART_STEPS;
     const flow = (async () => {
-      await step(session, "owner opens the shop", async () => {
+      let shop = false;
+      await step(session, "owner opens the app", async () => {
         await goto(session, "/");
-        await page.waitForSelector("#products [data-add]", { timeout: WAIT_MS });
+        // The Acme Shop fixture renders its catalog list; any other app is a generic app.
+        shop = (await page.$("#products")) !== null;
+        if (shop) await page.waitForSelector("#products [data-add]", { timeout: WAIT_MS });
         await shot(session);
       });
-      if (await page.$(testId("wishlist"))) {
+      if (!shop) {
+        scenario = "app";
+        total = 1 + APP_STEPS;
+        await appScenario(session);
+      } else if (await page.$(testId("wishlist"))) {
         scenario = "wishlist";
         total = 1 + WISHLIST_STEPS;
         await wishlistScenario(session);

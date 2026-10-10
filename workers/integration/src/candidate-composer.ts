@@ -273,18 +273,22 @@ export function classifyCheck(check: VerificationCheck, run: CheckRun): CheckOut
 /** Outcome for a check that has a procedure and no automated command yet. */
 /**
  * Contract check outcome from the base and Candidate route tables. A missing table (no contract
- * script, crash, timeout) is a gap, never a pass. Any undeclared route change fails.
+ * script, crash, timeout) is a gap, never a pass. Any undeclared route change fails. A null base
+ * is an empty repository (no app yet): there is no earlier contract to break, so the first app's
+ * routes need only a valid Candidate table.
  */
 export function classifyContract(
-  base: CheckRun,
+  base: CheckRun | null,
   candidate: CheckRun,
   declared: string[],
 ): CheckOutcome {
-  const runs = [
-    ["base", base],
-    ["candidate", candidate],
-  ] as const;
-  const tables: string[][] = [];
+  const runs = base
+    ? ([
+        ["base", base],
+        ["candidate", candidate],
+      ] as const)
+    : ([["candidate", candidate]] as const);
+  const tables: string[][] = base ? [] : [[]];
   for (const [label, run] of runs) {
     const routes = run.exitCode === 0 ? parseRouteTable(run.output) : null;
     if (!routes) {
@@ -302,6 +306,14 @@ export function classifyContract(
   const [before = [], after = []] = tables;
   const diff = diffContract(before, after, declared);
   const metrics = { routesAdded: diff.added.length, routesRemoved: diff.removed.length };
+  if (!base) {
+    return {
+      status: "pass",
+      coverage: "checked_supported",
+      summary: `First app: ${after.length} routes; the base is an empty repository with no contract.`,
+      metrics,
+    };
+  }
   if (diff.undeclared.length > 0) {
     return {
       status: "fail",

@@ -1,7 +1,10 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
+import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { anthropicMonthlyBudgetUsd, meteredComplete, opusAllowed } from "@rhumbatron/model-router";
+import { sourceIndexKey } from "@rhumbatron/protocol";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent, qualify } from "./events.ts";
+import type { SourceIndex } from "./provision.ts";
 import { PlannerError, type PlannerResult, planChange } from "./root-planner.ts";
 
 /**
@@ -30,7 +33,20 @@ type Loaded = {
   projectName: string;
   budgetUsd: number;
   status: string;
+  /** Canonical file paths for the planner (null without a source index). */
+  files?: string[] | null;
 };
+
+/** The canonical file list from its R2 index: one DO read and one R2 read. */
+async function canonicalFiles(env: Env, projectId: string): Promise<string[] | null> {
+  const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
+  const canonical = await root.get(root.idFromName(projectId)).getCanonical();
+  if (!canonical || canonical.artifactRef === "unassigned") return null;
+  const index = await env.EVIDENCE.get(sourceIndexKey(projectId, canonical.treeSha));
+  if (!index) return null;
+  const parsed = (await index.json().catch(() => null)) as SourceIndex | null;
+  return Array.isArray(parsed?.files) ? parsed.files.slice(0, 2000) : null;
+}
 
 const taskIdFor = (changeId: string, key: string) => `tsk_${changeId.slice(4)}_${key}`;
 
@@ -59,6 +75,8 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         projectName: row.name,
         budgetUsd: row.budget_usd,
         status: row.status,
+        // Planner input only: a read failure plans without the list, never fails the Change.
+        files: await canonicalFiles(this.env, row.project_id).catch(() => null),
       };
     });
     // A missing Change, or one that already compiled, needs no work.
@@ -87,7 +105,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         { retries: { limit: 1, delay: "30 seconds", backoff: "constant" }, timeout: "5 minutes" },
         async () =>
           planChange(
-            { goal: loaded.goal, projectName: loaded.projectName },
+            { goal: loaded.goal, projectName: loaded.projectName, files: loaded.files ?? null },
             (req) =>
               // Monthly Anthropic budget (ADR 0021): a refusal fails the step with spend_limited.
               meteredComplete(

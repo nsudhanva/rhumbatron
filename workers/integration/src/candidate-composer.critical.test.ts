@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   type ChangeSetRow,
   classifyCheck,
+  classifyContract,
   DEFAULT_POLICY,
   isAllowedCheckCommand,
   orderChangeSets,
@@ -82,6 +83,32 @@ describe("classifyCheck", () => {
     for (const bad of ["bun test; curl x", "bun run deploy", "rm -rf /", "bun test $(id)"]) {
       expect(isAllowedCheckCommand(bad)).toBe(false);
     }
+  });
+});
+
+describe("classifyContract", () => {
+  const table = (routes: string[]) => ok(`${JSON.stringify({ routes })}\n`);
+  const failed = { exitCode: 1, output: "error: Script not found", timedOut: false };
+
+  it("fails an undeclared route change against an app base", () => {
+    expect(
+      classifyContract(table(["GET /api/health"]), table(["GET /api/health", "GET /api/x"]), [])
+        .status,
+    ).toBe("fail");
+  });
+
+  it("passes the first app on an empty repository, but never without a Candidate table", () => {
+    expect(classifyContract(null, table(["GET /api/health", "GET /api/todos"]), [])).toMatchObject({
+      status: "pass",
+      coverage: "checked_supported",
+    });
+    expect(classifyContract(null, failed, [])).toMatchObject({ coverage: "not_checked" });
+  });
+
+  it("keeps a missing base table on an app base a gap", () => {
+    expect(classifyContract(failed, table(["GET /api/health"]), [])).toMatchObject({
+      coverage: "not_checked",
+    });
   });
 });
 

@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import {
   AnyCommandEnvelope,
   type ApprovalOutcome,
@@ -28,6 +29,7 @@ import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
 import { injectReleaseFailure, recoverStuckRelease } from "./release.ts";
 import { requestRollback } from "./rollback.ts";
+import { type SourceSeed, seedOf, seedSourceIfUnassigned } from "./source-seed.ts";
 import { startWorkflow, workflowStartFor } from "./workflow-commands.ts";
 
 export { ChangeWorkflow } from "./change-workflow.ts";
@@ -57,6 +59,22 @@ async function isArchived(env: Env, projectId: string) {
     .bind(projectId)
     .first<{ status: string }>();
   return row?.status === "archived";
+}
+
+/** Seeds the Project's first commit when its canonical source is unassigned (source-seed.ts). */
+async function seedSource(env: Env, projectId: string, seed: SourceSeed) {
+  const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
+  const stub = root.get(root.idFromName(projectId));
+  const provisioned: object[] = [];
+  const outcome = await seedSourceIfUnassigned({
+    getCanonical: () => stub.getCanonical(),
+    provision: async () => {
+      provisioned.push(await provisionProject(env, { projectId, seed }));
+    },
+  });
+  console.warn(
+    JSON.stringify({ event: "project.provisioned", projectId, seed, outcome, ...provisioned[0] }),
+  );
 }
 
 async function logAppProvision(env: Env, projectId: string) {
@@ -135,21 +153,15 @@ async function handleCommand(
     return;
   }
   if (command.data.commandType === "project.provision") {
-    const template = (command.data.payload as { template?: string } | null)?.template ?? "empty";
-    const result = await provisionProject(env, { projectId: command.data.projectId, template });
-    console.warn(
-      JSON.stringify({
-        event: "project.provisioned",
-        projectId: command.data.projectId,
-        ...result,
-      }),
-    );
+    await seedSource(env, command.data.projectId, seedOf(command.data.payload));
     // Live apps (ADR 0020): the S0 bundle and production pointer. Prod only; dev returns disabled.
     if (env.APPS) await logAppProvision(env, command.data.projectId);
     return;
   }
-  // "Deploy app" for a Project that existed before live apps, or a retry after a failed build.
+  // "Deploy app" for a Project that existed before live apps, or a retry after a failed build. A
+  // Project created before every Project got a repository gets its empty repository first.
   if (command.data.commandType === "app.provision") {
+    await seedSource(env, command.data.projectId, "blank");
     await logAppProvision(env, command.data.projectId);
     return;
   }

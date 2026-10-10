@@ -5,7 +5,12 @@ import {
   type CompletionResult,
   routeByRules,
 } from "@rhumbatron/model-router";
-import { checkWorkGraph, type RouteRequest, WorkGraphPlan } from "@rhumbatron/protocol";
+import {
+  APP_CONVENTIONS,
+  checkWorkGraph,
+  type RouteRequest,
+  WorkGraphPlan,
+} from "@rhumbatron/protocol";
 import { z } from "zod";
 
 /**
@@ -26,9 +31,57 @@ Turn the user's goal into a small dependency graph of Tasks. Rules:
 - invariants are behaviours that must not change, taken from the goal (for example existing cart behaviour).
 - riskTier: high when a Task changes authorization, data ownership, or migrations; critical only for destructive changes.
 - Do not plan deployment or release Tasks; Rhumbatron releases automatically.
+- Rhumbatron builds and hosts the Project as a live app. Every Task must keep it in this shape:
+${APP_CONVENTIONS.map((c) => `  - ${c}`).join("\n")}
+- When the repository is empty, t1 is the bootstrap Task (kind "implement"): it creates package.json, tsconfig.json, wrangler.jsonc, src/app.ts with GET /api/health, src/worker.ts, src/server.ts, public/index.html, scripts/contract.ts and one passing test, so typecheck, test and contract pass. Every other Task depends on t1.
 Call ${SUBMIT_TOOL} exactly once. Do not write any other text.`;
 
-export type PlannerInput = { goal: string; projectName: string };
+export type PlannerInput = {
+  goal: string;
+  projectName: string;
+  /** Canonical file paths; null when unknown (no source index). */
+  files?: string[] | null;
+};
+
+/** Paths listed to the planner; the rest are counted. */
+const MAX_LISTED_FILES = 200;
+
+/** True when the repository has no app yet: an empty repository has no root package.json. */
+export function isEmptyRepository(files: readonly string[] | null | undefined): boolean {
+  return Array.isArray(files) && !files.includes("package.json");
+}
+
+/**
+ * An empty repository needs a bootstrap Task first: t1 is an implement Task and every other Task
+ * depends on it, directly or through other Tasks. Returns errors for a repair turn.
+ */
+function checkBootstrap(plan: WorkGraphPlan): string[] {
+  const t1 = plan.tasks.find((t) => t.key === "t1");
+  if (t1?.kind !== "implement") {
+    return ['the repository is empty: t1 must be the bootstrap Task with kind "implement"'];
+  }
+  const deps = new Map(plan.tasks.map((t) => [t.key, t.dependsOn]));
+  const reaches = (key: string, seen = new Set<string>()): boolean => {
+    if (key === "t1") return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return (deps.get(key) ?? []).some((d) => reaches(d, seen));
+  };
+  const missing = plan.tasks.filter((t) => t.key !== "t1" && !reaches(t.key)).map((t) => t.key);
+  return missing.length > 0
+    ? [`the repository is empty: ${missing.join(", ")} must depend on the bootstrap Task t1`]
+    : [];
+}
+
+function repositoryLine(files: readonly string[] | null | undefined): string {
+  if (!Array.isArray(files)) return "Repository: unknown.";
+  if (isEmptyRepository(files)) {
+    return "Repository: empty (no app yet). Plan the bootstrap Task t1 first.";
+  }
+  const shown = files.slice(0, MAX_LISTED_FILES);
+  const more = files.length - shown.length;
+  return `Repository files (${files.length}):\n${shown.join("\n")}${more > 0 ? `\n… ${more} more` : ""}`;
+}
 
 export type PlannerResult = {
   plan: WorkGraphPlan;
@@ -85,6 +138,7 @@ const tool = {
 /** Parses and checks one tool call. Returns the plan or human-readable errors for a repair turn. */
 export function parsePlan(
   args: string | undefined,
+  options: { emptyRepository?: boolean } = {},
 ): { ok: true; plan: WorkGraphPlan; order: string[] } | { ok: false; errors: string[] } {
   if (!args) return { ok: false, errors: [`no ${SUBMIT_TOOL} call`] };
   let json: unknown;
@@ -103,7 +157,11 @@ export function parsePlan(
     };
   }
   const graph = checkWorkGraph(parsed.data.tasks);
-  return graph.ok ? { ok: true, plan: parsed.data, order: graph.order } : graph;
+  if (!graph.ok) return graph;
+  const bootstrap = options.emptyRepository ? checkBootstrap(parsed.data) : [];
+  return bootstrap.length > 0
+    ? { ok: false, errors: bootstrap }
+    : { ok: true, plan: parsed.data, order: graph.order };
 }
 
 /** At most two model calls: the plan, then one repair turn with the validation errors. */
@@ -115,8 +173,12 @@ export async function planChange(
   const route = applyOpusPolicy(routeByRules(PLANNER_ROUTE), options.allowOpus ?? true);
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: `Project: ${input.projectName}\nGoal:\n${input.goal}` },
+    {
+      role: "user",
+      content: `Project: ${input.projectName}\n${repositoryLine(input.files)}\nGoal:\n${input.goal}`,
+    },
   ];
+  const emptyRepository = isEmptyRepository(input.files);
   const calls: PlannerResult["calls"] = [];
   let lastErrors: string[] = [];
 
@@ -139,7 +201,7 @@ export async function planChange(
     });
 
     const call = result.toolCalls.find((c) => c.function.name === SUBMIT_TOOL);
-    const outcome = parsePlan(call?.function.arguments);
+    const outcome = parsePlan(call?.function.arguments, { emptyRepository });
     if (outcome.ok) {
       return {
         plan: outcome.plan,

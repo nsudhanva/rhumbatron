@@ -12,8 +12,8 @@ export { candidateFork };
  */
 
 /**
- * HOM-192: hard stop at 10 Sandbox hours per calendar month. Same meter as Task workspaces.
- * ADR 0017 splits the hours between dev and prod through the `SANDBOX_MONTHLY_SECONDS` binding;
+ * Hard stop at the monthly Sandbox hours. Same meter as Task workspaces. ADR 0017 splits the
+ * approved 20 hours between dev (5) and prod (15) through the `SANDBOX_MONTHLY_SECONDS` binding;
  * this is the fallback when the binding is absent.
  */
 const MONTHLY_SECONDS = 36_000;
@@ -389,7 +389,13 @@ export async function runContractCheck(
     baseCommit: string;
     timeoutMs: number;
   },
-): Promise<{ candidate: CheckRun; base: CheckRun; startedAt: string; completedAt: string }> {
+): Promise<{
+  candidate: CheckRun;
+  /** Null when the base has no app yet (no package.json): an empty repository has no contract. */
+  base: CheckRun | null;
+  startedAt: string;
+  completedAt: string;
+}> {
   if (!SHA.test(input.baseCommit)) throw new Error("invalid base commit");
   const sandbox = sandboxFor(env, input.projectId);
   const dir = await ensureCheckout(env, sandbox, input);
@@ -403,11 +409,18 @@ export async function runContractCheck(
       cwd: dir,
       timeoutMs: input.timeoutMs,
     });
-    const baseRun = await exec(sandbox, "bun run contract", {
+    const baseHasApp = await exec(sandbox, `test -f ${base}/package.json`, {
       cwd: dir,
-      timeoutMs: input.timeoutMs,
-      env: { CONTRACT_ROOT: base },
+      timeoutMs: GIT_TIMEOUT_MS,
     });
+    const baseRun =
+      baseHasApp.exitCode === 1
+        ? null
+        : await exec(sandbox, "bun run contract", {
+            cwd: dir,
+            timeoutMs: input.timeoutMs,
+            env: { CONTRACT_ROOT: base },
+          });
     return { candidate, base: baseRun, startedAt, completedAt: new Date().toISOString() };
   } finally {
     await exec(sandbox, `git worktree remove --force ${base}; rm -rf ${base}`, {

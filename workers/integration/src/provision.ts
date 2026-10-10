@@ -5,14 +5,21 @@ import http from "isomorphic-git/http/web";
 import { createFsFromVolume, Volume } from "memfs";
 import { storeTreeCode, walkTree } from "./code-store.ts";
 import acmeShop from "./fixtures/acme-shop.fixture.gen.ts";
+import type { SourceSeed } from "./source-seed.ts";
 
 /**
- * Project source provisioning (AGENTS.md sections 29.1 and 54). One Artifacts repo per Project,
- * named by the Project ID. A template seeds the first commit with isomorphic-git over an in-memory
- * file system, then that commit becomes Canonical Generation 0. Safe to repeat.
+ * Project source provisioning (AGENTS.md section 29.1). One Artifacts repo per Project, named by the
+ * Project ID. The first commit holds only a `.gitignore` (git needs one file for a tree); agents
+ * build the app from nothing. Internal demo and smoke scripts seed the Acme Shop fixture instead
+ * (section 54). isomorphic-git pushes the commit from an in-memory file system, then it becomes
+ * Canonical Generation 0. Safe to repeat; it never seeds a Project whose canonical source is
+ * assigned (`needsSourceSeed`).
  */
 
-const TEMPLATES: Record<string, Record<string, string>> = { "acme-shop": acmeShop };
+const SEEDS: Record<SourceSeed, { files: Record<string, string>; message: string }> = {
+  blank: { files: { ".gitignore": "node_modules\n" }, message: "Empty repository (S0)" },
+  "acme-shop": { files: acmeShop, message: "Acme Shop baseline (S0)" },
+};
 
 const DIR = "/repo";
 const AUTHOR = { name: "Rhumbatron", email: "bot@rhumbatron.com" };
@@ -90,7 +97,11 @@ function isNotFound(error: unknown) {
 }
 
 /** Pushes the template as one commit on `main`. Tokens live 10 minutes and never leave this call. */
-async function seed(remote: string, token: string, files: Record<string, string>): Promise<string> {
+async function seed(
+  remote: string,
+  token: string,
+  { files, message }: { files: Record<string, string>; message: string },
+): Promise<string> {
   const fs = createFsFromVolume(new Volume()) as unknown as Parameters<typeof git.init>[0]["fs"];
   await git.init({ fs, dir: DIR, defaultBranch: "main" });
   for (const [path, content] of Object.entries(files)) {
@@ -106,7 +117,7 @@ async function seed(remote: string, token: string, files: Record<string, string>
   const commit = await git.commit({
     fs,
     dir: DIR,
-    message: "Acme Shop baseline (S0)",
+    message,
     author: AUTHOR,
   });
   const secret = token.split("?expires=")[0] ?? token;
@@ -124,9 +135,9 @@ async function seed(remote: string, token: string, files: Record<string, string>
 
 export async function provisionProject(
   env: Env,
-  input: { projectId: string; template: string },
+  input: { projectId: string; seed: SourceSeed },
 ): Promise<Provisioned> {
-  const files = TEMPLATES[input.template];
+  const files = SEEDS[input.seed];
   let seeded = false;
   let repo: ArtifactsRepo;
   try {
@@ -137,15 +148,13 @@ export async function provisionProject(
       description: `Rhumbatron project ${input.projectId}`,
       setDefaultBranch: "main",
     });
-    if (files) {
-      await seed(created.remote, created.token, files);
-      seeded = true;
-    }
+    await seed(created.remote, created.token, files);
+    seeded = true;
     repo = await env.ARTIFACTS.get(input.projectId);
   }
 
   let [head] = await repo.log({ ref: "main", limit: 1 });
-  if (!head && files) {
+  if (!head) {
     // Created earlier but the seed did not land: push it now with a short-lived token.
     const info = await repo.info();
     const token = await repo.createToken("write", 600);
