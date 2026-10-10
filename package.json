@@ -39,6 +39,7 @@
     "smoke:dev": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/smoke.ts dev",
     "smoke:prod": "bun scripts/smoke.ts prod",
     "smoke:release": "bun scripts/smoke-release.ts",
+    "e2e": "bun scripts/e2e.ts",
     "smoke:plan": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/smoke.ts dev --plan",
     "smoke:sandbox": "CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-dev -w) CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-dev -w) bun scripts/smoke.ts dev --sandbox",
     "smoke:models": "OPENROUTER_API_KEY=$(security find-generic-password -s rhumbatron-openrouter-api-key -w) VERTEX_SERVICE_ACCOUNT=$(security find-generic-password -s rhumbatron-vertex-sa-dev -w) CLOUDFLARE_ACCOUNT_ID=$(security find-generic-password -s rhumbatron-cloudflare-account-id -w) bun scripts/smoke-models.ts dev",
