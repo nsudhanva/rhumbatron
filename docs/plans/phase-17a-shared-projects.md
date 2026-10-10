@@ -97,7 +97,7 @@ Migration `0022_shared_projects.sql`:
 | `POST /v1/invitations/:invitationId/accept` | invitee | Membership created. Idempotent. |
 | `GET /v1/projects/:projectId` | members | Adds `role` (`owner` or `collaborator`). |
 | `GET /v1/projects/:projectId/changes` and `GET /v1/changes/:changeId` | members | Add `requester: { userId, name, rank, isYou }`, `outcome: { kind, reason, winnerChangeId, decidedBy, policy } | null` and `supersedesChangeId`. |
-| `GET /v1/changes/:changeId/conflicts` | members | Request conflicts of this Change, with both goals and the cited criteria. |
+| `GET /v1/changes/:changeId/request-conflicts` | members | Cross-request conflicts of this Change, with both goals and the cited criteria. (`/conflicts` already lists conflicts inside one Change.) |
 | `POST /v1/changes/:changeId/override` | owner | `{ changeId }` of the new linked Change. Only for `not_selected` or `awaiting_owner` Changes. |
 
 Owner-only actions also include approve, promote, rollback, archive and delete, code edits, budget
