@@ -702,7 +702,11 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         riskTier: riskTier === null ? null : RiskTier.catch("medium").parse(riskTier),
         policy: DEFAULT_POLICY,
       });
-      if (decided.kind === "manual" && decided.reason === "approval_required") {
+      if (
+        decided.kind === "manual" &&
+        (decided.reason === "approval_required" || decided.reason === "tier_not_auto")
+      ) {
+        // Either way a person decides next, so the Change shows as waiting, not stuck verifying.
         await this.env.DB.prepare(
           `UPDATE changes SET status = 'awaiting_approval', updated_at = ?
            WHERE id = ? AND status = 'verifying'`,

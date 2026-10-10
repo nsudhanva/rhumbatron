@@ -331,12 +331,22 @@ export const members = new Hono<AppEnv>()
       const role = await projectRole(c.env.DB, userId, projectId);
       if (!role) return fail(c, 404, "not_found", "Project not found");
       if (role !== "owner") return fail(c, 403, "forbidden", ownerOnlyMessage("manage sharing"));
-      await c.env.DB.prepare(
+      const revoked = await c.env.DB.prepare(
         `UPDATE project_invitations SET status = 'revoked'
          WHERE id = ? AND project_id = ? AND status = 'pending'`,
       )
         .bind(invitationId, projectId)
         .run();
+      if ((revoked.meta.changes ?? 0) === 0) {
+        // A repeat on an already revoked invitation of this Project stays 200.
+        const prior = await c.env.DB.prepare(
+          `SELECT 1 AS found FROM project_invitations
+           WHERE id = ? AND project_id = ? AND status = 'revoked'`,
+        )
+          .bind(invitationId, projectId)
+          .first();
+        if (!prior) return fail(c, 404, "not_found", "Invitation not found");
+      }
       return c.json({ data: { id: invitationId, status: "revoked" } });
     },
   )
@@ -357,7 +367,10 @@ export const members = new Hono<AppEnv>()
       )
         .bind(projectId, member)
         .run();
-      return c.json({ data: { userId: member, removed: (removed.meta.changes ?? 0) > 0 } });
+      if ((removed.meta.changes ?? 0) === 0) {
+        return fail(c, 404, "not_found", "Collaborator not found");
+      }
+      return c.json({ data: { userId: member, removed: true } });
     },
   )
 
@@ -545,6 +558,7 @@ export const members = new Hono<AppEnv>()
       if (outcome?.status === "refused") {
         return fail(c, 409, "conflict", outcome.detail ?? "The request could not be chosen.");
       }
-      return c.json({ data: outcome }, 202);
+      // Completes synchronously, so 200 rather than 202.
+      return c.json({ data: outcome }, 200);
     },
   );

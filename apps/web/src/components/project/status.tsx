@@ -23,6 +23,7 @@ const CHANGE_OVERRIDES: Record<string, { family: StatusFamily; label: string }> 
   promoting: { family: "active", label: "Promoting" },
   releasing: { family: "active", label: "Releasing" },
   not_selected: { family: "idle", label: "Not selected" },
+  awaiting_approval: { family: "attention", label: "Waiting for owner" },
   awaiting_owner: { family: "attention", label: "Waiting for owner" },
 };
 
