@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { activity } from "./activity.ts";
 import { agents } from "./agents.ts";
+import { apps } from "./apps.ts";
 import { candidates } from "./candidates.ts";
 import { code } from "./code.ts";
 import { conflicts } from "./conflicts.ts";
@@ -55,6 +56,7 @@ app.route("/", deadLetters);
 app.route("/", decisions);
 app.route("/", notifications);
 app.route("/", releases);
+app.route("/", apps);
 app.route("/", projects);
 
 app.notFound((c) => fail(c, 404, "not_found", "Route not found"));
