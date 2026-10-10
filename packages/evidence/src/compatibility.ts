@@ -188,7 +188,7 @@ function migrationNumbers(cs: ComposableChangeSet): number[] {
  * 9: a declared contract change names its route anywhere in the text ("Added GET /api/version
  * route ..."), not only at the start, so the contract check matches it to the observed route.
  */
-export const COMPOSITION_RULES_VERSION = 11;
+export const COMPOSITION_RULES_VERSION = 12;
 
 /**
  * Transitive `stackedOn` ancestors of each ChangeSet. A pair where one is an ancestor of the other
