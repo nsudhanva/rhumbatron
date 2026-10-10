@@ -83,7 +83,7 @@ function Projects() {
       ) : count === 0 ? (
         <EmptyState
           what="No projects yet."
-          how="Create one under New project, from an empty codebase or the Acme Shop demo."
+          how="Create one under New project. It starts empty, and agents build the app from your first request."
         />
       ) : (
         <DataTable label="Projects" minWidth={560}>
