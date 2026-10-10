@@ -145,6 +145,8 @@ function attribution(row: AttributionRow, projectId: string): ChangeSetAttributi
     status: row.status,
     files: changeSet?.ownFiles ?? changeSet?.files ?? [],
     patchRecorded: changeSet?.patchRef === changeSetPatchKey(projectId, row.id),
+    // A human ChangeSet (P16-19): the person's name, else their user ID. Null for agents.
+    editedBy: intent?.actor ? (intent.actor.name ?? intent.actor.id) : null,
     createdAt: row.created_at,
   };
 }
