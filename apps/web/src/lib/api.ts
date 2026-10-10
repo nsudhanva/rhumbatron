@@ -1077,6 +1077,8 @@ export type ChangeSetAttribution = {
   files: string[];
   /** False for ChangeSets published before patches were stored. */
   patchRecorded: boolean;
+  /** The person who wrote a human ChangeSet (an edit on the Code page), else null. */
+  editedBy: string | null;
   createdAt: string;
 };
 
@@ -1162,6 +1164,30 @@ export const getCodeFile = createServerFn()
     call<CodeFile>(
       `/v1/projects/${data.projectId}/code${codeQuery({ tree: data.tree, path: data.path })}`,
     ),
+  );
+
+export type CodeEditResult = {
+  status: "created" | "existing";
+  changeId: string;
+  changeSetId: string;
+  candidateIds: string[];
+};
+
+/** P16-19: save one file as a human ChangeSet on a new Change. 409 when canonical moved. */
+export const submitCodeEdit = createServerFn({ method: "POST" })
+  .inputValidator(
+    (input: {
+      projectId: string;
+      path: string;
+      content: string;
+      baseTree: string;
+      message: string;
+      authorName?: string | undefined;
+      clientRequestId: string;
+    }) => input,
+  )
+  .handler(({ data: { projectId, ...body } }) =>
+    call<CodeEditResult>(`/v1/projects/${projectId}/code/edits`, { method: "POST", body }),
   );
 
 export const getCodeVersions = createServerFn()

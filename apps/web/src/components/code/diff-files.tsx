@@ -117,6 +117,20 @@ const STATUS_WORD: Record<DiffFile["status"], string | null> = {
   modified: null,
 };
 
+/** "edited by <person>" for a human ChangeSet (P16-19), else the agent role and ID. */
+export function Author({ set }: { set: ChangeSetAttribution }) {
+  return set.editedBy !== null ? (
+    <>
+      edited by <span className="text-kumo-default">{set.editedBy}</span>
+    </>
+  ) : (
+    <>
+      {set.agentRole ?? "agent"} <span className="text-kumo-default">{set.agentId}</span>
+    </>
+  );
+}
+Author.displayName = "Author";
+
 /** Agent and ChangeSet that produced a file, as compact mono links. */
 export function Attribution({ sets }: { sets: ChangeSetAttribution[] }) {
   if (sets.length === 0) return null;
@@ -124,8 +138,7 @@ export function Attribution({ sets }: { sets: ChangeSetAttribution[] }) {
     <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-kumo-subtle">
       {sets.map((s) => (
         <span key={s.id} title={s.summary || s.id} className="whitespace-nowrap">
-          {s.agentRole ?? "agent"} <span className="text-kumo-default">{s.agentId}</span> ·{" "}
-          {s.taskKey ?? s.id}
+          <Author set={s} /> · {s.taskKey ?? s.id}
         </span>
       ))}
     </span>

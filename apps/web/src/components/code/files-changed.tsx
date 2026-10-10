@@ -12,7 +12,7 @@ import { SectionError, SkeletonBar } from "../project/feedback";
 import { EmptyState } from "../ui/empty-state";
 import { Mono } from "../ui/mono";
 import { Section } from "../ui/page";
-import { DiffFiles } from "./diff-files";
+import { Author, DiffFiles } from "./diff-files";
 
 const NO_PATCH = "No diff recorded for this ChangeSet.";
 const OLDER = "ChangeSets published before diffs were stored keep only their file list.";
@@ -97,7 +97,7 @@ export function ChangeFilesChanged({ changeId }: { changeId: string }) {
                   </span>
                   <span className="flex min-w-0 flex-wrap gap-x-2 font-mono text-[12px] text-kumo-subtle">
                     <span>
-                      {set.agentRole ?? "agent"} {set.agentId}
+                      <Author set={set} />
                     </span>
                     {set.taskKey && <span>· {set.taskKey}</span>}
                     <span>· {set.id}</span>

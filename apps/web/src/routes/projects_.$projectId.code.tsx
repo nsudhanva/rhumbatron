@@ -1,10 +1,11 @@
 import { Show, SignInButton } from "@clerk/tanstack-react-start";
 import { Button, Select } from "@cloudflare/kumo";
-import { SignIn } from "@phosphor-icons/react";
+import { PencilSimple, SignIn } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Attribution, ChangeLink } from "../components/code/diff-files";
+import { FileEditor } from "../components/code/file-editor";
 import { FileView, formatBytes } from "../components/code/file-view";
 import { SectionError, SkeletonBar } from "../components/project/feedback";
 import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../components/ui/data-table";
@@ -25,8 +26,9 @@ import {
 import { EMPTY, formatNumber, generation, timeAgo, truncate } from "../lib/format";
 
 /**
- * Code (P16-18; AGENTS.md 38.5): the files of any Canonical Generation, read-only, with the
- * version history and which agents changed what. Defaults to the live canonical tree.
+ * Code (P16-18; AGENTS.md 38.5): the files of any Canonical Generation, with the version history
+ * and which agents changed what. Defaults to the live canonical tree. A text file of the live tree
+ * can be edited (P16-19): Save creates a new Change that ships only after its checks pass.
  */
 
 type Search = { tree?: string; path?: string };
@@ -117,6 +119,11 @@ function CodeContent() {
     [tree.data],
   );
 
+  // The file being edited, by tree and path: opening another file or version leaves the editor.
+  const [editing, setEditing] = useState<string | null>(null);
+  const editable = file.data?.live && file.data.content !== null ? file.data : null;
+  const editingNow = !!editable && editing === `${editable.treeSha}:${editable.path}`;
+
   const open = (next: string) =>
     navigate({ search: (prev) => ({ ...prev, path: next }), replace: true });
 
@@ -180,7 +187,23 @@ function CodeContent() {
           </Section>
           <Section
             label="File"
-            meta={file.data?.size != null && <Mono subtle>{formatBytes(file.data.size)}</Mono>}
+            meta={
+              (file.data?.size != null || (editable && !editingNow)) && (
+                <>
+                  {file.data?.size != null && <Mono subtle>{formatBytes(file.data.size)}</Mono>}
+                  {editable && !editingNow && (
+                    <Button
+                      size="xs"
+                      variant="secondary"
+                      icon={PencilSimple}
+                      onClick={() => setEditing(`${editable.treeSha}:${editable.path}`)}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                </>
+              )
+            }
           >
             {!path ? (
               <EmptyState what="No file open." how="Pick a file from the list." />
@@ -189,6 +212,13 @@ function CodeContent() {
                 message={`The file could not load. ${file.error.message}`}
                 onRetry={() => file.refetch()}
                 retrying={file.isFetching}
+              />
+            ) : editable && editingNow ? (
+              <FileEditor
+                key={`${editable.treeSha}:${editable.path}`}
+                projectId={projectId}
+                file={{ ...editable, content: editable.content ?? "" }}
+                onCancel={() => setEditing(null)}
               />
             ) : file.data ? (
               <FileView file={file.data} />
@@ -306,7 +336,7 @@ function History({
             <tr>
               <Th>Version</Th>
               <Th>Change</Th>
-              <Th>Agents</Th>
+              <Th>Authors</Th>
               <Th>Diff</Th>
               <Th numeric>When</Th>
             </tr>
