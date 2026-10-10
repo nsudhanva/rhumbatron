@@ -6,7 +6,18 @@ Operations guide for application releases via Cloudflare Workers Builds, smoke v
 
 Rhumbatron manages application releases through git push triggers to Cloudflare Artifacts, verified by automated workflows and executable machine evidence (`AGENTS.md` sections 21.3 and 37, [ADR 0018](../adr/0018-release-via-workers-builds.md)).
 
-**Status (2026-10-09): blocked.** The release path is built and applied. The Workers Builds connection from the Artifacts repo to `rhumbatron-acme-shop-dev` does not exist yet (see "One-Time Workers Builds Setup" below). Until it does, `ReleaseWorkflow` finds no build trigger and fails the release with reason `not_connected`.
+**Status (2026-10-10): connected.** The Workers Builds connection from the Artifacts repo `rhumbatron-projects-dev/proj_077b581d-15b3-4f6d-b68a-6a6659cc2668` (Acme Shop Live) to `rhumbatron-acme-shop-dev` exists. It was made in the dashboard (Worker → Settings → Builds → Connect), because the Builds API rejects `cloudflare_artifacts` request bodies (error 12065).
+
+| Item | Value |
+|---|---|
+| Trigger UUID | `4fb2e3cf-ac43-4cd3-8107-855a94059a7b` |
+| Repo connection UUID | `c61776d4-d809-44aa-8915-a68f29982ce4` (provider `cloudflare_artifacts`) |
+| Branch | `main` only; Preview builds are off |
+| Build command | none |
+| Deploy command | `npx wrangler@4.149.0 deploy` |
+| Build token | `rhumbatron acme-shop-dev build token` (created by the dashboard, dedicated to this Worker) |
+
+Check it with `cf builds triggers list --external-script-id <worker tag>`.
 
 ---
 

@@ -131,3 +131,7 @@ sequenceDiagram
     end
   end
 ```
+
+## Update (2026-10-10, later)
+
+The dashboard connection now exists for `rhumbatron-acme-shop-dev`. It has trigger `4fb2e3cf-ac43-4cd3-8107-855a94059a7b`, branch `main`, deploy command `npx wrangler@4.149.0 deploy`, and a dedicated build token. The default token offered by the dashboard belonged to another project and lacked Artifacts permissions, which caused a 401. A new token fixed it. See docs/operations/release.md.
