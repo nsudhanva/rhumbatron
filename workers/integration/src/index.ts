@@ -14,6 +14,7 @@ import {
   startCandidateVerification,
 } from "./candidate-create.ts";
 import { cancelChange, raiseChangeBudget } from "./change-commands.ts";
+import { backfillTreeCode, type CodeBackfill } from "./code-store.ts";
 import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { handleFixtureCommand } from "./fixture-changesets.ts";
@@ -253,6 +254,14 @@ export default class Integration extends WorkerEntrypoint<Env> {
     actorUserId: string;
   }): Promise<ReleaseInjectionOutcome> {
     return injectReleaseFailure(this.env, input);
+  }
+
+  /**
+   * P16-16: copies one canonical tree's files to the code store when a code read finds it missing
+   * or partial. The API checked membership; only canonical trees of this Project are accepted.
+   */
+  async backfillTreeCode(input: { projectId: string; treeSha: string }): Promise<CodeBackfill> {
+    return backfillTreeCode(this.env, input);
   }
 
   /** P11-01: one human decision on a gated Candidate (section 40.2). */

@@ -1,7 +1,9 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
+import { sourceIndexKey } from "@rhumbatron/protocol";
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import { createFsFromVolume, Volume } from "memfs";
+import { storeTreeCode, walkTree } from "./code-store.ts";
 import acmeShop from "./fixtures/acme-shop.fixture.gen.ts";
 
 /**
@@ -26,26 +28,11 @@ type Provisioned = {
 /** File index of one canonical tree, stored once per tree in R2 (Context Compiler input, P7-02). */
 export type SourceIndex = { commit: string; treeSha: string; files: string[] };
 
-const MAX_INDEXED_FILES = 2000;
-
-/** Walks a tree with the binding: one readTree per directory, no blob reads (Artifacts ops). */
-async function indexTree(repo: ArtifactsRepo, treeSha: string): Promise<SourceIndex["files"]> {
-  const files: SourceIndex["files"] = [];
-  const pending: [string, string][] = [["", treeSha]];
-  while (pending.length > 0 && files.length < MAX_INDEXED_FILES) {
-    const [prefix, hash] = pending.shift() ?? ["", ""];
-    for (const entry of (await repo.readTree(hash)) ?? []) {
-      const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.type === "tree") pending.push([path, entry.hash]);
-      else if (entry.type === "blob") files.push(path);
-    }
-  }
-  return files.sort();
-}
-
 /**
- * Writes the file index of one canonical tree once. Readers resolve the canonical commit from it
+ * Writes the file index of one canonical tree once, then copies its file contents to the code
+ * store (P16-16). Readers resolve the canonical commit from the index
  * (`source/<project>/<tree>/index.json`), so it must exist only once that commit is on `main`.
+ * `previousTreeSha` is the canonical tree this one replaced: its blobs need no copy check.
  * Returns the number of indexed files, or 0 when the index already existed.
  */
 export async function ensureSourceIndex(
@@ -53,18 +40,38 @@ export async function ensureSourceIndex(
   repo: ArtifactsRepo,
   projectId: string,
   head: { commit: string; treeSha: string },
+  previousTreeSha?: string,
 ): Promise<number> {
-  const key = `source/${projectId}/${head.treeSha}/index.json`;
-  if (await env.EVIDENCE.head(key)) return 0;
-  const index: SourceIndex = {
-    commit: head.commit,
-    treeSha: head.treeSha,
-    files: await indexTree(repo, head.treeSha),
-  };
-  await env.EVIDENCE.put(key, JSON.stringify(index), {
-    httpMetadata: { contentType: "application/json" },
-  });
-  return index.files.length;
+  const key = sourceIndexKey(projectId, head.treeSha);
+  let written = 0;
+  let entries: Awaited<ReturnType<typeof walkTree>> | undefined;
+  if (!(await env.EVIDENCE.head(key))) {
+    entries = await walkTree(repo, head.treeSha);
+    const index: SourceIndex = {
+      commit: head.commit,
+      treeSha: head.treeSha,
+      files: entries.map((e) => e.path),
+    };
+    await env.EVIDENCE.put(key, JSON.stringify(index), {
+      httpMetadata: { contentType: "application/json" },
+    });
+    written = index.files.length;
+  }
+  // The code store is a read model: a failure here must not fail provisioning or the source
+  // sync. The API backfills a missing or partial tree on its first code read.
+  try {
+    await storeTreeCode(env, repo, { projectId, ...head, previousTreeSha, entries });
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "code_store.failed",
+        projectId,
+        treeSha: head.treeSha,
+        error: String(error).slice(0, 200),
+      }),
+    );
+  }
+  return written;
 }
 
 function isNotFound(error: unknown) {

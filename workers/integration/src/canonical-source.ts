@@ -88,6 +88,8 @@ export async function syncCanonicalSource(
   try {
     using canonical = await env.ARTIFACTS.get(input.projectId);
     const [head] = await canonical.log({ ref: "main", limit: 1 });
+    // The tree `main` held before this promotion: its stored blobs need no copy check.
+    const previousTreeSha = head?.hash !== input.commit ? head?.treeHash : undefined;
     if (head?.hash !== input.commit) {
       await fastForward(env, input.projectId, input.candidateId, input.commit);
     }
@@ -99,10 +101,13 @@ export async function syncCanonicalSource(
         detail: "canonical main is not at the composed commit",
       };
     }
-    await ensureSourceIndex(env, canonical, input.projectId, {
-      commit: input.commit,
-      treeSha: input.treeSha,
-    });
+    await ensureSourceIndex(
+      env,
+      canonical,
+      input.projectId,
+      { commit: input.commit, treeSha: input.treeSha },
+      previousTreeSha,
+    );
     return { synced: true, commit: input.commit };
   } catch (error) {
     return { synced: false, commit: null, detail: String(error).slice(0, 300) };

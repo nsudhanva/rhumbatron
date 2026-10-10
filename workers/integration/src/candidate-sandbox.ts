@@ -1,4 +1,5 @@
 import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
+import { boundPatch, candidatePatchKey, patchCommand, patchMetadata } from "@rhumbatron/protocol";
 import type { CheckRun, ComposeSource } from "./candidate-composer.ts";
 import { candidateFork } from "./repo-names.ts";
 
@@ -31,7 +32,13 @@ const INSTALL_TIMEOUT_MS = 180_000;
 const MAX_OUTPUT_CHARS = 64_000;
 const SHA = /^[0-9a-f]{40}$/;
 
-type CandidateEnv = { SANDBOX: DurableObjectNamespace; ARTIFACTS: Artifacts; DB: D1Database };
+type CandidateEnv = {
+  SANDBOX: DurableObjectNamespace;
+  ARTIFACTS: Artifacts;
+  DB: D1Database;
+  /** Where the Candidate patch goes (P16-17). Absent in tests that do not compose. */
+  EVIDENCE?: R2Bucket;
+};
 
 const month = () => new Date().toISOString().slice(0, 7);
 
@@ -94,7 +101,7 @@ function clip(text: string) {
 async function exec(
   sandbox: Sandbox,
   command: string,
-  opts: { cwd?: string; timeoutMs: number; env?: Record<string, string> },
+  opts: { cwd?: string; timeoutMs: number; env?: Record<string, string>; raw?: boolean },
 ): Promise<CheckRun> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<"timeout">((resolve) => {
@@ -112,7 +119,8 @@ async function exec(
     if (result === "timeout") return { exitCode: null, output: "", timedOut: true };
     return {
       exitCode: result.exitCode,
-      output: clip(joinOutput(result.stdout, result.stderr)),
+      // `raw` keeps all of stdout: the caller bounds it (a patch is cut at a line, not the end).
+      output: opts.raw ? result.stdout : clip(joinOutput(result.stdout, result.stderr)),
       timedOut: false,
     };
   } catch (error) {
@@ -272,6 +280,7 @@ export async function composeCandidate(
     );
     const commit = await must(sandbox, "git rev-parse HEAD", dir);
     const tree = await must(sandbox, "git rev-parse HEAD^{tree}", dir);
+    await storeCandidatePatch(env, sandbox, dir, { ...input, commit });
     const install = await exec(sandbox, "bun install", { cwd: dir, timeoutMs: INSTALL_TIMEOUT_MS });
     if (install.exitCode !== 0) {
       throw new Error(`bun install failed: ${install.error ?? install.output.slice(-300)}`);
@@ -279,6 +288,41 @@ export async function composeCandidate(
     return { ok: true, commit, tree, merged };
   } finally {
     for (const revoke of revokes) await revoke();
+  }
+}
+
+/**
+ * Stores `git diff base..composed` for the Files changed view (P16-17), bounded by
+ * MAX_PATCH_BYTES. A read model only: a failure is logged and composition continues. Repeated
+ * steps write the same bytes to the same key.
+ */
+async function storeCandidatePatch(
+  env: CandidateEnv,
+  sandbox: Sandbox,
+  dir: string,
+  input: { projectId: string; candidateId: string; baseCommit: string; commit: string },
+) {
+  if (!env.EVIDENCE) return;
+  try {
+    const run = await exec(sandbox, patchCommand(input.baseCommit, input.commit), {
+      cwd: dir,
+      timeoutMs: GIT_TIMEOUT_MS,
+      raw: true,
+    });
+    if (run.exitCode !== 0) throw new Error(`git diff exited ${run.exitCode}`);
+    const bounded = boundPatch(run.output);
+    await env.EVIDENCE.put(candidatePatchKey(input.projectId, input.candidateId), bounded.patch, {
+      httpMetadata: { contentType: "text/x-diff; charset=utf-8" },
+      customMetadata: patchMetadata({ base: input.baseCommit, head: input.commit, ...bounded }),
+    });
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "candidate.patch_failed",
+        candidateId: input.candidateId,
+        error: String(error).slice(0, 200),
+      }),
+    );
   }
 }
 
