@@ -3,7 +3,7 @@ import { requestCannotShip } from "./app-release-model.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 
-export const MAX_REBASE_RERUNS = 2;
+const MAX_REBASE_RERUNS = 2;
 export const REBASE_BLOCKED_REASON =
   "The request could not be merged with newer changes twice. Submit it again.";
 type RebaseEnv = Pick<Env, "DB" | "PROJECT_ROOT" | "RESOURCE_SHARD" | "AGENT_WAKEUPS">;

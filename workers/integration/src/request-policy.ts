@@ -172,7 +172,7 @@ const GATE_WORDS = new Set(
   ).split(" "),
 );
 const CHECK_WORDS = new Set(["typecheck", "test", "tests", "contract", "lint", "build"]);
-export function isQualityGate(criterion: Criterion): boolean {
+function isQualityGate(criterion: Criterion): boolean {
   const words = criterion.text.toLowerCase().match(/[a-z]+/g) ?? [];
   return words.some((w) => CHECK_WORDS.has(w)) && words.every((w) => GATE_WORDS.has(w));
 }

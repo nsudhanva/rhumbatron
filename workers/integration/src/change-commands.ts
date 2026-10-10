@@ -310,7 +310,7 @@ export type OverrideRequestOutcome =
   | { status: "refused"; reason: "not_found" | "not_overridable"; detail: string };
 
 /** Fixed-length identity, stable across retries and concurrent owner choices. */
-export async function overrideChangeId(changeId: string): Promise<string> {
+async function overrideChangeId(changeId: string): Promise<string> {
   const digest = new Uint8Array(
     await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`owner-override:${changeId}`)),
   );

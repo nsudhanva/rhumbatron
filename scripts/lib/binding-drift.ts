@@ -2,7 +2,7 @@
 // out of a Terraform bindings list. Text parsing only; no dependencies.
 
 /** Strips // and block comments (outside strings) and trailing commas from JSONC text. */
-export function stripJsonc(text: string): string {
+function stripJsonc(text: string): string {
   let out = "";
   let i = 0;
   while (i < text.length) {

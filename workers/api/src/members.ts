@@ -89,7 +89,7 @@ export async function ensureProfile(env: Env, userId: string, authSubject: strin
 }
 
 /** A person's label: display name, else the email's local part, else null. */
-export function requesterName(name: string | null, email: string | null): string | null {
+function requesterName(name: string | null, email: string | null): string | null {
   return name ?? (email ? (email.split("@")[0] ?? email) : null);
 }
 
