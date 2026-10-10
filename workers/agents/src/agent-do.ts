@@ -721,6 +721,13 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       },
       ...intents,
       priorFailures,
+      ...(task.attempts_reset_at && JSON.parse(task.route_json ?? "{}").rebase
+        ? {
+            rebase: JSON.parse(task.route_json ?? "{}").rebase as NonNullable<
+              CompileInput["rebase"]
+            >,
+          }
+        : {}),
       ...(compacted.compaction ? { compaction: compacted.compaction } : {}),
       ...(source ? { repository: { commit: source.commit, files: source.files } } : {}),
       inheritedChangeSets: stack.map((s) => ({
@@ -1032,7 +1039,12 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       ]);
       if (changeMoved?.meta.changes) {
         await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
-          await changeEvent(ctx, "verification.started", { reason: "work_graph_completed" }),
+          await changeEvent(
+            ctx,
+            "verification.started",
+            { reason: "work_graph_completed" },
+            { key: run.run_id },
+          ),
         ]);
       }
       if (published) {
@@ -1064,7 +1076,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
               files: published.files,
               stackedOn: published.stackedOn,
             },
-            { taskId: input.taskId, actor },
+            { taskId: input.taskId, actor, key: run.run_id },
           ),
         ]);
       }
@@ -1109,6 +1121,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
           {
             taskId: input.taskId,
             actor,
+            key: run.run_id,
           },
         ),
       ]);
@@ -1644,7 +1657,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       this.env.DB.prepare(
         `SELECT cs.id, r.task_id, cs.intent_json, cs.created_at FROM changesets cs
          JOIN task_runs r ON r.id = 'run_' || substr(cs.id, 4)
-         WHERE cs.change_id = ? AND cs.base_generation = ? AND cs.status != 'rejected'`,
+         JOIN tasks t ON t.id = r.task_id AND t.status = 'completed'
+         WHERE cs.change_id = ? AND cs.base_generation <= ? AND cs.status != 'rejected'`,
       ).bind(input.changeId, input.baseGeneration),
       this.env.DB.prepare("SELECT id, task_key, title FROM tasks WHERE change_id = ?").bind(
         input.changeId,

@@ -43,6 +43,7 @@ export const CANCELLABLE_FROM: readonly ChangeStatus[] = [
   "verifying",
   "awaiting_approval",
   "budget_blocked",
+  "blocked",
 ];
 
 export const canCancel = (status: string) =>

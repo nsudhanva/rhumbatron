@@ -32,6 +32,7 @@ import { type HumanEditInput, submitHumanEdit } from "./human-edit.ts";
 import { cleanupProject, forkRetentionDays, sweepForks } from "./project-cleanup.ts";
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
+import { recoverSourceConflicts } from "./rebase.ts";
 import { injectReleaseFailure, recoverStuckRelease } from "./release.ts";
 import { requestRollback } from "./rollback.ts";
 import { type SourceSeed, seedOf, seedSourceIfUnassigned } from "./source-seed.ts";
@@ -131,13 +132,14 @@ async function handleCommand(
     return result.status === "partial" ? "continue" : undefined;
   }
   if (command.data.commandType === "forks.sweep") {
+    const rebases = await recoverSourceConflicts(env);
     const result = await sweepForks(env, {
       now: Date.now(),
       retentionDays: forkRetentionDays(env.ENVIRONMENT),
     });
     // P16-22: preview rows (and their data) expire with their 7-day bundles.
     const previews = await expirePreviews(env);
-    console.warn(JSON.stringify({ event: "forks.sweep", ...result, ...previews }));
+    console.warn(JSON.stringify({ event: "forks.sweep", ...result, ...previews, rebases }));
     return result.more ? "continue" : undefined;
   }
   // A Change stuck in `releasing` (event router sweep, HOM-204). Bounded: one Change per command.
@@ -183,6 +185,7 @@ async function handleCommand(
   // Section 21.1 step 7: the Work Graph completed; compose its Candidates (Causal Router).
   if (command.data.commandType === "candidate.create") {
     if (!command.data.changeId) return;
+    await recoverSourceConflicts(env, command.data.changeId);
     // The last delivery composes anyway: a stuck review must not hold the Change forever.
     const result = await composeChangeCandidates(env, command.data.changeId, {
       force: attempts >= MAX_DELIVERIES,

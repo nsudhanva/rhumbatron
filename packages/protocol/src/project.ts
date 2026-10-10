@@ -73,6 +73,8 @@ export const ChangeStatus = z.enum([
   "cancelled",
   "failed",
   "budget_blocked",
+  /** Source could not merge after two bounded rebase reruns. */
+  "blocked",
   /** A conflicting request lost to a higher-priority request (docs/plans/phase-17a-shared-projects.md). */
   "not_selected",
   /** A conflicting request waits for the Project owner to decide. */

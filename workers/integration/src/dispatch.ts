@@ -8,6 +8,7 @@ type TaskRow = {
   wake_sent_at: string | null;
   semantic_resource: string | null;
   kind: string;
+  attempts_reset_at?: string | null;
 };
 
 /** One logical agent per Task until AgentDO pools agents by role (Phase 6). */
@@ -20,14 +21,14 @@ const agentIdFor = (taskId: string) => `agt_${taskId.slice(4)}`;
  * after the send succeeds.
  */
 export async function dispatchReadyTasks(
-  env: Env,
+  env: Pick<Env, "DB" | "RESOURCE_SHARD" | "AGENT_WAKEUPS">,
   ctx: ChangeContext,
   budgetRemainingUsd: number,
 ): Promise<string[]> {
   const [change, tasks, deps] = await env.DB.batch([
     env.DB.prepare("SELECT status FROM changes WHERE id = ?").bind(ctx.changeId),
     env.DB.prepare(
-      "SELECT id, status, semantic_resource, kind, wake_sent_at FROM tasks WHERE change_id = ?",
+      "SELECT id, status, semantic_resource, kind, wake_sent_at, attempts_reset_at FROM tasks WHERE change_id = ?",
     ).bind(ctx.changeId),
     env.DB.prepare(
       `SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d
@@ -70,6 +71,9 @@ export async function dispatchReadyTasks(
         { agentId: agentIdFor(taskId) },
         {
           taskId,
+          ...(byId.get(taskId)?.attempts_reset_at
+            ? { key: byId.get(taskId)?.attempts_reset_at ?? "" }
+            : {}),
           ...(byId.get(taskId)?.semantic_resource
             ? { resource: byId.get(taskId)?.semantic_resource ?? "" }
             : {}),
@@ -80,7 +84,7 @@ export async function dispatchReadyTasks(
   await appendChangeEvents(env.RESOURCE_SHARD, ctx, events);
 
   const commands: CommandEnvelope<AgentWakePayload>[] = ready.map((taskId, i) => ({
-    commandId: `cmd_${taskId.slice(4)}_ready`,
+    commandId: `cmd_${taskId.slice(4)}_ready${byId.get(taskId)?.attempts_reset_at ? `_${events[i]?.eventId}` : ""}`,
     commandType: "agent.wake",
     projectId: ctx.projectId,
     changeId: ctx.changeId,

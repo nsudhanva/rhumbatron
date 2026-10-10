@@ -1,6 +1,7 @@
 import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
 import { boundPatch, candidatePatchKey, patchCommand, patchMetadata } from "@rhumbatron/protocol";
 import type { CheckRun, ComposeSource } from "./candidate-composer.ts";
+import { recordSourceConflict } from "./rebase.ts";
 import { candidateFork } from "./repo-names.ts";
 
 export { candidateFork };
@@ -38,6 +39,7 @@ type CandidateEnv = {
   DB: D1Database;
   /** Where the Candidate patch goes (P16-17). Absent in tests that do not compose. */
   EVIDENCE?: R2Bucket;
+  VERIFICATION_COMMANDS?: Env["VERIFICATION_COMMANDS"];
 };
 
 const month = () => new Date().toISOString().slice(0, 7);
@@ -244,6 +246,12 @@ export async function composeCandidate(
         timeoutMs: GIT_TIMEOUT_MS,
       });
       if (present.exitCode !== 0) {
+        await recordSourceConflict(env, {
+          candidateId: input.candidateId,
+          projectId: input.projectId,
+          changeSetId: source.id,
+          sourceConflict: false,
+        });
         return {
           ok: false,
           changeSetId: source.id,
@@ -262,6 +270,14 @@ export async function composeCandidate(
           timeoutMs: GIT_TIMEOUT_MS,
         });
         await exec(sandbox, "git merge --abort", { cwd: dir, timeoutMs: GIT_TIMEOUT_MS });
+        // A missing commit, timeout, or Sandbox failure must never become a rebase rerun.
+        await recordSourceConflict(env, {
+          candidateId: input.candidateId,
+          projectId: input.projectId,
+          changeSetId: source.id,
+          sourceConflict:
+            merge.exitCode !== null && conflicted.exitCode === 0 && !!conflicted.output.trim(),
+        });
         return {
           ok: false,
           changeSetId: source.id,

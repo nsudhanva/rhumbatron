@@ -55,6 +55,19 @@ const base: CompileInput = {
 };
 
 describe("compilePacket", () => {
+  it("keeps the rebase instruction with the required Task objective even at a tiny context budget", () => {
+    const packet = compilePacket({
+      ...base,
+      maxTokens: 1,
+      rebase: { fromGeneration: 2, toGeneration: 3 },
+    });
+    const task = packet.items.find((item) => item.source === "task");
+    expect(task?.body).toContain("The base moved from S2 to S3");
+    expect(task?.body).toContain(
+      "Read the current files and re-apply your objective while preserving the newer changes.",
+    );
+    expect(task?.body).toContain(base.task.objective);
+  });
   it("orders items by retrieval priority with provenance", () => {
     const packet = compilePacket(base);
     expect(packet.items.map((i) => i.source)).toEqual([

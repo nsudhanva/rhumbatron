@@ -56,6 +56,8 @@ export type CompileInput = {
     /** Original evidence retained even if the optional failure text is dropped. */
     sourceRefs?: string[];
   }[];
+  /** A source conflict reopened this Task on the current canonical files. */
+  rebase?: { fromGeneration: number; toGeneration: number };
   /** Validated prior-log summary. The source references are required provenance, never trimmed. */
   compaction?: {
     sourceHash: string;
@@ -131,7 +133,7 @@ export function compilePacket(input: CompileInput): ContextPacket {
       sourceVersion: task.updatedAt,
       capturedAt: now,
       title: `Your Task ${task.key} (${task.kind}, risk ${task.riskTier}): ${task.title}`,
-      body: `Objective: ${task.objective}\n\nSemantic resources:\n${bullets(task.semanticResources)}\n\nAcceptance criteria:\n${bullets(task.acceptanceCriteria)}`,
+      body: `Objective: ${task.objective}${input.rebase ? `\n\nThe base moved from S${input.rebase.fromGeneration} to S${input.rebase.toGeneration}, and the previous source change could not merge. Read the current files and re-apply your objective while preserving the newer changes.` : ""}\n\nSemantic resources:\n${bullets(task.semanticResources)}\n\nAcceptance criteria:\n${bullets(task.acceptanceCriteria)}`,
     },
   ];
   const emptyRepository = !!input.repository && !input.repository.files.includes("package.json");

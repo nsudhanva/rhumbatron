@@ -334,9 +334,17 @@ async function insertCandidate(
   const now = new Date().toISOString();
   const inserted = await env.DB.prepare(
     `INSERT INTO candidates (id, change_id, base_generation, status, created_at, updated_at,
-       composition_key, change_set_ids_json)
-     SELECT ?, ?, ?, 'composing', ?, ?, ?, ?
-     WHERE (SELECT COUNT(*) FROM candidates WHERE change_id = ? AND recomposed_from IS NULL) < ?
+       composition_key, change_set_ids_json, recomposed_from, recompose_count)
+     SELECT ?, ?, ?, 'composing', ?, ?, ?, ?,
+       (SELECT id FROM candidates WHERE change_id = ? AND json_extract(score_json, '$.rebase.requested') = 1
+         ORDER BY json_extract(score_json, '$.rebase.count') DESC LIMIT 1),
+       CASE WHEN EXISTS (SELECT 1 FROM candidates WHERE change_id = ? AND json_extract(score_json, '$.rebase.requested') = 1)
+         THEN 1 ELSE 0 END
+     WHERE (SELECT COUNT(*) FROM candidates c WHERE c.change_id = ?
+       AND (c.recomposed_from IS NULL OR (c.recompose_count = 1 AND EXISTS
+         (SELECT 1 FROM candidates origin WHERE origin.id = c.recomposed_from AND json_extract(origin.score_json, '$.rebase.requested') = 1)))
+       AND c.created_at >= COALESCE((SELECT MAX(json_extract(r.score_json, '$.rebase.resetAt'))
+         FROM candidates r WHERE r.change_id = c.change_id AND json_extract(r.score_json, '$.rebase.requested') = 1), '')) < ?
      ON CONFLICT DO NOTHING`,
   )
     .bind(
@@ -347,6 +355,8 @@ async function insertCandidate(
       now,
       compositionKey,
       JSON.stringify(sorted),
+      change.id,
+      change.id,
       change.id,
       MAX_CANDIDATES,
     )

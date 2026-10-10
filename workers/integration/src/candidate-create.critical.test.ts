@@ -262,11 +262,13 @@ function fakeEnv(input: {
     },
     run: async () => {
       if (!sql.startsWith("INSERT INTO candidates")) throw new Error(`unexpected run: ${sql}`);
-      // Bind order of insertCandidate: id, change, generation, times, key, ids, change, limit.
-      const [id, changeId, , , , , ids, , max] = args as [
+      // Includes two lineage lookups before the per-Change Candidate limit.
+      const [id, changeId, , , , , ids, , , , max] = args as [
         string,
         string,
         number,
+        string,
+        string,
         string,
         string,
         string,

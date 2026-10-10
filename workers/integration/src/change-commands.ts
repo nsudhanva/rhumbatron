@@ -9,6 +9,7 @@ import {
 } from "./change-status.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
+import { recoverSourceConflicts } from "./rebase.ts";
 import { startWorkflowOnce } from "./workflow-commands.ts";
 
 /**
@@ -265,10 +266,14 @@ export async function raiseChangeBudget(
     );
   }
   await env.DB.batch(statements);
+  // An owner can repair a source-conflicted Change through the existing budget API, even with
+  // the current budget unchanged. The same bound and guarded reset apply as automatic recovery.
+  if (["verifying", "blocked", "awaiting_approval"].includes(row.status))
+    await recoverSourceConflicts(env, row.id);
   const after = await loadChange(env, row.id);
   if (!after) return notFound(row.id);
   const raised = after.budget_usd > row.budget_usd;
-  const resumed = row.status === "budget_blocked" && after.status === "running";
+  const resumed = row.status !== "running" && after.status === "running";
   // Dispatch reads only `running` Changes and wakes only ready Tasks not woken yet: safe to repeat.
   const dispatched =
     after.status === "running"

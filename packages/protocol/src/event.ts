@@ -35,6 +35,7 @@ export const EVENT_TYPES = [
   "candidate.forked",
   "candidate.composed",
   "candidate.stale",
+  "candidate.rebase_requested",
   "verification.started",
   "verification.check.completed",
   "verification.completed",
