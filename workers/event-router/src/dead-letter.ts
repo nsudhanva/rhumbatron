@@ -20,11 +20,16 @@ import { AnyCommandEnvelope, type CommandEnvelope } from "@rhumbatron/protocol";
  */
 
 /** Queues whose consumers send poison commands here (Terraform `cloudflare_queue_consumer`). */
-export type OriginQueue = "agent-wakeups" | "integration";
+export type OriginQueue = "agent-wakeups" | "integration" | "verification" | "release";
 
 /** The Queue a command type travels on. Retry sends the command back to it. */
-export const originQueue = (commandType: string): OriginQueue =>
-  commandType === "agent.wake" ? "agent-wakeups" : "integration";
+export const originQueue = (commandType: string): OriginQueue => {
+  if (commandType === "agent.wake") return "agent-wakeups";
+  // Workflow start commands (AGENTS.md section 20, HOM-202).
+  if (commandType === "verification.start") return "verification";
+  if (commandType === "release.start") return "release";
+  return "integration";
+};
 
 /** Queues hide the consumer's error from the dead-letter copy; Workers Logs has the details. */
 const errorText = (commandType: string, queue: OriginQueue) =>

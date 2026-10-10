@@ -206,6 +206,8 @@ describe("dead-letter consumer", () => {
     for (const type of ["change.dispatch", "candidate.verify", "project.provision"]) {
       expect(originQueue(type)).toBe("integration");
     }
+    expect(originQueue("verification.start")).toBe("verification");
+    expect(originQueue("release.start")).toBe("release");
   });
 });
 
