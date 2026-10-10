@@ -1,6 +1,6 @@
 # ADR 0006: Temporary Terraform adapter for K2 streams
 
-- Status: Accepted
+- Status: Accepted. Updated 2026-10-10: prod stream set, archive consumer, poison batches.
 - Date: 2026-10-08
 - Decider: Project owner
 
@@ -53,3 +53,50 @@ here; it is not safe to automate.
 
 Replace the adapter with the first-party resource when the provider adds one, then delete both
 scripts and the `hashicorp/external` provider.
+
+## Diagram
+
+Adapter at apply time:
+
+```mermaid
+flowchart TD
+  apply["terraform apply"] --> td["terraform_data.k2_streams<br/>(hash of k2_config)"]
+  td --> sync["scripts/k2-sync.ts"]
+  sync --> list["List streams (read-before-write)"]
+  list --> cap{"Existing + missing over 20?"}
+  cap -- yes --> stop["Refuse, create nothing"]
+  cap -- no --> streams["Create missing streams<br/>fix retention (7 days)"]
+  streams --> subs["Ensure 4 subscriptions per stream"]
+  subs --> read["data.external.k2_streams<br/>scripts/k2-read.ts"]
+  read --> ids["Stream IDs"]
+  ids --> coord["coordinator: k2 bindings EVENTS_00..EVENTS_07"]
+  ids --> router["event router: K2_STREAM_IDS"]
+```
+
+Events at run time:
+
+```mermaid
+flowchart LR
+  outbox["DO outbox alarm<br/>(ProjectRootDO, ResourceShardDO)"] --> k2[("K2 stream<br/>hash of project ID")]
+  outbox -- "nudge(streamIndex)" --> proc["event router processStream"]
+  cron["Cron, every minute<br/>one stream per tick"] --> proc
+  cron --> arch["audit-archiver"] --> r2[("R2 events/")]
+  k2 --> proc
+  proc --> dedupe["processed_events dedupe (D1)"]
+  dedupe --> view["project-view-projector<br/>ProjectViewDO + feed"]
+  dedupe --> causal["causal-router<br/>commands to Queues"]
+```
+
+## Update (2026-10-10)
+
+- Prod has its own 8 streams, `rhumbatron_events_NN_prod`, with the same retention and
+  subscriptions (ADR 0017). Dev plus prod use 16 of the 20 account streams. A prod plan-time
+  precondition (`data.external.k2_inventory`) and the apply-time check in `k2-sync.ts` both refuse
+  more than 20.
+- The cron sweep also drains `audit-archiver` for its stream and writes NDJSON batches to R2
+  (AGENTS.md section 19.1). The nudge path does not archive.
+- `analytics-projector` exists as a subscription, but no Worker consumes it yet.
+- A batch that fails 5 deliveries (`MAX_BATCH_FAILURES`) is dead-lettered and skipped
+  (`poison-batch.ts`, migration `0016_k2_batch_failures.sql`).
+- The cron sweep is removed while `local.paused = true`. The nudge path still runs.
+- K2 prices above are from the beta listing; they were not re-checked on this date.

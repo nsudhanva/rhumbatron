@@ -1,6 +1,6 @@
 # ADR 0004: Resource organization and bootstrap credentials
 
-- Status: Accepted
+- Status: Accepted. Updated 2026-10-10: prod reuses these credentials (ADR 0017); naming exceptions.
 - Date: 2026-10-08
 - Decider: Project owner
 
@@ -27,7 +27,7 @@
 
 ### Bootstrap credentials
 
-These credentials are the only Cloudflare objects created outside Terraform. Both are created
+These credentials are the only Cloudflare objects created outside Terraform. All are created
 with the `cf` CLI and stored in the macOS Keychain, never in Git or Terraform files.
 
 | Token | Scope | Keychain service |
@@ -43,5 +43,39 @@ with the `cf` CLI and stored in the macOS Keychain, never in Git or Terraform fi
 
 ## Consequences
 
-- Rotating either credential is a manual `cf` CLI step. Record each rotation in this ADR.
+- Rotating any of these credentials is a manual `cf` CLI step. Record each rotation in this ADR.
 - Non-Worker resources are grouped by name only until provider support exists.
+
+## Diagram
+
+How credentials reach Terraform, and where each root keeps its state.
+
+```mermaid
+flowchart LR
+  cli["cf CLI (OAuth session)"] --> keys["Bootstrap credentials"]
+  keys --> kc["macOS Keychain"]
+  kc --> tf["scripts/tf.ts<br/>bun run tf ROOT"]
+  tf --> boot["bootstrap"]
+  tf --> glob["envs/global"]
+  tf --> dev["envs/dev"]
+  tf --> prod["envs/prod"]
+  boot -- creates --> bucket[("R2 rhumbatron-terraform-state-global")]
+  boot -. state .-> bucket
+  glob -. state .-> bucket
+  dev -. state .-> bucket
+  prod -. state .-> bucket
+  dev --> res["rhumbatron-COMPONENT-ENV resources<br/>Workers tagged"]
+  prod --> res
+```
+
+`scripts/tf.ts` sets `CLOUDFLARE_API_TOKEN`, `TF_VAR_account_id`, and the `AWS_*` backend keys for
+every root, plus per-root `TF_VAR_*` values. State keys are `<root>/terraform.tfstate`.
+
+## Update (2026-10-10)
+
+- Prod (ADR 0017) reuses these credentials. The `rhumbatron-k2-consumer-dev` token serves both
+  environments.
+- Later ADRs add other Keychain items: ADR 0007 (model providers), ADR 0002 and ADR 0017
+  (Clerk), ADR 0018 (Builds API), and ADR 0019 (alert address).
+- Naming exceptions to `rhumbatron-<component>-<env>`: K2 streams (`rhumbatron_events_NN_<env>`,
+  ADR 0006) and the Analytics Engine dataset (`rhumbatron_metrics_<env>`) use underscores.

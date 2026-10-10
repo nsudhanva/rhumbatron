@@ -1,6 +1,6 @@
 # ADR 0001: Repository tooling
 
-- Status: Accepted
+- Status: Accepted. Updated 2026-10-10: CI scope (see Update).
 - Date: 2026-10-08
 - Decider: Opus 5.5 (Phase 0)
 
@@ -31,3 +31,32 @@ Terraform-only rule. These are developer tools. They do not change the runtime s
 - Contributors need `gitleaks`, `terraform`, and `tflint` on `PATH`.
 - CI (Phase 14) runs the same `bun run check` command.
 - Unused-dependency failures mean a dependency is added only by the change that first imports it.
+
+## Diagram
+
+Local gates in `lefthook.yml`. `bun install` runs `lefthook install` through the `prepare` script.
+
+```mermaid
+flowchart LR
+  commit["git commit"] --> pre["pre-commit (parallel)"]
+  pre --> biome["biome check --write"]
+  pre --> leaks["gitleaks git --staged"]
+  pre --> tffmt["terraform fmt -check"]
+  pre --> guard["check-guardrails.ts"]
+  commit --> msg["commit-msg"] --> cl["commitlint"]
+  push["git push"] --> prepush["pre-push (parallel)"]
+  prepush --> tc["bun run typecheck"]
+  prepush --> deps["check:deps (knip, sherif)"]
+  prepush --> tfc["tf:check (fmt, validate, tflint)"]
+```
+
+## Update (2026-10-10)
+
+- CI exists before Phase 14: `.github/workflows/ci.yml` runs on pull requests and on pushes to
+  `main`. It does not run `bun run check`.
+- CI runs `lint`, `typecheck`, `test:critical`, `build`, `cf:bundle`, `terraform fmt -check`, and
+  `terraform validate` with `-backend=false` (no credentials, no remote state, no deploy step).
+- These checks run only locally (lefthook and `bun run check`): guardrails, the fixture check,
+  knip, sherif, gitleaks, and tflint.
+- `bun run check` also runs `check:fixtures` (`scripts/build-fixtures.ts --check`). The table above
+  does not list it.

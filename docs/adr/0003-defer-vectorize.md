@@ -1,6 +1,7 @@
 # ADR 0003: Defer the Vectorize index until first-party Terraform support
 
-- Status: Accepted; superseded in part by the Phase 7 decision below (2026-10-09)
+- Status: Accepted; superseded in part by the Phase 7 decision below (2026-10-09). Updated
+  2026-10-10: prod has its own index, and the code caps apply per environment.
 - Date: 2026-10-08
 - Decider: Project owner
 
@@ -60,3 +61,34 @@ Free-limit math (Workers Free numbers; the account plan includes more):
 
 Remove the adapter when the provider ships a Vectorize index resource: import the index, delete
 both `terraform_data` resources with `terraform state rm`, and delete the script.
+
+## Diagram
+
+The temporary adapter (`scripts/vectorize-sync.ts`), as both roots (`envs/dev`, `envs/prod`) call it.
+
+```mermaid
+flowchart TD
+  apply["terraform apply"] --> sync["terraform_data.vectorize_index<br/>VECTORIZE_MODE=sync"]
+  sync --> read["List indexes (read-before-write)"]
+  read --> exists{"Index exists?"}
+  exists -- no --> create["Create: 384 dims, cosine"]
+  exists -- yes --> shape{"Same dims and metric?"}
+  shape -- yes --> ok["No change"]
+  shape -- no --> fail["Fail the apply (never replace)"]
+  destroy["terraform destroy"] --> teardown["terraform_data.vectorize_index_teardown<br/>VECTORIZE_MODE=destroy"]
+  teardown --> del["Delete the index (derived data only)"]
+  create --> bind["MEMORY binding: indexer (write), agents (query)"]
+  ok --> bind
+```
+
+## Update (2026-10-10)
+
+- Prod has its own index, `rhumbatron-memory-prod`, through the same adapter. The prod indexer and
+  agents Workers bind `MEMORY`. ADR 0017 says prod omits the indexer and Vectorize; that is no
+  longer true.
+- The caps in code count rows in each environment's own D1 (`project_vectors`, `usage_counters`).
+  `VECTOR_ACCOUNT_CAP` is therefore a cap per environment, not per account.
+- Dev plus prod allow up to 20,000 stored vectors (7.68M dimensions), 2,000 queries per day, and
+  4,000 embedded texts per day. The stored worst case is above the 5M Workers Free figure in the
+  table. The account is on Workers Paid (ADR 0017). Check its included Vectorize storage before
+  both environments approach their caps.

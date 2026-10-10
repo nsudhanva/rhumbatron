@@ -1,6 +1,7 @@
 # ADR 0007: OpenRouter free models through AI Gateway, Gemini as a capped backup
 
-- Status: Accepted
+- Status: Accepted. Amended by ADR 0016 (agents use Vertex as daily overflow) and ADR 0017
+  (spend caps per environment). Updated 2026-10-10.
 - Date: 2026-10-08
 - Decider: Project owner
 
@@ -74,3 +75,33 @@ AI Gateway as the model proxy.
   actually answered.
 - Switching back to Claude needs only a new tier map and a key, because the gateway and the
   router stay the same.
+
+## Diagram
+
+`complete()` in `packages/model-router/src/gateway-client.ts`, which the Root Planner uses
+(ChangeWorkflow). Agent runs choose a provider once per run instead (ADR 0016).
+
+```mermaid
+flowchart TD
+  req["Request for tier T"] --> pref{"MODEL_PROVIDER = vertex<br/>and Vertex credential set?"}
+  pref -- yes --> vtx["Vertex through gateway /compat<br/>TIER_VERTEX_MODEL[T]"]
+  pref -- no --> orr["OpenRouter through gateway<br/>models = TIER_MODELS[T]"]
+  orr --> ofb["OpenRouter tries the list in order"]
+  ofb -- answer --> done["Result, cost 0"]
+  ofb -- error --> kind{"rate_limited, transient, or timeout,<br/>and Vertex credential set?"}
+  kind -- no --> err["Throw ModelCallError"]
+  kind -- yes --> vtx
+  vtx -- answer --> priced["Result, priced from VERTEX_PRICES"]
+  vtx -- "429 from the gateway spend limit" --> stop["spend_limited: budget stop, no retry"]
+```
+
+## Update (2026-10-10)
+
+- The $9 cap is replaced by one cap per gateway: dev $40 and prod $10 per 30 days
+  (`vertex_spend_limit_usd`, ADR 0017). The agents and API Workers read it from
+  `VERTEX_SPEND_LIMIT_USD` for budget-stop and Costs page text. The code fallback is still $9.
+  The "$1 margin over $10 of credit" reasoning above no longer matches these caps.
+- Dev sets `model_provider = "vertex"`: Root Planner and agent calls go to Gemini, not to OpenRouter.
+  Prod keeps `openrouter`, with Vertex as fallback and overflow.
+- Agents now use Vertex too, as daily overflow (ADR 0016). The agent caps are 45 OpenRouter calls
+  and 400 calls on all providers per day.

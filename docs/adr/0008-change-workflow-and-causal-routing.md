@@ -1,6 +1,7 @@
 # ADR 0008: ChangeWorkflow, Work Graph persistence, and causal routing
 
-- Status: Accepted
+- Status: Accepted. Updated 2026-10-10: the wake consumer now starts AgentDO runs (ADR 0009);
+  command cap (ADR 0019).
 - Date: 2026-10-08
 - Decider: Project owner
 
@@ -37,3 +38,35 @@ ProjectRootDO must stay cold (section 13.1).
 
 About 7 Workflow steps, 1 to 4 model calls (free models), and 3 Queue operations per woken Task
 per Change. Analytics Engine has no billing. Workers AI is capped in code.
+
+## Diagram
+
+```mermaid
+sequenceDiagram
+  participant API as API Worker
+  participant WF as ChangeWorkflow (integration)
+  participant S as ResourceShardDO change:ID
+  participant Q as Queues
+  participant AG as Agents Worker
+  participant K2 as K2
+  participant R as Event router (causal-router)
+  API->>WF: CHANGE_WORKFLOW.create(id = Change ID)
+  WF->>WF: load, mark compiling, plan (opus tier, gateway)
+  WF->>WF: persist Tasks and edges (D1), Work Graph (R2 work-graphs/)
+  WF->>S: appendEvents (change.compiled, task.created)
+  WF->>S: dispatch: appendEvents (task.ready)
+  WF->>Q: agent.wake on rhumbatron-agent-wakeups, then wake_sent_at
+  Q->>AG: wake consumer: relevance check, task.assigned, agent.woken, AgentDO.start
+  S->>K2: outbox alarm publishes
+  K2->>R: routeEvent (rules first, Clef-flash for ambiguous overlaps)
+  R->>Q: agent.wake for affected agents
+  R->>Q: change.dispatch on rhumbatron-integration (newly ready Tasks)
+```
+
+## Update (2026-10-10)
+
+- The wake consumer now starts a run on the Task's `AgentDO` for a `task_ready` wake (ADR 0009).
+- The causal router caps wake, dispatch, and compose commands at 1,000 per Change per UTC day
+  (`CHANGE_DAILY_COMMAND_CAP`, ADR 0019).
+- The Root Planner call follows the environment's provider mode: Gemini on Vertex in dev, free
+  OpenRouter models first in prod (ADR 0007 update, ADR 0016). Dev planner calls are not free.
