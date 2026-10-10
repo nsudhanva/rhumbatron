@@ -223,7 +223,11 @@ flowchart TB
 
 This is the common case, because the later Change does the comparison.
 The workflow excludes the criteria that the review cited for the later Change.
-It removes them from the Change and checks what remains.
+It also excludes the criteria that depend on a cited one (`losingCriterionIds`).
+The review lists them in `dependentOnConflict`, and code checks each entry like a citation.
+A deterministic rule adds a criterion that names the losing layout, for example "card" or "grid", when the winner does not.
+Example from prod: "Each card shows the recipe title" depends on "renders as a grid of cards", so it loses with it.
+Then the workflow checks what remains.
 
 `nothingSelected` returns true when every remaining criterion only restates the quality gate.
 An example is "typecheck, test and contract all pass".
