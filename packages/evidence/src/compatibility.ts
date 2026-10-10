@@ -169,8 +169,10 @@ function migrationNumbers(cs: ComposableChangeSet): number[] {
  * 4: stacked workspaces. A ChangeSet stacked on another (it descends from that commit) is never in
  * contract, migration, or file conflict with it; a ChangeSet whose stacked ancestor is missing from
  * the composition is an unsatisfied dependency; overlap uses the files a ChangeSet itself changed.
+ * 8: the Verification Plan maps an invariant that keeps existing product, API, route, or endpoint
+ * behavior to the contract and unit checks, not to an unrunnable procedure gap.
  */
-export const COMPOSITION_RULES_VERSION = 7;
+export const COMPOSITION_RULES_VERSION = 8;
 
 /**
  * Transitive `stackedOn` ancestors of each ChangeSet. A pair where one is an ancestor of the other

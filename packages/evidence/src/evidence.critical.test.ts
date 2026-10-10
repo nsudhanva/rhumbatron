@@ -68,6 +68,48 @@ describe("buildVerificationPlan", () => {
     }
   });
 
+  it("maps existing product and endpoint invariants to contract + unit, never a procedure gap", () => {
+    // cand_0e70893092f00a213057151b was rejected on a skipped procedure for the first wording.
+    const invariants = [
+      "existing product behavior and endpoints unchanged",
+      "Keep existing product listing behavior unchanged",
+      "Do not change existing endpoints",
+      "Existing catalog API routes must keep working",
+      "Product detail responses must remain backward-compatible",
+    ];
+    for (const invariant of invariants) {
+      for (const tier of ["low", "medium", "high"] as const) {
+        const p = plan(tier, { protectedInvariants: [invariant] });
+        expect(ids(p)).toEqual(expect.arrayContaining(["unit", "contract"]));
+        expect(p.checks.filter((c) => c.kind === "protected-invariant")).toEqual([]);
+        for (const id of ["unit", "contract"]) {
+          const check = p.checks.find((c) => c.checkId === id);
+          expect(check?.reason).toContain(`existing endpoints -> contract + unit): ${invariant}`);
+        }
+      }
+    }
+  });
+
+  it("a cart and product invariant needs both the Cart check and the endpoint regression", () => {
+    const p = plan("low", {
+      protectedInvariants: ["Keep existing cart and product behavior unchanged."],
+    });
+    expect(ids(p)).toEqual(
+      expect.arrayContaining(["unit", "contract", "protected-invariant-cart"]),
+    );
+  });
+
+  it("an invariant that maps to no deterministic Evidence stays a visible required gap", () => {
+    const p = plan("low", {
+      protectedInvariants: ["Checkout emails must reach the customer within one minute."],
+    });
+    const gap = p.checks.find((c) => c.kind === "protected-invariant");
+    expect(gap?.command).toBeUndefined();
+    expect(gap?.procedure).toBeDefined();
+    expect(ids(p)).toContain(gap?.checkId);
+    expect(ids(p)).not.toContain("contract");
+  });
+
   it("authorization forces security Evidence and approval even at low risk", () => {
     const p = plan("low", { authorization: true });
     expect(ids(p)).toContain("security");

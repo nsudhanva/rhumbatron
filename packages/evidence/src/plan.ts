@@ -70,6 +70,55 @@ function invariantSlug(invariant: string, index: number): string {
   return `protected-invariant-${index + 1}${slug ? `-${slug}` : ""}`;
 }
 
+const LATENCY = /\bp9[59]\b|\blatency\b/i;
+const CART = /\bcarts?\b/i;
+/** Parts of the shop whose existing behavior the contract diff and the project tests cover. */
+const ENDPOINT_SUBJECT =
+  /\b(products?|catalog(ue)?|listings?|api|apis|routes?|endpoints?|http|responses?)\b/i;
+/** Wording that asks to keep existing behavior, not to add a new property. */
+const PRESERVE =
+  /\b(existing|unchanged|must remain|remains?|preserved?|backwards?[- ]compatible|regressions?|(do|does|must|should|will) not (change|break|alter|modify)|(don't|doesn't|never) (change|break|alter|modify)|without (changing|breaking)|(keep|keeps|continue to) work(ing)?)\b/i;
+
+/**
+ * True when the invariant protects existing product, catalog, API, route, or endpoint behavior.
+ * The Acme fixture proves it deterministically: `bun run contract` fails on any undeclared route
+ * change, and `bun test` (test/catalog.test.ts) pins product list, detail, 404, and 401 behavior.
+ */
+function protectsExistingEndpoints(invariant: string): boolean {
+  return ENDPOINT_SUBJECT.test(invariant) && PRESERVE.test(invariant);
+}
+
+function unitCheck(reason: string): VerificationCheck {
+  return {
+    checkId: "unit",
+    kind: "unit",
+    reason,
+    command: "bun test",
+    timeoutMs: 180_000,
+    required: true,
+    expected: exit0,
+    evidenceOutput: [...STD],
+  };
+}
+
+function contractCheck(reason: string): VerificationCheck {
+  return {
+    checkId: "contract",
+    kind: "contract",
+    reason,
+    procedure:
+      "Diff the composed API route table against the base (bun run contract) and match each " +
+      "added or removed route to the declared expectedContractChanges; any undeclared change fails.",
+    timeoutMs: 120_000,
+    required: true,
+    expected: {
+      kind: "procedure",
+      description: "Every observed contract change is declared",
+    },
+    evidenceOutput: ["report.json"],
+  };
+}
+
 export function buildVerificationPlan(input: BuildVerificationPlanInput): VerificationPlan {
   const { candidateId, riskTier, policy, touches } = input;
   const p95BudgetMs = input.p95BudgetMs ?? 200;
@@ -89,64 +138,63 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
     });
   }
   if (wanted.has("targeted")) {
-    checks.push({
-      checkId: "unit",
-      kind: "unit",
-      reason: "Project tests must pass on the composed source.",
-      command: "bun test",
-      timeoutMs: 180_000,
-      required: true,
-      expected: exit0,
-      evidenceOutput: [...STD],
-    });
+    checks.push(unitCheck("Project tests must pass on the composed source."));
   }
   if (wanted.has("contract")) {
-    checks.push({
-      checkId: "contract",
-      kind: "contract",
-      reason: `Risk tier ${riskTier} requires contract Evidence for declared API and data changes.`,
-      procedure:
-        "Diff the composed API route table against the base (bun run contract) and match each " +
-        "added or removed route to the declared expectedContractChanges; any undeclared change fails.",
-      timeoutMs: 120_000,
-      required: true,
-      expected: {
-        kind: "procedure",
-        description: "Every observed contract change is declared",
-      },
-      evidenceOutput: ["report.json"],
-    });
+    checks.push(
+      contractCheck(
+        `Risk tier ${riskTier} requires contract Evidence for declared API and data changes.`,
+      ),
+    );
   }
 
   touches.protectedInvariants.forEach((invariant, index) => {
     // A latency invariant is what the performance check measures; a procedure would only be a gap.
-    if (touches.performanceConstraint && /\bp9[59]\b|\blatency\b/i.test(invariant)) return;
-    const isCart = /\bcart\b/i.test(invariant);
-    // One Cart invariant check covers every invariant that names the Cart.
-    if (isCart && checks.some((c) => c.checkId === "protected-invariant-cart")) return;
-    checks.push(
-      isCart
-        ? {
-            checkId: "protected-invariant-cart",
-            kind: "protected-invariant",
-            reason: `Protected invariant: ${invariant}`,
-            command: "bun test test/cart.invariant.test.ts",
-            timeoutMs: 120_000,
-            required: true,
-            expected: exit0,
-            evidenceOutput: [...STD],
-          }
-        : {
-            checkId: invariantSlug(invariant, index),
-            kind: "protected-invariant",
-            reason: `Protected invariant: ${invariant}`,
-            procedure: `Run a check that proves this invariant still holds: ${invariant}`,
-            timeoutMs: 180_000,
-            required: true,
-            expected: { kind: "procedure", description: invariant },
-            evidenceOutput: ["report.json"],
-          },
-    );
+    if (touches.performanceConstraint && LATENCY.test(invariant)) return;
+    const isCart = CART.test(invariant);
+    const isRegression = protectsExistingEndpoints(invariant);
+    if (isCart) {
+      // One Cart invariant check covers every invariant that names the Cart.
+      const cart = checks.find((c) => c.checkId === "protected-invariant-cart");
+      if (cart) {
+        cart.reason += `; ${invariant}`;
+      } else {
+        checks.push({
+          checkId: "protected-invariant-cart",
+          kind: "protected-invariant",
+          reason: `Protected invariant: ${invariant}`,
+          command: "bun test test/cart.invariant.test.ts",
+          timeoutMs: 120_000,
+          required: true,
+          expected: exit0,
+          evidenceOutput: [...STD],
+        });
+      }
+    }
+    if (isRegression) {
+      // Existing endpoint behavior is what the route-table diff and the project tests prove.
+      const note = `Protected invariant (mapped: existing endpoints -> contract + unit): ${invariant}`;
+      for (const [id, make] of [
+        ["contract", contractCheck],
+        ["unit", unitCheck],
+      ] as const) {
+        const check = checks.find((c) => c.checkId === id);
+        if (check) check.reason += ` ${note}`;
+        else checks.push(make(note));
+      }
+    }
+    if (isCart || isRegression) return;
+    // Maps to no deterministic Evidence: a required procedure that stays a visible gap.
+    checks.push({
+      checkId: invariantSlug(invariant, index),
+      kind: "protected-invariant",
+      reason: `Protected invariant: ${invariant}`,
+      procedure: `Run a check that proves this invariant still holds: ${invariant}`,
+      timeoutMs: 180_000,
+      required: true,
+      expected: { kind: "procedure", description: invariant },
+      evidenceOutput: ["report.json"],
+    });
   });
 
   if (touches.performanceConstraint) {
