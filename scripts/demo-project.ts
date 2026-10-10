@@ -33,10 +33,10 @@ const get = async <T>(path: string) =>
 const slug = "acme-shop-demo";
 let project = (await get<Project[]>("/v1/projects")).find((p) => p.slug === slug);
 if (!project) {
-  const response = await fetch(`${api}/v1/projects`, {
+  const response = await fetch(`${api}/v1/fixtures/projects`, {
     method: "POST",
     headers: await headers(),
-    body: JSON.stringify({ name: "Acme Shop", slug, template: "acme-shop" }),
+    body: JSON.stringify({ name: "Acme Shop", slug }),
   });
   if (!response.ok) throw new Error(`create project returned ${response.status}`);
   const id = ((await response.json()) as { data: { id: string } }).data.id;

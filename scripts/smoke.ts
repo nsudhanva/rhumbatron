@@ -240,15 +240,12 @@ if (secretKey && smokeUserId) {
       const { jwt: token } = await clerk<{ jwt: string }>(`/sessions/${session.id}/tokens`, {});
       return { authorization: `Bearer ${token}`, "content-type": "application/json" };
     };
+    // The Acme Shop fixture Project (internal route; the product creates empty repositories).
     const demo = (await (
-      await fetch(`${target.api}/v1/projects`, {
+      await fetch(`${target.api}/v1/fixtures/projects`, {
         method: "POST",
         headers: await fresh(),
-        body: JSON.stringify({
-          name: "Sandbox Smoke",
-          slug: `sandbox-${Date.now()}`,
-          template: "acme-shop",
-        }),
+        body: JSON.stringify({ name: "Sandbox Smoke", slug: `sandbox-${Date.now()}` }),
       })
     ).json()) as { data?: { id: string } };
     const demoId = demo.data?.id ?? "missing";

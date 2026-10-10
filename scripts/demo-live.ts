@@ -222,13 +222,12 @@ async function runDemo(): Promise<void> {
     if (existing) {
       projectId = existing.id;
     } else {
-      console.log(`Project "${projectSlug}" not found. Creating with template "acme-shop"...`);
+      console.log(`Project "${projectSlug}" not found. Creating it with the Acme Shop fixture...`);
       const created = await apiPost<{ id: string }>(
-        "/v1/projects",
+        "/v1/fixtures/projects",
         {
           name: projectSlug === "acme-shop-live" ? "Acme Shop Live" : projectSlug,
           slug: projectSlug,
-          template: "acme-shop",
         },
         headers,
       );

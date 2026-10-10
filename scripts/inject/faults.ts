@@ -61,18 +61,19 @@ export class Context {
     readonly stamp: string,
   ) {}
 
+  /** `acme-shop` uses the internal fixture route; `empty` is a product Project (empty repository). */
   async createProject(slug: string, template: "empty" | "acme-shop"): Promise<string> {
-    const reply = await this.api.request<ProjectView>("POST", "/v1/projects", {
+    const path = template === "acme-shop" ? "/v1/fixtures/projects" : "/v1/projects";
+    const reply = await this.api.request<ProjectView>("POST", path, {
       name: `Inject ${slug}`,
       slug,
-      template,
     });
     if (reply.status !== 201 || !reply.data) throw new Error(`create project: ${said(reply)}`);
     this.created.push(reply.data.id);
     return reply.data.id;
   }
 
-  /** An empty Project: no source, no Artifacts repo, no Sandbox. */
+  /** An empty Project: an empty repository (one commit), no Sandbox. */
   scratch(): Promise<string> {
     this.scratchId ??= this.createProject(`inject-${this.stamp}`, "empty");
     return this.scratchId;
@@ -248,7 +249,6 @@ export const faults: Fault[] = [
           ctx.api.request<ProjectView>("POST", "/v1/projects", {
             name: "Inject slug race",
             slug,
-            template: "empty",
           }),
         ),
       );
@@ -285,7 +285,7 @@ export const faults: Fault[] = [
   },
   {
     id: "candidate-without-source",
-    title: "No Candidate (and no Sandbox) for a Project without source",
+    title: "No Candidate (and no Sandbox) for a Change without ChangeSets",
     sections: "29.2, 30.5",
     sandbox: false,
     async run(ctx) {
