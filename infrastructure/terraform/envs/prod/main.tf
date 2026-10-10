@@ -666,7 +666,7 @@ locals {
     # alone would capture api, www, dev, and api-dev. With routing on, Terraform adds the proxied
     # wildcard record, the wildcard route, one route without a Worker per custom-domain host (it
     # negates the wildcard there), and APPS_DOMAIN on the API (the "Live at" line).
-    routing = false
+    routing = true
 
     # Every Worker custom domain under the zone, dev and prod, including docs (docs.tf). The apex
     # does not match `*.`. The Clerk records are DNS-only, so no Worker route runs on them. Add any
