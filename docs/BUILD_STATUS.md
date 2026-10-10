@@ -1,7 +1,7 @@
 # Build Status
 
 ## Current phase
-Reliability and cost hardening on dev and prod. Phases 0 through 13 are complete except the live release (blocked).
+Phase 16, live apps. Phases 0 through 13 are complete. Prod serves each Project as a live app at `<slug>.rhumbatron.com`.
 
 ## Completed
 - P0 through P6: Monorepo skeleton, base Cloudflare infrastructure, Workers, Durable Objects, D1, K2 event plane, workflows, and agent runtime with AI Gateway.
@@ -18,14 +18,13 @@ Reliability and cost hardening on dev and prod. Phases 0 through 13 are complete
 - Milestone: A real model-driven Change ran end to end on dev (`https://dev.rhumbatron.com`). The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD.
 
 ## Active
-- None.
+- Phase 16 milestone B: Candidate previews, the production pointer on promotion, rollback, stale
+  recompose and app removal. P16-19: human file edits.
+- Model provider switch to Anthropic (Haiku and Sonnet by default). It waits for a
+  workspace-scoped Anthropic key.
 
 ## Blocked
-- Live release of Acme Shop Live (P11-07, P11-08, P13-12 live run): The release path is built and
-  applied. The dashboard Workers Builds connection from Artifacts to `rhumbatron-acme-shop-dev`
-  does not exist yet. Until it exists, ReleaseWorkflow fails with `not_connected`.
-- Google sign-in on prod: The Clerk production instance (rhumbatron.com) has email and password only
-  until a Google Cloud OAuth client exists.
+- None.
 
 ## Cost
 - Workers Paid account shared with other projects. Rhumbatron stays within free and included limits.

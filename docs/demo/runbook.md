@@ -63,7 +63,7 @@ Cost and limits:
 | 1 | Open `rhumbatron.com` | `/` | Projects table. Header shows notification bell. |
 | 2 | Open `Acme Shop` | `/` -> `/projects/$projectId` | Click Acme Shop to open the Project overview. |
 | 3 | Show Canonical Generation `S1841` | `/projects/$projectId` | Stat strip "Canonical generation" and "Canonical source". Projects start at `S0`, and each promotion adds one. `S1841` is the AGENTS.md example. The live demo shows the real number. |
-| 4 | Show production health | `/projects/$projectId` | Project status. Live deployment health is not available yet. The Workers Builds release is blocked until its Artifacts connection exists. |
+| 4 | Show production health | `/projects/$projectId` | The overview shows "Live at" with the app URL. Open the app to show it serves. |
 | 5 | Enter the shared Wishlist goal | `/projects/$projectId`, "New change" | Submit goal: `Add shared wishlists. Users can create a wishlist, share it with a link, and let collaborators add or remove products. Keep existing cart behavior unchanged. Keep API p95 below 200 ms.` |
 | 6 | Show generated acceptance criteria | `/changes/$changeId` or `/changes/$changeId/flight` | "Acceptance criteria" section, which the Root Planner fills. |
 | 7 | Show protected Cart invariant | `/changes/$changeId` or `/changes/$changeId/flight` | "Protected invariants" section. |
@@ -87,8 +87,8 @@ Cost and limits:
 | 28 | Approve | Approval dialog | Dialog shows Candidate, composed tree, transition, policy, approver, and required checks. Submit approval with reason. |
 | 29 | Show CAS promotion | `/candidates/$candidateId` | Click "Promote S(N) → S(N+1)". ProjectRootDO runs compare-and-swap. |
 | 30 | Show `canonical.advanced` Event | `/projects/$projectId/events` or `/changes/$changeId/flight` Events | Canonical generation advances by one. |
-| 31 to 32 | Show build start and deployment complete | none | Not available yet. Release via Workers Builds (P11-07/08) is blocked ([release.md](../operations/release.md)). |
-| 33 to 34 | Open production app; shared Wishlist works | none | Not available yet. Depends on the blocked release. |
+| 31 to 32 | Show build start and deployment complete | Candidate page | The release panel shows the build, then "deployed" with the version and the smoke result ([release.md](../operations/release.md)). |
+| 33 to 34 | Open production app; shared Wishlist works | `<slug>.rhumbatron.com` | Click "Open app" on the Project overview or the Candidate page. |
 | 35 | End on the convergence visualization | `/changes/$changeId/flight` | Flight Control time machine and replay: `12 possible changes -> 2 candidates -> 1 verified future -> S1842`. |
 
 ## Reliability and troubleshooting

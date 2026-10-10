@@ -170,7 +170,7 @@ Cost controls ([docs/operations/costs.md](docs/operations/costs.md)):
 - Gemini on Vertex: AI Gateway caps it at 40 USD (dev) and 10 USD (prod) per 30 days.
 - Account budget alerts at 10, 25, and 100 USD (ADR 0019, `envs/global`).
 - Pause switch: `locals.paused` in `infrastructure/terraform/envs/{dev,prod}/main.tf` ([pause-resume.md](docs/operations/pause-resume.md)).
-- Application release through Workers Builds is built and applied. It is blocked because the dashboard Artifacts connection does not exist yet ([release.md](docs/operations/release.md)).
+- Application release through Workers Builds works for Acme Shop Live on dev ([release.md](docs/operations/release.md)). Live apps on Dynamic Workers replace it on prod (ADR 0020).
 
 ## CI
 
