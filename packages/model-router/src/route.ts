@@ -1,12 +1,14 @@
 import type { DecisionReceipt, ModelTier, RouteDecision, RouteRequest } from "@rhumbatron/protocol";
 import type { DecisionModel } from "./decision.ts";
-import { TIER_MODELS } from "./models.ts";
-import { decisionFor, routeByRules } from "./rules.ts";
+import { resolveTier } from "./models.ts";
+import { applyOpusPolicy, decisionFor, routeByRules } from "./rules.ts";
 
 /**
  * ModelRouter (AGENTS.md section 23, P6-07). Deterministic rules decide whenever a specific rule
  * fires. Only the generic default goes to Clef-flash, and deterministic floors still apply to its
- * answer. Abstain or cap reached: the rules' answer stands.
+ * answer. Abstain or cap reached: the rules' answer stands. Last, policy: while Opus is off
+ * (`ALLOW_OPUS` not "true", ADR 0021) an opus decision runs on Sonnet, and the receipt records
+ * the requested tier and the downgrade.
  */
 
 const TIERS: readonly ModelTier[] = ["haiku", "sonnet", "opus"];
@@ -26,7 +28,30 @@ function floorOf(req: RouteRequest): ModelTier {
   return "haiku";
 }
 
-export async function routeStep(req: RouteRequest, clef?: DecisionModel): Promise<RoutedStep> {
+export async function routeStep(
+  req: RouteRequest,
+  clef?: DecisionModel,
+  options: { allowOpus?: boolean } = {},
+): Promise<RoutedStep> {
+  const routed = await chooseTier(req, clef);
+  const capped = applyOpusPolicy(routed.decision, options.allowOpus ?? true);
+  if (!capped.requestedTier) return routed;
+  const { requestedTier, ...decision } = capped;
+  return {
+    decision,
+    receipt: {
+      ...routed.receipt,
+      selectedTier: decision.selectedTier,
+      selectedModels: [resolveTier(decision.selectedTier, true).model],
+      requestedTier,
+      downgradeReason: "opus_disabled",
+      reasons: decision.reasons,
+      escalateOn: decision.escalateOn,
+    },
+  };
+}
+
+async function chooseTier(req: RouteRequest, clef?: DecisionModel): Promise<RoutedStep> {
   const rules = routeByRules(req);
   const signals = {
     complexity: req.complexity,
@@ -42,7 +67,7 @@ export async function routeStep(req: RouteRequest, clef?: DecisionModel): Promis
     decisionType: "MODEL_ROUTE" as const,
     decidedBy,
     selectedTier: decision.selectedTier,
-    selectedModels: [...TIER_MODELS[decision.selectedTier]],
+    selectedModels: [resolveTier(decision.selectedTier, true).model],
     reasons: decision.reasons,
     signals: probabilities ? { ...signals, probabilities } : signals,
     escalateOn: decision.escalateOn,

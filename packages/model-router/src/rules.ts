@@ -92,3 +92,19 @@ export function decisionFor(tier: ModelTier, reasons: string[], confidence: numb
     escalateOn: ESCALATE_ON[tier],
   };
 }
+
+/**
+ * Policy after routing (ADR 0021): while Opus is off, an opus decision becomes the sonnet decision
+ * (Sonnet output cap and escalation triggers) with `opus_disabled` appended, and names the tier it
+ * replaced. Other decisions pass through unchanged.
+ */
+export function applyOpusPolicy(
+  decision: RouteDecision,
+  allowOpus: boolean,
+): RouteDecision & { requestedTier?: ModelTier } {
+  if (decision.selectedTier !== "opus" || allowOpus) return decision;
+  return {
+    ...decisionFor("sonnet", [...decision.reasons, "opus_disabled"], decision.confidence),
+    requestedTier: "opus",
+  };
+}

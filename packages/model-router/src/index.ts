@@ -6,3 +6,4 @@ export * from "./models.ts";
 export * from "./provider.ts";
 export * from "./route.ts";
 export * from "./rules.ts";
+export * from "./spend-meter.ts";

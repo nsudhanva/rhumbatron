@@ -111,6 +111,7 @@
       "name": "@rhumbatron/model-router",
       "version": "0.0.0",
       "dependencies": {
+        "@anthropic-ai/sdk": "0.129.0",
         "@rhumbatron/protocol": "workspace:*",
         "zod": "4.6.5",
       },

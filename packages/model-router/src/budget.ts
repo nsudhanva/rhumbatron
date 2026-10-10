@@ -1,35 +1,32 @@
 import type { ModelTier } from "@rhumbatron/protocol";
 
 /**
- * Budgets (AGENTS.md section 24). OpenRouter free models cost $0 and allow 50 calls per day below
- * $10 of credit purchases; Gemini on Vertex AI is the paid overflow (ADR 0016). Hard limits: calls
- * per Task run, calls per day per provider, and the AI Gateway spend cap on Vertex.
+ * Budgets (AGENTS.md section 24, ADR 0019, ADR 0021). Hard limits: calls per Task run, agent calls
+ * per UTC day, the Change budget, and the monthly Anthropic USD budget of this environment, which
+ * code enforces on the D1 meter (spend-meter.ts). Past any of them the work stops; there is no
+ * fallback to another paid provider.
  */
 
 /** Hard cap on model calls in one Task run, by tier. */
 /** Coding Tasks read, write, and test, so sonnet and opus get more room than haiku. */
 export const MAX_CALLS_PER_RUN: Record<ModelTier, number> = { haiku: 16, sonnet: 32, opus: 32 };
 
-/** Daily cap on agent model calls on every provider. Vertex spend is capped by the gateway. */
+/** Daily cap on agent model calls. */
 export const AGENT_DAILY_CALL_CAP = 400;
 
-/** Daily cap on agent calls to OpenRouter, below its 50 free calls so other callers keep some. */
-export const OPENROUTER_DAILY_CALL_CAP = 45;
-
 /**
- * The AI Gateway spend limit on `google-vertex-ai` (Terraform `modules/ai`,
- * `var.vertex_spend_limit_usd`). For budget-stop text only; Terraform enforces it. `usd` is the
- * fallback when a Worker has no `VERTEX_SPEND_LIMIT_USD` binding (ADR 0017: dev $40, prod $10).
+ * Fallback for the `ANTHROPIC_MONTHLY_BUDGET_USD` binding: the smaller of the two approved
+ * environment budgets (dev $15, prod $10 per calendar month; Terraform `envs/*`), so a Worker
+ * without the binding never gets more than prod.
  */
-export const VERTEX_SPEND_LIMIT = { usd: 9, days: 30 } as const;
+export const ANTHROPIC_MONTHLY_BUDGET_FALLBACK_USD = 10;
 
-/** The configured Vertex cap from the `VERTEX_SPEND_LIMIT_USD` binding, else the $9 fallback. */
-export function vertexSpendLimit(configured?: string): { usd: number; days: number } {
+/** This environment's monthly Anthropic budget in USD from the binding, else the $10 fallback. */
+export function anthropicMonthlyBudgetUsd(configured?: string): number {
   const usd = Number(configured);
-  return {
-    usd: configured && Number.isFinite(usd) && usd >= 0 ? usd : VERTEX_SPEND_LIMIT.usd,
-    days: VERTEX_SPEND_LIMIT.days,
-  };
+  return configured && Number.isFinite(usd) && usd >= 0
+    ? usd
+    : ANTHROPIC_MONTHLY_BUDGET_FALLBACK_USD;
 }
 
 /** A Task's share of what is left of its Change budget. Never negative. */

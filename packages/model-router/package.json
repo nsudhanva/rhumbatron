@@ -11,6 +11,7 @@
     "test:critical": "vitest run --dir src"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.129.0",
     "@rhumbatron/protocol": "workspace:*",
     "zod": "4.6.5"
   },

@@ -1,17 +1,34 @@
+import Anthropic from "@anthropic-ai/sdk";
 import type { ModelTier } from "@rhumbatron/protocol";
-import { z } from "zod";
-import { TIER_MODELS, TIER_REASONING_EFFORT, TIER_VERTEX_MODEL } from "./models.ts";
-import { classifyProviderFailure, type ModelProvider, vertexCostUsd } from "./provider.ts";
+import { resolveTier, TIER_REASONING_EFFORT } from "./models.ts";
+import { anthropicCostUsd, classifyProviderFailure, type ModelProvider } from "./provider.ts";
 
 /**
- * Chat completions through Cloudflare AI Gateway (ADR 0007). Runs in Workers and Bun.
- * Order: OpenRouter free models first, then the tier's Vertex AI Gemini model as a capped paid backup.
+ * One Messages API call to Anthropic through the Cloudflare AI Gateway (ADR 0021). Runs in Workers
+ * and Bun. The request shape is provider-neutral (OpenAI-style messages and function tools) so the
+ * callers stay unchanged; this module maps it to Anthropic content blocks and back.
+ *
+ * - URL: `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic/v1/messages`.
+ * - Every request sends `anthropic-workspace-id`: the API key is organization-level.
+ * - Prompt caching: one `cache_control` breakpoint on the last system block, which also covers the
+ *   tool definitions (render order tools -> system -> messages).
+ * - Cost: exact, from the response `usage` fields, cache reads and writes included.
  * Never logs the API key, prompts, or completions; callers record only the returned metadata.
+ * The monthly budget is the caller's job (spend-meter.ts): reserve before, settle after.
  */
 
 export type ChatMessage =
   | { role: "system" | "user"; content: string }
-  | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
+  | {
+      role: "assistant";
+      content: string | null;
+      tool_calls?: ToolCall[];
+      /**
+       * Anthropic content blocks of this turn as returned (thinking blocks included). Replayed
+       * as is: a tool-use turn with thinking must keep its thinking block.
+       */
+      blocks?: unknown[];
+    }
   | { role: "tool"; tool_call_id: string; content: string };
 
 export type ToolDefinition = {
@@ -19,43 +36,11 @@ export type ToolDefinition = {
   function: { name: string; description: string; parameters: Record<string, unknown> };
 };
 
-const ToolCallSchema = z.object({
-  id: z.string(),
-  type: z.literal("function"),
-  function: z.object({ name: z.string(), arguments: z.string() }),
-});
-export type ToolCall = z.infer<typeof ToolCallSchema>;
-
-const CompletionSchema = z.object({
-  model: z.string(),
-  choices: z
-    .array(
-      z.object({
-        finish_reason: z.string().nullable(),
-        message: z.object({
-          content: z.string().nullable().optional(),
-          tool_calls: z.array(ToolCallSchema).nullable().optional(),
-        }),
-      }),
-    )
-    .min(1),
-  usage: z
-    .object({
-      prompt_tokens: z.number(),
-      completion_tokens: z.number(),
-      cost: z.number().optional(),
-      completion_tokens_details: z.object({ reasoning_tokens: z.number().optional() }).optional(),
-      prompt_tokens_details: z.object({ cached_tokens: z.number().optional() }).optional(),
-    })
-    .optional(),
-});
-
-const ErrorSchema = z.object({
-  error: z.object({
-    message: z.string().optional(),
-    code: z.union([z.number(), z.string()]).optional(),
-  }),
-});
+export type ToolCall = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
 
 export type CompletionRequest = {
   tier: ModelTier;
@@ -64,20 +49,27 @@ export type CompletionRequest = {
   maxOutputTokens: number;
   /** Up to 5 small values, sent as cf-aig-metadata for gateway log filtering. */
   metadata?: Record<string, string>;
-  /** Overrides the tier's model list (tests and pinned experiments only). */
-  models?: readonly string[];
 };
 
 export type CompletionResult = {
   provider: ModelProvider;
   model: string;
+  /** The tier that ran: sonnet for an opus request while Opus is off. */
+  tier: ModelTier;
+  /** Set when policy lowered the requested tier (ADR 0021). */
+  requestedTier?: ModelTier;
   content: string | null;
   toolCalls: ToolCall[];
+  /** The assistant turn to append to `messages` for a follow-up call. */
+  message: Extract<ChatMessage, { role: "assistant" }>;
+  /** Anthropic `stop_reason`: end_turn, tool_use, max_tokens, refusal, ... */
   finishReason: string | null;
+  /** Every prompt token: uncached input, cache reads, and cache writes. */
   inputTokens: number;
+  /** Output tokens, thinking included. */
   outputTokens: number;
-  reasoningTokens: number;
-  cachedInputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   costUsd: number;
   latencyMs: number;
   gatewayLogId: string | null;
@@ -85,7 +77,8 @@ export type CompletionResult = {
 
 /**
  * Failure classes for section 42.8: retry `rate_limited` and `transient` once at the same tier.
- * `spend_limited` is the gateway Vertex spend cap: a budget stop, never retried (ADR 0016).
+ * `spend_limited` (gateway spend limit, billing error, monthly budget) is a budget stop, never
+ * retried and never sent to another provider.
  */
 export type ModelErrorKind =
   | "spend_limited"
@@ -109,174 +102,192 @@ export class ModelCallError extends Error {
 export type GatewayConfig = {
   accountId: string;
   gatewayId: string;
-  /** OpenRouter API key. */
+  /** Anthropic API key (organization-level). */
   apiKey: string;
-  /** Base64 service account JSON with a `region` field. Enables the Vertex backup when set. */
-  vertexServiceAccount?: string;
-  /** `MODEL_PROVIDER=vertex`: call Gemini directly instead of OpenRouter first. */
-  preferVertex?: boolean;
+  /** Sent as `anthropic-workspace-id` on every request. Not a secret. */
+  workspaceId: string;
+  /** `ALLOW_OPUS` binding is "true". Otherwise the opus tier runs on Sonnet. */
+  allowOpus?: boolean;
   timeoutMs?: number;
   fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 };
 
-function classify(status: number, code: number | string | undefined): ModelErrorKind {
-  const effective = typeof code === "number" ? code : status;
-  if (effective === 429) return "rate_limited";
-  if (effective === 401 || effective === 403) return "auth";
-  if (effective === 408) return "timeout";
-  if (effective >= 500) return "transient";
-  return "invalid_request";
+export const gatewayAnthropicUrl = (accountId: string, gatewayId: string) =>
+  `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/anthropic`;
+
+const EPHEMERAL = { type: "ephemeral" } as const;
+
+/** Maps the neutral messages to Anthropic `system` blocks and `messages`. Exported for tests. */
+export function toAnthropicRequest(
+  messages: readonly ChatMessage[],
+  tools: readonly ToolDefinition[] = [],
+): {
+  system: Anthropic.TextBlockParam[];
+  messages: Anthropic.MessageParam[];
+  tools: Anthropic.Tool[];
+} {
+  const systemText = messages.flatMap((m) => (m.role === "system" ? [m.content] : []));
+  const system: Anthropic.TextBlockParam[] = systemText.map((text, i) => ({
+    type: "text",
+    text,
+    ...(i === systemText.length - 1 ? { cache_control: EPHEMERAL } : {}),
+  }));
+
+  const out: Anthropic.MessageParam[] = [];
+  const push = (role: "user" | "assistant", blocks: Anthropic.ContentBlockParam[]) => {
+    const last = out.at(-1);
+    if (last && last.role === role && Array.isArray(last.content)) {
+      last.content.push(...blocks);
+    } else {
+      out.push({ role, content: blocks });
+    }
+  };
+  for (const m of messages) {
+    if (m.role === "tool") {
+      push("user", [{ type: "tool_result", tool_use_id: m.tool_call_id, content: m.content }]);
+    } else if (m.role !== "assistant") {
+      if (m.role === "user") push("user", [{ type: "text", text: m.content }]);
+    } else if (m.blocks?.length) {
+      push("assistant", m.blocks as Anthropic.ContentBlockParam[]);
+    } else {
+      const blocks: Anthropic.ContentBlockParam[] = [];
+      if (m.content) blocks.push({ type: "text", text: m.content });
+      for (const call of m.tool_calls ?? []) {
+        blocks.push({
+          type: "tool_use",
+          id: call.id,
+          name: call.function.name,
+          input: safeJson(call.function.arguments),
+        });
+      }
+      if (blocks.length) push("assistant", blocks);
+    }
+  }
+
+  return {
+    system,
+    messages: out,
+    tools: tools.map((t) => ({
+      name: t.function.name,
+      description: t.function.description,
+      input_schema: { type: "object", ...t.function.parameters } as Anthropic.Tool.InputSchema,
+    })),
+  };
 }
 
-/** Failures that a different provider can avoid. */
-const FALLBACK_KINDS = new Set<ModelErrorKind>(["rate_limited", "transient", "timeout"]);
+function safeJson(text: string): Record<string, unknown> {
+  try {
+    const value: unknown = JSON.parse(text);
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
 
+/** One non-streaming Messages API call. Throws ModelCallError; never retries on its own. */
 export async function complete(
   config: GatewayConfig,
   req: CompletionRequest,
 ): Promise<CompletionResult> {
-  const base = `https://gateway.ai.cloudflare.com/v1/${config.accountId}/${config.gatewayId}`;
-  const vertex = () =>
-    call(
-      config,
-      "google-vertex-ai",
-      `${base}/compat/chat/completions`,
-      config.vertexServiceAccount ?? "",
-      {
-        model: `google-vertex-ai/${TIER_VERTEX_MODEL[req.tier]}`,
-        reasoning_effort: TIER_REASONING_EFFORT[req.tier],
-      },
-      req,
-    );
-  if (config.preferVertex && config.vertexServiceAccount && !req.models) return vertex();
-  try {
-    return await call(
-      config,
-      "openrouter",
-      `${base}/openrouter/v1/chat/completions`,
-      config.apiKey,
-      {
-        models: req.models ?? TIER_MODELS[req.tier],
-        reasoning: { effort: TIER_REASONING_EFFORT[req.tier], exclude: true },
-        usage: { include: true },
-      },
-      req,
-    );
-  } catch (error) {
-    const canFallBack =
-      config.vertexServiceAccount &&
-      !req.models &&
-      error instanceof ModelCallError &&
-      FALLBACK_KINDS.has(error.kind);
-    if (!canFallBack) throw error;
-    return call(
-      config,
-      "google-vertex-ai",
-      `${base}/compat/chat/completions`,
-      config.vertexServiceAccount ?? "",
-      {
-        model: `google-vertex-ai/${TIER_VERTEX_MODEL[req.tier]}`,
-        reasoning_effort: TIER_REASONING_EFFORT[req.tier],
-      },
-      req,
-    );
-  }
-}
-
-async function call(
-  config: GatewayConfig,
-  provider: ModelProvider,
-  url: string,
-  credential: string,
-  providerFields: Record<string, unknown>,
-  req: CompletionRequest,
-): Promise<CompletionResult> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${credential}`,
-    "Content-Type": "application/json",
-    "X-Title": "Rhumbatron",
-  };
-  if (req.metadata) headers["cf-aig-metadata"] = JSON.stringify(req.metadata);
+  const resolved = resolveTier(req.tier, config.allowOpus === true);
+  const client = new Anthropic({
+    apiKey: config.apiKey,
+    baseURL: gatewayAnthropicUrl(config.accountId, config.gatewayId),
+    defaultHeaders: { "anthropic-workspace-id": config.workspaceId },
+    maxRetries: 0,
+    timeout: config.timeoutMs ?? 120_000,
+    ...(config.fetch ? { fetch: config.fetch } : {}),
+  });
+  const mapped = toAnthropicRequest(req.messages, req.tools);
+  // Haiku runs bounded transforms (compaction, small edits): thinking off keeps every output
+  // token for the answer. Sonnet and Opus think adaptively; the text is never returned.
+  const thinking: Anthropic.ThinkingConfigParam =
+    resolved.tier === "haiku" ? { type: "disabled" } : { type: "adaptive", display: "omitted" };
 
   const started = Date.now();
-  let response: Response;
+  let message: Anthropic.Message;
+  let headers: Headers;
   try {
-    response = await (config.fetch ?? fetch)(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        ...providerFields,
-        messages: req.messages,
-        tools: req.tools?.length ? req.tools : undefined,
-        max_tokens: req.maxOutputTokens,
-      }),
-      signal: AbortSignal.timeout(config.timeoutMs ?? 120_000),
-    });
+    const { data, response } = await client.messages
+      .create(
+        {
+          model: resolved.model,
+          max_tokens: req.maxOutputTokens,
+          ...(mapped.system.length ? { system: mapped.system } : {}),
+          messages: mapped.messages,
+          ...(mapped.tools.length ? { tools: mapped.tools } : {}),
+          thinking,
+          ...(resolved.tier === "haiku"
+            ? {}
+            : { output_config: { effort: TIER_REASONING_EFFORT[resolved.tier] } }),
+        },
+        req.metadata ? { headers: { "cf-aig-metadata": JSON.stringify(req.metadata) } } : {},
+      )
+      .withResponse();
+    message = data;
+    headers = response.headers;
   } catch (error) {
-    const timedOut = error instanceof Error && error.name === "TimeoutError";
-    throw new ModelCallError(
-      timedOut ? "timeout" : "transient",
-      timedOut ? "Model call timed out" : "Model call failed",
-      null,
-    );
+    throw toModelError(error);
   }
   const latencyMs = Date.now() - started;
 
-  let json: unknown;
-  try {
-    json = await response.json();
-  } catch {
-    throw new ModelCallError(
-      response.ok ? "bad_response" : classify(response.status, undefined),
-      "Non-JSON model response",
-      response.status,
-    );
-  }
-  // Vertex errors through the compat endpoint arrive wrapped in a one-element array.
-  if (Array.isArray(json)) json = json[0];
-
-  // OpenRouter can return HTTP 200 with an error body when every fallback model fails.
-  const failure = ErrorSchema.safeParse(json);
-  if (!response.ok || failure.success) {
-    const err = failure.success ? failure.data.error : {};
-    // The gateway's Vertex spend cap answers 429 too; it must stop, not fall back or retry.
-    const spend =
-      provider === "google-vertex-ai" &&
-      classifyProviderFailure(provider, response.status, JSON.stringify(json)).kind ===
-        "spend_limited";
-    throw new ModelCallError(
-      spend ? "spend_limited" : classify(response.status, err.code),
-      err.message ?? `HTTP ${response.status}`,
-      response.status,
-    );
-  }
-
-  const parsed = CompletionSchema.safeParse(json);
-  if (!parsed.success)
-    throw new ModelCallError("bad_response", "Unexpected completion shape", response.status);
-  const { model, choices, usage } = parsed.data;
-  const choice = choices[0];
-  if (!choice) throw new ModelCallError("bad_response", "No completion choice", response.status);
-
-  const inputTokens = usage?.prompt_tokens ?? 0;
-  const outputTokens = usage?.completion_tokens ?? 0;
-  const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+  const usage = message.usage;
+  const cacheReadTokens = usage.cache_read_input_tokens ?? 0;
+  const cacheWriteTokens = usage.cache_creation_input_tokens ?? 0;
+  const text = message.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+  const toolCalls: ToolCall[] = message.content
+    .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
+    .map((b) => ({
+      id: b.id,
+      type: "function",
+      function: { name: b.name, arguments: JSON.stringify(b.input) },
+    }));
+  const content = message.stop_reason === "refusal" ? null : text || null;
 
   return {
-    provider,
-    model,
-    content: choice.message.content ?? null,
-    toolCalls: choice.message.tool_calls ?? [],
-    finishReason: choice.finish_reason,
-    inputTokens,
-    outputTokens,
-    reasoningTokens,
-    cachedInputTokens: usage?.prompt_tokens_details?.cached_tokens ?? 0,
-    costUsd:
-      provider === "openrouter"
-        ? (usage?.cost ?? 0)
-        : vertexCostUsd(String(providerFields.model), inputTokens, outputTokens + reasoningTokens),
+    provider: "anthropic",
+    model: message.model,
+    tier: resolved.tier,
+    ...(resolved.downgradedFrom ? { requestedTier: resolved.downgradedFrom } : {}),
+    content,
+    toolCalls,
+    message: {
+      role: "assistant",
+      content,
+      ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+      blocks: message.content,
+    },
+    finishReason: message.stop_reason,
+    inputTokens: usage.input_tokens + cacheReadTokens + cacheWriteTokens,
+    outputTokens: usage.output_tokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    costUsd: anthropicCostUsd(resolved.model, {
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      cacheWrite1hTokens: usage.cache_creation?.ephemeral_1h_input_tokens ?? 0,
+    }),
     latencyMs,
-    gatewayLogId: response.headers.get("cf-aig-log-id"),
+    gatewayLogId: headers.get("cf-aig-log-id"),
   };
+}
+
+function toModelError(error: unknown): ModelCallError {
+  if (error instanceof Anthropic.APIConnectionTimeoutError) {
+    return new ModelCallError("timeout", "Model call timed out", null);
+  }
+  if (error instanceof Anthropic.APIConnectionError) {
+    return new ModelCallError("transient", "Model call failed", null);
+  }
+  if (error instanceof Anthropic.APIError) {
+    const status = typeof error.status === "number" ? error.status : null;
+    const kind = classifyProviderFailure(status, JSON.stringify(error.error ?? error.message));
+    return new ModelCallError(kind, error.message.slice(0, 300), status);
+  }
+  return new ModelCallError("bad_response", "Unexpected model response", null);
 }
