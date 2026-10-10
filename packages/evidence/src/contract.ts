@@ -1,8 +1,8 @@
-import { contractKey } from "./compatibility.ts";
+import { contractKey, contractKeys } from "./compatibility.ts";
 
 /**
  * Contract check (AGENTS.md section 34.1): every route the Candidate adds or removes against its
- * base must be declared by one of its ChangeSets. Declared changes match by `contractKey`.
+ * base must be declared by one of its ChangeSets. Declared changes match by `contractKey`; one declaration can name several routes.
  */
 export type ContractDiff = {
   added: string[];
@@ -35,7 +35,7 @@ export function diffContract(
   const after = new Set(candidate);
   const added = [...after].filter((r) => !before.has(r)).sort();
   const removed = [...before].filter((r) => !after.has(r)).sort();
-  const declaredKeys = new Set(declared.map(contractKey));
+  const declaredKeys = new Set(declared.flatMap(contractKeys));
   const undeclared = [...added, ...removed].filter((r) => !declaredKeys.has(contractKey(r)));
   return { added, removed, undeclared };
 }

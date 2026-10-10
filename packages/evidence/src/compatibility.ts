@@ -96,6 +96,17 @@ function subject(change: string): { route?: string; tokens: string[] } {
 }
 
 /**
+ * Every contract one declaration names. "New routes: POST /a, PATCH /a/:id, DELETE /a/:id" names
+ * three routes; a declaration with no route names one contract (`contractKey`).
+ */
+export function contractKeys(change: string): string[] {
+  const routes = [...change.matchAll(new RegExp(HTTP_ROUTE_INLINE.source, "g"))]
+    .filter((m) => m[1] && m[2])
+    .map((m) => `${m[1]?.toUpperCase()} /${routeSegments(m[2] ?? "").join("/")}`);
+  return [...new Set([contractKey(change), ...routes])];
+}
+
+/**
  * The contract a declared change applies to. `POST /api/wishlists/:id - add item` and
  * `post /v1/wishlists/{wishlistId}` share `POST /wishlists`; `Add table wishlist_members (...)` and
  * `wishlist_members table: append-only` share `wishlist members`.

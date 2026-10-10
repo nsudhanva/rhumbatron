@@ -522,6 +522,20 @@ describe("contract route parsing", () => {
       ).undeclared,
     ).toEqual([]);
   });
+  it("reads every route of a declaration that lists several (prod, cand_a13e0220)", () => {
+    const declared =
+      "New routes: POST /api/todos/:id/items, PATCH /api/todos/:id/items/:itemId, DELETE /api/todos/:id/items/:itemId";
+    const added = [
+      "DELETE /api/todos/:id/items/:itemId",
+      "PATCH /api/todos/:id/items/:itemId",
+      "POST /api/todos/:id/items",
+    ];
+    expect(diffContract([], added, [declared]).undeclared).toEqual([]);
+    // A route the list does not name stays undeclared.
+    expect(diffContract([], [...added, "GET /api/todos/:id/items"], [declared]).undeclared).toEqual(
+      ["GET /api/todos/:id/items"],
+    );
+  });
 });
 
 describe("diffContract", () => {
