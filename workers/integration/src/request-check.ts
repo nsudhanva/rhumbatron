@@ -4,6 +4,7 @@ import { cancelChange, releaseRequestScope } from "./change-commands.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import {
   type Criterion,
+  losingCriterionIds,
   priorityWins,
   type RequestInput,
   type RequestReview,
@@ -153,6 +154,19 @@ export async function checkRequestPair(
   } else {
     ({ review, receipt, costUsd } = await reviewRequests(a, b, complete));
   }
+  const selection = ownerChoice ? { winner: b.changeId, loser: a.changeId } : priorityWins(a, b);
+  // The losing side keeps nothing that presupposes a conflicting criterion (cited, dependent, or
+  // naming the losing layout). Recomputed from the stored review on retry: it is deterministic.
+  const lost =
+    "winner" in selection
+      ? {
+          changeId: selection.loser,
+          criterionIds:
+            selection.loser === b.changeId
+              ? losingCriterionIds(review, "b", b.criteria, a.criteria)
+              : losingCriterionIds(review, "a", a.criteria, b.criteria),
+        }
+      : null;
   if (!previous)
     await env.DB.prepare(
       `UPDATE request_conflicts SET verdict = ?, criteria_json = ?, review_json = ? WHERE id = ?`,
@@ -172,6 +186,7 @@ export async function checkRequestPair(
           review,
           receipt,
           costUsd,
+          excluded: lost,
           inputs: {
             a: { changeId: a.changeId, goal: a.goal, criteria: a.criteria },
             b: { changeId: b.changeId, goal: b.goal, criteria: b.criteria },
@@ -180,7 +195,6 @@ export async function checkRequestPair(
         id,
       )
       .run();
-  const selection = ownerChoice ? { winner: b.changeId, loser: a.changeId } : priorityWins(a, b);
   const outcome: PairOutcome = { costUsd, excluded: [], stop: null };
   if (review.verdict === "conflicting") {
     if (!review.supported || "awaitingOwner" in selection) {
@@ -221,7 +235,7 @@ export async function checkRequestPair(
         .bind(loser.changeId)
         .first<{ id: string }>();
       if (loser.changeId === b.changeId) {
-        outcome.excluded = [...new Set(review.conflicts.map((conflict) => conflict.b))];
+        outcome.excluded = lost?.criterionIds ?? [];
         await env.DB.prepare(
           `UPDATE changes SET outcome = 'not_selected', outcome_reason = ?, outcome_winner_change_id = ?, outcome_decided_by = ?, updated_at = ? WHERE id = ? AND status = 'compiling'`,
         )

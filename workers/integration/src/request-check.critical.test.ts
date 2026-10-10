@@ -545,6 +545,95 @@ describe("request selection and owner override on real SQLite", () => {
       }
     }
   });
+  it("stops the prod card request fully, keeps an independent extra, and fails closed on a bad dependent", async () => {
+    const owner = {
+      ...request("chg_a", "alice", 0),
+      goal: "Show the recipe list as a compact table with one row per recipe",
+      criteria: [{ id: "c1", text: "Home page shows recipes as a table with one row per recipe" }],
+    };
+    const cards = [
+      "Recipe list renders as a grid of large cards, three per row",
+      "Each card shows the recipe title",
+    ];
+    const review = (dependentOnConflict?: unknown) =>
+      reply("review_requests", {
+        verdict: "conflicting",
+        conflicts: [{ a: "c1", b: "c1", why: "Table rows versus a card grid" }],
+        ...(dependentOnConflict ? { dependentOnConflict } : {}),
+      });
+    for (const [extra, reviewed, expected] of [
+      [[], review(), "not_selected"],
+      [[], review([{ side: "b", id: "c2", on: "c1" }]), "not_selected"],
+      [["Add a print button to each recipe"], review(), "partially_selected"],
+      [[], review([{ side: "b", id: "c2", on: "c9" }]), "awaiting_owner"],
+    ] as const) {
+      const h = harness();
+      h.add(owner);
+      h.scope(owner);
+      h.add(
+        { ...request("chg_b", "bob", 10), goal: "Design: show the recipe list as cards" },
+        "created",
+      );
+      vi.mocked(meteredComplete)
+        .mockReset()
+        .mockResolvedValueOnce(graph([...cards, ...extra]))
+        .mockResolvedValueOnce(reviewed)
+        .mockResolvedValueOnce(graph([...extra]));
+      const result = await h.run("chg_b");
+      if (expected === "partially_selected") {
+        expect(h.row("chg_b")).toMatchObject({ status: "running", outcome: "partially_selected" });
+        expect(h.scopes.scope("chg_b")?.criteria).toEqual([
+          { id: "c3", text: "Add a print button to each recipe" },
+        ]);
+        expect(h.dispatched).toHaveLength(1);
+      } else {
+        expect(result).toEqual({ status: expected });
+        expect(h.row("chg_b").status).toBe(expected);
+        expect(h.dispatched).toHaveLength(0);
+      }
+      if (expected !== "awaiting_owner") {
+        const stored = h.db.prepare("SELECT review_json FROM request_conflicts").get() as {
+          review_json: string;
+        };
+        expect(JSON.parse(stored.review_json).excluded).toEqual({
+          changeId: "chg_b",
+          criterionIds: ["c1", "c2"],
+        });
+      }
+    }
+  });
+  it("records the earlier loser's dependent criteria for the UI", async () => {
+    const h = harness();
+    const a = {
+      ...request("chg_a", "bob", 10),
+      criteria: [
+        { id: "c1", text: "Recipe list renders as a grid of large cards" },
+        { id: "c2", text: "Each card shows the recipe title" },
+        { id: "c3", text: "Add a print button" },
+      ],
+    };
+    const b = {
+      ...request("chg_b", "alice", 0),
+      criteria: [{ id: "c1", text: "Home page shows recipes as a table" }],
+    };
+    h.add(a);
+    h.add(b);
+    const result = await checkRequestPair(h.env, ctx, a, b, async () =>
+      reply("review_requests", {
+        verdict: "conflicting",
+        conflicts: [{ a: "c1", b: "c1", why: "Cards versus table" }],
+      }),
+    );
+    expect(result).toMatchObject({ excluded: [], stop: null });
+    expect(h.row("chg_a").status).toBe("not_selected");
+    const stored = h.db.prepare("SELECT review_json FROM request_conflicts").get() as {
+      review_json: string;
+    };
+    expect(JSON.parse(stored.review_json).excluded).toEqual({
+      changeId: "chg_a",
+      criterionIds: ["c1", "c2"],
+    });
+  });
   it("waits ten times for unscoped earlier work, then fails closed without dispatch", async () => {
     const h = harness();
     h.add(request("chg_a", "alice", 0));
