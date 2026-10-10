@@ -7,6 +7,10 @@ export const EVENT_TYPES = [
   "change.created",
   "change.compiled",
   "change.cancelled",
+  /** A Change reached `completed` after promotion: no release target, or its release finished. */
+  "change.completed",
+  /** A Change reached `failed` after promotion: its release did not deploy or never started. */
+  "change.failed",
   "task.created",
   "task.ready",
   "task.assigned",

@@ -30,6 +30,15 @@ export const FINAL_RELEASE_STATUSES: readonly ReleaseStatus[] = [
   "superseded",
 ];
 
+/**
+ * A `releasing` Change whose release has not finished this long after promotion (or after its
+ * release started, whichever is later) is stuck: its source sync or release start failed, or its
+ * ReleaseWorkflow died. ReleaseWorkflow polls for at most 15 minutes, then confirms and smokes the
+ * deployment in a few more, so 45 minutes never cuts a live release short. The event router's
+ * sweep selects with it; the integration Worker re-checks it before it changes anything.
+ */
+export const RELEASE_STUCK_AFTER_MS = 45 * 60_000;
+
 export const ReleaseView = z.object({
   id: Id,
   projectId: Id,
