@@ -18,9 +18,11 @@ Both envelopes are Zod schemas in `packages/protocol/src`.
 | Event | `eventId`, `eventType`, `eventVersion`, `tenantId`, `projectId`, `changeId`, `taskId`, `actor`, `resource`, `canonicalGeneration`, `causedBy`, `correlationId`, `timestamp`, `payload` | `eventId` | `event.ts` |
 | Command | `commandId`, `commandType`, `projectId`, `changeId`, `taskId`, `attempt`, `createdAt`, `deadline`, `payload` | `commandId` | `command.ts` |
 
-Most Change events get a deterministic ID: `evt_` plus 16 bytes of SHA-256 over the Change ID, the event type, the Task ID, and an optional key (`stableEventId` in `workers/integration/src/events.ts`).
+Most Change Events get a deterministic ID from `stableEventId` in `workers/integration/src/events.ts`.
+The ID is `evt_` plus 16 bytes of SHA-256 over the Change ID, the Event type, the Task ID, and an optional key.
 A retried Workflow step therefore writes the same Event again, and the outbox ignores it.
-ProjectRootDO uses `crypto.randomUUID()` inside its own transaction, which is safe because the transaction runs once.
+ProjectRootDO uses `crypto.randomUUID()` inside its own transaction.
+This is safe because the transaction runs once.
 
 ## Transactional outbox to K2
 
@@ -45,11 +47,11 @@ flowchart LR
 
 Rules in the code:
 
-- There are 8 streams per environment, named `rhumbatron_events_00_dev` through `rhumbatron_events_07_dev` (and `_prod`). `AGENTS.md` uses hyphens; K2 names allow only letters, digits, and underscores (ADR 0006).
+- There are 8 streams per environment, named `rhumbatron_events_00_dev` through `rhumbatron_events_07_dev` (and `_prod`). `AGENTS.md` uses hyphens. K2 names allow only letters, digits, and underscores (ADR 0006).
 - Retention is 7 days (`retention_seconds = 604800`).
 - One project always maps to one stream, so its Events stay in order on that stream.
 - The nudge is best effort. The cron sweep is the backstop. The cron visits one stream per minute, so each stream gets a sweep every 8 minutes.
-- In prod, a Terraform precondition fails the plan if the account would pass 20 K2 streams.
+- In prod, a Terraform precondition fails the plan if the account would have more than 20 K2 streams.
 
 ### Outbox row states
 
@@ -72,7 +74,8 @@ If K2 is down, the state change is still correct. Only the dashboard lags (secti
 
 The event router pulls from K2 over HTTP with `K2_CONSUMER_TOKEN`.
 It runs two subscriptions per stream on every nudge and every cron tick.
-The cron tick also runs the `audit-archiver` subscription, and, on ticks without maintenance or the release sweep, one `analytics-projector` batch.
+The cron tick also runs the `audit-archiver` subscription.
+On a tick without maintenance or the release sweep, it also runs one `analytics-projector` batch.
 
 ```mermaid
 flowchart TB
@@ -96,14 +99,14 @@ flowchart TB
 Notes:
 
 - The subrequest budget is at most 37 per invocation, below the Workers Free limit of 50.
-- Claims are released before a nack. Without that step, a redelivery would skip the events as duplicates.
+- The router releases the claim rows before a nack. Without that step, a redelivery would skip the events as duplicates.
 - The archive key is `events/<day>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz`. The R2 lifecycle expires `events/` after 30 days in dev and 365 days in prod.
 - Terraform creates four subscriptions: `causal-router`, `project-view-projector`, `audit-archiver`, and `analytics-projector`.
-- `analytics-projector` (`workers/event-router/src/analytics.ts`) maps lifecycle Events to section 41.1 metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others) and writes one data point each to the `rhumbatron_event_metrics_<env>` dataset (binding `EVENT_METRICS`). Its own dataset keeps these points apart from the source points in `METRICS`. Dedupe uses `processed_events` like the other consumers. It skips maintenance and release-sweep ticks, so a tick stays at 46 subrequests or fewer. Expected volume: about 1,000 points on a busy day (free: 100,000).
+- `analytics-projector` (`workers/event-router/src/analytics.ts`) maps lifecycle Events to section 41.1 metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others). It writes one data point for each Event to the `rhumbatron_event_metrics_<env>` dataset (binding `EVENT_METRICS`). This separate dataset keeps these points apart from the source points in `METRICS`. Dedupe uses `processed_events` like the other consumers. It skips maintenance and release-sweep ticks, so a tick stays at 46 subrequests or fewer. The expected volume is about 1,000 points on a busy day, and the free limit is 100,000.
 
 ## Causal routing
 
-The causal router decides which agents wake after each fresh Event.
+The causal router decides which Agents wake after each fresh Event.
 Deterministic rules come first. Clef-flash on Workers AI decides only an ambiguous resource overlap.
 
 ```mermaid
@@ -130,9 +133,9 @@ flowchart TB
 
 Notes:
 
-- Clef-flash abstains below a probability of 0.7. An abstention wakes the agent, which is the safe side.
+- Clef-flash abstains below a probability of 0.7. An abstention wakes the Agent, which is the safe default.
 - `artifact.promoted` and `canonical.advanced` both queue `index.build` for the indexer.
-- When a Task completes or fails, a slot frees. The router dispatches the Change again if a ready Task waits at the 8-agent limit.
+- When a Task completes or fails, it frees an Agent slot. If a ready Task waits at the 8-agent limit, the router dispatches the Change again.
 - The wake consumer checks relevance again. A stale wake ends at once and counts as a false wakeup in Analytics Engine.
 
 ## Queues
@@ -183,11 +186,12 @@ flowchart LR
 | `verification` | `rhumbatron-integration` | 5 | 3 | 30 s | `dead-letter` |
 | `release` | `rhumbatron-integration` | 5 | 3 | 30 s | `dead-letter` |
 
-`verification.start` (one per Candidate) and `release.start` (one per promoted generation with a release target) carry a stable `commandId` and the idempotency key (Candidate ID or release ID).
+Two commands start Workflows: `verification.start` (one per Candidate) and `release.start` (one per promoted generation with a release target).
+Each command carries a stable `commandId` and the idempotency key (Candidate ID or release ID).
 The consumer starts the existing Workflow with that key as the instance ID, so a redelivery finds the running instance.
-Only when the send fails does the producer start the Workflow directly (`workers/integration/src/workflow-commands.ts`).
+The producer starts the Workflow directly only if the send fails (`workers/integration/src/workflow-commands.ts`).
 
-The integration consumer also bounds its own work.
+The integration consumer also limits its own work.
 A command that has more work asks for another delivery, at most 4 deliveries in total.
 On the last delivery it acknowledges the message instead of sending it to the dead-letter Queue.
 The daily maintenance tick at 04:17 UTC queues the bounded work again.
@@ -227,7 +231,7 @@ Every retry boundary has a stable key, so a retry never creates a second logical
 |---|---|---|
 | Event publish | `eventId` | `outbox.event_id UNIQUE`; shard `appendEvents` ignores a repeat |
 | Event consume | `(consumer, event_id)` | D1 `processed_events`, `INSERT OR IGNORE` |
-| Wake command | `cmd_<task>_ready` | Wake consumer: same agent already holds the Task means duplicate |
+| Wake command | `cmd_<task>_ready` | Wake consumer treats a Task that the same Agent already holds as a duplicate |
 | Dead-letter record | `command_id` | D1 `dead_letters` |
 | Change creation | `(project_id, client_request_id)` | D1 unique constraint and `ON CONFLICT DO NOTHING` |
 | Workflow start | Instance ID = Change ID, Candidate ID, or release ID | Workflows reject a second instance with the same ID |

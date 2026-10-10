@@ -13,7 +13,7 @@ Main source files:
 
 There are four roots.
 `bootstrap` creates only the state bucket.
-`global` owns account-wide and zone-wide singletons, so dev and prod never fight over the shared zone.
+`global` owns account-wide and zone-wide singletons, so dev and prod never both manage the shared zone.
 `dev` and `prod` each own one full environment.
 All four keep state in one R2 bucket, with one key per root.
 
@@ -38,8 +38,8 @@ flowchart TB
 Rules:
 
 - The backend is the S3 backend on R2 with `use_lockfile = true`.
-- The first bootstrap apply used local state. It then moved to R2 with `terraform init -migrate-state` (section 11.2).
-- `scripts/tf.ts` loads secrets from the macOS Keychain for the one root that needs them. Values already in the environment win.
+- The first bootstrap apply used local state. The state then moved to R2 with `terraform init -migrate-state` (section 11.2).
+- `scripts/tf.ts` loads secrets from the macOS Keychain for the one root that needs them. Values already in the environment take precedence.
 - Provider: `cloudflare/cloudflare ~> 5.27`. Terraform `>= 1.16.0`.
 - The zone `rhumbatron.com` is a data source. No plan can delete the domain.
 
@@ -73,11 +73,11 @@ flowchart LR
 Two Worker modules exist (ADR 0005):
 
 - `modules/worker` uses `cloudflare_worker`, `cloudflare_worker_version`, and `cloudflare_workers_deployment` at 100 percent, plus custom domains and cron triggers.
-- `modules/durable-worker` uses `cloudflare_workers_script`, because Cloudflare rejects Durable Object migrations in version uploads. Steady state is migration tag `v1 -> v1`.
+- `modules/durable-worker` uses `cloudflare_workers_script`, because Cloudflare rejects Durable Object migrations in version uploads. The steady state is migration tag `v1 -> v1`.
 
 Prod mirrors dev resource for resource, with `-prod` names.
 Prod also has Clerk DNS records, a Clerk key check, and a K2 account-limit precondition.
-The two files are kept in step by hand.
+Operators update the two files together by hand.
 
 ### Temporary adapters
 
@@ -108,7 +108,7 @@ A teardown runs only on a real destroy, so a config change never deletes a live 
 ### Deployment loop
 
 There is no deploy CI. `.github/workflows/ci.yml` runs checks only.
-`wrangler deploy` is never used.
+The project never uses `wrangler deploy`.
 
 ```mermaid
 flowchart LR
@@ -121,7 +121,7 @@ flowchart LR
 ```
 
 A new bundle hash creates a new Worker version (`modules/worker`) or a new full script upload (`modules/durable-worker`).
-The same bundles serve dev and prod. Environment configuration travels in bindings.
+The same bundles serve dev and prod. Bindings carry the environment configuration.
 
 ## Cost guard layers
 
@@ -163,8 +163,8 @@ flowchart TB
 | Account | Alerts at 10, 25, 100 USD | `envs/global` |
 
 A guard that trips stops new expensive work and keeps all state.
-A concurrency limit is backpressure: the work waits for a free slot.
-A budget limit is a stop: the Task becomes `blocked` and the Change becomes `budget_blocked`, with the exact limit named.
+A concurrency limit applies backpressure. The work waits for a free slot.
+A budget limit stops the work. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit named.
 
 ### How the approved caps split between environments
 
@@ -198,7 +198,8 @@ The two Sandbox shares add up to the approved 10 hours per month.
 ## Pause switch
 
 Each environment has `locals.paused` in `envs/<env>/main.tf`.
-Set it to `true`, then plan and apply.
+To pause, set it to `true`.
+Then plan and apply.
 All data stays.
 
 ```mermaid
@@ -210,6 +211,6 @@ flowchart LR
 ```
 
 The pause switch does not stop Durable Object alarms.
-The alarm guard bounds those (ADR 0019).
-Set `paused` to `false` and apply again to resume.
+The alarm guard limits them (ADR 0019).
+To resume, set `paused` to `false` and apply again.
 See `docs/operations/pause-resume.md` for the full steps.

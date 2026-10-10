@@ -1,6 +1,6 @@
 # Rhumbatron architecture guide
 
-This guide explains how Rhumbatron works, with diagrams.
+This guide uses diagrams to explain how Rhumbatron works.
 Each diagram matches the code at the time of writing.
 When the code and `AGENTS.md` differ, this guide describes the code and records the difference.
 
@@ -9,14 +9,15 @@ When the code and `AGENTS.md` differ, this guide describes the code and records 
 Rhumbatron accepts a product goal for one Project.
 A Root Planner model splits the goal into a Work Graph of small Tasks.
 Agents run the ready Tasks in parallel, each in its own Artifacts fork and Sandbox directory.
-Each agent publishes a ChangeSet and a typed Intent.
+Each Agent publishes a ChangeSet and a typed Intent.
 Deterministic code compares the Intents and finds semantic conflicts that Git cannot see.
 When two designs conflict, Rhumbatron composes two Candidate futures.
 A Verification Workflow runs executable checks on each Candidate.
 Only `checked_supported` Evidence with status `pass` can satisfy a required check.
 A human approves a gated Candidate.
 ProjectRootDO then advances the Canonical Generation with compare-and-swap.
-Workers Builds builds the promoted source, and a Release Workflow observes the deployment.
+Workers Builds builds the promoted source.
+A Release Workflow observes the deployment.
 
 > Many Agents can propose many futures. Only verified evidence can advance the Canonical State.
 
@@ -76,7 +77,7 @@ flowchart LR
 
 Differences from `AGENTS.md`:
 
-- The KV namespace `rhumbatron-config-<env>` (binding `CONFIG` on the integration Worker) holds only a 5-minute snapshot of the Project policy. D1 `project_policies` is the source of truth, and no API writes it yet: a Project without a row uses the default policy. Only promotion and approval read it. Candidate verification still plans with the default policy.
+- The KV namespace `rhumbatron-config-<env>` (binding `CONFIG` on the integration Worker) holds only a 5-minute snapshot of the Project policy. D1 `project_policies` is the source of truth. No API writes it yet, so a Project without a row uses the default policy. Only promotion and approval read the policy. Candidate verification still plans with the default policy.
 - No OpenTelemetry tracing is configured. Durable Object Workers set `traces.enabled = false`.
 
 ## Deployables map
@@ -165,7 +166,7 @@ Notes:
 ## Reading order
 
 Read the pages in this order.
-Each page builds on the one before it.
+Each page uses concepts from the pages before it.
 
 ```mermaid
 flowchart LR

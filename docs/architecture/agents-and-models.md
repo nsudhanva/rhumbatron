@@ -12,10 +12,11 @@ Main source files:
 
 ## AgentDO
 
-AgentDO is one durable logical agent.
+AgentDO is one durable logical Agent.
 It extends the Agents SDK `Agent` class and implements the `AgentRuntime` interface (`start`, `resume`, `cancel`, `getState`).
 Pi types stay inside AgentDO and `workers/agents/src/models.ts` (section 25).
-There is one agent per Task today: the agent ID is `agt_<task>`.
+There is one Agent per Task today.
+The Agent ID is `agt_<task>`.
 
 AgentDO stores its own run rows in DO SQLite (`agent_runs`, `run_tool_logs`).
 D1 holds the shared view (`task_runs`, `decision_receipts`, `tasks`).
@@ -47,7 +48,7 @@ flowchart TB
 ```
 
 Claims are advisory (ADR 0015).
-A Claim held by another agent does not block the run.
+A Claim held by another Agent does not block the run.
 The shard records `claim.contended`, and conflict detection uses that signal.
 A Claim lease is 120 seconds and renews at half-life, on the one-minute run check.
 
@@ -92,18 +93,19 @@ Caps inside one run:
 | Run spend | Must stay at or below the Task budget share | `checkRunBudget` |
 
 Commands must match an allowlist: `bun install`, `bun test`, `bun run typecheck|test|bench`, `bunx tsc --noEmit`, `git status|diff|log`, and `ls`.
-Shell metacharacters are refused.
+The command tool refuses shell metacharacters.
 
 ## Model routing
 
 The code keeps the tier names `haiku`, `sonnet`, and `opus` from `AGENTS.md`.
-The models behind them differ from `AGENTS.md`: the code does not call Claude.
+The models behind them differ from `AGENTS.md`.
+The code does not call Claude.
 A tier maps to OpenRouter free models, with Gemini on Vertex AI as the paid overflow (ADR 0007, ADR 0016).
 
 ### Deterministic rules, then Clef-flash
 
 `routeByRules` (section 23.2) picks a base tier and applies floors.
-Clef-flash runs only when the rules fell through to `default` on a first attempt.
+Clef-flash runs only on a first attempt, and only when the rules end at `default`.
 A Clef choice can never go below the floor.
 
 ```mermaid
@@ -126,7 +128,8 @@ flowchart TB
   CLEF -->|"choice, raised to floor"| FLOOR["Floor: sonnet for billing<br/>or non-trivial authorization"]
 ```
 
-The floor applies to the rule path too: billing and non-trivial authorization raise the tier to at least `sonnet`.
+The floor also applies to the rule path.
+Billing and non-trivial authorization raise the tier to at least `sonnet`.
 Every route writes a Decision Receipt (`decision_receipts` in D1) and a `model.route.decided` Event.
 A receipt has no private reasoning.
 
@@ -159,14 +162,14 @@ flowchart LR
 Provider rules (`selectProvider` in `packages/model-router/src/provider.ts`):
 
 1. `MODEL_PROVIDER = vertex` sends every agent call to Gemini. The dev default is `vertex`. The prod default is `openrouter`.
-2. Otherwise OpenRouter goes first, until 45 OpenRouter calls today or a quota error today.
+2. Otherwise, OpenRouter goes first until it reaches 45 calls today or returns a quota error today.
 3. Then Gemini on Vertex, if a Vertex credential is bound.
-4. If Vertex is needed and the gateway already rejected it for its spend limit today, nothing runs.
+4. If the run needs Vertex and the gateway already rejected Vertex today for its spend limit, no call runs.
 
-Daily caps in D1 `usage_counters`: 400 agent model calls per day on all providers, 45 OpenRouter calls, and 200 Clef-flash calls.
+D1 `usage_counters` holds the daily caps: 400 agent model calls per day on all providers, 45 OpenRouter calls, and 200 Clef-flash calls.
 The Root Planner and the conflict reviewer call `complete()` directly.
 That function goes to Vertex first when `MODEL_PROVIDER = vertex`.
-Otherwise it tries OpenRouter and falls back to Vertex on a rate limit, an outage, or a timeout.
+Otherwise it tries OpenRouter first and uses Vertex after a rate limit, an outage, or a timeout.
 
 ## Escalation
 
@@ -196,15 +199,16 @@ Other rules:
 
 - A transport failure (`rate_limited`, `timeout`, `transient`) retries once at the same tier. A second one in a row fails the Task.
 - `budget_exhausted` and `spend_limited` stop at once. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit.
-- `replan` has no automatic re-plan today. It is a budget stop with limit `max_attempts_per_tier`: the Task becomes `blocked`, and the Change becomes `budget_blocked`.
-- `limitAttempts` also caps attempts at 2 per tier (section 44), counting every earlier run at that tier.
+- `replan` has no automatic re-plan today. It is a budget stop with limit `max_attempts_per_tier`. The Task becomes `blocked`, and the Change becomes `budget_blocked`.
+- `limitAttempts` also caps attempts at 2 per tier (section 44) and counts every earlier run at that tier.
 - When a Task fails or stops, its pending dependents become `blocked`.
 - An escalation records `agent.escalated`. Every retry gets a fresh Pi session (section 23.3).
 
 ## Context Packet assembly
 
 The Context Compiler is deterministic and does no I/O.
-`workers/agents/src/retrieval.ts` loads the inputs; `compilePacket` orders, trims, and renders them.
+`workers/agents/src/retrieval.ts` loads the inputs.
+`compilePacket` orders, trims, and renders them.
 The model never chooses its own scope (section 27.5).
 
 ```mermaid
@@ -232,8 +236,8 @@ flowchart TB
 Rules:
 
 - Every item carries `itemId`, `source`, `sourceVersion`, and `capturedAt`.
-- The packet hash is stored on the `task_runs` row (`context_hash`). Two runs with the same hash had the same inputs.
-- Vectorize gets at most 1,000 query embeddings per day. It only adds files that exist in the indexed tree.
+- AgentDO stores the packet hash on the `task_runs` row (`context_hash`). Two runs with the same hash have the same inputs.
+- Vectorize gets at most 1,000 query embeddings per day. It adds only files that exist in the indexed tree.
 - `rhumbatron-indexer` builds the exact indexes once per canonical tree, on `index.build`.
 - Tool inputs and outputs (never model reasoning) go to R2 at `context/<project>/<change>/<task>/tools-<run>.json`.
 
@@ -272,4 +276,4 @@ The ChangeSet records this lineage in `intent_json.changeSet`:
 | `ownFiles` | Files this Task changed on top of its stack |
 
 Because `ws-t3` descends from `ws-t1` and `ws-t2`, Candidate composition merges them as shared history, not as concurrent edits.
-Conflicting dependency ChangeSets fail the Task at once (`dependency_merge_conflict`): no retry or tier can fix them.
+Conflicting dependency ChangeSets fail the Task at once (`dependency_merge_conflict`). No retry or tier can fix them.

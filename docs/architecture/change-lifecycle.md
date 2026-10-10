@@ -10,7 +10,7 @@ The path uses these stable IDs (section 60 of `AGENTS.md`):
 | Change | `chg_<uuid>`, idempotent on `clientRequestId` | `workers/api/src/projects.ts` |
 | ChangeWorkflow instance | The Change ID | `workers/api/src/projects.ts` |
 | Task | `tsk_<change>_<key>`, for example `tsk_..._t3` | `workers/integration/src/change-workflow.ts` |
-| Agent | `agt_<task>`: one logical agent per Task | `workers/integration/src/dispatch.ts` |
+| Agent | `agt_<task>`: one logical Agent per Task | `workers/integration/src/dispatch.ts` |
 | Task run | `run_<task>_<attempt>` | `workers/agents/src/agent-do.ts` |
 | ChangeSet | `cs_<run>` | `workers/agents/src/agent-do.ts` |
 | Candidate | `cand_` plus 24 hex characters of the SHA-256 composition key | `workers/integration/src/candidate-create.ts` |
@@ -19,7 +19,7 @@ The path uses these stable IDs (section 60 of `AGENTS.md`):
 ## Part 1: from goal to ready Tasks
 
 The API stores the Change and starts one ChangeWorkflow.
-The workflow calls the Root Planner, stores the Work Graph, and dispatches the ready Tasks.
+The ChangeWorkflow calls the Root Planner, stores the Work Graph, and dispatches the ready Tasks.
 The API returns before any model call (section 58).
 
 ```mermaid
@@ -53,7 +53,7 @@ sequenceDiagram
 
 Notes:
 
-- The Root Planner routes by rules to the `opus` tier (`taskKind = plan`, `complexity = large`). The prompt asks for 2 to 8 Tasks. The schema accepts 1 to 12 (`MAX_TASKS_PER_CHANGE`).
+- The routing rules send the Root Planner to the `opus` tier (`taskKind = plan`, `complexity = large`). The prompt asks for 2 to 8 Tasks. The schema accepts 1 to 12 (`MAX_TASKS_PER_CHANGE`).
 - The Work Graph JSON goes to R2 at `work-graphs/<project>/<change>.json`.
 - Change events go to the ResourceShardDO that owns `change:<id>`. This keeps ProjectRootDO cold (section 13.1).
 - The API updates ProjectViewDO directly with the new Change. No code emits `change.created` today.
@@ -61,8 +61,9 @@ Notes:
 ## Part 2: from a wake to a published ChangeSet
 
 Each wake becomes one AgentDO run.
-The agent works in its own Artifacts fork and Sandbox directory.
-When the run ends, the agent publishes a ChangeSet, declares a typed Intent, and the shard detects conflicts.
+The Agent works in its own Artifacts fork and Sandbox directory.
+When the run ends, the Agent publishes a ChangeSet and declares a typed Intent.
+The ResourceShardDO then detects conflicts.
 
 ```mermaid
 sequenceDiagram
@@ -106,7 +107,7 @@ Notes:
 ## Part 3: from Candidates to a release
 
 The causal router turns `verification.started` into one `candidate.create` command.
-The integration Worker applies the fork rule and starts one verification workflow per Candidate.
+The integration Worker applies the fork rule and starts one CandidateVerificationWorkflow per Candidate.
 A human approves and promotes. ProjectRootDO runs the compare-and-swap.
 
 ```mermaid
@@ -144,15 +145,15 @@ sequenceDiagram
 
 Notes:
 
-- Promotion is a human action in the UI, except under policy `autoPromoteRiskTiers`. When the verified Candidate needs no human approval and the Change risk tier is listed (`low` in `policy-1`), the verification workflow calls the same `promoteCandidate` path with actor `system:auto-promotion`. `canonical.promotion.requested` then records `trigger: "auto"`. All section 36 preconditions still apply. A Candidate that needs approval never promotes automatically (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
+- Promotion is a human action in the UI, except under policy `autoPromoteRiskTiers`. Auto-promotion applies when the verified Candidate needs no human approval and `autoPromoteRiskTiers` lists the Change risk tier (`low` in `policy-1`). Then the CandidateVerificationWorkflow calls the same `promoteCandidate` path with actor `system:auto-promotion`. `canonical.promotion.requested` then records `trigger: "auto"`. All section 36 preconditions still apply. A Candidate that needs approval never promotes automatically (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
 - The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a release target, else `completed`. The release then ends the Change as `completed` (deployed or superseded) or `failed`.
-- Every end after promotion records `change.completed` or `change.failed`, and `build.started` records `releasing`, so ProjectViewDO leaves `promoting` (section 13.3).
-- A Change still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change. The integration Worker marks a queued or building release `failed`, records a release that never started as a `failed` release row, and fails the Change. Without a release target it completes the Change. The reason is on the release row and in the event. The generation stays promoted; the next promotion releases as usual.
+- Every end after promotion records `change.completed` or `change.failed`. `build.started` records `releasing`. These Events move ProjectViewDO out of `promoting` (section 13.3).
+- A Change still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change. The integration Worker then marks a queued or building release `failed`. It records a release that never started as a `failed` release row. Then it fails the Change. If the Project has no release target, the Worker completes the Change instead. The reason is on the release row and in the Event. The generation stays promoted. The next promotion releases as usual.
 - After `canonical.advanced`, the causal router marks every other in-flight Candidate on an older base `stale`.
 
 ## Status state machines
 
-The enums live in `packages/protocol/src`.
+The enums are in `packages/protocol/src`.
 The diagrams show only the transitions that the code writes.
 
 ### Change status
@@ -193,11 +194,11 @@ A verified Candidate can also promote from `running` or `budget_blocked`.
 - `POST /v1/changes/:changeId/cancel` works until promotion starts.
   It cancels the open Tasks and rejects the open Candidates (reason `change cancelled`).
   A cancel during `compiling` stores the planned Tasks as `cancelled` and records no compile.
-  A running CandidateVerificationWorkflow checks the Change at each step boundary and stops before more Sandbox or Browser Run time.
+  A running CandidateVerificationWorkflow checks the Change at each step boundary and stops before it uses more Sandbox or Browser Run time.
   Dispatch runs only for a `running` Change.
-  A running agent run stops at its next one-minute run check.
+  An active Agent run stops at its next one-minute run check.
 - `POST /v1/changes/:changeId/budget` raises `budget_usd`. The budget can never go down.
-  A `budget_blocked` Change returns to `running`, the only status a budget stop leaves.
+  A `budget_blocked` Change returns to `running`, because `running` is the only status that a budget stop interrupts.
   Its budget-stopped Tasks become ready again, and their blocked dependents become pending.
   Then the normal dispatch runs (section 44 rule 5).
 
@@ -244,7 +245,7 @@ stateDiagram-v2
 ```
 
 `composed` is in the enum and in RPC results, but D1 rows go from `composing` directly to `verifying`.
-A stale Candidate is never retried blind (section 42.9). A new Candidate on the new base replaces it.
+Rhumbatron never retries a stale Candidate blind (section 42.9). A new Candidate on the new base replaces it.
 
 ### Release status
 

@@ -38,17 +38,17 @@ Rules:
 
 - Repo names derive from D1 row IDs only: the Project ID, `ws-<run>` for run `run_<run>`, and `cand-<id>` for Candidate `cand_<id>`.
 - Cleanup never lists the namespace. It deletes only names it derives from one Project's rows, so it cannot reach another Project.
-- Every git access uses a short-lived repo token (600 s) that is revoked after use.
+- Every git access uses a short-lived repo token (600 s). The code revokes the token after use.
 - Provisioning stores a file index at `source/<project>/<tree>/index.json` in R2. Agents read that index instead of walking the repo.
-- The same step fills the code store (P16-16): `source/<project>/<tree>/code.json` maps paths to Git blob IDs, and each blob is copied once to `source/<project>/blobs/<blob>`. A promotion copies only the blobs that its previous tree did not have. Files over 1 MB are listed but not copied.
-- Patches for the code view: an agent publish stores `git diff` of its own work at `source/<project>/patches/changesets/<cs>.patch` and sets `patchRef`; a Candidate composition stores the Candidate-vs-base diff at `source/<project>/patches/candidates/<cand>.patch`. Each patch stops at 512 KB, at a line boundary, and records `truncated` and the full size in R2 metadata.
-- Everything above lives under `source/<project>/`, so no lifecycle rule expires it and archive cleanup removes it.
-- A new Project starts at Canonical Generation 0. `AGENTS.md` shows `S1841` for the demo; the code starts at `S0`.
+- The same step fills the code store (P16-16). `source/<project>/<tree>/code.json` maps paths to Git blob IDs. The step copies each blob once to `source/<project>/blobs/<blob>`. A promotion copies only the blobs that its previous tree did not have. The code store lists files over 1 MB but does not copy them.
+- The code view uses stored patches. An Agent publish stores the `git diff` of its own work at `source/<project>/patches/changesets/<cs>.patch` and sets `patchRef`. A Candidate composition stores the Candidate-vs-base diff at `source/<project>/patches/candidates/<cand>.patch`. Each patch stops at 512 KB, at a line boundary. R2 metadata records `truncated` and the full size.
+- All of these objects are under `source/<project>/`. No lifecycle rule expires them, and archive cleanup removes them.
+- A new Project starts at Canonical Generation 0. `AGENTS.md` shows `S1841` for the demo. The code starts at `S0`.
 
 ## Composition and promotion in Git terms
 
 A Candidate fork starts at the canonical base commit.
-The workflow merges the ChangeSets in Work Graph order.
+The CandidateVerificationWorkflow merges the ChangeSets in Work Graph order.
 Promotion moves canonical `main` forward to the composed commit, fast-forward only.
 
 ```mermaid
@@ -79,7 +79,7 @@ Notes:
 
 ## Sandbox lifecycle
 
-The `Sandbox` class lives in `rhumbatron-sandbox` (ADR 0012).
+The `Sandbox` class is in `rhumbatron-sandbox` (ADR 0012).
 There is one Sandbox per Project, with the ID `proj-<uuid>`.
 Agent runs and Candidate checks use separate directories in it.
 The container application allows one instance per environment.
@@ -119,7 +119,8 @@ sequenceDiagram
 
 A Sandbox loss does not lose committed work.
 The workspace restores from the same fork, base, and stacked merges, and checks the recorded start commit (section 42.5).
-Uncommitted edits are lost, so a publish after a loss fails the run instead of publishing partial work.
+Uncommitted edits are lost.
+A publish after a loss therefore fails the run instead of publishing partial work.
 The Sandbox never receives Terraform, Cloudflare API, or model credentials.
 
 ## Verification workflow
@@ -182,10 +183,11 @@ flowchart LR
 | `browser` | browser | Section 35 Wishlist flow, or a cart flow, in one Browser Run session | 90 s |
 
 The browser check opens the composed app through request interception.
-The preview host has no public URL; every other request is blocked.
+The preview host has no public URL.
+The check blocks every other request.
 One session lasts at most 55 s. A Candidate gets at most 2 browser runs.
 
-A Critical risk tier is not listed in the policy, so it uses the strictest listed tier.
+The policy does not list the `critical` risk tier, so a `critical` Change uses the strictest listed tier.
 A gap in policy never lowers verification.
 
 ## Coverage states and the gate
