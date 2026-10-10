@@ -4,7 +4,7 @@ import { type ReactNode, Suspense, useId } from "react";
 import { type PanelId, useFlightStore } from "./flight-store";
 
 /**
- * Fixed-height frame around one Debug view panel (DESIGN.md 6.2.3, 6.3): an h6 label row
+ * Fixed-height frame around one Flight Control panel (DESIGN.md 6.2.3, 6.3): an h6 label row
  * (label, count or meta, expand button) above a 2px divider, then the panel body. The height is
  * fixed so a lazy panel or a loading panel never shifts the layout; wide content scrolls inside.
  * Focused, the frame fills the page below the Flight chrome and the other panels are hidden.
@@ -43,7 +43,7 @@ export function PanelFrame({
         className,
       )}
     >
-      <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b border-kumo-rule py-1 pr-1.5 pl-3">
+      <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b-2 border-kumo-divider py-1 pr-1.5 pl-3">
         <div className="flex min-w-0 items-baseline gap-3">
           <h2 id={headingId} className="type-h6 truncate">
             {label}

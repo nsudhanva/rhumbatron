@@ -6,27 +6,28 @@ import { Banner } from "../components/candidate/banner";
 import {
   type ComparedCandidate,
   ComparisonMatrix,
-  resultSentence,
 } from "../components/candidate/comparison-matrix";
 import { candidateLabels, checkRows, isActive } from "../components/candidate/model";
 import { CandidateSkeleton } from "../components/candidate/skeleton";
 import { usePageMeta } from "../components/shell/page-meta";
 import { EmptyState } from "../components/ui/empty-state";
+import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
-import { Term } from "../components/ui/term";
+import { StatusPill } from "../components/ui/status-pill";
 import { getChange, listCandidateEvidence, listCandidates } from "../lib/api";
 import { formatNumber, generation, timeAgo, truncate } from "../lib/format";
 
 /**
- * Compare versions of one Change (AGENTS.md section 38.4; spec B.2, B.3). Every version runs the
- * same checks, so a reader sees in under a minute which version the check results select and why.
+ * Candidate comparison for one Change (AGENTS.md section 38.4, DESIGN.md 9.12). Shows every
+ * Candidate against the same criteria so a reader sees in under a minute which future the
+ * Evidence selects and why.
  */
 export const Route = createFileRoute("/compare/$changeId")({ component: ComparePage });
 
 const POLL_MS = 10_000;
 
 function ComparePage() {
-  usePageMeta({ trail: [{ label: "Compare versions" }] });
+  usePageMeta({ trail: [{ label: "Compare" }] });
   return (
     <Page>
       <Show when="signed-in">
@@ -34,8 +35,8 @@ function ComparePage() {
       </Show>
       <Show when="signed-out">
         <EmptyState
-          what="Sign in to compare versions."
-          how="Versions belong to a project you are a member of."
+          what="Sign in to compare Candidates."
+          how="Candidates belong to a Project you are a member of."
         />
       </Show>
     </Page>
@@ -63,31 +64,20 @@ function CompareView() {
     })),
   });
 
-  const title = (intro?: string) => (
+  const title = (
     <PageTitle
       size="detail"
-      title="Compare versions"
+      kicker="Compare Candidates"
+      title={change.data ? truncate(change.data.goal, 90) : "Candidate futures"}
       meta={
         <>
+          <Mono>{changeId}</Mono>
           {change.data && (
-            <Link
-              to="/changes/$changeId"
-              params={{ changeId }}
-              title={change.data.goal}
-              className="text-kumo-link hover:underline"
-            >
-              {truncate(change.data.goal, 90)}
-            </Link>
+            <span>
+              base <Mono>{generation(change.data.baseGeneration)}</Mono>
+            </span>
           )}
-          {change.data && (
-            <>
-              <span aria-hidden>·</span>
-              <span>
-                <Term k="basedOn" plain /> {generation(change.data.baseGeneration)}
-              </span>
-            </>
-          )}
-          {intro && <p className="basis-full pt-1 text-[14px] text-kumo-default">{intro}</p>}
+          {candidates.data && <span>{formatNumber(list.length)} Candidates</span>}
         </>
       }
       actions={
@@ -96,7 +86,7 @@ function CompareView() {
           params={{ changeId }}
           className={buttonVariants({ variant: "secondary" })}
         >
-          Back to the change
+          Open the Change
         </Link>
       }
     />
@@ -106,10 +96,10 @@ function CompareView() {
     if (candidates.isError) {
       return (
         <>
-          {title()}
+          {title}
           <Banner
             family="danger"
-            title="Versions did not load"
+            title="Candidates did not load"
             action={
               <Button
                 size="sm"
@@ -126,73 +116,79 @@ function CompareView() {
         </>
       );
     }
-    return <CandidateSkeleton label="Loading versions" rows={8} />;
+    return <CandidateSkeleton label="Loading Candidates" rows={8} />;
   }
 
   if (list.length < 2) {
     return (
       <>
-        {title()}
-        <EmptyState
-          what={
-            list.length === 0
-              ? "This change has no versions yet, so there is nothing to compare."
-              : "This change has one version, so there is nothing to compare yet."
-          }
-          how="A second version appears when two agents choose different approaches and Rhumbatron builds both."
-          action={
-            <Link
-              to="/changes/$changeId"
-              params={{ changeId }}
-              className={buttonVariants({ variant: "secondary" })}
-            >
-              Back to the change
-            </Link>
-          }
-        />
+        {title}
+        <Section label="Comparison">
+          <EmptyState
+            what={
+              list.length === 0
+                ? "This Change has no Candidates yet, so there is nothing to compare."
+                : "This Change has one Candidate, so there is nothing to compare yet."
+            }
+            how="A second Candidate appears when a design conflict forks the Change or another Candidate is composed."
+            action={
+              <Link
+                to="/changes/$changeId"
+                params={{ changeId }}
+                className={buttonVariants({ variant: "secondary" })}
+              >
+                Back to the Change
+              </Link>
+            }
+          />
+        </Section>
       </>
     );
   }
 
   const labels = candidateLabels(list);
-  const items: ComparedCandidate[] = list.map((candidate, index) => ({
-    candidate,
-    label: labels.get(candidate.id) ?? candidate.id,
-    rows: checkRows(candidate, evidence[index]?.data ?? []),
-  }));
-  const loading = evidence.some((q) => q.isPending);
+  const items: ComparedCandidate[] = list.map((candidate, index) => {
+    const records = evidence[index]?.data ?? [];
+    return {
+      candidate,
+      label: labels.get(candidate.id) ?? candidate.id,
+      rows: checkRows(candidate, records),
+      evidenceCount: records.length,
+    };
+  });
+  const evidenceLoading = evidence.some((q) => q.isPending);
   const failed = evidence.some((q) => q.isError) || candidates.isError;
-  const checking = list.filter(isActive).length;
+  const verifying = list.filter(isActive).length;
 
   return (
     <>
-      {title(loading ? undefined : resultSentence(items))}
-      {checking > 0 && (
+      {title}
+      {verifying > 0 && (
         <Banner
           family="progress"
-          title={`${formatNumber(checking)} of ${formatNumber(list.length)} versions still being checked`}
+          title={`${formatNumber(verifying)} of ${formatNumber(list.length)} Candidates still verifying`}
         >
-          Results fill in as checks finish. A check without a result never shows as passed.
+          Cells fill in as Evidence lands. A check without Evidence is never shown as a pass.
         </Banner>
       )}
       <Section
-        label={<Term k="checks" />}
+        label="Evidence matrix"
         meta={
           failed ? (
-            <span>
-              Couldn't refresh · updated {timeAgo(new Date(candidates.dataUpdatedAt).toISOString())}
-            </span>
-          ) : loading ? (
-            <span>Loading check results…</span>
+            <>
+              <StatusPill status="stale" />
+              <span>updated {timeAgo(new Date(candidates.dataUpdatedAt).toISOString())}</span>
+            </>
+          ) : evidenceLoading ? (
+            <span>Loading Evidence…</span>
           ) : (
-            <span>{formatNumber(list.length)} versions</span>
+            <Mono subtle>
+              {formatNumber(items.reduce((n, i) => n + i.evidenceCount, 0))} Evidence records
+            </Mono>
           )
         }
       >
         <ComparisonMatrix items={items} />
-        <p className="text-[12px] text-kumo-subtle">
-          Decided by check results, never by model confidence.
-        </p>
       </Section>
     </>
   );

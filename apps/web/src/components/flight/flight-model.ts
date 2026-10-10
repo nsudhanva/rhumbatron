@@ -27,7 +27,7 @@ import {
 import type { EntityKind, EntityRef } from "./flight-store";
 
 /**
- * Debug view read model: ONE fold that every panel reads at one instant.
+ * Flight Control read model: ONE fold that every panel reads at one instant.
  *
  *   deriveFlight(input)        -> FlightModel   (all recorded facts of the Change, sorted by time)
  *   foldFlight(model, at|null) -> FlightState   (what was true at `at`; null = now, live)
@@ -374,7 +374,7 @@ export type ResourceActivity = {
   protectedResource: boolean;
 };
 
-export type DecisionKind = "route" | "fork" | "gate" | "approval" | "promotion" | "release";
+export type DecisionKind = "route" | "fork" | "gate" | "approval" | "promotion";
 
 export type Cause = {
   ref: EntityRef;
@@ -1252,48 +1252,6 @@ function deriveDecisions(
           },
         });
       }
-    }
-    // Release of the promoted generation (ADR 0018): recorded once it finished. The verdict is the
-    // smoke check's Evidence and the deployment the Builds API confirmed, never a model.
-    const release = d.release;
-    const releaseAt = time(release?.finishedAt);
-    if (
-      release &&
-      releaseAt !== null &&
-      releaseAt <= instant &&
-      ["deployed", "failed", "smoke_failed", "superseded"].includes(release.status)
-    ) {
-      const gen = `S${release.generation}`;
-      out.push({
-        id: `release:${cand.id}`,
-        kind: "release",
-        at: releaseAt,
-        title:
-          release.status === "deployed"
-            ? `${gen} released`
-            : release.status === "superseded"
-              ? `${gen} release superseded`
-              : `${gen} release failed`,
-        verdict:
-          release.status === "deployed"
-            ? `Deployed${release.versionId ? ` as version ${release.versionId.slice(0, 8)}` : ""}; smoke check passed.`
-            : (release.failureReason ?? `Release ${release.status}.`),
-        by: "policy",
-        subject: { kind: "candidate", id: cand.id },
-        causes: [
-          {
-            ref: { kind: "decision", id: `promotion:${cand.id}` },
-            label: `Promotion to ${gen}`,
-            at: null,
-          },
-          {
-            ref: { kind: "candidate", id: cand.id },
-            label: `Workers Build of commit ${release.commit.slice(0, 12)}`,
-            at: time(release.startedAt),
-          },
-        ],
-        receipt: { ...release },
-      });
     }
   }
 

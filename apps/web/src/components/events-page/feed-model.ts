@@ -46,15 +46,7 @@ export function familyOf(eventType: string): FamilyKey {
  */
 export type TypeTone = "danger" | "success" | "brand" | "default";
 
-const FAILURE_STATUS = new Set([
-  "fail",
-  "failed",
-  "error",
-  "rejected",
-  "blocked",
-  "timed_out",
-  "smoke_failed",
-]);
+const FAILURE_STATUS = new Set(["fail", "failed", "error", "rejected", "blocked", "timed_out"]);
 const BRAND_TYPES = new Set(["canonical.advanced", "artifact.promoted"]);
 const SUCCESS_TYPES = new Set([
   "approval.granted",

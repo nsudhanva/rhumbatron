@@ -21,18 +21,18 @@ import {
 } from "./cost-format";
 
 /**
- * Model usage for one Change (AGENTS.md section 56), one row per model tier shown by product
- * name: attempts, calls, the busiest attempt against the per-attempt call cap, tokens and cost.
+ * Model usage by tier for one Change (AGENTS.md section 56): attempts, calls, the busiest
+ * attempt against the per-run call cap, tokens and recorded cost.
  */
 export function TierTable({ byTier }: { byTier: SelectedCost["byTier"] }) {
   return (
-    <DataTable label="Model usage" minWidth={560}>
+    <DataTable label="Model usage by tier" minWidth={560}>
       <thead>
         <tr>
-          <Th>Model</Th>
+          <Th>Tier</Th>
           <Th numeric>Attempts</Th>
           <Th numeric>Calls</Th>
-          <Th numeric title="Most calls in one attempt / per-attempt cap">
+          <Th numeric title="Most calls in one attempt / per-run cap">
             Peak / cap
           </Th>
           <Th numeric>Input</Th>
@@ -46,11 +46,11 @@ export function TierTable({ byTier }: { byTier: SelectedCost["byTier"] }) {
           return (
             <TRow key={t.tier}>
               <Td>
-                <TitleCell title={TIER_LABEL[t.tier]} />
+                <TitleCell title={TIER_LABEL[t.tier]} meta={t.tier} />
               </Td>
               <Td numeric>{formatNumber(t.runs)}</Td>
               <Td numeric>{formatNumber(t.modelCalls)}</Td>
-              <Td numeric className={atCap ? "font-semibold text-kumo-danger" : undefined}>
+              <Td numeric className={atCap ? "font-semibold text-accent-700" : undefined}>
                 {formatFraction(
                   t.runs > 0 ? formatNumber(t.maxCallsInRun) : EMPTY,
                   formatNumber(t.callCapPerRun),
@@ -68,10 +68,15 @@ export function TierTable({ byTier }: { byTier: SelectedCost["byTier"] }) {
 }
 TierTable.displayName = "TierTable";
 
-/** Model usage by Task, most cost first; Tasks that never ran sit at the end with dashes. */
+/** Model usage by Task, most tokens first; Tasks that never ran sit at the end with dashes. */
 export function TaskTable({ byTask }: { byTask: SelectedCost["byTask"] }) {
   if (byTask.length === 0) {
-    return <EmptyState what="No tasks yet." how="Tasks appear once the change is planned." />;
+    return (
+      <EmptyState
+        what="No Tasks yet."
+        how="Tasks appear once the Change compiles into a Work Graph."
+      />
+    );
   }
   const rows = [...byTask].sort(
     (a, b) =>
@@ -80,12 +85,12 @@ export function TaskTable({ byTask }: { byTask: SelectedCost["byTask"] }) {
       a.key.localeCompare(b.key),
   );
   return (
-    <DataTable label="Model usage by task" minWidth={820}>
+    <DataTable label="Model usage by Task" minWidth={820}>
       <thead>
         <tr>
           <Th>Task</Th>
           <Th>Status</Th>
-          <Th>Models</Th>
+          <Th>Tiers</Th>
           <Th numeric>Attempts</Th>
           <Th numeric>Calls</Th>
           <Th numeric>Input</Th>
@@ -135,12 +140,12 @@ export function ChangeTable({
   selectedId: string | undefined;
 }) {
   return (
-    <DataTable label="Spend by change" minWidth={760}>
+    <DataTable label="Changes by recorded spend" minWidth={760}>
       <thead>
         <tr>
           <Th>Change</Th>
           <Th>Status</Th>
-          <Th numeric>Spent of budget</Th>
+          <Th numeric>Spend / budget</Th>
           <Th numeric>Calls</Th>
           <Th numeric>Tokens in / out</Th>
           <Th numeric>Age</Th>
@@ -162,6 +167,7 @@ export function ChangeTable({
                     {truncate(c.goal, 90)}
                   </Link>
                 }
+                meta={c.id}
               />
             </Td>
             <Td>
@@ -169,9 +175,9 @@ export function ChangeTable({
             </Td>
             <Td
               numeric
-              className={c.costUsd > c.budgetUsd ? "font-semibold text-kumo-danger" : undefined}
+              className={c.costUsd > c.budgetUsd ? "font-semibold text-accent-700" : undefined}
             >
-              {`${formatCost(c.costUsd)} of ${formatUsd(c.budgetUsd)}`}
+              {formatFraction(formatCost(c.costUsd), formatUsd(c.budgetUsd))}
             </Td>
             <Td numeric>{formatNumber(c.modelCalls)}</Td>
             <Td numeric>

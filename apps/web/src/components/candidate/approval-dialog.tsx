@@ -1,26 +1,26 @@
 import { useUser } from "@clerk/tanstack-react-start";
 import { Button, Dialog, InputArea } from "@cloudflare/kumo";
-import {
-  CheckCircle,
-  Circle,
-  RocketLaunch,
-  WarningCircle,
-  X,
-  XCircle,
-} from "@phosphor-icons/react";
+import { Check, Square, X } from "@phosphor-icons/react";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { type CandidateDetail, decideApproval } from "../../lib/api";
-import { generation, generationCode } from "../../lib/format";
+import { formatMs, generation } from "../../lib/format";
 import { KeyValue } from "../ui/key-value";
-import { type CheckRow, criterion, p95Budget, requiredTally, verdictWord } from "./model";
-import { TechnicalDetails } from "./technical-details";
+import {
+  type CheckRow,
+  criterion,
+  formatP95,
+  p95Budget,
+  p95Of,
+  REASON_WORDS,
+  requiredTally,
+} from "./model";
 
 /**
- * "Approve and ship" dialog (spec 6.2 P8, 7.4 step 4). It repeats what the person approves, the
- * rule that asks for a person, and an optional reason. It only records the decision; the caller
- * ships after `onDecided("approve")`. The API takes the approver from the session, so the browser
- * cannot name one. Outside clicks do not close the dialog while a decision is pending.
+ * Human gate (AGENTS.md sections 36 rule 4, 40.2; DESIGN.md 8.4, 9.14, 10 "Confirm decisions in
+ * place"). The dialog shows the Evidence the decision rests on, the facts it binds to, and the
+ * required-check checklist. The API takes the approver from the session; the browser cannot name
+ * one. Outside clicks do not close the dialog while a decision is pending.
  */
 export function ApprovalDialog({
   open,
@@ -42,8 +42,6 @@ export function ApprovalDialog({
   const { user } = useUser();
   const approver = user?.fullName || user?.primaryEmailAddress?.emailAddress || "you";
   const [reason, setReason] = useState("");
-  // A rejection needs a reason so the people who built the version learn why.
-  const [askReason, setAskReason] = useState(false);
   const decide = useMutation({
     mutationFn: (decision: "approve" | "reject") =>
       decideApproval({
@@ -56,7 +54,6 @@ export function ApprovalDialog({
       }),
     onSuccess: (_result, decision) => {
       setReason("");
-      setAskReason(false);
       onOpenChange(false);
       onDecided(decision);
     },
@@ -65,19 +62,15 @@ export function ApprovalDialog({
   const required = rows.filter((r) => r.required);
   const tally = requiredTally(rows);
   const budget = p95Budget(candidate);
-  const summary = [
-    label,
-    `${tally.met} of ${tally.total} checks passed`,
-    `Based on ${generation(candidate.baseGeneration)}`,
-  ].join(" · ");
-
-  const reject = () => {
-    if (!reason.trim()) {
-      setAskReason(true);
-      return;
-    }
-    decide.mutate("reject");
-  };
+  const p95 = p95Of(candidate, rows);
+  const evidenceLine = [
+    `${tally.met} of ${tally.total} required checks pass with executable Evidence`,
+    p95 !== null && budget !== null
+      ? `p95 ${formatP95(p95)} against a ${formatMs(budget)} budget`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <Dialog.Root
@@ -87,71 +80,97 @@ export function ApprovalDialog({
       }}
       disablePointerDismissal
     >
-      <Dialog size="lg" className="grid max-h-[calc(100dvh-32px)] gap-4 overflow-y-auto p-5">
+      <Dialog size="lg" className="grid max-h-[calc(100dvh-32px)] gap-4 overflow-y-auto p-4">
         <div className="flex items-start justify-between gap-3">
-          <Dialog.Title className="text-[20px] leading-tight font-semibold">
-            Approve and ship {label}?
-          </Dialog.Title>
+          <p className="type-kicker text-kumo-accent">
+            Human gate · {candidate.plan?.policyVersion ?? "policy"}
+          </p>
           <Dialog.Close
             aria-label="Close"
             title="Close"
             disabled={decide.isPending}
-            className="-mt-1 -mr-1 grid size-7 place-items-center rounded-md text-kumo-subtle hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-accent-500"
+            className="-mt-1 -mr-1 grid size-7 place-items-center text-kumo-subtle hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-accent-500"
           >
             <X size={16} aria-hidden />
           </Dialog.Close>
         </div>
-
         <div className="grid gap-2">
-          <p className="text-[14px]">
-            <span className="text-kumo-subtle">You are approving: </span>
-            <span className="font-semibold">{summary}</span>
-          </p>
+          <Dialog.Title className="type-h4">Approve {label} for promotion</Dialog.Title>
           <Dialog.Description className="text-[14px] text-pretty">
-            {rule} Shipping makes {label} the new release,{" "}
-            {generation(candidate.baseGeneration + 1)}, and deploys it.
+            {rule} Your decision binds to the composed tree below. If the tree changes, the decision
+            no longer applies.
           </Dialog.Description>
+          <p className="text-[13px] text-kumo-subtle">{evidenceLine}.</p>
         </div>
 
-        <details className="rounded-lg border border-kumo-rule bg-kumo-elevated">
-          <summary className="cursor-pointer px-3 py-2 text-[13px] font-semibold">
-            See the {tally.total} required checks
-          </summary>
-          <ul className="grid border-t border-kumo-rule px-3 py-1">
+        <div className="border-t-2 border-b border-t-kumo-divider border-b-kumo-rule py-3">
+          <KeyValue
+            items={[
+              { label: "Candidate", value: candidate.id, mono: true },
+              { label: "Composed tree", value: candidate.composedTree, mono: true },
+              {
+                label: "Transition",
+                value: `${generation(candidate.baseGeneration)} → ${generation(candidate.baseGeneration + 1)}`,
+                mono: true,
+              },
+              { label: "Policy", value: candidate.plan?.policyVersion ?? null, mono: true },
+              { label: "Approver", value: `${approver} (signed in)` },
+            ]}
+          />
+        </div>
+
+        <div className="grid gap-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="type-label text-kumo-subtle">Required checks</p>
+            <span className="font-mono text-[12px] tabular-nums">
+              {tally.met} / {tally.total} met
+            </span>
+          </div>
+          <ul className="grid">
             {required.map((row) => (
               <li
                 key={row.checkId}
                 className="flex items-start gap-2 border-b border-kumo-rule py-1.5 text-[13px] last:border-b-0"
               >
                 {row.verdict === "pass" ? (
-                  <CheckCircle size={16} className="mt-px shrink-0 text-kumo-success" aria-hidden />
+                  <Check
+                    size={14}
+                    weight="bold"
+                    className="mt-0.5 shrink-0 text-kumo-success"
+                    aria-hidden
+                  />
                 ) : row.verdict === "pending" ? (
-                  <Circle size={16} className="mt-px shrink-0 text-kumo-subtle" aria-hidden />
-                ) : row.verdict === "fail" ? (
-                  <XCircle size={16} className="mt-px shrink-0 text-kumo-danger" aria-hidden />
+                  <Square size={14} className="mt-0.5 shrink-0 text-kumo-divider" aria-hidden />
                 ) : (
-                  <WarningCircle
-                    size={16}
-                    className="mt-px shrink-0 text-kumo-warning"
+                  <X
+                    size={14}
+                    weight="bold"
+                    className="mt-0.5 shrink-0 text-kumo-danger"
                     aria-hidden
                   />
                 )}
                 <span className="min-w-0">
+                  <span className="sr-only">
+                    {row.verdict === "pass"
+                      ? "Met: "
+                      : row.verdict === "pending"
+                        ? "Pending: "
+                        : "Not met: "}
+                  </span>
                   {criterion(row, budget).title}
-                  <span className="text-kumo-subtle"> · {verdictWord(row)}</span>
+                  <span className="font-mono text-[11px] text-kumo-subtle"> · {row.checkId}</span>
+                  {row.verdict !== "pass" && row.reason && (
+                    <span className="text-kumo-subtle"> · {REASON_WORDS[row.reason]}</span>
+                  )}
                 </span>
               </li>
             ))}
           </ul>
-        </details>
+        </div>
 
         <InputArea
-          label={askReason ? "Why are you rejecting it?" : "Reason (optional)"}
-          description={
-            askReason
-              ? "Add a reason, then press Reject again."
-              : "Saved with your decision and shown on this version."
-          }
+          label="Reason (optional)"
+          description="Recorded with the decision and shown on the Candidate."
           value={reason}
           maxLength={1000}
           onValueChange={setReason}
@@ -159,25 +178,9 @@ export function ApprovalDialog({
           autoResize
         />
 
-        <TechnicalDetails>
-          <KeyValue
-            items={[
-              { label: "Candidate", value: candidate.id, mono: true },
-              { label: "Composed tree", value: candidate.composedTree, mono: true },
-              {
-                label: "Transition",
-                value: `${generationCode(candidate.baseGeneration)} → ${generationCode(candidate.baseGeneration + 1)}`,
-                mono: true,
-              },
-              { label: "Policy", value: candidate.plan?.policyVersion ?? null, mono: true },
-            ]}
-          />
-          <p className="pt-1 text-kumo-subtle">Your decision applies only to this exact code.</p>
-        </TechnicalDetails>
-
         {decide.isError && (
-          <p role="alert" className="flex items-start gap-1.5 text-[13px] text-kumo-danger">
-            <XCircle size={16} className="mt-px shrink-0" aria-hidden />
+          <p role="alert" className="flex items-start gap-1.5 text-[12px] text-kumo-danger">
+            <X size={14} className="mt-px shrink-0" aria-hidden />
             {decide.error.message}
           </p>
         )}
@@ -185,27 +188,24 @@ export function ApprovalDialog({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="primary"
-            icon={RocketLaunch}
+            icon={Check}
             loading={decide.isPending && decide.variables === "approve"}
             disabled={decide.isPending}
             onClick={() => decide.mutate("approve")}
           >
-            Approve and ship
+            Approve
           </Button>
           <Button
             variant="secondary"
             loading={decide.isPending && decide.variables === "reject"}
             disabled={decide.isPending}
-            onClick={reject}
+            onClick={() => decide.mutate("reject")}
           >
             Reject
           </Button>
-          <span className="ml-auto truncate text-[12px] text-kumo-subtle">
-            Signed in as {approver}
-          </span>
+          <span className="ml-auto truncate text-[12px] text-kumo-subtle">as {approver}</span>
         </div>
       </Dialog>
     </Dialog.Root>
   );
 }
-ApprovalDialog.displayName = "ApprovalDialog";

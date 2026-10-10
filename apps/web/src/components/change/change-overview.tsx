@@ -1,5 +1,9 @@
-import { Circle, LockSimple } from "@phosphor-icons/react";
-import type { TaskDetail } from "../../lib/api";
+import { ShieldCheck } from "@phosphor-icons/react";
+import type { CandidateDetail, ConflictDetail, TaskDetail } from "../../lib/api";
+import { formatFraction, formatNumber, formatUsd, latestRun } from "../../lib/format";
+import { SegmentedSteps } from "../ui/meter";
+import { StatCell, StatStrip } from "../ui/stat-strip";
+import { StatusPill } from "../ui/status-pill";
 
 /** Recorded model spend and calls across every run of the Change. Null before the first run. */
 export function changeSpend(tasks: TaskDetail[]) {
@@ -11,41 +15,112 @@ export function changeSpend(tasks: TaskDetail[]) {
   };
 }
 
+/** Stat strip for one Change (DESIGN.md 6.2.2, 9.2). Real data only; a cell without data is omitted. */
+export function ChangeStats({
+  tasks,
+  conflicts,
+  candidates,
+  budgetUsd,
+}: {
+  tasks: TaskDetail[];
+  conflicts: ConflictDetail[];
+  candidates: CandidateDetail[];
+  budgetUsd: number;
+}) {
+  const done = tasks.filter((t) => t.status === "completed").length;
+  const running = tasks.filter((t) => latestRun(t)?.status === "running").length;
+  const woken = tasks.filter((t) => t.runs.length > 0).length;
+  const open = conflicts.filter((c) => c.state !== "resolved");
+  const verified = candidates.filter((c) => c.status === "verified" || c.status === "promoted");
+  const rejected = candidates.filter((c) => c.status === "rejected").length;
+  const spend = changeSpend(tasks);
+  return (
+    <StatStrip>
+      <StatCell
+        label="Tasks done"
+        value={formatNumber(done)}
+        unit={`/ ${formatNumber(tasks.length)}`}
+      >
+        {tasks.length > 0 && (
+          <SegmentedSteps
+            label="Tasks"
+            steps={tasks.map((t) => ({ label: `${t.key} ${t.title}`, status: t.status }))}
+          />
+        )}
+      </StatCell>
+      <StatCell
+        label="Active agents"
+        value={formatNumber(running)}
+        footnote={`${formatNumber(woken)} woken · ${formatNumber(tasks.length - woken)} asleep`}
+      />
+      <StatCell
+        label="Conflicts"
+        value={formatNumber(open.length)}
+        unit="open"
+        pill={
+          open.some((c) => c.state === "confirmed" || c.state === "fork_required") ? (
+            <StatusPill status="confirmed" />
+          ) : undefined
+        }
+        footnote={`${formatNumber(conflicts.length - open.length)} resolved`}
+      />
+      <StatCell
+        label="Candidates verified"
+        value={formatNumber(verified.length)}
+        unit={`/ ${formatNumber(candidates.length)}`}
+        footnote={`${formatNumber(rejected)} rejected`}
+      />
+      {spend && (
+        <StatCell
+          label="Model calls"
+          value={formatNumber(spend.calls)}
+          footnote={`${formatFraction(formatUsd(spend.costUsd), formatUsd(budgetUsd))} spent`}
+        />
+      )}
+    </StatStrip>
+  );
+}
+
 /**
- * "Done when" as a checklist. The API does not record which check proved which item, so every
- * item shows an open circle rather than a claimed tick.
+ * Acceptance criteria as a checklist (DESIGN.md 9.14). The API does not record which criterion
+ * a check proved, so every item shows the pending square rather than a claimed tick.
  */
 export function CriteriaList({ items }: { items: string[] }) {
   if (items.length === 0) {
-    return <p className="text-[13px] text-kumo-subtle">The planner has not set these yet.</p>;
+    return (
+      <p className="text-[13px] text-kumo-subtle">The Root Planner has not set criteria yet.</p>
+    );
   }
   return (
-    <ul className="grid gap-1.5">
+    <ul className="grid">
       {items.map((item) => (
-        <li key={item} className="flex items-start gap-2 text-[14px]">
-          <Circle aria-hidden size={16} className="mt-0.5 shrink-0 text-kumo-subtle" />
-          <span className="min-w-0">{item}</span>
+        <li
+          key={item}
+          className="grid grid-cols-[14px_minmax(0,1fr)] items-start gap-2.5 border-b border-kumo-rule py-2 text-[13px]"
+        >
+          <span aria-hidden className="mt-0.5 size-3.5 border border-kumo-divider" />
+          <span>{item}</span>
         </li>
       ))}
     </ul>
   );
 }
-CriteriaList.displayName = "CriteriaList";
 
-/** "Must not change": each item with a lock icon. */
 export function InvariantList({ items }: { items: string[] }) {
   if (items.length === 0) {
-    return <p className="text-[13px] text-kumo-subtle">Nothing is protected for this change.</p>;
+    return <p className="text-[13px] text-kumo-subtle">No protected invariants for this Change.</p>;
   }
   return (
-    <ul className="grid gap-1.5">
+    <ul className="grid">
       {items.map((item) => (
-        <li key={item} className="flex items-start gap-2 text-[14px]">
-          <LockSimple aria-hidden size={16} className="mt-0.5 shrink-0 text-kumo-subtle" />
-          <span className="min-w-0">{item}</span>
+        <li
+          key={item}
+          className="grid grid-cols-[14px_minmax(0,1fr)] items-start gap-2.5 border-b border-kumo-rule py-2 text-[13px]"
+        >
+          <ShieldCheck aria-hidden size={14} className="mt-0.5" />
+          <span>{item}</span>
         </li>
       ))}
     </ul>
   );
 }
-InvariantList.displayName = "InvariantList";

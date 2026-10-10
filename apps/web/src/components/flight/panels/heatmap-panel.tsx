@@ -3,6 +3,7 @@
 import { cn } from "@cloudflare/kumo";
 import { memo, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatNumber } from "../../../lib/format";
+import { usePrefersReducedMotion } from "../../../lib/motion";
 import { StatusPill } from "../../ui/status-pill";
 import { Tag } from "../../ui/tag";
 import { AddsDels } from "../../workspace-page/fork-tree";
@@ -19,8 +20,10 @@ import { EntityHover } from "../hover-preview";
 import { PanelSkeleton } from "../panel-frame";
 import type { PanelProps } from "../panel-types";
 import { ROVING_CONTAINER, ROVING_ITEM, type Roving, useRovingFocus } from "../use-roving-focus";
+import { tokenMs } from "./arena/check-view";
 import {
   type Axis,
+  animationOf,
   axisOf,
   bucketStart,
   clockOf,
@@ -43,7 +46,8 @@ import {
  *   Resources  rows = semantic resources; a cell counts Claim facts in its bucket, an accent
  *              square marks the bucket where a conflict on the resource was detected.
  *
- * Every cell is a recorded fact (FlightState.files / resources / claims / events). Nothing moves.
+ * Every cell is a recorded fact (FlightState.files / resources / claims / events). A cell whose
+ * ChangeSet fact newly played fills over `--rh-dur-heat`; nothing else moves.
  *
  * Each layer is ONE tab stop: a grid (use-roving-focus.ts) whose row headers and touched cells are
  * reached with the arrow keys; Enter selects. A pointer picks the nearest cell, so the 10px
@@ -146,10 +150,32 @@ const Track = memo(function Track({ count, pitch }: { count: number; pitch: numb
 });
 Track.displayName = "Track";
 
-/** The square inside a cell. */
-function Square({ pitch, className }: { pitch: number; className: string }) {
+/** The square inside a cell. Fills over `--rh-dur-heat` once when its fact newly played. */
+function Square({
+  pitch,
+  className,
+  animateKey,
+}: {
+  pitch: number;
+  className: string;
+  animateKey: string | null;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const reduce = usePrefersReducedMotion();
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!animateKey || !el || reduce || typeof el.animate !== "function") return;
+    const duration = tokenMs("--rh-dur-heat", 400);
+    if (duration <= 0) return;
+    const to = getComputedStyle(el).backgroundColor;
+    el.animate([{ backgroundColor: "transparent" }, { backgroundColor: to }], {
+      duration,
+      easing: "ease",
+    });
+  }, [animateKey, reduce]);
   return (
     <span
+      ref={ref}
       aria-hidden
       className={cn("block", className)}
       style={{ width: pitch - 2, height: pitch - 2 }}
@@ -331,7 +357,7 @@ function FileRowView({
     >
       <div className="sticky left-0 z-[1] shrink-0 bg-kumo-elevated" style={{ width: labelWidth }}>
         {file.contended && (
-          <span aria-hidden className="absolute inset-y-0 left-0 z-[1] w-0.5 bg-kumo-danger" />
+          <span aria-hidden className="absolute inset-y-0 left-0 z-[1] w-0.5 bg-accent-500" />
         )}
         <HeatHeader
           item={fileKey(file.path)}
@@ -343,7 +369,7 @@ function FileRowView({
           className="flex h-full w-full min-w-0 items-center gap-2 pr-2 pl-3"
         >
           <LeftTruncated text={file.path} className="flex-1" />
-          <span className="font-mono text-[12px]">
+          <span className="font-mono text-[11px]">
             <AddsDels adds={file.adds} dels={file.dels} />
           </span>
         </HeatHeader>
@@ -364,6 +390,7 @@ function FileRowView({
           >
             <Square
               pitch={pitch}
+              animateKey={cell.animateKey}
               className={
                 cell.changed > 0 ? (FILL[cell.level] ?? "") : cn("border-2", OUTLINE[cell.level])
               }
@@ -423,7 +450,7 @@ function ResourceRowView({
     >
       <div className="sticky left-0 z-[1] shrink-0 bg-kumo-elevated" style={{ width: labelWidth }}>
         {r.conflictIds.length > 0 && (
-          <span aria-hidden className="absolute inset-y-0 left-0 z-[1] w-0.5 bg-kumo-danger" />
+          <span aria-hidden className="absolute inset-y-0 left-0 z-[1] w-0.5 bg-accent-500" />
         )}
         <HeatHeader
           item={resourceKey(r.resource)}
@@ -435,7 +462,7 @@ function ResourceRowView({
           className="grid h-full w-full min-w-0 content-center gap-0.5 py-1 pr-2 pl-3"
         >
           <LeftTruncated text={r.resource} />
-          <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-kumo-subtle">
+          <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-kumo-subtle">
             {r.protectedResource && (
               <Tag variant="outline" className="px-1.5 py-0">
                 protected
@@ -466,7 +493,8 @@ function ResourceRowView({
           >
             <Square
               pitch={pitch}
-              className={cell.conflictIds.length > 0 ? "bg-kumo-danger" : (FILL[cell.level] ?? "")}
+              animateKey={null}
+              className={cell.conflictIds.length > 0 ? "bg-accent-500" : (FILL[cell.level] ?? "")}
             />
           </HeatCell>
         ))}
@@ -487,7 +515,7 @@ function GroupHeader({ group, labelWidth }: { group: FileGroup; labelWidth: numb
         style={{ width: labelWidth }}
       >
         <span className="type-label truncate">{group.area}</span>
-        <span className="shrink-0 font-mono text-[12px] text-kumo-subtle tabular-nums">
+        <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
           {formatNumber(group.rows.length)} · <AddsDels adds={group.adds} dels={group.dels} />
         </span>
       </div>
@@ -526,13 +554,13 @@ function AxisRow({
         {ticks.map((i) => (
           <span
             key={i}
-            className="absolute bottom-1 border-l border-kumo-rule pl-1 font-mono text-[12px] leading-none whitespace-nowrap text-kumo-subtle"
+            className="absolute bottom-1 border-l border-kumo-rule pl-1 font-mono text-[10px] leading-none whitespace-nowrap text-kumo-subtle"
             style={{ left: i * pitch }}
           >
             {clockOf(bucketStart(axis, i))}
           </span>
         ))}
-        <span className="absolute right-0 bottom-1 font-mono text-[12px] leading-none whitespace-nowrap text-kumo-subtle">
+        <span className="absolute right-0 bottom-1 font-mono text-[10px] leading-none whitespace-nowrap text-kumo-subtle">
           {clockOf(axis.end)}
         </span>
       </div>
@@ -544,7 +572,7 @@ AxisRow.displayName = "AxisRow";
 function Legend({ layer }: { layer: Layer }) {
   const swatch = "inline-block size-2.5 shrink-0";
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-kumo-rule px-3 py-1 text-[12px] text-kumo-subtle">
+    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-kumo-rule px-3 py-1 text-[11px] text-kumo-subtle">
       {layer === "files" ? (
         <>
           <span className="inline-flex items-center gap-1">
@@ -555,7 +583,7 @@ function Legend({ layer }: { layer: Layer }) {
             <span aria-hidden className={cn(swatch, "bg-tone-500")} /> changed (ChangeSet)
           </span>
           <span className="inline-flex items-center gap-1">
-            <span aria-hidden className="inline-block h-2.5 w-0.5 bg-kumo-danger" /> contended
+            <span aria-hidden className="inline-block h-2.5 w-0.5 bg-accent-500" /> contended
           </span>
         </>
       ) : (
@@ -564,7 +592,7 @@ function Legend({ layer }: { layer: Layer }) {
             <span aria-hidden className={cn(swatch, "bg-tone-500")} /> Claim facts
           </span>
           <span className="inline-flex items-center gap-1">
-            <span aria-hidden className={cn(swatch, "bg-kumo-danger")} /> conflict detected
+            <span aria-hidden className={cn(swatch, "bg-accent-500")} /> conflict detected
           </span>
         </>
       )}
@@ -606,7 +634,7 @@ function useWidth() {
 }
 
 export function HeatmapPanel({ focused }: PanelProps) {
-  const { state, model, ready } = useFlight();
+  const { state, model, ready, animated } = useFlight();
   const selection = useSelection();
   const filters = useFlightFilters();
   const [layer, setLayer] = useState<Layer>("files");
@@ -627,9 +655,10 @@ export function HeatmapPanel({ focused }: PanelProps) {
     [model.bounds.start, state.at, count],
   );
   const workspaceLoaded = model.input.workspace !== null;
+  const animate = useMemo(() => animationOf(state, animated), [state, animated]);
   const groups = useMemo(
-    () => fileGroups(state, axis, filters, sort, workspaceLoaded),
-    [state, axis, filters, sort, workspaceLoaded],
+    () => fileGroups(state, axis, filters, sort, workspaceLoaded, animate),
+    [state, axis, filters, sort, workspaceLoaded, animate],
   );
   const resources = useMemo(
     () => resourceRows(state, axis, filters, sort),
@@ -803,7 +832,7 @@ export function HeatmapPanel({ focused }: PanelProps) {
         {layer === "files" && !workspaceLoaded && (
           <StatusPill status="stale" family="attention" label="Workspace view not loaded" />
         )}
-        <span className="ml-auto font-mono text-[12px] text-kumo-subtle tabular-nums">
+        <span className="ml-auto font-mono text-[11px] text-kumo-subtle tabular-nums">
           {formatNumber(count)} × {formatDurationShort(axis.span)}
         </span>
       </div>

@@ -214,8 +214,27 @@ export function summarize(
 
 export const formatCost = (usd: number | null) => (usd === null ? "not recorded" : formatUsd(usd));
 
+/** `${candidateId}:${checkId}` -> the id of the check fact that recorded it. */
+export function checkEventIds(state: FlightState): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const e of state.events) {
+    if (e.kind === "check") out.set(`${e.candidateId}:${e.checkId}`, e.id);
+  }
+  return out;
+}
+
 /** Epoch ms -> ISO, for the shared clock formatter. */
 export const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
+
+/** A duration token from theme.css (`--rh-dur-heat: 0.4s`) in ms; `fallback` during SSR. */
+export function tokenMs(name: string, fallback: number): number {
+  if (typeof window === "undefined") return fallback;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  if (!raw) return fallback;
+  const value = Number.parseFloat(raw);
+  if (!Number.isFinite(value)) return fallback;
+  return raw.endsWith("ms") ? value : value * 1000;
+}
 
 /** Screenshot URL served by the same-origin proxy route (routes/evidence.$candidateId...). */
 export const screenshotUrl = (candidateId: string, checkId: string, n: number) =>

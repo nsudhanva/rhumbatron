@@ -47,7 +47,7 @@ function notableOf(event: ActivityEvent): Omit<Notable, "id" | "at"> | null {
     case "candidate.fork":
       return { label: "Candidate fork", fill: "bg-kumo-ink" };
     case "challenge":
-      return { label: "Conflict", fill: "bg-kumo-danger" };
+      return { label: "Conflict", fill: "bg-accent-500" };
     case "promoted":
       return { label: "Promotion", fill: "bg-kumo-success" };
     case "run.end":
@@ -65,7 +65,7 @@ function notableOf(event: ActivityEvent): Omit<Notable, "id" | "at"> | null {
 
 const LEGEND = [
   { label: "Fork", fill: "bg-kumo-ink" },
-  { label: "Conflict", fill: "bg-kumo-danger" },
+  { label: "Conflict", fill: "bg-accent-500" },
   { label: "Failure", fill: "bg-tone-500" },
   { label: "Promotion", fill: "bg-kumo-success" },
 ];
@@ -202,7 +202,7 @@ export function Scrubber() {
               disabled={!historical}
               onClick={() => setSpeed(s)}
               className={cn(
-                "min-h-6 min-w-8 px-2 font-mono text-[12px] tabular-nums pointer-coarse:min-h-11",
+                "min-h-6 min-w-8 px-2 font-mono text-[11px] tabular-nums pointer-coarse:min-h-11",
                 i > 0 && "border-l border-kumo-divider",
                 historical && speed === s
                   ? "bg-kumo-ink text-kumo-inverse"
@@ -275,7 +275,7 @@ export function Scrubber() {
         {historical && (
           <>
             <StatusPill status="stale" family="attention" label="Historical" />
-            <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">
+            <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
               {formatNumber(state.events.length)} / {formatNumber(model.events.length)} facts
             </span>
           </>
@@ -290,7 +290,7 @@ export function Scrubber() {
         </Button>
       </div>
 
-      <ul aria-hidden className="flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-kumo-subtle">
+      <ul aria-hidden className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-kumo-subtle">
         {LEGEND.map((l) => (
           <li key={l.label} className="inline-flex items-center gap-1.5">
             <span className={cn("size-1.5", l.fill)} />

@@ -4,7 +4,7 @@ import { type ComponentPropsWithRef, forwardRef } from "react";
 import { formatBadge } from "./notification-keys";
 
 type BellButtonProps = ComponentPropsWithRef<"button"> & {
-  /** Open action items: danger badge. */
+  /** Open action items: accent badge. */
   action: number;
   /** Unread items: ink badge when nothing needs a decision. */
   unread: number;
@@ -36,18 +36,18 @@ export const BellButton = forwardRef<HTMLButtonElement, BellButtonProps>(functio
       aria-label={name}
       {...rest}
       className={cn(
-        "relative grid size-7 shrink-0 place-items-center rounded-md border border-kumo-line transition-colors duration-(--rh-dur-ui) focus-visible:outline-offset-[-2px] pointer-coarse:size-11",
-        open ? "bg-kumo-info-tint text-kumo-info" : "hover:bg-kumo-tint",
+        "relative grid size-7 shrink-0 place-items-center border border-kumo-divider transition-colors duration-(--rh-dur-ui) focus-visible:outline-offset-[-2px] pointer-coarse:size-11",
+        open ? "bg-kumo-ink text-kumo-inverse" : "hover:bg-kumo-tint",
         className,
       )}
     >
-      <Bell size={16} aria-hidden />
+      <Bell size={14} aria-hidden />
       {badge > 0 && (
         <span
           aria-hidden
           className={cn(
-            "absolute -top-2 -right-2 grid h-[18px] min-w-[18px] place-items-center rounded-full px-1 text-[12px] leading-none font-semibold text-white tabular-nums ring-2 ring-kumo-base",
-            action > 0 ? "bg-kumo-danger" : "bg-kumo-info",
+            "absolute -top-1.5 -right-1.5 grid h-4 min-w-4 place-items-center px-[3px] font-mono text-[10px] leading-none font-semibold text-kumo-inverse tabular-nums ring-2 ring-kumo-base",
+            action > 0 ? "bg-accent-500" : "bg-kumo-ink",
           )}
         >
           {formatBadge(badge)}

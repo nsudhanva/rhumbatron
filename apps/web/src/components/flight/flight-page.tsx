@@ -14,26 +14,27 @@ import {
   useRef,
   useState,
 } from "react";
-import { formatNumber, formatUsd, generation, generationCode, truncate } from "../../lib/format";
+import { formatNumber, formatUsd, generation, truncate } from "../../lib/format";
 import type { LiveStatus } from "../../lib/live";
+import { MOTION } from "../../lib/motion";
 import type { ActivityEvent } from "../agents/activity-model";
+import { useActivityPlayer } from "../agents/use-activity-player";
 import { StatusPill } from "../ui/status-pill";
 import { Tag } from "../ui/tag";
 import { FiltersBar } from "./filters-bar";
 import { type FlightContextValue, FlightProvider } from "./flight-context";
 import { type FlightModel, type FlightState, foldFlight, providerName } from "./flight-model";
-import { type PanelId, useFlightStore, useFlightTime } from "./flight-store";
+import { type FlightTime, type PanelId, useFlightStore, useFlightTime } from "./flight-store";
 import { InspectorDrawer } from "./inspector-drawer";
 import { PanelFrame, PanelSkeleton } from "./panel-frame";
 import type { PanelProps } from "./panel-types";
 import { Scrubber, stepFact } from "./scrubber";
 
 /**
- * Debug view (was Flight Control; AGENTS.md 38): every recorded fact of one Change, folded at one
- * instant and shown in synchronized panels. The page owns the fold, the time machine, filters,
- * the panel grid and the inspector. Panels read the folded state from context and never fetch.
- * Nothing moves on its own: live facts appear in place, and the time machine plays only when the
- * viewer presses Play.
+ * Flight Control (AGENTS.md 38, DESIGN.md 9, 11.1): every recorded fact of one Change, folded at
+ * one instant and shown in synchronized panels. The page owns the fold, the pacing of newly
+ * arriving facts, the time machine, filters, the panel grid and the inspector. Panels read the
+ * folded state from context and never fetch.
  */
 
 type Panel = LazyExoticComponent<ComponentType<PanelProps>>;
@@ -138,6 +139,62 @@ const PANELS: PanelSpec[] = [
   },
 ];
 
+const NONE: ReadonlySet<string> = new Set();
+const IN_FLIGHT_MS = MOTION.packetMs + MOTION.arriveMs;
+
+/**
+ * Facts that enter the fold while the time machine plays: they animate like live arrivals
+ * (DESIGN.md 11.1, replay from recorded events). Scrubbing by hand or pausing settles them.
+ */
+function usePlaybackFacts(events: ActivityEvent[], time: FlightTime) {
+  const at = time.mode === "historical" ? time.at : null;
+  const playing = time.mode === "historical" && time.playing;
+  const previous = useRef<number | null>(null);
+  const [played, setPlayed] = useState<{
+    animated: Set<string>;
+    recent: { id: string; at: number }[];
+  }>(() => ({ animated: new Set(), recent: [] }));
+
+  useEffect(() => {
+    const from = previous.current;
+    previous.current = at;
+    if (!playing || at === null || from === null || at <= from) {
+      if (!playing) {
+        setPlayed((s) => (s.animated.size === 0 ? s : { animated: new Set(), recent: [] }));
+      }
+      return;
+    }
+    const crossed = events.filter((e) => e.at > from && e.at <= at);
+    if (crossed.length === 0) return;
+    const now = performance.now();
+    setPlayed((s) => ({
+      animated: new Set([...s.animated, ...crossed.map((e) => e.id)]),
+      recent: [
+        ...s.recent.filter((r) => now - r.at < IN_FLIGHT_MS),
+        ...crossed.map((e) => ({ id: e.id, at: now })),
+      ],
+    }));
+  }, [at, playing, events]);
+
+  // Drop facts from flight once their packet and flash have finished.
+  useEffect(() => {
+    const oldest = played.recent[0];
+    if (!oldest) return;
+    const wait = Math.max(0, oldest.at + IN_FLIGHT_MS - performance.now());
+    const timer = setTimeout(() => {
+      setPlayed((s) => {
+        const now = performance.now();
+        const recent = s.recent.filter((r) => now - r.at < IN_FLIGHT_MS);
+        return recent.length === s.recent.length ? s : { ...s, recent };
+      });
+    }, wait + 16);
+    return () => clearTimeout(timer);
+  }, [played.recent]);
+
+  const inFlight = useMemo(() => new Set(played.recent.map((r) => r.id)), [played.recent]);
+  return { animated: played.animated, inFlight };
+}
+
 /** Keys typed into a text field never drive the page. */
 const TEXT_FIELD =
   'input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]), textarea, select, [contenteditable="true"]';
@@ -200,7 +257,7 @@ function useChromeHeight() {
 function Count({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
   return (
     <div className="inline-flex items-baseline gap-1.5">
-      <dt className="text-[12px] text-kumo-subtle">{label}</dt>
+      <dt className="text-[11px] text-kumo-subtle">{label}</dt>
       <dd
         className={cn(
           "font-mono text-[12px] font-semibold tabular-nums",
@@ -230,6 +287,7 @@ function HeaderStrip({
   live: boolean;
 }) {
   const change = model.input.change;
+  const Heading = fixture ? "h2" : "h1";
   const providers = useMemo(() => {
     const names = new Set<string>();
     for (const t of Object.values(state.tasks)) {
@@ -240,18 +298,16 @@ function HeaderStrip({
   }, [state.tasks]);
   const c = state.counts;
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-kumo-rule px-3 py-2">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b-2 border-kumo-divider px-3 py-2">
       <div className="flex min-w-0 flex-[1_1_320px] items-baseline gap-2">
-        <h2 className="min-w-0 truncate text-[15px] font-semibold" title={change.goal}>
+        <span className="type-kicker shrink-0 text-kumo-accent">Flight Control</span>
+        <Heading className="min-w-0 truncate text-[15px] font-bold" title={change.goal}>
           {truncate(change.goal, 140)}
-        </h2>
+        </Heading>
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <span className="text-[13px] font-semibold tabular-nums">
+        <span className="font-mono text-[13px] font-semibold tabular-nums">
           {generation(state.generation)}
-        </span>
-        <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">
-          {generationCode(state.generation)}
         </span>
         {live && <StatusPill status={change.status} />}
         {live && model.bounds.live && socket === "open" && <StatusPill status="live" />}
@@ -289,7 +345,7 @@ function HeaderStrip({
           className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-1.5")}
         >
           <Columns size={14} aria-hidden />
-          Compare versions
+          Compare Candidates
         </Link>
       </nav>
     </div>
@@ -330,11 +386,16 @@ export function FlightPage({
   const at = time.mode === "live" ? null : time.at;
   const state = useMemo(() => foldFlight(model, at), [model, at]);
 
+  const player = useActivityPlayer(model.events, ready);
+  const playback = usePlaybackFacts(model.events, time);
   const live = time.mode === "live";
+  const playing = time.mode === "historical" && time.playing;
+  const animated = live ? player.animated : playing ? playback.animated : NONE;
+  const inFlight = live ? player.inFlight : playing ? playback.inFlight : NONE;
 
   const value = useMemo<FlightContextValue>(
-    () => ({ model, state, ready, socket, projectId, changeId }),
-    [model, state, ready, socket, projectId, changeId],
+    () => ({ model, state, ready, socket, animated, inFlight, projectId, changeId }),
+    [model, state, ready, socket, animated, inFlight, projectId, changeId],
   );
 
   useFlightKeys(model.events);
@@ -410,9 +471,9 @@ export function FlightPage({
           )}
         </div>
 
-        {/* One polite line for the newest recorded fact, live only (DESIGN.md 9.9, 14). */}
+        {/* One polite line per newly arrived fact, live only (DESIGN.md 9.9, 14). */}
         <p className="sr-only" aria-live="polite" aria-atomic>
-          {live && ready ? (model.events.at(-1)?.detail ?? "") : ""}
+          {live ? (player.latest?.detail ?? "") : ""}
         </p>
       </div>
       {paletteMounted && (
@@ -438,7 +499,7 @@ export function FlightSkeleton() {
               key={p.id}
               className={cn("bg-kumo-elevated", p.tall ? "h-[420px]" : "h-[360px]", p.span)}
             >
-              <div className="h-10 border-b border-kumo-rule" />
+              <div className="h-10 border-b-2 border-kumo-divider" />
               <PanelSkeleton />
             </div>
           ))}

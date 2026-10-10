@@ -20,7 +20,6 @@ import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as ChangesChangeIdFlightRouteImport } from './routes/changes_.$changeId.flight'
 import { Route as LiveProjectsProjectIdRouteImport } from './routes/live.projects.$projectId'
-import { Route as ProjectsProjectIdActivityRouteImport } from './routes/projects_.$projectId.activity'
 import { Route as ProjectsProjectIdAgentsRouteImport } from './routes/projects_.$projectId.agents'
 import { Route as ProjectsProjectIdCostsRouteImport } from './routes/projects_.$projectId.costs'
 import { Route as ProjectsProjectIdEventsRouteImport } from './routes/projects_.$projectId.events'
@@ -84,12 +83,6 @@ const LiveProjectsProjectIdRoute = LiveProjectsProjectIdRouteImport.update({
   path: '/live/projects/$projectId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProjectsProjectIdActivityRoute =
-  ProjectsProjectIdActivityRouteImport.update({
-    id: '/projects_/$projectId/activity',
-    path: '/projects/$projectId/activity',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const ProjectsProjectIdAgentsRoute = ProjectsProjectIdAgentsRouteImport.update({
   id: '/projects_/$projectId/agents',
   path: '/projects/$projectId/agents',
@@ -141,7 +134,6 @@ export interface FileRoutesByFullPath {
   '/sign-up/$': typeof SignUpSplatRoute
   '/changes/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
-  '/projects/$projectId/activity': typeof ProjectsProjectIdActivityRoute
   '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
   '/projects/$projectId/costs': typeof ProjectsProjectIdCostsRoute
   '/projects/$projectId/events': typeof ProjectsProjectIdEventsRoute
@@ -162,7 +154,6 @@ export interface FileRoutesByTo {
   '/sign-up/$': typeof SignUpSplatRoute
   '/changes/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
-  '/projects/$projectId/activity': typeof ProjectsProjectIdActivityRoute
   '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
   '/projects/$projectId/costs': typeof ProjectsProjectIdCostsRoute
   '/projects/$projectId/events': typeof ProjectsProjectIdEventsRoute
@@ -184,7 +175,6 @@ export interface FileRoutesById {
   '/sign-up/$': typeof SignUpSplatRoute
   '/changes_/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
-  '/projects_/$projectId/activity': typeof ProjectsProjectIdActivityRoute
   '/projects_/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
   '/projects_/$projectId/costs': typeof ProjectsProjectIdCostsRoute
   '/projects_/$projectId/events': typeof ProjectsProjectIdEventsRoute
@@ -207,7 +197,6 @@ export interface FileRouteTypes {
     | '/sign-up/$'
     | '/changes/$changeId/flight'
     | '/live/projects/$projectId'
-    | '/projects/$projectId/activity'
     | '/projects/$projectId/agents'
     | '/projects/$projectId/costs'
     | '/projects/$projectId/events'
@@ -228,7 +217,6 @@ export interface FileRouteTypes {
     | '/sign-up/$'
     | '/changes/$changeId/flight'
     | '/live/projects/$projectId'
-    | '/projects/$projectId/activity'
     | '/projects/$projectId/agents'
     | '/projects/$projectId/costs'
     | '/projects/$projectId/events'
@@ -249,7 +237,6 @@ export interface FileRouteTypes {
     | '/sign-up/$'
     | '/changes_/$changeId/flight'
     | '/live/projects/$projectId'
-    | '/projects_/$projectId/activity'
     | '/projects_/$projectId/agents'
     | '/projects_/$projectId/costs'
     | '/projects_/$projectId/events'
@@ -271,7 +258,6 @@ export interface RootRouteChildren {
   SignUpSplatRoute: typeof SignUpSplatRoute
   ChangesChangeIdFlightRoute: typeof ChangesChangeIdFlightRoute
   LiveProjectsProjectIdRoute: typeof LiveProjectsProjectIdRoute
-  ProjectsProjectIdActivityRoute: typeof ProjectsProjectIdActivityRoute
   ProjectsProjectIdAgentsRoute: typeof ProjectsProjectIdAgentsRoute
   ProjectsProjectIdCostsRoute: typeof ProjectsProjectIdCostsRoute
   ProjectsProjectIdEventsRoute: typeof ProjectsProjectIdEventsRoute
@@ -360,13 +346,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LiveProjectsProjectIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/projects_/$projectId/activity': {
-      id: '/projects_/$projectId/activity'
-      path: '/projects/$projectId/activity'
-      fullPath: '/projects/$projectId/activity'
-      preLoaderRoute: typeof ProjectsProjectIdActivityRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/projects_/$projectId/agents': {
       id: '/projects_/$projectId/agents'
       path: '/projects/$projectId/agents'
@@ -431,7 +410,6 @@ const rootRouteChildren: RootRouteChildren = {
   SignUpSplatRoute: SignUpSplatRoute,
   ChangesChangeIdFlightRoute: ChangesChangeIdFlightRoute,
   LiveProjectsProjectIdRoute: LiveProjectsProjectIdRoute,
-  ProjectsProjectIdActivityRoute: ProjectsProjectIdActivityRoute,
   ProjectsProjectIdAgentsRoute: ProjectsProjectIdAgentsRoute,
   ProjectsProjectIdCostsRoute: ProjectsProjectIdCostsRoute,
   ProjectsProjectIdEventsRoute: ProjectsProjectIdEventsRoute,

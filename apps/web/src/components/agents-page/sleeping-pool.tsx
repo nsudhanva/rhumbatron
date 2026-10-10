@@ -1,61 +1,50 @@
 import { formatNumber } from "../../lib/format";
-import { Term } from "../ui/term";
-import { Details, plainRole } from "./agent-words";
 
 /**
- * Idle agents as one sentence (spec B.2: "12 agents idle"), with the split by plain role behind
- * a disclosure. Idle is a resting state, not one that needs attention, so nothing here is colored.
+ * Sleeping agents that are not listed one by one, aggregated by role (AGENTS.md 38.6, 57), as a
+ * horizontal bar list (DESIGN.md 9.1): label, bar, right-aligned mono value. Every bar has its
+ * value beside it. Bars use the neutral series: asleep is idle, not a state that needs attention.
  */
 export function SleepingPool({
-  total,
   unlisted,
   notWoken,
 }: {
-  /** Every idle agent, listed above or not. */
-  total: number;
-  /** Idle agents not listed one by one, by API role. */
   unlisted: { role: string; count: number }[];
   notWoken: number;
 }) {
-  // Several internal roles share one plain role (every reviewer kind is a "Reviewer").
-  const byRole = new Map<string, number>();
-  for (const row of unlisted) {
-    const role = plainRole(row.role);
-    byRole.set(role, (byRole.get(role) ?? 0) + row.count);
-  }
-  const rows = [...byRole].sort((a, b) => b[1] - a[1]);
+  const max = Math.max(1, ...unlisted.map((r) => r.count));
   return (
-    <div className="grid gap-2 text-[14px]">
-      <p>
-        <span className="tabular-nums">{formatNumber(total)}</span>{" "}
-        {total === 1 ? "agent" : "agents"} <Term k="idle">idle</Term>
-        {notWoken > 0 && (
-          <span className="text-kumo-subtle">
-            {" "}
-            · {formatNumber(notWoken)} open {notWoken === 1 ? "task is" : "tasks are"} waiting for
-            their agent to start
-          </span>
-        )}
-      </p>
-      {rows.length > 0 && (
-        <Details label="Show idle agents by role">
-          <ul className="grid max-w-80 text-[13px]" aria-label="Idle agents by role">
-            {rows.map(([role, count]) => (
-              <li
-                key={role}
-                className="flex items-baseline justify-between gap-3 border-b border-kumo-rule py-1.5 last:border-b-0"
-              >
-                <span>{role}</span>
-                <span className="tabular-nums">{formatNumber(count)}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="text-kumo-subtle">
-            Agents active in the last hours are listed above and not counted here. An agent starts
-            only when its task is ready.
-          </p>
-        </Details>
+    <div className="grid gap-3">
+      {unlisted.length === 0 ? (
+        <p className="text-[13px] text-kumo-subtle">
+          Every sleeping agent is listed above. Older sleeping agents collect here by role.
+        </p>
+      ) : (
+        <ul className="grid gap-2" aria-label="Sleeping agents by role">
+          {unlisted.map((row) => (
+            <li
+              key={row.role}
+              className="grid grid-cols-[minmax(0,160px)_minmax(0,1fr)_64px] items-center gap-3 text-[13px]"
+            >
+              <span className="truncate">{row.role}</span>
+              <span aria-hidden className="h-2 bg-kumo-recessed">
+                <span
+                  className="block h-full bg-tone-400 transition-[width] duration-(--rh-dur-bar)"
+                  style={{ width: `${(row.count / max) * 100}%` }}
+                />
+              </span>
+              <span className="text-right font-mono text-[12px] tabular-nums">
+                {formatNumber(row.count)}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
+      <p className="text-[12px] text-kumo-subtle">
+        <span className="font-mono tabular-nums">{formatNumber(notWoken)}</span> open{" "}
+        {notWoken === 1 ? "Task has" : "Tasks have"} an agent that has not woken. Agents wake only
+        when their Task becomes ready.
+      </p>
     </div>
   );
 }

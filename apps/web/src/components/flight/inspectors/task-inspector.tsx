@@ -361,12 +361,12 @@ function AttemptsBlock({ task }: { task: TaskState }) {
                   <Td>
                     <span className="font-mono text-[12px]">{r.tier}</span>
                     {r.escalatedFrom && (
-                      <span className="block text-[12px] text-kumo-subtle">
+                      <span className="block text-[11px] text-kumo-subtle">
                         ↑ from {r.escalatedFrom}
                       </span>
                     )}
                     {providerName(r.provider) && (
-                      <span className="block text-[12px] text-kumo-subtle">
+                      <span className="block text-[11px] text-kumo-subtle">
                         {providerName(r.provider)}
                       </span>
                     )}
@@ -385,7 +385,7 @@ function AttemptsBlock({ task }: { task: TaskState }) {
                       label={`Route decision of attempt ${r.attempt}`}
                     >
                       <span className="min-w-0">
-                        <span className="font-mono text-[12px] text-kumo-subtle">
+                        <span className="font-mono text-[11px] text-kumo-subtle">
                           {r.decidedBy ?? "not recorded"}
                         </span>
                         {r.routeReasons.length > 0 && (
@@ -399,7 +399,7 @@ function AttemptsBlock({ task }: { task: TaskState }) {
                   <Td className="max-w-[220px]">
                     {r.failureKind ? (
                       <span className="grid">
-                        <span className="font-mono text-[12px] text-kumo-danger">
+                        <span className="font-mono text-[11px] text-kumo-danger">
                           {r.failureKind}
                         </span>
                         {r.failureReason && (
@@ -527,7 +527,7 @@ function FilesBlock({ task }: { task: TaskState }) {
               <RefButton entity={{ kind: "file", id: r.path }} className="min-w-0 flex-1">
                 <Mono truncate>{r.path}</Mono>
               </RefButton>
-              <span className="flex shrink-0 items-center gap-2 pl-2 font-mono text-[12px] tabular-nums">
+              <span className="flex shrink-0 items-center gap-2 pl-2 font-mono text-[11px] tabular-nums">
                 {r.contended && (
                   <span
                     className="bg-kumo-warning-tint px-1 text-kumo-warning"
@@ -631,7 +631,7 @@ function LinksBlock({ task }: { task: TaskState }) {
                     {cs.id}
                   </Mono>
                 </RefButton>
-                <span className="shrink-0 pl-2 font-mono text-[12px] tabular-nums">
+                <span className="shrink-0 pl-2 font-mono text-[11px] tabular-nums">
                   {formatNumber(cs.files.length)} files{" "}
                   <span className="text-kumo-success">+{cs.insertions}</span>{" "}
                   <span className="text-kumo-danger">−{cs.deletions}</span>
@@ -741,7 +741,7 @@ function ObjectiveBlock({ task }: { task: TaskState }) {
   const { model } = useFlight();
   const criteria = model.input.tasks.find((t) => t.id === task.id)?.acceptanceCriteria ?? [];
   return (
-    <details className="group border-t border-kumo-rule pt-2">
+    <details className="group border-t-2 border-kumo-divider pt-2">
       <summary className="w-fit cursor-pointer text-[12px] text-kumo-link">
         Objective and acceptance criteria
       </summary>

@@ -20,8 +20,7 @@ type ClaimFact = Omit<LifecycleClaimFact, "action"> & {
 };
 
 /**
- * Agent activity as a sequence of facts (AGENTS.md sections 17 and 31-36). The Debug view
- * (components/flight) folds it at any recorded instant; the Change page reuses `describeStep`.
+ * Agent activity as a sequence of facts (DESIGN.md 11.1, AGENTS.md sections 17 and 31-36).
  *
  * The sequence comes from records the page reads, and from nothing else:
  *
@@ -63,7 +62,7 @@ export type CandidateSpec = {
   id: string;
   /** A, B, C in creation order. */
   letter: string;
-  /** Display name shared with the Candidate pages (`candidateLabels`). */
+  /** Display name shared with the Candidate pages: "Baseline" or "Candidate A". */
   name: string;
   status: CandidateDetail["status"];
   checks: CandidateCheckSpec[];
@@ -410,7 +409,7 @@ export function deriveActivity(input: ActivityInput): ActivityModel {
           }));
 
     const created = time(candidate.createdAt);
-    const name = names.get(candidate.id) ?? `Version ${letter}`;
+    const name = names.get(candidate.id) ?? `Candidate ${letter}`;
     if (created !== null) {
       push({
         id: `${candidate.id}:fork`,
@@ -753,7 +752,7 @@ function addRecordedFacts(
 }
 
 /** A tool step in words, for example `read_file src/cart.ts` -> `Reading src/cart.ts`. */
-export function describeStep(step: string): string {
+function describeStep(step: string): string {
   const cut = step.indexOf(" ");
   const tool = cut < 0 ? step : step.slice(0, cut);
   const target = cut < 0 ? "" : step.slice(cut + 1);
@@ -784,6 +783,8 @@ export type LaneView = {
   calls: number | null;
   /** Resources this lane's agent holds a Claim on, after the played facts. */
   claims: string[];
+  /** Event id of the last message that arrived at this lane (restarts the flash). */
+  arrival: string | null;
 };
 
 export type CandidateView = {
@@ -796,6 +797,7 @@ export type CandidateView = {
   >;
   changeSets: number;
   approval: "granted" | "rejected" | null;
+  arrival: string | null;
 };
 
 export type ConflictView = {
@@ -814,8 +816,14 @@ export type ActivityView = {
   lanes: Record<string, LaneView>;
   candidates: Record<string, CandidateView>;
   conflicts: ConflictView[];
+  /** Lanes with a declared Intent: the possible changes. */
+  intents: number;
+  /** Workspace arrivals restart the workspace flash. */
+  workspaceArrival: string | null;
   /** Set once a Candidate merges. */
   promoted: { candidateId: string; generation: number; eventId: string } | null;
+  /** Lane or Candidate the latest fact is about: the current step. */
+  current: string | null;
 };
 
 export function foldActivity(
@@ -834,6 +842,7 @@ export function foldActivity(
       step: lane.status === "ready" ? "Ready, waiting for an agent" : "Waiting on dependencies",
       calls: null,
       claims: [],
+      arrival: null,
     };
   }
   const candidates: Record<string, CandidateView> = {};
@@ -845,10 +854,20 @@ export function foldActivity(
       checks: {},
       changeSets: 0,
       approval: null,
+      arrival: null,
     };
   }
   const conflicts = new Map<string, ConflictView>();
-  const view: ActivityView = { lanes, candidates, conflicts: [], promoted: null };
+  const intentLanes = new Set<string>();
+  const view: ActivityView = {
+    lanes,
+    candidates,
+    conflicts: [],
+    intents: 0,
+    workspaceArrival: null,
+    promoted: null,
+    current: null,
+  };
 
   for (const event of model.events) {
     if (!played.has(event.id)) continue;
@@ -868,6 +887,7 @@ export function foldActivity(
             : event.previousTier !== event.tier
               ? `Attempt ${event.attempt} · escalated from ${event.previousTier}`
               : `Attempt ${event.attempt} · retry`;
+        view.current = event.laneId;
         break;
       }
       case "run.end": {
@@ -884,8 +904,14 @@ export function foldActivity(
               ? `Intent: ${event.intent}`
               : "Done"
             : `Failed · ${event.failure ?? "no reason recorded"}`;
+        view.current = event.laneId;
         break;
       }
+      case "intent":
+        intentLanes.add(event.laneId);
+        view.workspaceArrival = event.id;
+        view.current = event.laneId;
+        break;
       case "claim": {
         const lane = event.laneId ? lanes[event.laneId] : undefined;
         if (!lane) break;
@@ -894,6 +920,8 @@ export function foldActivity(
         else if (event.action === "released" || event.action === "expired")
           held.delete(event.resource);
         lane.claims = [...held];
+        if (event.action === "acquired") view.workspaceArrival = event.id;
+        view.current = event.laneId;
         break;
       }
       case "fact": {
@@ -914,6 +942,8 @@ export function foldActivity(
             lane.step = `Routed to ${String(tier ?? "a model")}`;
           }
         }
+        if (event.laneId) view.current = event.laneId;
+        else if (event.candidateId) view.current = event.candidateId;
         break;
       }
       case "challenge": {
@@ -928,6 +958,9 @@ export function foldActivity(
           statements: event.statements,
           eventId: event.id,
         });
+        const target = lanes[event.toLaneId];
+        if (target && event.challenged) target.arrival = event.id;
+        view.current = event.toLaneId;
         break;
       }
       case "conflict.resolved": {
@@ -941,12 +974,15 @@ export function foldActivity(
       case "candidate.fork": {
         const c = candidates[event.candidateId];
         if (c) c.forked = true;
+        view.current = event.candidateId;
         break;
       }
       case "changeset": {
         const c = candidates[event.candidateId];
         if (!c) break;
         c.changeSets += 1;
+        c.arrival = event.id;
+        view.current = event.candidateId;
         break;
       }
       case "check": {
@@ -954,6 +990,7 @@ export function foldActivity(
         if (!c) break;
         c.status = c.status === "composing" ? "verifying" : c.status;
         c.checks[event.checkId] = { status: event.status, coverage: event.coverage };
+        view.current = event.candidateId;
         break;
       }
       case "candidate.status": {
@@ -961,11 +998,13 @@ export function foldActivity(
         if (!c) break;
         c.status = event.status;
         c.reason = event.reason;
+        view.current = event.candidateId;
         break;
       }
       case "approval": {
         const c = candidates[event.candidateId];
         if (c) c.approval = event.decision;
+        view.current = event.candidateId;
         break;
       }
       case "promoted": {
@@ -976,6 +1015,7 @@ export function foldActivity(
           generation: event.generation,
           eventId: event.id,
         };
+        view.current = event.candidateId;
         break;
       }
     }
@@ -1004,6 +1044,7 @@ export function foldActivity(
     }
   }
 
+  view.intents = intentLanes.size;
   view.conflicts = [...conflicts.values()];
   return view;
 }

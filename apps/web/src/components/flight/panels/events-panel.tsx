@@ -17,7 +17,7 @@ import { clockOf } from "./decisions/decision-view";
  * Event stream (DESIGN.md 9.9): every recorded fact of the Change up to the fold instant, newest
  * on top. Facts come from `state.events` (flight-model.ts over activity-model.ts: Task runs,
  * conflicts, Candidates, Evidence, claim facts and the Change's event feed). The global event
- * family filter and the text filter apply. Each row selects the
+ * family filter and the text filter apply. A newly played fact flashes once. Each row selects the
  * fact, its entity button selects what the fact is about, and "Jump to time" folds the time
  * machine at the fact. The page owns the polite live region.
  */
@@ -86,6 +86,7 @@ function EventRow({
   state,
   selected,
   dimmed,
+  flash,
   focused,
 }: {
   event: ActivityEvent;
@@ -93,6 +94,7 @@ function EventRow({
   state: FlightState;
   selected: boolean;
   dimmed: boolean;
+  flash: boolean;
   focused: boolean;
 }) {
   const ref = { kind: "event" as const, id: event.id };
@@ -118,6 +120,7 @@ function EventRow({
             : "grid-cols-[minmax(0,1fr)_minmax(0,120px)_32px]",
           (selected || hovered) && "bg-kumo-faint",
           selected && "shadow-[inset_2px_0_0_var(--color-accent-500)]",
+          flash && "rh-arrive",
         )}
       >
         <EntityHover entity={ref}>
@@ -133,32 +136,32 @@ function EventRow({
             )}
           >
             {focused && (
-              <span className="text-right font-mono text-[12px] text-kumo-subtle tabular-nums">
+              <span className="text-right font-mono text-[11px] text-kumo-subtle tabular-nums">
                 {formatNumber(index + 1)}
               </span>
             )}
-            <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">
+            <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
               {clockOf(event.at)}
             </span>
             <span
-              className={cn("truncate font-mono text-[12px] font-semibold", typeTone(event))}
+              className={cn("truncate font-mono text-[11px] font-semibold", typeTone(event))}
               title={event.type}
             >
               {event.type}
             </span>
             {focused && (
-              <span className="truncate font-mono text-[12px] text-kumo-subtle" title={event.kind}>
+              <span className="truncate font-mono text-[11px] text-kumo-subtle" title={event.kind}>
                 {event.kind}
               </span>
             )}
             {focused && (
-              <span className="truncate font-mono text-[12px]" title={event.actor}>
+              <span className="truncate font-mono text-[11px]" title={event.actor}>
                 {event.actor}
               </span>
             )}
             <span className="min-w-0 truncate text-[12px]" title={event.detail}>
               {!focused && event.actor && (
-                <span className="mr-1.5 font-mono text-[12px] text-kumo-subtle">{event.actor}</span>
+                <span className="mr-1.5 font-mono text-[11px] text-kumo-subtle">{event.actor}</span>
               )}
               {event.detail}
             </span>
@@ -166,7 +169,7 @@ function EventRow({
         </EntityHover>
         {ids && (
           <span
-            className="truncate px-1 font-mono text-[12px] text-kumo-subtle"
+            className="truncate px-1 font-mono text-[11px] text-kumo-subtle"
             title={ids.taskId ?? undefined}
           >
             {ids.taskId ?? "—"}
@@ -174,7 +177,7 @@ function EventRow({
         )}
         {ids && (
           <span
-            className="truncate px-1 font-mono text-[12px] text-kumo-subtle"
+            className="truncate px-1 font-mono text-[11px] text-kumo-subtle"
             title={ids.candidateId ?? undefined}
           >
             {ids.candidateId ?? "—"}
@@ -186,7 +189,7 @@ function EventRow({
               entity={aboutEntity}
               title={`Select ${entityLabel(state, aboutEntity).kicker}: ${entityLabel(state, aboutEntity).title}`}
               context={`select ${entityLabel(state, aboutEntity).kicker}: ${entityLabel(state, aboutEntity).title}`}
-              className="max-w-[120px] truncate px-1 font-mono text-[12px]"
+              className="max-w-[120px] truncate px-1 font-mono text-[11px]"
             >
               {entityText(state, aboutEntity)}
             </RefButton>
@@ -208,7 +211,7 @@ function EventRow({
 EventRow.displayName = "EventRow";
 
 export function EventsPanel({ focused }: PanelProps) {
-  const { state, ready } = useFlight();
+  const { state, ready, inFlight } = useFlight();
   const filters = useFlightFilters();
   const selection = useSelection();
   const [limit, setLimit] = useState(PAGE);
@@ -263,7 +266,7 @@ export function EventsPanel({ focused }: PanelProps) {
     <div className="flex h-full min-h-0 flex-col">
       {fresh > 0 && (
         <div className="flex shrink-0 items-center gap-2 border-b border-kumo-rule px-3 py-1">
-          <span className="font-mono text-[12px] text-kumo-subtle">{formatNumber(fresh)} new</span>
+          <span className="font-mono text-[11px] text-kumo-subtle">{formatNumber(fresh)} new</span>
           <Button size="xs" variant="ghost" onClick={() => scrollRef.current?.scrollTo({ top: 0 })}>
             Show newest
           </Button>
@@ -305,6 +308,7 @@ export function EventsPanel({ focused }: PanelProps) {
                   !related.has(refKey({ kind: "event", id: event.id })) &&
                   !(currentRef(event) && related.has(refKey(currentRef(event) as EntityRef)))
                 }
+                flash={inFlight.has(event.id)}
                 focused={focused}
               />
             ))}
@@ -314,7 +318,7 @@ export function EventsPanel({ focused }: PanelProps) {
               <Button size="sm" variant="secondary" onClick={() => setLimit((l) => l + PAGE)}>
                 Show older
               </Button>
-              <span className="font-mono text-[12px] text-kumo-subtle">
+              <span className="font-mono text-[11px] text-kumo-subtle">
                 {formatNumber(limit)} of {formatNumber(rows.length)}
               </span>
             </div>

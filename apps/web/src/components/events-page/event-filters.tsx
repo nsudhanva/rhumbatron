@@ -3,8 +3,8 @@ import { formatNumber } from "../../lib/format";
 import { FAMILIES, type FamilyKey } from "./feed-model";
 
 /**
- * Filter chips by event family: 12px, 1px rule border, 6px radius, the selected chip tinted with
- * an ink border, a trailing mono count at 70%. No selection means every family.
+ * Filter chips by event family (DESIGN.md 8.3 filter chip, 9.9): 12px, 1px rule border, selected
+ * in ink with inverse text, a trailing mono count at 70%. No selection means every family.
  * Counts cover the loaded events only; the stream says so next to the chips.
  */
 export function EventFilters({
@@ -67,15 +67,15 @@ function Chip({
       aria-pressed={pressed}
       onClick={onClick}
       className={cn(
-        "inline-flex min-h-6 items-center gap-1.5 rounded-md border px-2.5 py-1 text-[12px] leading-none transition-colors duration-(--rh-dur-ui) pointer-coarse:min-h-11",
+        "inline-flex min-h-6 items-center gap-1.5 border px-2.5 py-1 text-[12px] leading-none transition-colors duration-(--rh-dur-ui) pointer-coarse:min-h-11",
         pressed
-          ? "border-kumo-ink bg-kumo-tint font-semibold"
+          ? "border-kumo-ink bg-kumo-ink text-kumo-inverse"
           : "border-kumo-rule hover:bg-kumo-tint",
         !pressed && count === 0 && "text-kumo-subtle",
       )}
     >
       <span>{label}</span>
-      <span className="font-mono text-[12px] tabular-nums opacity-70">{formatNumber(count)}</span>
+      <span className="font-mono text-[11px] tabular-nums opacity-70">{formatNumber(count)}</span>
     </button>
   );
 }

@@ -9,7 +9,7 @@ import { previewActivityInput } from "../agents/activity-fixture";
 import type { FlightInput } from "./flight-model";
 
 /**
- * Fixture input for the Debug view design preview (`/design/flight`). Shaped exactly like
+ * Fixture input for the Flight Control design preview (`/design/flight`). Shaped exactly like
  * the API responses and run through the same `deriveFlight` and `foldFlight` as the real page.
  * Used only for local visual checks of the panels; product pages never read it.
  */
@@ -317,7 +317,7 @@ const decisions: DecisionReceiptView[] = [
   },
 ];
 
-/** The Wishlist story as Debug view input. */
+/** The Wishlist story as Flight Control input. */
 export function previewFlightInput(): FlightInput {
   const base = previewActivityInput();
   const tasks = base.tasks.map((t) => ({

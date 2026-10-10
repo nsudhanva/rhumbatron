@@ -5,7 +5,7 @@
 export function InboxSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div role="status" aria-label="Loading notifications">
-      <div className="flex h-11 items-center border-b border-kumo-rule px-3">
+      <div className="flex h-11 items-center border-b-2 border-kumo-divider px-3">
         <span className="type-h6">Notifications</span>
       </div>
       <ul>

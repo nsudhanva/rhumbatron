@@ -100,12 +100,7 @@ export function formatClock(iso: Maybe<string>) {
   return date.toLocaleTimeString("en-GB", { hour12: false });
 }
 
-/**
- * The plain label of a canonical generation: `Release 1` (docs/ux/research-2026-10-09.md 7.6).
- * The internal code `S1` is `generationCode`, for the Debug view and technical details.
- */
-export const generation = (n: number) => `Release ${n}`;
-export const generationCode = (n: number) => `S${n}`;
+export const generation = (n: number) => `S${n}`;
 
 export function truncate(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}\u2026` : text;
@@ -126,39 +121,49 @@ export function isLive(change: ChangeDetail | undefined, tasks: TaskDetail[] | u
 
 export const isCompiling = (status: string) => status === "created" || status === "compiling";
 
-/** A running timer: `48s`, `1m 12s`, `2 h 5m`. Whole seconds, so it does not jitter. */
-export function elapsed(fromIso: Maybe<string>, now = Date.now()) {
-  if (!fromIso) return EMPTY;
-  const seconds = Math.floor((now - new Date(fromIso).getTime()) / 1000);
-  if (Number.isNaN(seconds)) return EMPTY;
-  const s = Math.max(0, seconds);
-  return s < 60 ? `${s}s` : formatDuration(s);
-}
+export const latestRun = (task: TaskDetail): TaskRun | undefined => task.runs[task.runs.length - 1];
 
-/** `1 task`, `3 tasks`. */
-export const plural = (n: number, word: string, many = `${word}s`) =>
-  `${formatNumber(n)} ${n === 1 ? word : many}`;
-
-/**
- * Tasks in dependency order (a task after everything it depends on), ties kept in API order.
- * A cycle cannot occur in a Work Graph, but a defensive pass appends any task left over.
- */
-export function topologicalOrder(tasks: TaskDetail[]): TaskDetail[] {
-  const ids = new Set(tasks.map((t) => t.id));
-  const placed = new Set<string>();
-  const out: TaskDetail[] = [];
-  let progress = true;
-  while (out.length < tasks.length && progress) {
-    progress = false;
-    for (const task of tasks) {
-      if (placed.has(task.id)) continue;
-      if (task.dependsOn.every((d) => !ids.has(d) || placed.has(d))) {
-        placed.add(task.id);
-        out.push(task);
-        progress = true;
-      }
+export function lastActiveTask(tasks: TaskDetail[]): TaskDetail | undefined {
+  let best: TaskDetail | undefined;
+  let bestTime = -1;
+  for (const task of tasks) {
+    const run = latestRun(task);
+    const time = run ? new Date(run.endedAt ?? run.startedAt).getTime() : -1;
+    if (time > bestTime) {
+      best = task;
+      bestTime = time;
     }
   }
-  for (const task of tasks) if (!placed.has(task.id)) out.push(task);
-  return out;
+  return best ?? tasks[0];
+}
+
+export function layoutTasks(tasks: TaskDetail[]) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const layers = new Map<string, number>();
+  const depth = (id: string, seen: Set<string>): number => {
+    const cached = layers.get(id);
+    if (cached !== undefined) return cached;
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const deps = (byId.get(id)?.dependsOn ?? []).filter((d) => byId.has(d));
+    const value = deps.length === 0 ? 0 : 1 + Math.max(...deps.map((d) => depth(d, seen)));
+    layers.set(id, value);
+    return value;
+  };
+  for (const t of tasks) depth(t.id, new Set());
+  const columns = new Map<number, string[]>();
+  for (const t of tasks) {
+    const layer = layers.get(t.id) ?? 0;
+    columns.set(layer, [...(columns.get(layer) ?? []), t.id]);
+  }
+  const positions = new Map<string, { x: number; y: number }>();
+  const rowHeight = 130;
+  const tallest = Math.max(1, ...[...columns.values()].map((c) => c.length));
+  for (const [layer, ids] of columns) {
+    const offset = ((tallest - ids.length) * rowHeight) / 2;
+    for (const [i, id] of ids.entries()) {
+      positions.set(id, { x: layer * 300, y: offset + i * rowHeight });
+    }
+  }
+  return positions;
 }

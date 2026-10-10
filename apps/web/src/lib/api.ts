@@ -269,33 +269,8 @@ export type CandidateDetail = {
   approval: Approval | null;
   baseTree: string | null;
   promotedGeneration: number | null;
-  /** Release of the promoted generation (ADR 0018). Absent from older API versions. */
-  release?: Release | null;
   createdAt: string;
   updatedAt: string;
-};
-
-/**
- * Release of one promoted generation through Workers Builds (AGENTS.md sections 21.3, 37;
- * ADR 0018). Mirrors `ReleaseView` in packages/protocol/src/release.ts.
- */
-export type Release = {
-  id: string;
-  projectId: string;
-  changeId: string;
-  candidateId: string;
-  generation: number;
-  commit: string;
-  status: "queued" | "building" | "deployed" | "failed" | "smoke_failed" | "superseded";
-  buildUuid: string | null;
-  versionId: string | null;
-  url: string | null;
-  workerName: string | null;
-  startedAt: string;
-  finishedAt: string | null;
-  failureReason: string | null;
-  evidenceId: string | null;
-  evidenceR2Key: string | null;
 };
 
 /** One recorded human decision, bound to the composed tree the approver saw. */
@@ -573,6 +548,20 @@ export type RunProgress = {
   progressAt: string | null;
 };
 
+export type ProjectStats = {
+  changes: { total: number; active: number };
+  candidates: { total: number; verified: number; promoted: number; rejected: number };
+  model: {
+    runs: number;
+    running: number;
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+  };
+  events: { latestSeq: number };
+};
+
 function feedQuery(cursor: FeedCursor) {
   const params = new URLSearchParams();
   if (cursor.after !== undefined) params.set("after", String(cursor.after));
@@ -589,6 +578,10 @@ export const listProjectEvents = createServerFn()
 export const listChangeEvents = createServerFn()
   .inputValidator((input: { changeId: string } & FeedCursor) => input)
   .handler(({ data }) => call<FeedPage>(`/v1/changes/${data.changeId}/events${feedQuery(data)}`));
+
+export const getProjectStats = createServerFn()
+  .inputValidator((projectId: string) => projectId)
+  .handler(({ data }) => call<ProjectStats>(`/v1/projects/${data}/stats`));
 
 export const getChangeClaims = createServerFn()
   .inputValidator((changeId: string) => changeId)
@@ -959,9 +952,7 @@ export type NotificationKind =
   | "candidate_rejected"
   | "conflict_open"
   | "change_completed"
-  | "promoted"
-  | "release_failed"
-  | "release_deployed";
+  | "promoted";
 
 /** `action`: needs a person until its condition clears. `attention`: stopped or rejected work. */
 export type NotificationSeverity = "action" | "attention" | "info";

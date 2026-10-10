@@ -1,13 +1,12 @@
 import { cn } from "@cloudflare/kumo";
-import { CircleNotch } from "@phosphor-icons/react";
 
 /**
- * Loader: a 16px CircleNotch that turns once per second (`.rh-spin` in theme.css). It is the
- * only looping motion in the default view: use it on running rows and loading states. Under
- * reduced motion it stays still and still reads as "working" next to its word. Use a progress
- * bar instead when the work has a known length. Inside a Kumo Button use `loading`.
+ * Loader (DESIGN.md 8.5): a square that fills with ink in a loop, never a spinning circle.
+ * Under reduced motion it shows a static half fill. Use a progress bar instead when the work
+ * has a known length. Kumo's own Loader (inside `<Button loading>`) is restyled to match in
+ * theme.css, so either is fine; use this one outside Kumo components.
  *
- *   <Loader /> <span>Planning</span>
+ *   <Loader /> <span>Compiling the Work Graph</span>
  */
 export function Loader({
   size = 16,
@@ -22,10 +21,9 @@ export function Loader({
     <span
       role="status"
       aria-label={label}
-      className={cn("inline-flex shrink-0 text-kumo-info", className)}
-    >
-      <CircleNotch size={size} aria-hidden className="rh-spin" />
-    </span>
+      className={cn("rh-loader", className)}
+      style={{ width: size, height: size }}
+    />
   );
 }
 Loader.displayName = "Loader";

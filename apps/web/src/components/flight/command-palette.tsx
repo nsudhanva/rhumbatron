@@ -21,7 +21,7 @@ import { stepFact } from "./scrubber";
 /**
  * Command palette (DESIGN.md 8.6), opened with Cmd/Ctrl+K (the page registers the shortcut).
  * Built on Kumo's CommandPalette (Base UI Dialog + Autocomplete): focus trap and return, Escape,
- * arrow keys and Enter come from Kumo. Commands act on the current Debug view state only:
+ * arrow keys and Enter come from Kumo. Commands act on the current Flight Control state only:
  * jump to any entity, focus a panel, move the time machine, toggle filters, open related pages.
  */
 
@@ -477,7 +477,7 @@ export function CommandPalette() {
         <Palette.Results>
           {(group: Group) => (
             <Palette.Group key={group.id} items={group.items}>
-              <Palette.GroupLabel className="mb-1 pt-2 text-[12px] font-normal">
+              <Palette.GroupLabel className="mb-1 pt-2 text-[11px] font-normal tracking-[0.08em] uppercase">
                 {group.label}
               </Palette.GroupLabel>
               <Palette.Items>
@@ -490,12 +490,12 @@ export function CommandPalette() {
                   >
                     <span className="min-w-0 flex-1 truncate">{command.title}</span>
                     {command.detail && (
-                      <span className="max-w-[40%] shrink-0 truncate font-mono text-[12px] text-kumo-subtle">
+                      <span className="max-w-[40%] shrink-0 truncate font-mono text-[11px] text-kumo-subtle">
                         {command.detail}
                       </span>
                     )}
                     {command.shortcut && (
-                      <kbd className="shrink-0 border border-kumo-rule px-1 py-px font-mono text-[12px] text-kumo-subtle">
+                      <kbd className="shrink-0 border border-kumo-rule px-1 py-px font-mono text-[10px] text-kumo-subtle">
                         {command.shortcut}
                       </kbd>
                     )}
@@ -508,12 +508,12 @@ export function CommandPalette() {
         <Palette.Empty>Nothing in this Change matches.</Palette.Empty>
       </Palette.List>
       <Palette.Footer>
-        <span className="flex items-center gap-3 font-mono text-[12px]">
+        <span className="flex items-center gap-3 font-mono text-[11px]">
           <span>↑↓ move</span>
           <span>↵ run</span>
           <span>Esc close</span>
         </span>
-        <span className="font-mono text-[12px]">⌘K / Ctrl K</span>
+        <span className="font-mono text-[11px]">⌘K / Ctrl K</span>
       </Palette.Footer>
     </Palette.Root>
   );

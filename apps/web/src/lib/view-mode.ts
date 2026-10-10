@@ -1,11 +1,10 @@
 import { type ReactNode, useSyncExternalStore } from "react";
 
 /**
- * "Show technical details" (research 7.1). The switch sits at the bottom of the Advanced group in
- * the sidebar; pages only read it. The stored values keep their old names:
+ * Product View / Systems View (AGENTS.md 38.7). The header holds the toggle; pages only read it.
  *
- *   "product" (default)  technical details hidden: plain words, no IDs or internal names.
- *   "systems"            technical details shown: event types, IDs, model routes, internal names.
+ * Product View (the default) shows user outcomes. Systems View adds the machinery: K2 flow, Queue
+ * flow, Durable Object ownership, model routes, Sandbox state and cost details.
  *
  * Usage in a page:
  *
@@ -16,12 +15,12 @@ import { type ReactNode, useSyncExternalStore } from "react";
  *     <Section label="Model routes">...</Section>
  *   </SystemsOnly>
  *
- *   // Or branch when the two differ in detail:
+ *   // Or branch when the two views differ in detail:
  *   const view = useViewMode(); // "product" | "systems"
- *   const columns = view === "systems" ? [...base, "Event ID"] : base;
+ *   const columns = view === "systems" ? [...base, "Durable Object", "Queue"] : base;
  *
- * The choice is stored per browser (localStorage, best effort). The server always renders with
- * technical details hidden; the client switches after hydration when the stored choice is shown.
+ * The choice is stored per browser (localStorage, best effort). The server always renders
+ * Product View; the client switches after hydration when the stored choice is Systems.
  */
 
 export type ViewMode = "product" | "systems";
@@ -69,7 +68,7 @@ function subscribe(listener: () => void) {
   };
 }
 
-/** Shows or hides technical details on every page and stores the choice for the next visit. */
+/** Sets the view for every component on the page and stores it for the next visit. */
 export function setViewMode(next: ViewMode) {
   try {
     localStorage.setItem(STORAGE_KEY, next);
@@ -80,14 +79,14 @@ export function setViewMode(next: ViewMode) {
   emit();
 }
 
-/** "systems" when technical details are shown, else "product" (the default). */
+/** The current view: "product" (default) or "systems". */
 export function useViewMode(): ViewMode {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 /**
- * Renders `children` only while technical details are shown. `fallback` (optional) renders
- * otherwise, for example a one-line summary of what the details would show.
+ * Renders `children` only in Systems View. `fallback` (optional) renders in Product View, for
+ * example a one-line summary of what Systems View would show.
  */
 export function SystemsOnly({
   children,

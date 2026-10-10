@@ -21,7 +21,7 @@ import { useEventFeed } from "../project/use-event-feed";
 import { deriveFlight, type FlightModel } from "./flight-model";
 
 /**
- * Every record the Debug view folds, read with the same React Query keys as the Change page
+ * Every record Flight Control folds, read with the same React Query keys as the Change page
  * (routes/changes.$changeId.tsx), so the two pages share one cache. Live push invalidates; the
  * slow fallback poll runs only while the Change is live and the socket is not open (AGENTS.md 39).
  * Two more reads than the Change page: the project Workspace (forks, ChangeSets, changed files)

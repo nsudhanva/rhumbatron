@@ -40,9 +40,9 @@ function Block({
 }) {
   return (
     <section className="grid min-w-0 content-start gap-1.5">
-      <div className="flex items-end justify-between gap-3 border-b border-kumo-rule pb-1">
+      <div className="flex items-end justify-between gap-3 border-b-2 border-kumo-divider pb-1">
         <h3 className="type-h6">{label}</h3>
-        {meta && <span className="text-[12px] text-kumo-subtle">{meta}</span>}
+        {meta && <span className="text-[11px] text-kumo-subtle">{meta}</span>}
       </div>
       {children}
     </section>
@@ -149,8 +149,8 @@ export function CandidateInspector({ entity }: { entity: EntityRef }) {
                   entity={{ kind: "changeset", id: cs.id }}
                   className="grid w-full grid-cols-[48px_minmax(0,1fr)_auto] items-baseline gap-2 px-1 py-1"
                 >
-                  <span className="font-mono text-[12px] font-semibold">{cs.taskKey}</span>
-                  <span className="truncate font-mono text-[12px] text-kumo-subtle">
+                  <span className="font-mono text-[11px] font-semibold">{cs.taskKey}</span>
+                  <span className="truncate font-mono text-[11px] text-kumo-subtle">
                     {short(cs.record?.commit) ?? cs.id}
                     {cs.record
                       ? ` · ${formatNumber(cs.record.files.length)} files`
@@ -160,7 +160,7 @@ export function CandidateInspector({ entity }: { entity: EntityRef }) {
                     <AddsDels
                       adds={cs.record.insertions}
                       dels={cs.record.deletions}
-                      className="font-mono text-[12px]"
+                      className="font-mono text-[11px]"
                     />
                   ) : (
                     <span />
@@ -182,7 +182,7 @@ export function CandidateInspector({ entity }: { entity: EntityRef }) {
                   entity={{ kind: "task", id: t.id }}
                   className="flex w-full items-baseline gap-2 px-1 py-1"
                 >
-                  <span className="font-mono text-[12px] font-semibold">{t.key}</span>
+                  <span className="font-mono text-[11px] font-semibold">{t.key}</span>
                   <span className="min-w-0 truncate">{t.title}</span>
                   <StatusPill status={t.status} className="ml-auto" />
                 </RefButton>
@@ -218,17 +218,17 @@ export function CandidateInspector({ entity }: { entity: EntityRef }) {
                           view.hollow ? "border-2 border-kumo-warning" : FAMILY_FILL[view.family],
                         )}
                       />
-                      <span className="font-mono text-[12px]">{check.checkId}</span>
+                      <span className="font-mono text-[11px]">{check.checkId}</span>
                       <span className={cn("font-semibold", FAMILY_TEXT[view.family])}>
                         {view.word}
                       </span>
-                      <span className="truncate text-[12px] text-kumo-subtle">{view.coverage}</span>
-                      <span className="ml-auto shrink-0 text-[12px] text-kumo-subtle">
+                      <span className="truncate text-[11px] text-kumo-subtle">{view.coverage}</span>
+                      <span className="ml-auto shrink-0 text-[10px] text-kumo-subtle">
                         {check.required ? "required" : "optional"}
                       </span>
                     </span>
                     {bits.length > 0 && (
-                      <span className="truncate pl-4.5 font-mono text-[12px] text-kumo-subtle">
+                      <span className="truncate pl-4.5 font-mono text-[11px] text-kumo-subtle">
                         {bits.join(" · ")}
                       </span>
                     )}
@@ -251,7 +251,7 @@ export function CandidateInspector({ entity }: { entity: EntityRef }) {
           <ul className="grid gap-0.5">
             {gaps.map((g) => (
               <li key={g.checkId}>
-                <span className="font-mono text-[12px]">{g.checkId}</span>
+                <span className="font-mono text-[11px]">{g.checkId}</span>
                 <span className="text-kumo-subtle"> · {g.words}</span>
               </li>
             ))}
@@ -290,7 +290,7 @@ export function CandidateInspector({ entity }: { entity: EntityRef }) {
                     <Tag>{d.kind}</Tag>
                     <span className="min-w-0 truncate font-semibold">{d.title}</span>
                   </span>
-                  <span className="line-clamp-2 text-[12px] text-kumo-subtle">
+                  <span className="line-clamp-2 text-[11px] text-kumo-subtle">
                     {d.verdict} · by {d.by}
                   </span>
                 </RefButton>
@@ -330,11 +330,11 @@ function List({ label, items }: { label: string; items: string[] }) {
     <div className="grid gap-0.5">
       <span className="type-label text-kumo-subtle">{label}</span>
       {items.length === 0 ? (
-        <span className="text-[12px] text-kumo-subtle">none declared</span>
+        <span className="text-[11px] text-kumo-subtle">none declared</span>
       ) : (
         <ul className="grid gap-0.5">
           {items.map((item) => (
-            <li key={item} className="text-[12px] break-words">
+            <li key={item} className="text-[11px] break-words">
               {item}
             </li>
           ))}
@@ -364,7 +364,7 @@ function Side({
   const otherPaths = new Set(other?.files.changed.map((f) => f.path) ?? []);
   const changeSets: WorkspaceChangeSet[] = task?.changeSets ?? [];
   return (
-    <div className="grid min-w-0 content-start gap-2 border-t border-kumo-rule pt-1.5">
+    <div className="grid min-w-0 content-start gap-2 border-t-2 border-kumo-divider pt-1.5">
       <span className="type-label text-kumo-subtle">
         {index === 0 ? "Side A · challenger" : "Side B"}
       </span>
@@ -374,8 +374,8 @@ function Side({
         entity={{ kind: "task", id: taskId }}
         className="flex w-full items-baseline gap-1.5 px-1 py-0.5"
       >
-        <span className="font-mono text-[12px] font-semibold">{intent.taskKey}</span>
-        <span className="min-w-0 truncate text-[12px] text-kumo-subtle">{intent.agentId}</span>
+        <span className="font-mono text-[11px] font-semibold">{intent.taskKey}</span>
+        <span className="min-w-0 truncate text-[11px] text-kumo-subtle">{intent.agentId}</span>
       </RefButton>
       <List label="Expected files" items={declared?.expectedFiles ?? []} />
       <List label="Contract changes" items={declared?.expectedContractChanges ?? []} />
@@ -384,7 +384,7 @@ function Side({
       <div className="grid gap-0.5">
         <span className="type-label text-kumo-subtle">ChangeSets</span>
         {changeSets.length === 0 ? (
-          <span className="text-[12px] text-kumo-subtle">none published at this instant</span>
+          <span className="text-[11px] text-kumo-subtle">none published at this instant</span>
         ) : (
           changeSets.map((cs) => (
             <div key={cs.id} className="grid gap-0.5">
@@ -393,11 +393,11 @@ function Side({
                 entity={{ kind: "changeset", id: cs.id }}
                 className="flex w-full items-baseline gap-1.5 px-1 py-0.5"
               >
-                <span className="font-mono text-[12px]">{short(cs.commit)}</span>
+                <span className="font-mono text-[11px]">{short(cs.commit)}</span>
                 <AddsDels
                   adds={cs.insertions}
                   dels={cs.deletions}
-                  className="ml-auto font-mono text-[12px]"
+                  className="ml-auto font-mono text-[11px]"
                 />
               </RefButton>
               <ul className="grid">
@@ -405,7 +405,7 @@ function Side({
                   ? cs.fileStats
                   : cs.files.map((path) => ({ path, adds: null, dels: null }))
                 ).map((f) => (
-                  <li key={f.path} className="flex min-w-0 items-baseline gap-1.5 text-[12px]">
+                  <li key={f.path} className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
                     <span className="min-w-0 truncate font-mono" title={f.path}>
                       {f.path}
                     </span>
@@ -432,7 +432,7 @@ function Side({
             <StatusPill status={candidate.status} className="ml-auto" />
           </RefButton>
         ) : (
-          <span className="text-[12px] text-kumo-subtle">no Candidate at this instant</span>
+          <span className="text-[11px] text-kumo-subtle">no Candidate at this instant</span>
         )}
       </div>
     </div>
@@ -462,7 +462,7 @@ export function ConflictInspector({ entity }: { entity: EntityRef }) {
     <div className="grid min-w-0 gap-4 text-[12px]">
       <div className="grid gap-1.5">
         <div className="flex items-center gap-2">
-          <span className="text-[15px] font-extrabold text-kumo-danger">Conflict</span>
+          <span className="text-[15px] font-extrabold text-kumo-accent">Conflict</span>
           <StatusPill status={conflict.state} className="ml-auto" />
         </div>
         <KeyValue
@@ -596,7 +596,7 @@ export function ChangeSetInspector({ entity }: { entity: EntityRef }) {
           entity={{ kind: "task", id: task.id }}
           className="flex w-full items-baseline gap-2 px-1 py-1"
         >
-          <span className="font-mono text-[12px] font-semibold">{task.key}</span>
+          <span className="font-mono text-[11px] font-semibold">{task.key}</span>
           <span className="min-w-0 truncate">{task.title}</span>
           <StatusPill status={task.status} className="ml-auto" />
         </RefButton>
@@ -617,7 +617,7 @@ export function ChangeSetInspector({ entity }: { entity: EntityRef }) {
                   className="flex w-full items-center gap-2 px-1 py-1"
                 >
                   <span className="font-semibold">{c.name}</span>
-                  <span className="font-mono text-[12px] text-kumo-subtle">{c.id}</span>
+                  <span className="font-mono text-[11px] text-kumo-subtle">{c.id}</span>
                   <StatusPill status={c.status} className="ml-auto" />
                 </RefButton>
               </li>

@@ -57,6 +57,44 @@ const keysOf = (state: FlightState, taskIds: string[]) =>
   taskIds.map((id) => state.tasks[id]?.key ?? id);
 
 /* --------------------------------------------------------------------------------------------
+ * Animation: which touches newly played
+ * ------------------------------------------------------------------------------------------ */
+
+/**
+ * Returns a lookup from a changed touch to the id of the newly played fact that recorded it (the
+ * ChangeSet proposal, its composition, or the run end that published it). Only those cells fill
+ * with motion; settled cells render still (DESIGN.md 11.1).
+ */
+export function animationOf(state: FlightState, animated: ReadonlySet<string>) {
+  const byChangeSet = new Map<string, string>();
+  const runEnds: { taskId: string; at: number; id: string }[] = [];
+  if (animated.size > 0) {
+    for (const event of state.events) {
+      if (!animated.has(event.id)) continue;
+      if (event.kind === "changeset") byChangeSet.set(event.changeSetId, event.id);
+      else if (event.kind === "fact" && event.eventType === "changeset.proposed") {
+        const id = event.data?.changeSetId;
+        if (typeof id === "string") byChangeSet.set(id, event.id);
+        else if (event.laneId) runEnds.push({ taskId: event.laneId, at: event.at, id: event.id });
+      } else if (event.kind === "run.end" && event.status === "completed") {
+        runEnds.push({ taskId: event.laneId, at: event.at, id: event.id });
+      }
+    }
+  }
+  return (touch: FileTouch): string | null => {
+    if (touch.kind !== "changed") return null;
+    if (touch.changeSetId) {
+      const id = byChangeSet.get(touch.changeSetId);
+      if (id) return id;
+    }
+    return (
+      runEnds.find((r) => r.taskId === touch.taskId && Math.abs(r.at - touch.at) <= 5_000)?.id ??
+      null
+    );
+  };
+}
+
+/* --------------------------------------------------------------------------------------------
  * Files layer
  * ------------------------------------------------------------------------------------------ */
 
@@ -68,6 +106,8 @@ export type FileCell = {
   /** The most relevant entity in the bucket: a ChangeSet, else the Task. */
   target: EntityRef;
   label: string;
+  /** Id of the newly played fact behind this cell, if any. */
+  animateKey: string | null;
 };
 
 export type FileRow = {
@@ -94,6 +134,7 @@ function fileCells(
   file: FileActivity,
   touches: FileTouch[],
   axis: Axis,
+  animate: (t: FileTouch) => string | null,
 ): FileCell[] {
   const buckets = new Map<number, FileTouch[]>();
   for (const touch of touches) {
@@ -127,6 +168,8 @@ function fileCells(
       ];
       if (changedKeys.length > 0) words.push(`changed by ${changedKeys.join(", ")}`);
       if (expectedKeys.length > 0) words.push(`expected by ${expectedKeys.join(", ")}`);
+      let animateKey: string | null = null;
+      for (const t of changed) animateKey = animate(t) ?? animateKey;
       return {
         index,
         touches: list,
@@ -134,6 +177,7 @@ function fileCells(
         level: levelOf(list.length),
         target,
         label: `${file.path}, ${clockOf(bucketStart(axis, index))}, ${words.join("; ")}`,
+        animateKey,
       };
     });
 }
@@ -153,6 +197,7 @@ export function fileGroups(
   filters: FlightFilters,
   sort: FileSort,
   workspaceLoaded: boolean,
+  animate: (t: FileTouch) => string | null,
 ): FileGroup[] {
   const q = filters.query.trim().toLowerCase();
   const rows: FileRow[] = [];
@@ -166,7 +211,7 @@ export function fileGroups(
     rows.push({
       file,
       touches,
-      cells: fileCells(state, file, touches, axis),
+      cells: fileCells(state, file, touches, axis, animate),
       taskKeys: [...new Set(keysOf(state, [...new Set(touches.map((t) => t.taskId))]))],
       churn: file.adds + file.dels,
     });

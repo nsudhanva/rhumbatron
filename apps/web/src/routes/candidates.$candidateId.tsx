@@ -1,45 +1,45 @@
-import { Show, useUser } from "@clerk/tanstack-react-start";
+import { Show } from "@clerk/tanstack-react-start";
 import { Button, buttonVariants, cn } from "@cloudflare/kumo";
-import { CheckCircle, Columns, WarningCircle, XCircle } from "@phosphor-icons/react";
+import { Columns } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Banner } from "../components/candidate/banner";
 import {
   type CheckRow,
   candidateLabels,
+  candidateSentence,
   checkRows,
   formatP95,
   isActive,
+  meterMax,
   p95Budget,
   p95Of,
-  releaseInFlight,
   requiredTally,
-  versionSentence,
-  versionWord,
+  shortHash,
+  VERDICT_STATUS,
 } from "../components/candidate/model";
 import { CandidateSkeleton } from "../components/candidate/skeleton";
-import { TechnicalDetails } from "../components/candidate/technical-details";
 import { CandidateEvidence } from "../components/candidate-evidence";
 import { CandidatePromotion } from "../components/candidate-promotion";
+import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../components/ui/data-table";
 import { EmptyState } from "../components/ui/empty-state";
-import { KeyValue } from "../components/ui/key-value";
-import { Loader } from "../components/ui/loader";
+import { SegmentedSteps, ThresholdMeter } from "../components/ui/meter";
+import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
+import { StatCell, StatStrip } from "../components/ui/stat-strip";
 import { StatusPill } from "../components/ui/status-pill";
-import { Term } from "../components/ui/term";
 import {
-  type ApprovalWithName,
   type CandidateDetail,
   getCandidate,
   listCandidateEvidence,
   listCandidates,
   listChanges,
 } from "../lib/api";
-import { EMPTY, formatMs, formatNumber, generation, generationCode, timeAgo } from "../lib/format";
+import { EMPTY, formatMs, formatNumber, generation, timeAgo } from "../lib/format";
 
 export const Route = createFileRoute("/candidates/$candidateId")({ component: CandidatePage });
 
-/** Checks run for minutes; poll while they are active, then stop (AGENTS.md section 39). */
+/** Verification runs for minutes; poll while it is active, then stop (AGENTS.md section 39). */
 const POLL_MS = 10_000;
 
 function CandidatePage() {
@@ -50,8 +50,8 @@ function CandidatePage() {
       </Show>
       <Show when="signed-out">
         <EmptyState
-          what="Sign in to view this version."
-          how="Versions belong to a project you are a member of."
+          what="Sign in to view this Candidate."
+          how="Candidates belong to a Project you are a member of."
         />
       </Show>
     </Page>
@@ -63,10 +63,7 @@ function CandidateView() {
   const candidate = useQuery({
     queryKey: ["candidate", candidateId],
     queryFn: () => getCandidate({ data: candidateId }),
-    refetchInterval: (query) =>
-      !query.state.data || isActive(query.state.data) || releaseInFlight(query.state.data)
-        ? POLL_MS
-        : false,
+    refetchInterval: (query) => (!query.state.data || isActive(query.state.data) ? POLL_MS : false),
   });
   const active = !candidate.data || isActive(candidate.data);
   const evidence = useQuery({
@@ -82,7 +79,7 @@ function CandidateView() {
     refetchInterval: active ? POLL_MS : false,
   });
   const projectId = candidate.data?.projectId;
-  // Risk tier is only on the Change summary list; it names the rule behind the approval.
+  // Risk tier is only on the Change summary list; it names the rule behind the human gate.
   const changes = useQuery({
     queryKey: ["changes", projectId],
     queryFn: () => listChanges({ data: projectId ?? "" }),
@@ -94,7 +91,7 @@ function CandidateView() {
       return (
         <Banner
           family="danger"
-          title="This version did not load"
+          title="The Candidate did not load"
           action={
             <Button
               size="sm"
@@ -110,7 +107,7 @@ function CandidateView() {
         </Banner>
       );
     }
-    return <CandidateSkeleton label="Loading this version" />;
+    return <CandidateSkeleton label="Loading Candidate" />;
   }
 
   const data = candidate.data;
@@ -125,16 +122,25 @@ function CandidateView() {
     <>
       <PageTitle
         size="detail"
+        kicker={
+          <span className="flex items-center gap-2">
+            Candidate <StatusPill status={data.status} className="tracking-normal normal-case" />
+          </span>
+        }
         title={label ?? <span className="font-mono text-[0.75em] break-all">{data.id}</span>}
         meta={
           <>
+            {label && <Mono>{data.id}</Mono>}
             <span>
-              <Term k="basedOn" plain /> {generation(data.baseGeneration)}
+              base <Mono>{generation(data.baseGeneration)}</Mono>
             </span>
-            <span aria-hidden>·</span>
+            <span className="min-w-0 max-w-[280px]">
+              <Mono truncate>{data.artifactRef ?? "fork pending"}</Mono>
+            </span>
+            <span>
+              tree <Mono>{shortHash(data.composedTree) ?? EMPTY}</Mono>
+            </span>
             <span title={data.createdAt}>created {timeAgo(data.createdAt)}</span>
-            <span aria-hidden>·</span>
-            <span>{versionWord(data.status)}</span>
           </>
         }
         actions={
@@ -145,188 +151,263 @@ function CandidateView() {
               className={cn(buttonVariants({ variant: "secondary" }), "gap-1.5")}
             >
               <Columns size={16} aria-hidden />
-              Compare versions
+              Compare {formatNumber(others.length + 1)} Candidates
             </Link>
           )
         }
       />
 
-      <div className="grid gap-3">
-        <StatusHeader candidate={data} rows={rows} />
-        <SummaryLine candidate={data} rows={rows} />
-        <TechnicalDetails>
-          <KeyValue
-            items={[
-              { label: "Candidate", value: data.id, mono: true },
-              { label: "Status", value: data.status, mono: true },
-              { label: "Base", value: generationCode(data.baseGeneration), mono: true },
-              { label: "Artifact", value: data.artifactRef, mono: true },
-              { label: "Composed tree", value: data.composedTree, mono: true },
-              { label: "Composed commit", value: data.composedCommit, mono: true },
-              {
-                label: "ChangeSets",
-                value: data.changeSetIds.length > 0 ? data.changeSetIds.join(" · ") : null,
-                mono: true,
-              },
-              { label: "Status reason", value: data.statusReason },
-            ]}
-          />
-        </TechnicalDetails>
-      </div>
+      <Verdict candidate={data} label={label ?? "This Candidate"} rows={rows} />
 
-      <Section
-        label={<Term k="checks" />}
-        meta={
-          <>
-            {stale && (
-              <span>
-                Couldn't refresh · updated{" "}
-                {timeAgo(new Date(candidate.dataUpdatedAt).toISOString())}
-              </span>
-            )}
-            <span>{formatNumber(rows.length)} checks</span>
-          </>
-        }
-      >
-        {evidence.isPending ? (
-          <p className="flex items-center gap-2 text-[14px] text-kumo-subtle">
-            <Loader size={16} /> Loading checks…
-          </p>
-        ) : (
-          <CandidateEvidence candidate={data} rows={rows} />
-        )}
-      </Section>
+      <Stats candidate={data} rows={rows} />
 
-      <Section label="Your approval and shipping">
+      <Section label="Approval and promotion">
         <CandidatePromotion
           candidate={data}
-          label={label ?? "this version"}
+          label={label ?? "this Candidate"}
           rows={rows}
           riskTier={riskTier}
         />
       </Section>
 
+      <Section
+        label="Verification evidence"
+        meta={
+          <>
+            {stale && (
+              <>
+                <StatusPill status="stale" />
+                <span>updated {timeAgo(new Date(candidate.dataUpdatedAt).toISOString())}</span>
+              </>
+            )}
+            <Mono subtle>
+              {formatNumber(rows.length)} checks · {formatNumber(evidence.data?.length ?? 0)}{" "}
+              records
+            </Mono>
+          </>
+        }
+      >
+        {evidence.isPending ? (
+          <p className="text-[13px] text-kumo-subtle">Loading Evidence…</p>
+        ) : (
+          <CandidateEvidence candidate={data} rows={rows} />
+        )}
+      </Section>
+
       {others.length > 0 && (
         <Section
-          label="Other versions of this change"
+          label="Candidates of this Change"
           meta={
             <Link
               to="/compare/$changeId"
               params={{ changeId: data.changeId }}
               className="font-semibold text-kumo-link hover:underline"
             >
-              Compare versions
+              Compare side by side
             </Link>
           }
         >
-          <ul className="grid rounded-lg border border-kumo-rule bg-kumo-elevated">
-            {others.map((c) => (
-              <li
-                key={c.id}
-                className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-kumo-rule px-3 py-2.5 text-[14px] last:border-b-0"
-              >
-                <Link
-                  to="/candidates/$candidateId"
-                  params={{ candidateId: c.id }}
-                  className="font-semibold text-kumo-link hover:underline"
-                >
-                  {labels.get(c.id) ?? c.id}
-                </Link>
-                <StatusPill status={c.status} label={versionWord(c.status)} />
-                <span className="text-[13px] text-kumo-subtle">
-                  Response time (p95) {formatP95(c.gate?.p95Ms)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <DataTable label="Candidates of this Change" minWidth={560}>
+            <thead>
+              <tr>
+                <Th>Candidate</Th>
+                <Th>Status</Th>
+                <Th numeric>ChangeSets</Th>
+                <Th numeric>p95</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {(siblings.data ?? []).map((c) => (
+                <TRow key={c.id} selected={c.id === data.id}>
+                  <Td>
+                    <TitleCell
+                      title={
+                        <RowLink to="/candidates/$candidateId" params={{ candidateId: c.id }}>
+                          {labels.get(c.id) ?? c.id}
+                        </RowLink>
+                      }
+                      meta={c.id}
+                    />
+                  </Td>
+                  <Td>
+                    <StatusPill status={c.status} />
+                  </Td>
+                  <Td numeric>{formatNumber(c.changeSetIds.length)}</Td>
+                  <Td numeric>{formatP95(c.gate?.p95Ms)}</Td>
+                </TRow>
+              ))}
+            </tbody>
+          </DataTable>
         </Section>
       )}
     </>
   );
 }
 
-/** One status header (spec 6.2 P1): icon, one word, one sentence. */
-function StatusHeader({ candidate, rows }: { candidate: CandidateDetail; rows: CheckRow[] }) {
-  const word = versionWord(candidate.status);
-  let sentence = versionSentence(candidate, rows);
-  const awaiting =
-    candidate.status === "verified" &&
-    candidate.gate?.promotable &&
-    candidate.approvalRequired &&
-    !candidate.approval;
-  if (awaiting) sentence += " A person must approve it before it ships.";
-  const icon = { size: 20, className: "mt-px shrink-0", "aria-hidden": true } as const;
-  return (
-    <div
-      role="status"
-      className="flex items-start gap-2.5 rounded-lg border border-kumo-rule bg-kumo-elevated px-4 py-3 text-[14px]"
-    >
-      {isActive(candidate) ? (
-        <Loader size={20} label={word} className="mt-px shrink-0" />
-      ) : candidate.status === "rejected" ? (
-        <XCircle {...icon} className={cn(icon.className, "text-kumo-danger")} />
-      ) : candidate.status === "stale" ? (
-        <WarningCircle {...icon} className={cn(icon.className, "text-kumo-warning")} />
-      ) : (
-        <CheckCircle {...icon} className={cn(icon.className, "text-kumo-success")} />
-      )}
-      <p className="text-pretty">
-        <span className="font-semibold">{word}</span>
-        <span className="text-kumo-subtle"> · </span>
+/** Verdict banner (DESIGN.md 8.5): the gate result in words, one banner per page. */
+function Verdict({
+  candidate,
+  label,
+  rows,
+}: {
+  candidate: CandidateDetail;
+  label: string;
+  rows: CheckRow[];
+}) {
+  const sentence = candidateSentence(label, candidate, rows);
+  if (candidate.status === "promoted") {
+    return (
+      <Banner family="success" title="Promoted · all required checks passed with evidence">
         {sentence}
-      </p>
-    </div>
+      </Banner>
+    );
+  }
+  if (candidate.status === "verified" && candidate.gate?.promotable) {
+    return (
+      <Banner family="success" title="Verified · all required checks pass with evidence">
+        {sentence}
+        {candidate.approvalRequired &&
+          !candidate.approval &&
+          " A human approval is still required before promotion."}
+      </Banner>
+    );
+  }
+  if (candidate.status === "stale") {
+    return (
+      <Banner family="attention" title="Stale · the canonical state moved">
+        {sentence} A stale Candidate cannot promote.
+      </Banner>
+    );
+  }
+  if (isActive(candidate)) {
+    const recorded = rows.filter((r) => r.record).length;
+    return (
+      <Banner
+        family="progress"
+        title={
+          candidate.status === "verifying" ? "Verifying in the Sandbox" : "Composing the Candidate"
+        }
+        progress={rows.length > 0 ? recorded / rows.length : undefined}
+        action={
+          rows.length > 0 ? (
+            <Mono subtle>
+              step {recorded} / {rows.length}
+            </Mono>
+          ) : undefined
+        }
+      >
+        Checks record Evidence as they finish. Nothing counts as a pass until its Evidence lands.
+      </Banner>
+    );
+  }
+  const humanReject =
+    candidate.approval?.decision === "rejected" && (candidate.gate?.promotable ?? false);
+  const title = humanReject
+    ? "Rejected · by a human decision"
+    : `${candidate.status === "rejected" ? "Rejected" : "Not promotable"} · required checks not satisfied`;
+  return (
+    <Banner family="danger" title={title}>
+      {sentence}
+    </Banner>
   );
 }
-StatusHeader.displayName = "StatusHeader";
 
-/** Required checks, response time and approval, in one line (replaces the stat strip). */
-function SummaryLine({ candidate, rows }: { candidate: CandidateDetail; rows: CheckRow[] }) {
-  const { user } = useUser();
+function Stats({ candidate, rows }: { candidate: CandidateDetail; rows: CheckRow[] }) {
   const tally = requiredTally(rows);
   const budget = p95Budget(candidate);
   const p95 = p95Of(candidate, rows);
-  const { approval } = candidate;
-  const approver = approval
-    ? approval.approverUserId === (user ? `usr_${user.id}` : null)
-      ? "you"
-      : ((approval as ApprovalWithName).approverName ?? "a person")
-    : null;
-  const approvalText = approval
-    ? `${approval.decision === "granted" ? "Approved" : "Rejected"} by ${approver} ${timeAgo(approval.createdAt)}`
+  const perfRow = rows.find((r) => r.kind === "performance");
+  const approval = candidate.approval;
+  const approvalWord = approval
+    ? approval.decision === "granted"
+      ? "Approved"
+      : "Rejected"
     : candidate.approvalRequired
       ? "Required"
-      : "Not needed";
+      : "None";
   return (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-kumo-subtle">
-      <span>
-        Required checks:{" "}
-        <span className="text-kumo-default">
-          {formatNumber(tally.met)} of {formatNumber(tally.total)} passed
-        </span>
-      </span>
-      {(p95 !== null || budget !== null) && (
-        <>
-          <span aria-hidden>·</span>
-          <span className="inline-flex items-center gap-1">
-            <Term k="p95" />{" "}
-            <span
-              className={cn(
-                "text-kumo-default",
-                p95 !== null && budget !== null && p95 >= budget && "text-kumo-danger",
-              )}
-            >
-              {p95 === null ? EMPTY : formatP95(p95)}
-            </span>
-            {budget !== null && <span>(limit {formatMs(budget)})</span>}
-          </span>
-        </>
-      )}
-      <span aria-hidden>·</span>
-      <span>
-        Approval: <span className="text-kumo-default">{approvalText}</span>
-      </span>
-    </p>
+    <StatStrip>
+      <StatCell
+        label="Required checks met"
+        value={formatNumber(tally.met)}
+        unit={`/ ${formatNumber(tally.total)}`}
+        pill={
+          tally.pending.length > 0 ? undefined : (
+            <StatusPill
+              status={tally.total > 0 && tally.met === tally.total ? "pass" : "fail"}
+              label={tally.total > 0 && tally.met === tally.total ? "All met" : "Unmet"}
+            />
+          )
+        }
+      >
+        <SegmentedSteps
+          label="Required checks"
+          steps={rows
+            .filter((r) => r.required)
+            .map((r) => ({ label: r.checkId, status: VERDICT_STATUS[r.verdict] }))}
+        />
+      </StatCell>
+      <StatCell
+        label="p95 vs budget"
+        value={p95 === null ? EMPTY : formatNumber(p95, Math.abs(p95) < 10 ? 1 : 0)}
+        unit={p95 === null ? undefined : "ms"}
+        pill={
+          perfRow && perfRow.verdict !== "pending" ? (
+            <StatusPill status={VERDICT_STATUS[perfRow.verdict]} />
+          ) : undefined
+        }
+        footnote={budget === null ? "no performance check planned" : undefined}
+      >
+        {budget !== null && p95 !== null && (
+          <ThresholdMeter
+            label="budget"
+            value={p95}
+            max={meterMax(budget, [p95])}
+            threshold={budget}
+            size="inline"
+            format={(n) => formatMs(n)}
+          />
+        )}
+        {budget !== null && p95 === null && (
+          <p className="font-mono text-[11px] text-kumo-subtle">
+            budget {formatMs(budget)} · no measurement yet
+          </p>
+        )}
+      </StatCell>
+      <StatCell
+        label="ChangeSets composed"
+        value={formatNumber(candidate.changeSetIds.length)}
+        footnote={
+          candidate.changeSetIds.length === 0
+            ? "canonical baseline"
+            : candidate.changeSetIds.join(" · ")
+        }
+      />
+      <StatCell
+        label="Approval"
+        value={approvalWord}
+        pill={
+          approval ? (
+            <StatusPill status={approval.decision === "granted" ? "approved" : "rejected"} />
+          ) : candidate.approvalRequired ? (
+            <StatusPill
+              status={
+                candidate.status === "verified" && candidate.gate?.promotable ? "waiting" : "queued"
+              }
+              label={
+                candidate.status === "verified" && candidate.gate?.promotable
+                  ? "Waiting"
+                  : "After checks"
+              }
+            />
+          ) : undefined
+        }
+        footnote={
+          approval
+            ? `${approval.policyVersion} · ${timeAgo(approval.createdAt)}`
+            : `${candidate.plan?.policyVersion ?? "policy"} · ${candidate.approvalRequired ? "human gate" : "no human gate"}`
+        }
+      />
+    </StatStrip>
   );
 }
-SummaryLine.displayName = "SummaryLine";

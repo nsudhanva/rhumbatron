@@ -1,291 +1,222 @@
-import { cn } from "@cloudflare/kumo";
-import { CheckCircle, Circle, CircleNotch, type Icon, XCircle } from "@phosphor-icons/react";
-import { Link } from "@tanstack/react-router";
+import { Button, cn } from "@cloudflare/kumo";
+import { Pause, Play } from "@phosphor-icons/react";
+import { useMemo, useRef, useState } from "react";
 import type { FeedEvent } from "../../lib/api";
-import { useViewMode } from "../../lib/view-mode";
-import { type TypeTone, typeTone } from "../events-page/feed-model";
+import { formatClock, formatNumber, truncate } from "../../lib/format";
 import { EmptyState } from "../ui/empty-state";
 import { SectionError, SkeletonBar } from "./feedback";
 
 /**
- * Activity feed (research 7.1, 7.6 "Activity"): what happened, in order, as plain sentences,
- * newest first and grouped by minute. Event types, IDs and actors stay out of the default view;
- * with technical details shown, each row gets a "Technical details" disclosure. The raw table
- * is the Event log page (Advanced).
+ * Event stream (DESIGN.md 9.9): sequence · time · type · actor · detail · version, newest on top.
+ * New rows never move what the user is reading: while paused, or while the list is scrolled
+ * away from the top, the shown rows stay fixed and a "N new" count waits. The region is
+ * `aria-live="polite"` and goes silent while paused (section 14).
  */
 
-/** Heartbeats and routing records: useful when debugging, noise in a plain feed. */
-const NOISE = new Set(["claim.renewed", "model.route.decided", "agent.woken", "agent.slept"]);
-
-const TONE_ICON: Record<TypeTone, { icon: Icon; className: string }> = {
-  danger: { icon: XCircle, className: "text-kumo-danger" },
-  success: { icon: CheckCircle, className: "text-kumo-success" },
-  // A state change (a release); a static mark, never spinning.
-  brand: { icon: CircleNotch, className: "text-kumo-accent" },
-  default: { icon: Circle, className: "text-kumo-subtle" },
-};
-
-const CHECK_WORDS: Record<string, string> = {
-  pass: "passed",
-  fail: "failed",
-  error: "could not run",
-  skipped: "was skipped",
-};
-
-/** `project:acme:wishlist:membership` -> `wishlist membership`. */
-function areaOf(resource: string | null) {
-  if (!resource) return null;
-  const parts = resource.split(":");
-  const rest = parts[0] === "project" ? parts.slice(2) : parts;
-  return rest.join(" ").replace(/[_-]+/g, " ") || null;
-}
-
-/** `task.started` -> `Task started`. */
-function sentenceFromType(eventType: string) {
-  const words = eventType.replace(/[._-]+/g, " ").trim();
-  return words ? words[0]?.toUpperCase() + words.slice(1) : "Something happened";
-}
-
-/**
- * One plain sentence per event. The API summary uses internal names (S1842, claims, intents),
- * so the feed builds its own from the event type and the kept payload fields.
- */
-function plainSummary(event: FeedEvent): string {
-  const d = event.data;
-  const s = (key: string) => (typeof d[key] === "string" ? (d[key] as string) : undefined);
-  const n = (key: string) => (typeof d[key] === "number" ? (d[key] as number) : undefined);
-  const reason = s("reason") ? `: ${s("reason")}` : "";
-  const title = s("title") ? `: ${s("title")}` : "";
-  const area = areaOf(event.resource);
-  const on = area ? ` on ${area}` : "";
-  const release = n("generation") ?? n("toGeneration");
-  const releaseName = release !== undefined ? `Release ${release}` : "The release";
-  switch (event.eventType) {
-    case "project.created":
-      return "Project created";
-    case "change.created":
-      return "New change started";
-    case "change.compiled": {
-      const tasks = n("taskCount");
-      return tasks !== undefined
-        ? `Goal split into ${tasks} task${tasks === 1 ? "" : "s"}`
-        : "Goal split into tasks";
-    }
-    case "change.cancelled":
-      return `Change cancelled${reason}`;
-    case "task.created":
-      return `Task added${title}`;
-    case "task.ready":
-      return `Task ready to start${title}`;
-    case "task.assigned":
-      return `Task given to an agent${title}`;
-    case "task.started":
-      return `An agent started a task${title}`;
-    case "task.completed":
-      return `Task done${title}`;
-    case "task.failed":
-      return `Task failed${reason || title}`;
-    case "claim.acquired":
-      return `An agent started work${on}`;
-    case "claim.renewed":
-      return `An agent is still working${on}`;
-    case "claim.released":
-      return `An agent finished${on}`;
-    case "claim.expired":
-      return `An agent stopped responding${on}; its work there was released`;
-    case "intent.declared":
-      return `An agent planned its approach${s("summary") ? `: ${s("summary")}` : on}`;
-    case "intent.changed":
-      return `An agent changed its approach${on}`;
-    case "challenge.created":
-      return `An agent raised a concern${on}`;
-    case "challenge.resolved":
-      return `A concern was resolved${on}`;
-    case "changeset.proposed":
-      return "An agent submitted a code change";
-    case "changeset.accepted":
-      return "A code change was accepted";
-    case "changeset.rejected":
-      return `A code change was rejected${reason}`;
-    case "candidate.forked":
-      return "A new version was started";
-    case "candidate.composed":
-      return "A version was assembled from the code changes";
-    case "candidate.stale":
-      return `A version is out of date: another change shipped first${reason ? ` (${s("reason")})` : ""}`;
-    case "verification.started":
-      return "Checks started";
-    case "verification.check.completed": {
-      const word = CHECK_WORDS[s("status") ?? ""] ?? "finished";
-      const name = s("checkId") ? `Check "${s("checkId")}"` : "A check";
-      return `${name} ${word}${s("summary") ? `. ${s("summary")}` : ""}`;
-    }
-    case "verification.completed":
-      if (s("status") === "verified") return "A version passed its checks";
-      if (s("status") === "rejected") return `A version was set aside${reason}`;
-      return "Checks finished";
-    case "preview.ready":
-      return "Preview ready";
-    case "approval.requested":
-      return "Approval requested: a person must approve before it ships";
-    case "approval.granted":
-      return "Approved";
-    case "approval.rejected":
-      return `Approval rejected${reason}`;
-    case "canonical.promotion.requested":
-      return "Shipping requested";
-    case "canonical.advanced":
-      return `${releaseName} shipped`;
-    case "artifact.promoted":
-      return "Live code updated";
-    case "build.started":
-      return `Building ${releaseName}`;
-    case "build.completed":
-      return s("status") && s("status") !== "success" && s("status") !== "succeeded"
-        ? `${releaseName} build ${s("status")}`
-        : `${releaseName} built`;
-    case "deployment.started":
-      return `Deploying ${releaseName}`;
-    case "deployment.completed":
-      return `${releaseName} deployed`;
-    case "deployment.failed":
-      return `${releaseName} did not deploy${reason}`;
-    case "release.smoke_failed":
-      return `${releaseName} failed its smoke check${reason}`;
-    case "test.failed":
-      return `A test failed${reason}`;
-    case "security.check.failed":
-      return `A security check failed${reason}`;
-    case "performance.check.failed":
-      return `A performance check failed${reason}`;
-    case "agent.woken":
-      return "An agent started";
-    case "agent.slept":
-      return "An agent went idle";
-    case "agent.escalated":
-      return `Retried with a stronger model${reason}`;
-    case "model.route.decided":
-      return "A model was chosen automatically";
-    default:
-      return `${sentenceFromType(event.eventType)}${reason}`;
+/** Failure in danger · completion in success · state-changing commits in brand (accent). */
+function eventTypeClass(event: Pick<FeedEvent, "eventType" | "data">): string {
+  const t = event.eventType;
+  const status = event.data.status;
+  if (
+    t.endsWith(".failed") ||
+    t.endsWith(".rejected") ||
+    t === "candidate.stale" ||
+    t === "claim.expired" ||
+    (t === "verification.completed" && status === "rejected") ||
+    (t === "verification.check.completed" && (status === "fail" || status === "error"))
+  ) {
+    return "text-kumo-danger";
   }
-}
-
-/** Local `14:03` for a minute group, with the day when it is not today. */
-function minuteLabel(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "Unknown time";
-  const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-  if (date.toDateString() === new Date().toDateString()) return time;
-  return `${date.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}, ${time}`;
-}
-
-/** Consecutive events (newest first) grouped by their local minute. */
-function byMinute(events: FeedEvent[]) {
-  const groups: { label: string; at: string; events: FeedEvent[] }[] = [];
-  for (const event of events) {
-    const label = minuteLabel(event.occurredAt);
-    const last = groups.at(-1);
-    if (last && last.label === label) last.events.push(event);
-    else groups.push({ label, at: event.occurredAt, events: [event] });
+  if (t === "canonical.advanced" || t === "artifact.promoted") return "text-kumo-accent";
+  if (t.endsWith(".completed") || t === "approval.granted" || t === "changeset.accepted") {
+    return "text-kumo-success";
   }
-  return groups;
+  return "text-kumo-default";
 }
 
-export function ActivityFeed({
+const family = (eventType: string) => eventType.split(".")[0] ?? eventType;
+
+function actorLabel(event: FeedEvent) {
+  return event.actor.kind === "user" ? "person" : event.actor.id;
+}
+
+export function EventStream({
   events,
   loading,
   error,
   onRetry,
+  className,
 }: {
   /** Newest first. */
   events: FeedEvent[];
   loading: boolean;
   error: string | null;
   onRetry?: () => void;
+  className?: string;
 }) {
-  const technical = useViewMode() === "systems";
-  const shown = technical ? events : events.filter((e) => !NOISE.has(e.eventType));
-  const groups = byMinute(shown);
+  const [paused, setPaused] = useState(false);
+  /** Newest `seq` shown while the list holds still (paused or scrolled); null when following. */
+  const [held, setHeld] = useState<number | null>(null);
+  const [filter, setFilter] = useState<string | null>(null);
+  const list = useRef<HTMLOListElement>(null);
+
+  const newest = events[0]?.seq ?? 0;
+  const holding = paused || held !== null;
+  const top = held ?? newest;
+  const shown = holding ? events.filter((e) => e.seq <= top) : events;
+  const waiting = holding ? events.length - shown.length : 0;
+
+  const families = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of shown)
+      counts.set(family(e.eventType), (counts.get(family(e.eventType)) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [shown]);
+  const rows = filter ? shown.filter((e) => family(e.eventType) === filter) : shown;
+  const digits = Math.max(2, String(newest).length);
+
+  const pause = () => {
+    setHeld((h) => h ?? newest);
+    setPaused(true);
+  };
+  const follow = () => {
+    setPaused(false);
+    setHeld(null);
+    list.current?.scrollTo({ top: 0 });
+  };
 
   return (
-    <div className="grid min-w-0 gap-4">
+    <div className={cn("grid min-w-0 gap-2", className)}>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <fieldset className="flex min-w-0 flex-wrap gap-1.5">
+          <legend className="sr-only">Filter events</legend>
+          <FilterChip
+            label="All"
+            count={shown.length}
+            selected={filter === null}
+            onClick={() => setFilter(null)}
+          />
+          {families.map(([name, count]) => (
+            <FilterChip
+              key={name}
+              label={name}
+              count={count}
+              selected={filter === name}
+              onClick={() => setFilter(filter === name ? null : name)}
+            />
+          ))}
+        </fieldset>
+        <div className="flex items-center gap-2">
+          {waiting > 0 &&
+            (paused ? (
+              <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+                {formatNumber(waiting)} new
+              </span>
+            ) : (
+              <Button size="sm" variant="secondary" onClick={follow}>
+                {formatNumber(waiting)} new
+              </Button>
+            ))}
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={paused ? Play : Pause}
+            onClick={paused ? follow : pause}
+          >
+            {paused ? "Resume" : "Pause"}
+          </Button>
+        </div>
+      </div>
+
       {error && (
         <SectionError
-          message={`Activity could not load. ${error}`}
+          message={`Events could not load. ${error}`}
           {...(onRetry ? { onRetry } : {})}
         />
       )}
-      {loading && events.length === 0 ? (
-        <div className="grid gap-3" aria-hidden>
-          {[0, 1, 2, 3].map((i) => (
-            <SkeletonBar key={i} height={14} className="w-2/3" />
-          ))}
-        </div>
-      ) : !error && shown.length === 0 ? (
+
+      <div className="min-w-0 overflow-x-auto border-t border-kumo-rule">
+        <ol
+          ref={list}
+          aria-label="Recent events"
+          aria-live={paused ? "off" : "polite"}
+          aria-relevant="additions"
+          aria-busy={loading || undefined}
+          onScroll={(e) => {
+            const scrolled = e.currentTarget.scrollTop > 8;
+            if (scrolled && held === null) setHeld(newest);
+            else if (!scrolled && !paused && held !== null) setHeld(null);
+          }}
+          className="max-h-96 min-w-[720px] overflow-y-auto"
+        >
+          {loading && events.length === 0
+            ? [0, 1, 2].map((i) => (
+                <li key={i} className="border-b border-kumo-rule px-1 py-2">
+                  <SkeletonBar height={12} className="w-2/3" />
+                </li>
+              ))
+            : rows.map((event) => (
+                <li
+                  key={event.seq}
+                  className="grid grid-cols-[56px_64px_minmax(150px,220px)_minmax(96px,160px)_minmax(0,1fr)_28px] items-baseline gap-3 border-b border-kumo-rule px-1 py-1.5 font-mono text-[11px] tabular-nums"
+                >
+                  <span className="text-kumo-subtle">
+                    {String(event.seq).padStart(digits, "0")}
+                  </span>
+                  <time className="text-kumo-subtle" dateTime={event.occurredAt}>
+                    {formatClock(event.occurredAt)}
+                  </time>
+                  <span className={cn("truncate font-semibold", eventTypeClass(event))}>
+                    {event.eventType}
+                  </span>
+                  <span className="truncate text-kumo-subtle" title={event.actor.id}>
+                    {actorLabel(event)}
+                  </span>
+                  <span className="truncate font-sans text-[12px]" title={event.summary}>
+                    {truncate(event.summary, 200)}
+                  </span>
+                  <span className="text-right text-kumo-subtle">v{event.eventVersion}</span>
+                </li>
+              ))}
+        </ol>
+      </div>
+      {!loading && !error && events.length === 0 && (
         <EmptyState
-          what="Nothing has happened yet."
-          how="Start a change on the Overview; each step appears here as it happens."
+          what="No events recorded yet."
+          how="Events appear here as Changes run: Tasks, agents, Claims, Candidates and promotion."
         />
-      ) : (
-        <div aria-live="polite" aria-relevant="additions" className="grid gap-5">
-          {groups.map((group) => (
-            <section key={`${group.label}-${group.at}`} aria-label={group.label}>
-              <h3 className="pb-1.5 text-[12px] font-medium text-kumo-subtle tabular-nums">
-                <time dateTime={group.at}>{group.label}</time>
-              </h3>
-              <ol className="grid rounded-lg border border-kumo-rule bg-kumo-elevated">
-                {group.events.map((event) => (
-                  <ActivityRow key={event.seq} event={event} technical={technical} />
-                ))}
-              </ol>
-            </section>
-          ))}
-        </div>
       )}
     </div>
   );
 }
-ActivityFeed.displayName = "ActivityFeed";
+EventStream.displayName = "EventStream";
 
-function ActivityRow({ event, technical }: { event: FeedEvent; technical: boolean }) {
-  const tone = TONE_ICON[typeTone(event)];
-  const IconComponent = tone.icon;
+function FilterChip({
+  label,
+  count,
+  selected,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  selected: boolean;
+  onClick: () => void;
+}) {
   return (
-    <li
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onClick}
       className={cn(
-        "grid gap-1 border-b border-kumo-rule px-3 py-2.5 last:border-b-0",
-        // New rows fade in once (150ms); nothing moves.
-        "transition-opacity duration-(--rh-dur-ui) starting:opacity-0",
+        "inline-flex min-h-6 cursor-pointer items-center gap-1.5 border border-kumo-rule px-2 font-mono text-[11px]",
+        "transition-colors duration-(--rh-dur-ui) hover:bg-kumo-row-hover",
+        "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-500",
+        selected && "border-kumo-ink bg-kumo-faint font-semibold",
       )}
     >
-      <div className="flex items-start gap-2.5">
-        <IconComponent size={16} aria-hidden className={cn("mt-0.5 shrink-0", tone.className)} />
-        <p className="min-w-0 flex-1 text-[14px] break-words">{plainSummary(event)}</p>
-        {event.changeId && (
-          <Link
-            to="/changes/$changeId"
-            params={{ changeId: event.changeId }}
-            className="shrink-0 text-[13px] text-kumo-link hover:underline"
-          >
-            Open change
-          </Link>
-        )}
-      </div>
-      {technical && (
-        <details className="pl-[26px] text-[12px] text-kumo-subtle">
-          <summary className="cursor-pointer select-none">Technical details</summary>
-          <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
-            <dt>Type</dt>
-            <dd className="font-mono break-all">{event.eventType}</dd>
-            <dt>Event ID</dt>
-            <dd className="font-mono break-all">{event.eventId}</dd>
-            <dt>Recorded as</dt>
-            <dd className="break-words">{event.summary}</dd>
-          </dl>
-        </details>
-      )}
-    </li>
+      {label}
+      <span className="text-kumo-subtle tabular-nums">{formatNumber(count)}</span>
+    </button>
   );
 }
-ActivityRow.displayName = "ActivityRow";
+FilterChip.displayName = "FilterChip";

@@ -35,10 +35,6 @@ const ACTIVE_STATUSES = new Set<CandidateDetail["status"]>(["composing", "compos
 
 export const isActive = (candidate: CandidateDetail) => ACTIVE_STATUSES.has(candidate.status);
 
-/** The promoted generation's release is still building (ADR 0018): keep polling the Candidate. */
-export const releaseInFlight = (candidate: CandidateDetail) =>
-  candidate.release?.status === "queued" || candidate.release?.status === "building";
-
 /** Verification is over: the gate ran, or the Candidate reached a final state without it. */
 export const isFinished = (candidate: CandidateDetail) =>
   candidate.gate !== null ||
@@ -83,22 +79,22 @@ function localReason(
 
 const FAIL_REASONS = new Set<GapReason>(["failed", "expectation_not_met"]);
 
-/** Plain words for a gap reason (spec 7.6), used in rows, banners and the result sentence. */
+/** Plain words for a gap reason, used in rows, banners and the "Why" paragraph. */
 export const REASON_WORDS: Record<GapReason, string> = {
-  missing: "no result recorded",
-  not_checked: "not run",
-  no_signal: "ran with no result",
+  missing: "no evidence recorded",
+  not_checked: "not checked",
+  no_signal: "ran with no signal",
   failed: "failed",
-  error: "couldn't run",
-  skipped: "skipped (not automated yet)",
+  error: "errored without a result",
+  skipped: "not automated yet",
   timed_out: "timed out",
-  expectation_not_met: "over the limit",
+  expectation_not_met: "over the threshold",
 };
 
 export const COVERAGE_WORDS: Record<EvidenceRecord["coverage"], string> = {
-  checked_supported: "ran, result recorded",
-  checked_no_signal: "ran with no result",
-  not_checked: "not run",
+  checked_supported: "checked, supported",
+  checked_no_signal: "ran, no signal",
+  not_checked: "not checked",
 };
 
 /** Pill status for a verdict (StatusPill vocabulary). A gap is attention, never green. */
@@ -108,18 +104,6 @@ export const VERDICT_STATUS: Record<CheckVerdict, string> = {
   gap: "gap",
   pending: "queued",
 };
-
-/** Plain word for one check (spec 7.4 check words). A gap is amber and never reads as a pass. */
-export function verdictWord(row: Pick<CheckRow, "verdict" | "reason">): string {
-  if (row.verdict === "pass") return "Passed";
-  if (row.verdict === "fail") return "Failed";
-  if (row.verdict === "pending") return "Queued";
-  if (row.reason === "error") return "Couldn't run";
-  if (row.reason === "no_signal") return "No result";
-  if (row.reason === "skipped") return "Skipped";
-  if (row.reason === "timed_out") return "Timed out";
-  return "Not run";
-}
 
 const KIND_ORDER = [
   "composition",
@@ -221,32 +205,32 @@ export function meterMax(budget: number, values: (number | null)[]) {
   return Math.ceil(top / step) * step;
 }
 
-/** Readable names (spec 7.6): the empty baseline, then Version A, B, C in creation order. */
+/** Readable names: the canonical baseline, then Candidate A, B, C in creation order. */
 export function candidateLabels(candidates: CandidateDetail[]): Map<string, string> {
   const ordered = [...candidates].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
   const labels = new Map<string, string>();
   let letter = 0;
   for (const c of ordered) {
     if (c.changeSetIds.length === 0) labels.set(c.id, "Baseline");
-    else labels.set(c.id, `Version ${String.fromCharCode(65 + letter++)}`);
+    else labels.set(c.id, `Candidate ${String.fromCharCode(65 + letter++)}`);
   }
   return labels;
 }
 
 const CRITERIA: Record<string, { title: string; detail: string }> = {
   composition: {
-    title: "Code combines cleanly",
-    detail: "The code changes from every task merge without a conflict",
+    title: "Composition",
+    detail: "ChangeSets merge without a source or semantic conflict",
   },
-  build: { title: "Build", detail: "The combined code typechecks" },
-  unit: { title: "Project tests", detail: "The project's tests pass on the combined code" },
-  contract: { title: "API contract", detail: "Every API route change is declared" },
+  build: { title: "Build", detail: "The composed source typechecks" },
+  unit: { title: "Project tests", detail: "bun test passes on the composed source" },
+  contract: { title: "API contract", detail: "Every route change is declared" },
   "protected-invariant-cart": {
-    title: "Cart unchanged",
-    detail: "Cart add, remove, quantity and total stay exactly the same",
+    title: "Protected Cart invariant",
+    detail: "Cart add, remove, quantity and total stay unchanged",
   },
   security: { title: "Security", detail: "Denied actions stay denied" },
-  browser: { title: "Browser flow", detail: "Share, collaborate and revoke, in a real browser" },
+  browser: { title: "Browser flow", detail: "Share, collaborate and revoke in Browser Run" },
 };
 
 /** Criterion title and one-line explanation for a check. */
@@ -257,98 +241,37 @@ export function criterion(
   if (row.kind === "performance") {
     return {
       title: "Performance",
-      detail: `API response time (p95) under ${budget === null ? "the limit" : formatMs(budget)}`,
+      detail: `API p95 below ${budget === null ? "the budget" : formatMs(budget)}`,
     };
   }
   const known = CRITERIA[row.checkId] ?? CRITERIA[row.kind];
   if (known) return known;
   if (row.kind === "protected-invariant") {
     return {
-      title: "Must not change",
+      title: "Protected invariant",
       detail: row.check?.reason.replace(/^Protected invariant:\s*/, "") ?? row.checkId,
     };
   }
   return { title: row.checkId, detail: row.check?.reason ?? row.kind };
 }
 
-/** What a failing or missing check means, in words: "Project tests failed (3 failing)". */
-function problemPhrase(row: CheckRow, candidate: CandidateDetail, budget: number | null) {
-  const name = criterion(row, budget).title;
-  if (
-    row.kind === "performance" &&
-    (row.reason === "failed" || row.reason === "expectation_not_met")
-  ) {
+/** What a failing or missing check means, in words: "fails performance: p95 412 ms over …". */
+function failurePhrase(row: CheckRow, candidate: CandidateDetail, budget: number | null) {
+  const name = criterion(row, budget).title.toLowerCase();
+  if (row.kind === "performance" && row.reason === "failed") {
     const p95 = row.record?.metrics?.p95Ms ?? candidate.gate?.p95Ms;
     if (p95 !== undefined && budget !== null) {
-      return `API response time (p95) was ${formatP95(p95)} (limit ${formatMs(budget)})`;
+      return `fails performance: p95 ${formatP95(p95)} over the ${formatMs(budget)} budget`;
     }
   }
   if (row.verdict === "fail") {
     const tests = row.record?.metrics?.testsFailed;
-    return tests ? `${name} failed (${tests} failing)` : `${name} failed`;
+    return tests ? `fails ${name} (${tests} failing)` : `fails ${name}`;
   }
-  return `${name} ${REASON_WORDS[row.reason ?? "missing"]}`;
+  return `has a gap in ${name}: ${REASON_WORDS[row.reason ?? "missing"]}`;
 }
 
-/** Why a finished version did not pass, as one clause; null when nothing is known. */
-function setAsideReason(candidate: CandidateDetail, rows: CheckRow[]): string | null {
-  const tally = requiredTally(rows);
-  const budget = p95Budget(candidate);
-  const problems = [...tally.failed, ...tally.gaps];
-  if (problems.length > 0) {
-    return problems.map((r) => problemPhrase(r, candidate, budget)).join("; ");
-  }
-  if (candidate.approval?.decision === "rejected") {
-    return `rejected by a person${candidate.approval.reason ? `: ${candidate.approval.reason}` : ""}`;
-  }
-  return candidate.statusReason;
-}
-
-/** The release that shipped first, read from the stale reason ("... advanced to S1842 ..."). */
-function shippedFirst(candidate: CandidateDetail): number {
-  const match = /S(\d+)/.exec(candidate.statusReason ?? "");
-  return match ? Number(match[1]) : candidate.baseGeneration + 1;
-}
-
-const VERSION_WORDS: Record<CandidateDetail["status"], string> = {
-  composing: "Assembling",
-  composed: "Ready for checks",
-  verifying: "Checking",
-  verified: "Passed",
-  rejected: "Set aside",
-  stale: "Out of date",
-  promoted: "Shipped",
-};
-
-/** One word for a version's status (spec 7.4 Version table). */
-export const versionWord = (status: CandidateDetail["status"]) => VERSION_WORDS[status];
-
-const sentence = (text: string) => text.replace(/\.?$/, ".");
-
-/** One sentence on where a version stands (spec 7.4 Version table), for the status header. */
-export function versionSentence(candidate: CandidateDetail, rows: CheckRow[]): string {
-  const n = candidate.changeSetIds.length;
-  switch (candidate.status) {
-    case "composing":
-      return `Combining code changes from ${n} ${n === 1 ? "task" : "tasks"}.`;
-    case "composed":
-      return "Built. Checks start next.";
-    case "verifying":
-      return `${rows.filter((r) => r.record).length} of ${rows.length} checks finished.`;
-    case "verified":
-      return `Passed all ${requiredTally(rows).total} required checks.`;
-    case "stale":
-      return `Another change shipped first (${generation(shippedFirst(candidate))}). This version must be rebuilt on it.`;
-    case "promoted":
-      return `Shipped as ${generation(candidate.promotedGeneration ?? candidate.baseGeneration + 1)}.`;
-    default: {
-      const reason = setAsideReason(candidate, rows);
-      return sentence(`Set aside: ${reason ?? "a required check did not pass"}`);
-    }
-  }
-}
-
-/** One sentence naming the version, for the compare page result line and banners. */
+/** One sentence on where a Candidate stands, for banners and the comparison "Why". */
 export function candidateSentence(
   label: string,
   candidate: CandidateDetail,
@@ -359,33 +282,37 @@ export function candidateSentence(
   const p95 = p95Of(candidate, rows);
   const perf =
     p95 !== null && budget !== null && p95 < budget
-      ? ` Response time (p95) ${formatP95(p95)}, under the ${formatMs(budget)} limit.`
+      ? ` p95 ${formatP95(p95)} is under the ${formatMs(budget)} budget.`
       : "";
   if (candidate.status === "promoted") {
-    return `${label} shipped as ${generation(
+    return `${label} was promoted, ${generation(candidate.baseGeneration)} → ${generation(
       candidate.promotedGeneration ?? candidate.baseGeneration + 1,
-    )} after passing all ${tally.total} required checks.`;
+    )}, after all ${tally.total} required checks passed with evidence.`;
   }
   if (candidate.status === "stale") {
-    return `${label} is out of date: another change shipped first (${generation(
-      shippedFirst(candidate),
-    )}). It must be rebuilt on it.`;
+    return `${label} is stale: ${candidate.statusReason ?? "the canonical state moved"}`.replace(
+      /\.?$/,
+      ".",
+    );
   }
   if (isActive(candidate)) {
     const recorded = rows.filter((r) => r.record).length;
-    return `${label} is still being checked: ${recorded} of ${rows.length} checks finished.`;
+    return `${label} is still verifying: ${recorded} of ${rows.length} checks have evidence so far.`;
   }
   if (candidate.gate?.promotable && candidate.status === "verified") {
-    return `${label} passed all ${tally.total} required checks.${perf}`;
+    return `${label} passes all ${tally.total} required checks with evidence.${perf}`;
+  }
+  const problems = [...tally.failed, ...tally.gaps];
+  if (problems.length > 0) {
+    return `${label} ${problems.map((r) => failurePhrase(r, candidate, budget)).join("; ")}.`;
   }
   if (candidate.status === "rejected" && candidate.approval?.decision === "rejected") {
-    return sentence(
-      `${label} was rejected by a person${candidate.approval.reason ? `: ${candidate.approval.reason}` : ""}`,
-    );
+    return `${label} was rejected by a human decision${
+      candidate.approval.reason ? `: ${candidate.approval.reason}` : ""
+    }`.replace(/\.?$/, ".");
   }
-  const reason = setAsideReason(candidate, rows);
-  if (reason) return sentence(`${label} was set aside: ${reason}`);
-  return `${label} passed ${tally.met} of ${tally.total} required checks.`;
+  if (candidate.statusReason) return `${label}: ${candidate.statusReason}`.replace(/\.?$/, ".");
+  return `${label} meets ${tally.met} of ${tally.total} required checks.`;
 }
 
 /**
@@ -413,19 +340,23 @@ export function recommend(
   return { id: best.candidate.id, kind: "closest" };
 }
 
-/** Why a person must (or need not) approve this version, in one plain sentence. */
+/** Names the policy rule that requires a human, in one line (DESIGN.md section 12). */
 export function gateRule(candidate: CandidateDetail, riskTier: string | null | undefined) {
-  if (!candidate.approvalRequired) return "No approval is needed for this version.";
+  const policy = candidate.plan?.policyVersion ?? candidate.approval?.policyVersion;
+  const named = policy ? `Policy ${policy}` : "Project policy";
+  if (!candidate.approvalRequired) {
+    return `${named} does not require a human decision for this Candidate.`;
+  }
   const authorization = candidate.plan?.checks.some(
     (c) => c.kind === "security" && /authorization/i.test(c.reason),
   );
   if (authorization) {
-    return `A person must approve this version because it changes who can do what${
-      riskTier ? ` (${riskTier} risk)` : ""
+    return `${named} requires human approval because this Candidate changes authorization${
+      riskTier ? ` (risk tier ${riskTier})` : ""
     }.`;
   }
-  if (riskTier) return `A person must approve ${riskTier} risk changes.`;
-  return "A person must approve this version before it ships.";
+  if (riskTier) return `${named} requires human approval for risk tier ${riskTier}.`;
+  return `${named} requires human approval before promotion.`;
 }
 
 export const shortHash = (value: string | null | undefined, length = 12) =>

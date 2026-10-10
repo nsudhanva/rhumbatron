@@ -1,6 +1,7 @@
 import { cn } from "@cloudflare/kumo";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
 import { formatClock, formatNumber, generation } from "../../../lib/format";
+import { usePrefersReducedMotion } from "../../../lib/motion";
 import { criterion, formatP95, p95Budget } from "../../candidate/model";
 import { ThresholdMeter } from "../../ui/meter";
 import { FAMILY_FILL, FAMILY_TEXT, StatusPill } from "../../ui/status-pill";
@@ -18,6 +19,7 @@ import { useFlightFilters, useIsHighlighted, useSelection } from "../flight-stor
 import type { PanelProps } from "../panel-types";
 import {
   type CandidateSummary,
+  checkEventIds,
   checkView,
   composedChangeSets,
   formatCost,
@@ -29,6 +31,7 @@ import {
   p95OfCheck,
   standing,
   summarize,
+  tokenMs,
 } from "./arena/check-view";
 import { RefButton } from "./arena/ref-button";
 
@@ -37,7 +40,8 @@ import { RefButton } from "./arena/ref-button";
  * criteria down: summary rows, then one row per check (union over Candidates), then the conflicts
  * whose two sides became these Candidates. Every cell is a recorded fact at the fold instant:
  * status word plus coverage, never model confidence (AGENTS.md 34.4.1, 38.4). The winner carries
- * the accent bar; a rejected column is grey with its reason in words. Nothing moves.
+ * the accent bar; a rejected column greys out with its reason in words. A check fact that newly
+ * played fills its square over `--rh-dur-heat`; nothing else moves.
  */
 
 const LABEL_COL = 176;
@@ -77,7 +81,7 @@ function matchesQuery(state: FlightState, model: FlightModel, c: CandidateState,
 }
 
 export function ArenaPanel({ focused }: PanelProps) {
-  const { state, model, ready } = useFlight();
+  const { state, model, ready, animated } = useFlight();
   const selection = useSelection();
   const { query } = useFlightFilters();
   const q = query.trim().toLowerCase();
@@ -130,6 +134,7 @@ export function ArenaPanel({ focused }: PanelProps) {
     return narrowed.length > 0 ? narrowed : all;
   }, [columns, q]);
   const related = useMemo(() => relatedRefs(state, selection), [state, selection]);
+  const eventIds = useMemo(() => checkEventIds(state), [state]);
   const conflicts = useMemo(
     () =>
       state.conflicts.filter((c) =>
@@ -188,7 +193,7 @@ export function ArenaPanel({ focused }: PanelProps) {
           <tr>
             <th
               scope="col"
-              className="sticky left-0 z-[3] border-b border-kumo-rule bg-kumo-base px-2 py-1.5 align-bottom font-normal"
+              className="sticky left-0 z-[3] border-b-2 border-kumo-divider bg-kumo-base px-2 py-1.5 align-bottom font-normal"
             >
               <span className="type-label text-kumo-subtle">Criterion</span>
             </th>
@@ -288,13 +293,14 @@ export function ArenaPanel({ focused }: PanelProps) {
                 <span className="block truncate text-[12px] font-semibold" title={row.detail}>
                   {row.title}
                 </span>
-                <span className="block truncate font-mono text-[12px] text-kumo-subtle">
+                <span className="block truncate font-mono text-[10px] text-kumo-subtle">
                   {row.checkId} · {row.required}
                 </span>
               </th>
               {columns.map((col) => {
                 const check = col.candidate.checks.find((c) => c.checkId === row.checkId);
                 const key = `${col.candidate.id}:${row.checkId}`;
+                const eventId = eventIds.get(key) ?? null;
                 return (
                   <CheckCell
                     key={col.candidate.id}
@@ -304,6 +310,7 @@ export function ArenaPanel({ focused }: PanelProps) {
                     dim={
                       selection !== null && !related.has(`check:${key}`) && dimmed(col.candidate.id)
                     }
+                    animateEvent={eventId && animated.has(eventId) ? eventId : null}
                   />
                 );
               })}
@@ -331,15 +338,10 @@ ArenaPanel.displayName = "ArenaPanel";
  * Header
  * ------------------------------------------------------------------------------------------ */
 
-/** A losing column is grey, but its reason still reads (subtle text, not an opacity fade). */
-const LOSER =
-  "grayscale text-kumo-subtle [--text-color-kumo-default:var(--rh-subtle)] [--text-color-kumo-strong:var(--rh-subtle)]";
-
 function columnClass(candidate: CandidateState, dim: boolean) {
   return cn(
-    "border-l border-kumo-rule transition-opacity duration-(--rh-dur-ui)",
+    "rh-greyout border-l border-kumo-rule transition-opacity duration-(--rh-dur-ui)",
     isWinner(candidate) && "shadow-[inset_2px_0_0_var(--color-accent-500)]",
-    isLoser(candidate) && LOSER,
     dim && "opacity-45",
   );
 }
@@ -366,7 +368,7 @@ function ColumnHeader({
       data-state={isLoser(candidate) ? "rejected" : undefined}
       className={cn(
         columnClass(candidate, dim),
-        "border-b border-b-kumo-rule px-2 py-1.5 align-top font-normal",
+        "border-b-2 border-b-kumo-divider px-2 py-1.5 align-top font-normal",
         selected && "bg-kumo-faint",
       )}
     >
@@ -380,7 +382,7 @@ function ColumnHeader({
             <span
               aria-hidden
               className={cn(
-                "grid size-5 shrink-0 place-items-center text-[12px] font-extrabold",
+                "grid size-5 shrink-0 place-items-center text-[11px] font-extrabold",
                 isWinner(candidate)
                   ? "bg-accent-500 text-kumo-inverse"
                   : "bg-kumo-ink text-kumo-inverse",
@@ -395,7 +397,7 @@ function ColumnHeader({
         {line && (
           <p
             className={cn(
-              "text-[12px] leading-snug",
+              "text-[11px] leading-snug",
               focused ? "line-clamp-3" : "line-clamp-2",
               candidate.status === "rejected"
                 ? "text-kumo-danger"
@@ -410,7 +412,7 @@ function ColumnHeader({
             {line}
           </p>
         )}
-        <p className="truncate font-mono text-[12px] text-kumo-subtle tabular-nums">
+        <p className="truncate font-mono text-[10px] text-kumo-subtle tabular-nums">
           {candidate.promotedGeneration !== null
             ? `${generation(candidate.detail.baseGeneration)} → ${generation(candidate.promotedGeneration)}`
             : `base ${generation(candidate.detail.baseGeneration)}`}
@@ -431,7 +433,7 @@ function ColumnHeader({
                   entity={{ kind: "changeset", id: k.id }}
                   title={`ChangeSet ${k.id} from ${k.taskKey}${k.commit ? ` at ${k.commit.slice(0, 8)}` : ""}`}
                   context={`ChangeSet ${k.id}${k.commit ? ` at ${k.commit.slice(0, 8)}` : ""}`}
-                  className="bg-tone-100 px-1 font-mono text-[12px] tabular-nums"
+                  className="bg-tone-100 px-1 font-mono text-[10px] tabular-nums"
                 >
                   {k.taskKey}
                 </RefButton>
@@ -467,7 +469,7 @@ function SummaryRow({
         title={detail}
         className={cn(
           "sticky left-0 z-[1] border-b border-kumo-rule bg-kumo-base px-2 py-1 align-middle text-[12px] font-normal text-kumo-subtle",
-          last && "border-b border-b-kumo-rule",
+          last && "border-b-2 border-b-kumo-divider",
         )}
       >
         {label}
@@ -495,7 +497,7 @@ function SummaryCell({
       className={cn(
         columnClass(column.candidate, dim),
         "border-b border-b-kumo-rule px-2 py-1 align-middle",
-        last && "border-b border-b-kumo-rule",
+        last && "border-b-2 border-b-kumo-divider",
       )}
     >
       {children}
@@ -511,7 +513,7 @@ function RatioSquares({ met, total }: { met: number; total: number }) {
     <span aria-hidden className="flex gap-0.5">
       {Array.from({ length: total }, (_, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: squares are positional
-        <span key={i} className={cn("size-2", i < met ? "bg-kumo-ink" : "bg-kumo-danger")} />
+        <span key={i} className={cn("size-2", i < met ? "bg-kumo-ink" : "bg-accent-500")} />
       ))}
     </span>
   );
@@ -527,17 +529,19 @@ function CheckCell({
   candidate,
   check,
   dim,
+  animateEvent,
 }: {
   state: FlightState;
   candidate: CandidateState;
   check: CheckState | undefined;
   dim: boolean;
+  animateEvent: string | null;
 }) {
   const cellClass = cn(columnClass(candidate, dim), "border-b border-b-kumo-rule p-0 align-top");
   if (!check) {
     return (
       <td data-state={isLoser(candidate) ? "rejected" : undefined} className={cellClass}>
-        <span className="block px-2 py-1.5 text-[12px] text-kumo-subtle">Not planned</span>
+        <span className="block px-2 py-1.5 text-[11px] text-kumo-subtle">Not planned</span>
       </td>
     );
   }
@@ -556,17 +560,17 @@ function CheckCell({
         className="grid w-full gap-1 px-2 py-1"
       >
         <span className="flex min-w-0 items-center gap-2">
-          <Segment family={view.family} hollow={view.hollow} />
+          <Segment family={view.family} hollow={view.hollow} animateEvent={animateEvent} />
           <span className={cn("shrink-0 font-semibold", FAMILY_TEXT[view.family])}>
             {view.word}
           </span>
-          <span className="min-w-0 truncate text-[12px] text-kumo-subtle">{view.coverage}</span>
+          <span className="min-w-0 truncate text-[11px] text-kumo-subtle">{view.coverage}</span>
           {check.required && (
-            <span className="ml-auto shrink-0 font-mono text-[12px] text-kumo-subtle">req</span>
+            <span className="ml-auto shrink-0 font-mono text-[10px] text-kumo-subtle">req</span>
           )}
         </span>
         {bits.length > 0 && (
-          <span className="truncate font-mono text-[12px] text-kumo-subtle tabular-nums">
+          <span className="truncate font-mono text-[11px] text-kumo-subtle tabular-nums">
             {bits.join(" · ")}
           </span>
         )}
@@ -589,10 +593,32 @@ function CheckCell({
 }
 CheckCell.displayName = "CheckCell";
 
-/** A square status segment. */
-function Segment({ family, hollow }: { family: keyof typeof FAMILY_FILL; hollow: boolean }) {
+/** A square status segment. Fills over `--rh-dur-heat` only when its check fact newly played. */
+function Segment({
+  family,
+  hollow,
+  animateEvent,
+}: {
+  family: keyof typeof FAMILY_FILL;
+  hollow: boolean;
+  animateEvent: string | null;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const reduce = usePrefersReducedMotion();
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!animateEvent || !el || reduce || typeof el.animate !== "function") return;
+    const duration = tokenMs("--rh-dur-heat", 400);
+    if (duration <= 0) return;
+    const to = getComputedStyle(el).backgroundColor;
+    el.animate([{ backgroundColor: "transparent" }, { backgroundColor: to }], {
+      duration,
+      easing: "ease",
+    });
+  }, [animateEvent, reduce]);
   return (
     <span
+      ref={ref}
       aria-hidden
       className={cn(
         "size-3 shrink-0",
@@ -635,14 +661,14 @@ function ConflictRow({
           context={`${a} vs ${b}`}
           className="grid w-full gap-0.5 py-1 pr-2 pl-3"
         >
-          <span className="text-[12px] font-semibold text-kumo-danger">Conflict</span>
+          <span className="text-[12px] font-semibold text-kumo-accent">Conflict</span>
           <span
-            className="truncate font-mono text-[12px] text-kumo-subtle"
+            className="truncate font-mono text-[10px] text-kumo-subtle"
             title={conflict.resource}
           >
             {conflict.resource}
           </span>
-          <span className="text-[12px] text-kumo-subtle">
+          <span className="text-[10px] text-kumo-subtle">
             {conflict.open ? "open" : "resolved"} · {conflict.state.replace(/_/g, " ")}
           </span>
         </RefButton>
@@ -662,7 +688,7 @@ function ConflictRow({
               <span className="text-kumo-subtle">Not a side</span>
             ) : (
               <span className="grid gap-0.5">
-                <span className="font-mono text-[12px] text-kumo-subtle">
+                <span className="font-mono text-[10px] text-kumo-subtle">
                   {side === 0 ? "Side A · challenger" : "Side B"}
                 </span>
                 <span className="line-clamp-3">{side === 0 ? a : b}</span>
@@ -684,7 +710,7 @@ function ArenaSkeleton({ focused }: { focused: boolean }) {
   const rows = focused ? 12 : 8;
   return (
     <div aria-hidden className="grid h-full content-start gap-0 overflow-hidden">
-      <div className="grid grid-cols-[176px_1fr_1fr] gap-2 border-b border-kumo-rule p-2">
+      <div className="grid grid-cols-[176px_1fr_1fr] gap-2 border-b-2 border-kumo-divider p-2">
         <span className="h-3 w-16 animate-pulse bg-kumo-faint" />
         <span className="h-14 animate-pulse bg-kumo-faint" />
         <span className="h-14 animate-pulse bg-kumo-faint" />

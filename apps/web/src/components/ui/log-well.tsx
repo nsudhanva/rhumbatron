@@ -14,8 +14,8 @@ const ROLE_TEXT: Record<LogLineRole, string> = {
 };
 
 /**
- * Log viewer: a raised well with a 1px rule border and 8px radius, a toolbar row (filename
- * left, actions right), zero-padded line numbers in a 34px gutter, mono 12.5px/20px,
+ * Log viewer (DESIGN.md 9.7): elevated well with a 2px ink rule on top, a toolbar row
+ * (filename left, actions right), zero-padded line numbers in a 34px gutter, mono 11.5px/1.7,
  * horizontal scroll, about 300px max height. Pass/fail summaries start with a word (`PASS`,
  * `FAIL`, `SKIPPED`) as well as the color.
  *
@@ -44,14 +44,9 @@ export function LogWell({
     typeof lines === "string" ? lines.split("\n").map((text) => ({ text })) : lines;
   const digits = Math.max(2, String(rows.length).length);
   return (
-    <figure
-      className={cn(
-        "min-w-0 overflow-hidden rounded-lg border border-kumo-rule bg-kumo-elevated",
-        className,
-      )}
-    >
+    <figure className={cn("min-w-0 rule-ink bg-kumo-elevated", className)}>
       {(title || toolbar) && (
-        <figcaption className="flex items-center justify-between gap-3 border-b border-kumo-rule px-3 py-1.5 font-mono text-[12px] text-kumo-subtle">
+        <figcaption className="flex items-center justify-between gap-3 border-b border-kumo-rule px-3 py-1.5 font-mono text-[10px] text-kumo-subtle">
           <span className="truncate">{title}</span>
           {toolbar && <span className="flex shrink-0 items-center gap-2">{toolbar}</span>}
         </figcaption>
@@ -78,7 +73,7 @@ LogWell.displayName = "LogWell";
 
 /**
  * Raw payload or receipt (DESIGN.md 9.15): pretty-printed JSON on `base` (inside an elevated
- * panel), mono 12px/1.5, about 260px max height, and one subtle caption line saying what the
+ * panel), mono 11px/1.5, about 260px max height, and one subtle caption line saying what the
  * payload is and what it deliberately leaves out.
  *
  *   <Payload value={receipt} caption="Decision Receipt as stored. Model reasoning is not recorded." />
@@ -98,12 +93,12 @@ export function Payload({
   return (
     <figure className={cn("grid min-w-0 gap-1.5", className)}>
       <pre
-        className="overflow-auto rounded-md bg-kumo-base p-2.5 font-mono text-[12px] leading-[1.5] whitespace-pre"
+        className="overflow-auto bg-kumo-base p-2.5 font-mono text-[11px] leading-[1.5] whitespace-pre"
         style={{ maxHeight }}
       >
         {text}
       </pre>
-      {caption && <figcaption className="type-meta text-kumo-subtle">{caption}</figcaption>}
+      {caption && <figcaption className="text-[11px] text-kumo-subtle">{caption}</figcaption>}
     </figure>
   );
 }

@@ -199,7 +199,7 @@ function TaskFacts({ task, live }: { task: TaskState; live: boolean }) {
                       {live && (
                         <span className="h-0.5 w-full bg-kumo-recessed">
                           <span
-                            className="block h-0.5 bg-kumo-ink"
+                            className="rh-lane-progress block"
                             style={{ width: `${Math.min(100, (running.modelCalls / cap) * 100)}%` }}
                           />
                         </span>
@@ -241,11 +241,7 @@ function TaskFacts({ task, live }: { task: TaskState; live: boolean }) {
         ]}
       />
       {failed && (
-        <div
-          className={cn(
-            "rounded-lg border border-kumo-rule bg-kumo-danger-tint px-3 py-2 text-[12px]",
-          )}
-        >
+        <div className={cn("border-l-2 border-accent-500 bg-accent-100 px-3 py-2 text-[12px]")}>
           <p className="font-semibold text-kumo-danger">
             {statusView(task.status).label}
             {lastFailed?.failureKind ? ` · ${lastFailed.failureKind.replace(/_/g, " ")}` : ""}

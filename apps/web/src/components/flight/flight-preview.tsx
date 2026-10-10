@@ -4,7 +4,7 @@ import { deriveFlight } from "./flight-model";
 import { FlightPage } from "./flight-page";
 
 /**
- * Fixture-driven Debug view for `/design/flight`: the real page body over
+ * Fixture-driven Flight Control for `/design/flight`: the real page body over
  * `previewFlightInput()`, labelled as a fixture. Never shown on a product page.
  */
 export function FlightPreview() {

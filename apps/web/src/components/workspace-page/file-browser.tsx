@@ -10,7 +10,7 @@ import { buildFileTree, defaultExpanded, flattenFileTree } from "./model";
 const MATCH_LIMIT = 200;
 
 /**
- * Read-only browser of the live release's files from its R2 file index (paths only). Directories open
+ * Read-only browser of one canonical tree from its R2 file index (paths only). Directories open
  * and close in place; a filter switches to a flat list of matching paths. Rows use the tree-list
  * dress (DESIGN.md 9.11): mono 12px with box-drawing prefixes in `subtle`.
  */
@@ -36,13 +36,13 @@ export function FileBrowser({ index }: { index: WorkspaceFileIndex }) {
   if (!index.indexed) {
     return (
       <EmptyState
-        what="No file list for this release yet."
-        how="It is written when the release's code is saved."
+        what="No file index for this tree yet."
+        how="The integration Worker writes it when the canonical commit lands on main."
       />
     );
   }
   if (index.files.length === 0) {
-    return <EmptyState what="This release has no files." />;
+    return <EmptyState what="The canonical tree has no files." />;
   }
 
   return (
@@ -56,15 +56,12 @@ export function FileBrowser({ index }: { index: WorkspaceFileIndex }) {
           onChange={(e) => setFilter(e.target.value)}
         />
       </div>
-      <div
-        className="min-w-0 overflow-auto rounded-lg border border-kumo-rule bg-kumo-elevated"
-        style={{ maxHeight: 420 }}
-      >
+      <div className="min-w-0 overflow-auto rule-ink bg-kumo-elevated" style={{ maxHeight: 420 }}>
         {query ? (
           <>
             <p
               role="status"
-              className="border-b border-kumo-rule px-3 py-1.5 text-[12px] text-kumo-subtle"
+              className="border-b border-kumo-rule px-3 py-1.5 font-mono text-[10px] text-kumo-subtle"
             >
               {formatNumber(matches.length)} of {formatNumber(index.files.length)} paths match
               {matches.length > MATCH_LIMIT ? ` · first ${formatNumber(MATCH_LIMIT)} shown` : ""}
@@ -78,7 +75,7 @@ export function FileBrowser({ index }: { index: WorkspaceFileIndex }) {
             </ul>
           </>
         ) : (
-          <ul aria-label="Files" className="py-1 font-mono text-[12px] leading-[1.7]">
+          <ul aria-label="Canonical files" className="py-1 font-mono text-[12px] leading-[1.7]">
             {rows.map((row) => (
               <li key={row.path}>
                 {row.isDir ? (
@@ -86,7 +83,7 @@ export function FileBrowser({ index }: { index: WorkspaceFileIndex }) {
                     type="button"
                     aria-expanded={row.expanded}
                     onClick={() => toggle(row.path)}
-                    className="flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 text-left transition-colors duration-150 hover:bg-kumo-row-hover focus-visible:outline-offset-[-2px] pointer-coarse:min-h-11"
+                    className="flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 text-left transition-colors duration-(--rh-dur-ui) hover:bg-kumo-row-hover focus-visible:outline-offset-[-2px] pointer-coarse:min-h-11"
                   >
                     <TreePrefix prefix={row.prefix} />
                     {row.expanded ? (

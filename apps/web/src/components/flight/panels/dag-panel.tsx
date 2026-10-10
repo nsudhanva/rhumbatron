@@ -51,12 +51,13 @@ import {
 } from "./dag/nodes";
 
 /**
- * Execution DAG (Debug view): the Work Graph of one Change as it stood at the fold instant.
+ * Execution DAG (Flight Control): the Work Graph of one Change as it stood at the fold instant.
  *
  *   nodes   state.tasks in state.taskOrder, column = layer, row = index in the layer
- *   edges   state.dependencies: done (tone), waiting (dashed attention), failed (danger),
- *           critical path (2px)
- *   motion  none; progress lines show recorded model calls only
+ *   edges   state.dependencies: done (tone), waiting (dashed attention, animated only while the
+ *           dependent is queued and the fold is live), failed (danger), critical path (2px)
+ *   motion  a one-shot flash on a node when a recorded fact about it plays (lane.fork,
+ *           run.start, run.end); progress lines advance with recorded model calls only
  *
  * Selection is shared with every other panel through the Flight store; unrelated nodes dim.
  * Filters dim, never remove, so the graph keeps its shape while a viewer narrows it.
@@ -131,6 +132,8 @@ const MIN_ZOOM = Math.ceil((24 / (NODE_H - 4)) * 100) / 100;
 /** One fit for the first render, the Fit button and a resize refit. */
 const FIT = { padding: 0.12, minZoom: MIN_ZOOM, maxZoom: 1 } as const;
 
+const EVENT_KINDS_OF_TASK = new Set(["lane.fork", "run.start", "run.end"]);
+
 /** Tasks an entity under the pointer stands for: itself for a Task, its related Tasks otherwise. */
 function hoveredTasks(state: FlightState, hover: EntityRef | null): ReadonlySet<string> {
   if (!hover) return new Set();
@@ -190,6 +193,7 @@ function DagCanvas({
   onToggleExpand: (taskId: string) => void;
   toggles: Toggles;
 }) {
+  const { animated } = useFlight();
   const selection = useSelection();
   const hover = useHover();
   const filters = useFlightFilters();
@@ -235,6 +239,17 @@ function DagCanvas({
   }, [state.tasks, filters]);
   const filtering = filters.query.trim() !== "" || filters.tiers.length > 0 || filters.activeOnly;
   const matchCount = [...matches.values()].filter(Boolean).length;
+
+  // Newest animated fact per Task (only facts the pacing queue just played may move).
+  const arrivals = useMemo(() => {
+    const out = new Map<string, string>();
+    if (animated.size === 0) return out;
+    for (const event of state.events) {
+      if (!animated.has(event.id) || !EVENT_KINDS_OF_TASK.has(event.kind)) continue;
+      if ("laneId" in event && event.laneId) out.set(event.laneId, event.id);
+    }
+    return out;
+  }, [state.events, animated]);
 
   const layout = useMemo(() => layoutDag(state, expanded, grouped), [state, expanded, grouped]);
 
@@ -289,12 +304,24 @@ function DagCanvas({
           hovered: hovered.has(task.id),
           dimmed,
           current: currentTask === task.id,
+          arrival: arrivals.get(task.id) ?? null,
           onToggleExpand,
         },
       });
     }
     return out;
-  }, [state, layout, selection, related, hovered, matches, criticalOnly, expanded, onToggleExpand]);
+  }, [
+    state,
+    layout,
+    selection,
+    related,
+    hovered,
+    matches,
+    criticalOnly,
+    expanded,
+    arrivals,
+    onToggleExpand,
+  ]);
 
   const edges = useMemo(
     () =>
@@ -308,14 +335,18 @@ function DagCanvas({
           !matches.get(dep.from) ||
           !matches.get(dep.to);
         const style = edgeStyle(dep, accent, dimmed);
+        const target = state.tasks[dep.to];
         const tooltip = describeDependency(state, dep);
         return {
           id: dep.id,
           type: "dep",
           source: dep.from,
           target: dep.to,
-          // Static: a dashed edge already says "waiting"; nothing loops in the Debug view.
-          animated: false,
+          animated:
+            dep.status === "blocking" &&
+            state.live &&
+            !reduce &&
+            (target?.status === "pending" || target?.status === "ready"),
           style,
           markerEnd: {
             type: MarkerType.ArrowClosed,
@@ -328,7 +359,7 @@ function DagCanvas({
           data: { tooltip },
         };
       }),
-    [state, related, criticalOnly, matches],
+    [state, related, criticalOnly, matches, reduce],
   );
 
   const onEdgeClick = useCallback((_: unknown, edge: { id: string }) => {
@@ -476,7 +507,7 @@ function DagToolbar({
           Group by resource
         </Chip>
       </div>
-      <span className="ml-auto truncate font-mono text-[12px] text-kumo-subtle">
+      <span className="ml-auto truncate font-mono text-[11px] text-kumo-subtle">
         {summary}
         {expandedCount > 0 ? ` · ${formatNumber(expandedCount)} expanded` : ""}
       </span>
@@ -523,7 +554,7 @@ function DagLegend() {
   return (
     <ul
       aria-label="Legend"
-      className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-kumo-rule px-2 py-1 text-[12px] whitespace-nowrap text-kumo-subtle"
+      className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-kumo-rule px-2 py-1 text-[11px] whitespace-nowrap text-kumo-subtle"
     >
       {NODE_LEGEND.map((item) => (
         <li key={item.border} className="flex items-center gap-1.5">
@@ -544,11 +575,11 @@ function DagLegend() {
         Done
       </li>
       <li className="flex items-center gap-1.5">
-        <span aria-hidden className="h-px w-4 bg-kumo-danger" />
+        <span aria-hidden className="h-px w-4 bg-accent-500" />
         Failed
       </li>
       <li className="flex items-center gap-1.5">
-        <span aria-hidden className="size-1.5 bg-kumo-danger" />
+        <span aria-hidden className="size-1.5 bg-accent-500" />
         Conflict
       </li>
       <li className="flex items-center gap-1.5">

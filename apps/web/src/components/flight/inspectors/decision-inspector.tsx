@@ -79,7 +79,7 @@ function Probabilities({ values }: { values: Json }) {
           </li>
         ))}
       </ul>
-      <figcaption className="text-[12px] text-kumo-subtle">
+      <figcaption className="text-[11px] text-kumo-subtle">
         Route probabilities as recorded in the Decision Receipt. They choose a model tier; they are
         not a confidence score and never gate a release.
       </figcaption>
@@ -243,12 +243,12 @@ function GateDetails({ candidate, receipt }: { candidate: CandidateState; receip
               className="min-w-0 truncate px-1 font-mono text-[12px]"
             >
               {c.checkId}
-              <span className="ml-2 font-sans text-[12px] text-kumo-subtle">
+              <span className="ml-2 font-sans text-[11px] text-kumo-subtle">
                 {c.required ? "required" : "optional"}
               </span>
             </RefButton>
             <span className="flex items-center gap-1.5">
-              <span className="text-[12px] text-kumo-subtle">
+              <span className="text-[11px] text-kumo-subtle">
                 {c.coverage ? c.coverage.replace(/_/g, " ") : "no Evidence"}
               </span>
               <StatusPill status={c.coverage === "not_checked" ? "not_checked" : c.status} />
@@ -342,27 +342,6 @@ function recordItems(decision: DecisionState): KeyValueItem[] {
         { label: "Promoted tree", value: short(r.composedTree), mono: true },
       ];
     }
-    case "release":
-      return [
-        {
-          label: "Status",
-          value: typeof r.status === "string" ? <StatusPill status={r.status} /> : null,
-        },
-        {
-          label: "Generation",
-          value: typeof r.generation === "number" ? generation(r.generation) : null,
-          mono: true,
-        },
-        { label: "Commit", value: short(r.commit), mono: true },
-        { label: "Build", value: typeof r.buildUuid === "string" ? r.buildUuid : null, mono: true },
-        {
-          label: "Version",
-          value: typeof r.versionId === "string" ? r.versionId : null,
-          mono: true,
-        },
-        { label: "URL", value: typeof r.url === "string" ? r.url : null, mono: true },
-        { label: "Reason", value: typeof r.failureReason === "string" ? r.failureReason : null },
-      ];
     default:
       return [];
   }
@@ -465,10 +444,10 @@ function StepButton({ event, label }: { event: ActivityEvent | null; label: stri
       }}
       className="grid min-h-6 w-full min-w-0 cursor-pointer grid-cols-[72px_56px_minmax(0,1fr)] items-baseline gap-x-2 py-1 text-left hover:bg-kumo-row-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-500 pointer-coarse:min-h-11"
     >
-      <span className="text-[12px] text-kumo-subtle">{label}</span>
+      <span className="text-[11px] tracking-[0.08em] text-kumo-subtle uppercase">{label}</span>
       <Mono subtle>{clockOf(event.at)}</Mono>
       <span className="min-w-0 truncate text-[12px]" title={event.detail}>
-        <span className="mr-1.5 font-mono text-[12px]">{event.type}</span>
+        <span className="mr-1.5 font-mono text-[11px]">{event.type}</span>
         {event.detail}
       </span>
     </button>

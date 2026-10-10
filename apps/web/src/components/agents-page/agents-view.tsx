@@ -1,26 +1,25 @@
+import { cn } from "@cloudflare/kumo";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { getProject, getProjectAgents, type ProjectAgents } from "../../lib/api";
 import { formatNumber, formatUsd, timeAgo } from "../../lib/format";
-import { SectionError, SkeletonRows } from "../project/feedback";
+import { SectionError, SkeletonBar, SkeletonRows } from "../project/feedback";
 import { DataTable, Th } from "../ui/data-table";
 import { EmptyState } from "../ui/empty-state";
-import { KeyValue } from "../ui/key-value";
+import { Mono } from "../ui/mono";
 import { Page, PageTitle, Section } from "../ui/page";
+import { StatCell, StatStrip } from "../ui/stat-strip";
 import { StatusPill } from "../ui/status-pill";
-import { Term } from "../ui/term";
 import { AgentInspector } from "./agent-inspector";
 import { AgentTable } from "./agent-table";
-import { Details } from "./agent-words";
 import { SleepingPool } from "./sleeping-pool";
 
 /** Poll while an agent is active. Idle pages do not poll, to stay inside the D1 read allowance. */
 const ACTIVE_POLL_MS = 15_000;
 
 /**
- * Agents page body (Advanced; AGENTS.md 38.6, 57): working and recently active agents one by
- * one, idle agents as one sentence. Selecting a row fills the inspector beside the tables. A
- * one-line summary replaces the stat strip; account usage sits under "Technical details".
+ * Agents page body (AGENTS.md 38.6, 57): active and recently active agents one by one, the rest
+ * of the pool aggregated by role. Selecting a row fills the inspector beside the tables.
  */
 export function AgentsView({ projectId }: { projectId: string }) {
   const project = useQuery({
@@ -41,16 +40,17 @@ export function AgentsView({ projectId }: { projectId: string }) {
   const recent = list.filter((a) => a.state === "sleeping");
   const current = list.find((a) => a.agentId === selected) ?? active[0] ?? recent[0];
   const stale = agents.isError && !!data;
-  const capReached = !!data && data.today.accountCalls >= data.today.cap;
 
   return (
     <Page>
       <PageTitle
-        title={<Term k="agent">Agents</Term>}
+        kicker={project.data?.name ?? "Project"}
+        title="Agents"
         meta={
           <>
-            {project.data?.name && <span>{project.data.name}</span>}
-            {data && <span>{summary(data)}</span>}
+            <span>One agent per Task</span>
+            <span aria-hidden>·</span>
+            <span>active and recently active agents listed, sleeping agents grouped by role</span>
           </>
         }
       />
@@ -67,57 +67,50 @@ export function AgentsView({ projectId }: { projectId: string }) {
         />
       )}
 
-      {capReached && data && (
-        <p className="flex flex-wrap items-center gap-2 text-[14px]">
-          <StatusPill status="paused" label="Daily limit reached" />
-          <span>
-            Agents used all {formatNumber(data.today.cap)} model calls allowed today. New agent work
-            waits until tomorrow.
-          </span>
-        </p>
-      )}
+      <AgentStats data={data} pending={agents.isPending} />
 
       {agents.isPending ? (
-        <Section label="Working now">
-          <DataTable minWidth={680} label="Loading agents">
+        <Section label="Active">
+          <DataTable minWidth={760} label="Loading agents">
             <thead>
               <tr>
                 <Th>Agent</Th>
                 <Th>Task</Th>
                 <Th>Model</Th>
+                <Th numeric>Calls this run</Th>
                 <Th numeric>Cost</Th>
                 <Th numeric>Updated</Th>
-                <Th>Status</Th>
+                <Th>State</Th>
               </tr>
             </thead>
             <tbody>
-              <SkeletonRows cells={["title", "title", "title", "numeric", "numeric", 56]} />
+              <SkeletonRows cells={["title", "title", 48, "numeric", "numeric", "numeric", 56]} />
             </tbody>
           </DataTable>
         </Section>
       ) : data && list.length === 0 && data.totals.agents === 0 ? (
         <Section label="Agents">
           <EmptyState
-            what="No agent has started in this project yet."
-            how="Start a change on the Overview. Each task's agent starts when the task is ready."
+            what="No agent has woken in this Project yet."
+            how="Submit a Change on the Overview. Each Task's agent wakes when the Task becomes ready."
           />
         </Section>
       ) : data ? (
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(320px,400px)] items-start gap-7 max-[1100px]:grid-cols-1">
           <div className="grid min-w-0 gap-7">
             <Section
-              label="Working now"
+              label="Active"
               meta={
                 <>
-                  {stale && <StatusPill status="stale" label="Not refreshed" />}
-                  <span className="tabular-nums">{formatNumber(active.length)}</span>
+                  {stale && <StatusPill status="stale" />}
+                  <Mono subtle>{active.length}</Mono>
                 </>
               }
             >
               {active.length === 0 ? (
                 <EmptyState
                   what="No agent is working right now."
-                  how="An agent starts when its task is ready and goes idle when it finishes."
+                  how="Agents sleep when their run ends and wake when a Task becomes ready."
                 />
               ) : (
                 <AgentTable
@@ -125,7 +118,7 @@ export function AgentsView({ projectId }: { projectId: string }) {
                   variant="active"
                   selectedId={current?.agentId ?? null}
                   onSelect={setSelected}
-                  label="Agents working now"
+                  label="Active agents"
                 />
               )}
             </Section>
@@ -134,13 +127,13 @@ export function AgentsView({ projectId }: { projectId: string }) {
               label="Recently active"
               meta={
                 <>
-                  <span>last {data.recentHours} h</span>
-                  <span className="tabular-nums">{formatNumber(recent.length)}</span>
+                  <span>last {data.recentHours} h · asleep</span>
+                  <Mono subtle>{recent.length}</Mono>
                 </>
               }
             >
               {recent.length === 0 ? (
-                <EmptyState what={`No agent finished in the last ${data.recentHours} h.`} />
+                <EmptyState what={`No agent slept in the last ${data.recentHours} h.`} />
               ) : (
                 <AgentTable
                   agents={recent}
@@ -152,23 +145,25 @@ export function AgentsView({ projectId }: { projectId: string }) {
               )}
             </Section>
 
-            <Section label="Idle">
-              <SleepingPool
-                total={data.sleeping.total}
-                unlisted={data.sleeping.unlisted}
-                notWoken={data.notWoken}
-              />
+            <Section
+              label="Sleeping pool"
+              meta={
+                <>
+                  <span>not listed</span>
+                  <Mono subtle>
+                    {formatNumber(data.sleeping.unlisted.reduce((s, r) => s + r.count, 0))}
+                  </Mono>
+                </>
+              }
+            >
+              <SleepingPool unlisted={data.sleeping.unlisted} notWoken={data.notWoken} />
             </Section>
-
-            <Details>
-              <Usage data={data} />
-            </Details>
           </div>
 
           {current ? (
             <AgentInspector agent={current} feedAvailable={data.feed.available} />
           ) : (
-            <aside className="rounded-lg border border-kumo-rule bg-kumo-elevated p-4">
+            <aside className="bg-kumo-elevated p-4">
               <EmptyState what="No agent selected." how="Select an agent to see its detail." />
             </aside>
           )}
@@ -179,41 +174,67 @@ export function AgentsView({ projectId }: { projectId: string }) {
 }
 AgentsView.displayName = "AgentsView";
 
-/** "3 working · 2 done in the last 24 h · 12 idle": the one-line summary under the title. */
-function summary(data: ProjectAgents): string {
-  const done = data.agents.filter(
-    (a) => a.state === "sleeping" && a.task.status === "completed",
-  ).length;
-  return [
-    `${formatNumber(data.totals.active)} working`,
-    `${formatNumber(done)} done in the last ${data.recentHours} h`,
-    `${formatNumber(data.sleeping.total)} idle`,
-  ].join(" · ");
-}
-
-/** Totals and the account-wide daily call cap, in the Advanced vocabulary. */
-function Usage({ data }: { data: ProjectAgents }) {
-  const { totals, today } = data;
+/** Active, sleeping, escalations, and today's model calls against the daily cap. */
+function AgentStats({ data, pending }: { data: ProjectAgents | undefined; pending: boolean }) {
+  const loading = <SkeletonBar height={34} width={64} />;
+  const value = (n: number | undefined) => (pending || n === undefined ? loading : formatNumber(n));
+  const today = data?.today;
+  const capReached = !!today && today.accountCalls >= today.cap;
   return (
-    <KeyValue
-      items={[
-        { label: "Agents started", value: formatNumber(totals.agents), mono: true },
-        { label: "Not started yet", value: formatNumber(data.notWoken), mono: true },
-        { label: "Attempts (runs)", value: formatNumber(totals.runs), mono: true },
-        {
-          label: "Retried with a stronger model (escalations)",
-          value: formatNumber(totals.escalations),
-          mono: true,
-        },
-        { label: "Model calls", value: formatNumber(totals.modelCalls), mono: true },
-        { label: "Cost", value: formatUsd(totals.costUsd), mono: true },
-        {
-          label: `Model calls today (${today.day})`,
-          value: `${formatNumber(today.accountCalls)} of ${formatNumber(today.cap)} account-wide · this project ${formatNumber(today.projectCalls)}`,
-          mono: true,
-        },
-      ]}
-    />
+    <StatStrip>
+      <StatCell
+        label="Active"
+        value={value(data?.totals.active)}
+        footnote={data ? `of ${formatNumber(data.totals.agents)} woken` : undefined}
+      />
+      <StatCell
+        label="Sleeping"
+        value={value(data?.sleeping.total)}
+        footnote={data ? `${formatNumber(data.notWoken)} not woken` : undefined}
+      />
+      <StatCell
+        label="Escalations"
+        value={value(data?.totals.escalations)}
+        footnote={
+          data
+            ? `${formatNumber(data.totals.runs)} runs · ${formatUsd(data.totals.costUsd)}`
+            : undefined
+        }
+      />
+      <StatCell
+        label="Model calls today"
+        value={value(today?.accountCalls)}
+        unit={today ? `/ ${formatNumber(today.cap)}` : undefined}
+        pill={capReached ? <StatusPill status="blocked" label="Cap reached" /> : undefined}
+        footnote={
+          today
+            ? `account-wide daily cap · this project ${formatNumber(today.projectCalls)}`
+            : undefined
+        }
+      >
+        {today && <CapBar used={today.accountCalls} cap={today.cap} />}
+      </StatCell>
+    </StatStrip>
   );
 }
-Usage.displayName = "Usage";
+AgentStats.displayName = "AgentStats";
+
+/**
+ * Daily cap as a 4px linear bar (DESIGN.md 9.1): ink fill on a recessed track, `danger` once the
+ * cap is reached, because reaching it stops new agent work. The value is in the cell above.
+ */
+function CapBar({ used, cap }: { used: number; cap: number }) {
+  const reached = used >= cap;
+  return (
+    <div aria-hidden className="h-1 bg-kumo-recessed">
+      <div
+        className={cn(
+          "h-full transition-[width] duration-(--rh-dur-bar)",
+          reached ? "bg-kumo-danger" : "bg-kumo-ink",
+        )}
+        style={{ width: `${Math.min(100, (used / Math.max(1, cap)) * 100)}%` }}
+      />
+    </div>
+  );
+}
+CapBar.displayName = "CapBar";

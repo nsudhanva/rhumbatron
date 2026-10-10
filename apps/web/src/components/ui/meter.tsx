@@ -7,10 +7,9 @@ const HEIGHT = { inline: "h-1", feature: "h-1.5", hero: "h-2.5" } as const;
 /**
  * Linear progress and threshold meter (DESIGN.md 9.1). Every bar shows its value as text.
  *
- * - Without `threshold`: brand fill on a recessed track; `success` when complete, `danger` over
- *   max.
+ * - Without `threshold`: ink fill on a recessed track; `success` when complete, `danger` over max.
  * - With `threshold`: a 2px ink marker at the limit (4px above and below the track), fill in
- *   `success` under the limit and `danger` over it, and a mono scale row `0 · limit N · max`.
+ *   `success` under the limit and accent over it, and a mono scale row `0 · threshold N · max`.
  * - `alert` adds a soft-limit marker in `warning`, labelled in the scale row.
  *
  *   <ThresholdMeter label="p95" value={164} max={300} threshold={200} format={(n) => `${n} ms`} />
@@ -42,13 +41,13 @@ export function ThresholdMeter({
   const fill =
     threshold !== undefined
       ? value > threshold
-        ? "bg-kumo-danger"
+        ? "bg-accent-500"
         : "bg-kumo-success"
       : value > max
         ? "bg-kumo-danger"
         : value >= max
           ? "bg-kumo-success"
-          : "bg-kumo-brand";
+          : "bg-kumo-ink";
   const text = format(value);
   return (
     <div className={cn("grid min-w-0 gap-1.5", className)}>
@@ -60,9 +59,9 @@ export function ThresholdMeter({
       <meter className="sr-only" min={0} max={max} value={value}>
         {text}
       </meter>
-      <div aria-hidden className={cn("relative rounded-full bg-kumo-recessed", HEIGHT[size])}>
+      <div aria-hidden className={cn("relative bg-kumo-recessed", HEIGHT[size])}>
         <div
-          className={cn("h-full rounded-full transition-[width] duration-(--rh-dur-bar)", fill)}
+          className={cn("h-full transition-[width] duration-(--rh-dur-bar)", fill)}
           style={{ width: pct(value) }}
         />
         {alert !== undefined && (
@@ -81,10 +80,10 @@ export function ThresholdMeter({
         )}
       </div>
       {threshold !== undefined && (
-        <div className="flex justify-between gap-2 font-mono text-[12px] whitespace-nowrap text-kumo-subtle tabular-nums">
+        <div className="flex justify-between gap-2 font-mono text-[10px] whitespace-nowrap text-kumo-subtle tabular-nums">
           <span>0</span>
           <span className="min-w-0 truncate">
-            {alert !== undefined && `alert ${format(alert)} · `}limit {format(threshold)}
+            {alert !== undefined && `alert ${format(alert)} · `}threshold {format(threshold)}
           </span>
           <span>{format(max)}</span>
         </div>
@@ -97,7 +96,7 @@ ThresholdMeter.displayName = "ThresholdMeter";
 export type Step = { label: string; status: string };
 
 /**
- * Segmented step bar: N equal 8px segments with 2px gaps, each colored by the
+ * Segmented step bar (DESIGN.md 9.1): N equal 8px segments with 2px gaps, each colored by the
  * family of its step status and titled with its label and status word. The mono count of done
  * steps sits on the left.
  *
@@ -125,7 +124,7 @@ export function SegmentedSteps({
             // biome-ignore lint/suspicious/noArrayIndexKey: steps are positional and labels may repeat
             key={index}
             title={`${step.label}: ${step.view.label}`}
-            className={cn("h-2 min-w-1 flex-1 rounded-xs", FAMILY_FILL[step.view.family])}
+            className={cn("h-2 min-w-1 flex-1", FAMILY_FILL[step.view.family])}
           >
             <span className="sr-only">
               {step.label}: {step.view.label}

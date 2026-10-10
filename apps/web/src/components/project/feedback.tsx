@@ -24,7 +24,7 @@ export function SectionError({
     <div
       role="alert"
       className={cn(
-        "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md bg-kumo-danger-tint px-3.5 py-2.5 text-[13px] font-semibold text-kumo-danger",
+        "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-kumo-danger-tint px-3.5 py-2.5 text-[13px] font-semibold text-kumo-danger",
         className,
       )}
     >

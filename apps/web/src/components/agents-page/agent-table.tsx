@@ -1,16 +1,18 @@
+import { cn } from "@cloudflare/kumo";
 import type { AgentView } from "../../lib/api";
-import { formatAge, formatUsd, truncate } from "../../lib/format";
-import { describeStep } from "../agents/activity-model";
+import { EMPTY, formatAge, formatNumber, formatUsd, truncate } from "../../lib/format";
+import { CALLS_PER_RUN } from "../agents/activity-model";
 import { DataTable, Td, Th, TitleCell, TRow } from "../ui/data-table";
+import { Mono } from "../ui/mono";
 import { StatusPill } from "../ui/status-pill";
-import { agentStatus, modelName, plainRole } from "./agent-words";
 
 /**
  * Agents as table rows (DESIGN.md 8.3). The whole row selects the agent for the inspector beside
  * the table; the row carries no other link, so the Change link lives in the inspector.
  *
- * Plain words only (spec 7.6): role, what the agent is doing now as a sentence, the model by
- * product name, one status. Ids, tiers and call counts are in the inspector's Technical details.
+ * `active` rows show the current attempt: tier, calls against the per-run cap with a 4px ink bar
+ * that advances with each recorded model call, and the age of the last progress write.
+ * `recent` rows show totals over every attempt and the Task result.
  */
 export function AgentTable({
   agents,
@@ -26,15 +28,16 @@ export function AgentTable({
   label: string;
 }) {
   return (
-    <DataTable minWidth={680} label={label}>
+    <DataTable minWidth={760} label={label}>
       <thead>
         <tr>
           <Th>Agent</Th>
           <Th>Task</Th>
           <Th>Model</Th>
+          <Th numeric>{variant === "active" ? "Calls this run" : "Model calls"}</Th>
           <Th numeric>Cost</Th>
           <Th numeric>{variant === "active" ? "Updated" : "Last active"}</Th>
-          <Th>Status</Th>
+          <Th>{variant === "active" ? "State" : "Result"}</Th>
         </tr>
       </thead>
       <tbody>
@@ -53,13 +56,6 @@ export function AgentTable({
 }
 AgentTable.displayName = "AgentTable";
 
-/** What a working agent is doing now, as one sentence (spec 6.2 P7). */
-function doingNow(agent: AgentView): string | null {
-  const run = agent.runs.at(-1);
-  if (agent.state !== "active" || run?.status !== "running") return null;
-  return run.lastStep ? describeStep(run.lastStep) : "Starting";
-}
-
 function AgentRow({
   agent,
   variant,
@@ -74,7 +70,6 @@ function AgentRow({
   const run = agent.runs.at(-1);
   const updated =
     variant === "active" ? (run?.progressAt ?? run?.startedAt ?? agent.lastActiveAt) : null;
-  const doing = doingNow(agent);
   return (
     <TRow selected={selected} className="cursor-pointer">
       <Td className="max-w-56">
@@ -86,42 +81,67 @@ function AgentRow({
               onClick={() => onSelect(agent.agentId)}
               className="text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-[-2px] focus-visible:after:outline-accent-500"
             >
-              {plainRole(agent.role)}
+              {agent.role}
             </button>
           }
-          meta={doing ? <span title={run?.lastStep ?? undefined}>{doing}</span> : undefined}
+          meta={agent.agentId}
         />
       </Td>
       <Td className="max-w-80">
         <TitleCell
-          title={<span title={agent.task.title}>{agent.task.title || agent.task.kind}</span>}
+          title={
+            <span title={agent.task.title}>
+              <Mono className="font-normal">{agent.task.key}</Mono> {agent.task.title}
+            </span>
+          }
           meta={<span title={agent.task.changeGoal}>{truncate(agent.task.changeGoal, 64)}</span>}
         />
       </Td>
       <Td>
-        <TitleCell
-          title={
-            <span className="font-normal">
-              {modelName(agent.tier, run?.provider) ?? "Not chosen yet"}
-            </span>
-          }
-          meta={
-            agent.escalations > 0
-              ? "Retried with a stronger model"
-              : agent.attempts > 1
-                ? `Attempt ${agent.attempts}`
-                : undefined
-          }
-        />
+        <div className="grid">
+          <Mono>{agent.tier}</Mono>
+          <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+            {agent.attempts === 0
+              ? "no attempt yet"
+              : `attempt ${agent.attempts}${agent.escalations > 0 ? " · escalated" : ""}`}
+          </span>
+        </div>
+      </Td>
+      <Td numeric>
+        {variant === "active" ? <RunCalls agent={agent} /> : formatNumber(agent.modelCalls)}
       </Td>
       <Td numeric>{formatUsd(agent.costUsd)}</Td>
       <Td numeric className="text-kumo-subtle">
         {formatAge(updated ?? agent.lastActiveAt)}
       </Td>
       <Td>
-        <StatusPill status={agentStatus(agent)} />
+        <StatusPill status={agent.task.status} />
       </Td>
     </TRow>
   );
 }
 AgentRow.displayName = "AgentRow";
+
+/** Model calls of the running attempt against its per-run cap, as text plus a 4px bar. */
+function RunCalls({ agent, className }: { agent: AgentView; className?: string }) {
+  const run = agent.runs.at(-1);
+  if (run?.status !== "running") {
+    return <span className="text-kumo-subtle">{run ? EMPTY : "waking"}</span>;
+  }
+  const cap = CALLS_PER_RUN[run.tier];
+  const pct = Math.min(100, (run.modelCalls / cap) * 100);
+  return (
+    <span className={cn("inline-flex w-full max-w-36 items-center justify-end gap-2", className)}>
+      <span aria-hidden className="h-1 min-w-10 grow bg-kumo-recessed">
+        <span
+          className="block h-full bg-kumo-ink transition-[width] duration-(--rh-dur-bar)"
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span>
+        {run.modelCalls} / {cap}
+      </span>
+    </span>
+  );
+}
+RunCalls.displayName = "RunCalls";

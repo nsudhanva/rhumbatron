@@ -78,7 +78,7 @@ function KindChip({
       )}
     >
       {KIND_NOUN[kind][1]}
-      <span className="font-mono text-[12px] tabular-nums opacity-70">{formatNumber(count)}</span>
+      <span className="font-mono text-[11px] tabular-nums opacity-70">{formatNumber(count)}</span>
     </button>
   );
 }
@@ -132,7 +132,7 @@ function DecisionRow({
             onClick={() => useFlightStore.getState().toggle(ref)}
             className="grid min-h-6 w-full min-w-0 cursor-pointer grid-cols-[56px_76px_minmax(0,1fr)] items-baseline gap-x-2 py-1.5 pl-3 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-500"
           >
-            <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">
+            <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
               {clockOf(decision.at)}
             </span>
             <span className="flex min-w-0 items-center gap-1">
@@ -162,7 +162,7 @@ function DecisionRow({
             mode="select"
             title={`Select ${subject.kicker}: ${subject.title}`}
             context={`select ${subject.kicker}: ${subject.title}`}
-            className="max-w-[120px] truncate px-1 font-mono text-[12px]"
+            className="max-w-[120px] truncate px-1 font-mono text-[11px]"
           >
             {subjectText}
           </RefButton>
@@ -170,7 +170,7 @@ function DecisionRow({
       </div>
       {selected && (
         <div className="border-t border-kumo-rule bg-kumo-base py-2.5 pr-3 pl-[71px]">
-          <p className="mb-2 text-[12px] text-kumo-subtle">
+          <p className="mb-2 text-[11px] tracking-[0.08em] text-kumo-subtle uppercase">
             Causal history · {formatNumber(decision.causes.length)} recorded cause
             {decision.causes.length === 1 ? "" : "s"}
           </p>
@@ -196,7 +196,6 @@ export function DecisionsPanel({ focused }: PanelProps) {
       gate: 0,
       approval: 0,
       promotion: 0,
-      release: 0,
     };
     for (const d of state.decisions) out[d.kind] += 1;
     return out;
@@ -247,7 +246,7 @@ export function DecisionsPanel({ focused }: PanelProps) {
           ))}
         </fieldset>
         {summary && (
-          <p className="ml-auto truncate font-mono text-[12px] text-kumo-subtle">{summary}</p>
+          <p className="ml-auto truncate font-mono text-[11px] text-kumo-subtle">{summary}</p>
         )}
       </div>
 

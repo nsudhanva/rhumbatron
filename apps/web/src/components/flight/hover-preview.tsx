@@ -374,7 +374,7 @@ function HoverCard({
       style={{ visibility: "hidden" }}
       className="fixed top-0 left-0 z-50 grid w-[min(320px,calc(100vw-16px))] gap-1.5 bg-kumo-elevated px-3 py-2.5 text-[12px] shadow-md transition-opacity duration-[var(--rh-dur-overlay-in)] starting:opacity-0"
     >
-      <p className="text-[12px] truncate text-kumo-subtle">{label.kicker}</p>
+      <p className="type-kicker truncate text-kumo-subtle">{label.kicker}</p>
       <p className="line-clamp-2 text-[13px] font-semibold break-words">{label.title}</p>
       {lines.length > 0 && (
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 border-t border-kumo-rule pt-1.5">
@@ -394,7 +394,7 @@ HoverCard.displayName = "HoverCard";
 type Line = { label: string; value: ReactNode };
 
 const clock = (at: number) => formatClock(new Date(at).toISOString());
-const mono = (value: ReactNode) => <span className="font-mono text-[12px]">{value}</span>;
+const mono = (value: ReactNode) => <span className="font-mono text-[11px]">{value}</span>;
 const keyOf = (state: FlightState, taskId: string | null | undefined) =>
   taskId ? (state.tasks[taskId]?.key ?? taskId) : "—";
 
