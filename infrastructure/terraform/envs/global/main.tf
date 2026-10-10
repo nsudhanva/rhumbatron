@@ -22,3 +22,41 @@ module "security" {
 
 # www.rhumbatron.com is a custom domain of the prod web Worker, which redirects it to the apex
 # (apps/web/src/server.ts). No zone redirect ruleset (ADR 0017).
+
+# Runaway-billing backstop (ADR 0019). Cloudflare has no hard spend cap, so the account emails the
+# owner when usage-based spend crosses each level. Code guards (alarm-guard.ts, causal caps) are the
+# first line; this alert catches anything they miss, in any product. Temporary adapter: provider
+# 5.27 rejects alert_type billing_budget_alert (AGENTS.md section 11.4).
+locals {
+  repo_root = abspath("${path.root}/../../../..")
+}
+
+resource "terraform_data" "budget_alerts" {
+  triggers_replace = {
+    levels = jsonencode(var.budget_alert_usd)
+    email  = sha256(var.alert_email)
+    script = filesha256("${local.repo_root}/scripts/budget-alerts.ts")
+  }
+  input = {
+    repo_root = local.repo_root
+  }
+
+  provisioner "local-exec" {
+    command = "bun ${self.input.repo_root}/scripts/budget-alerts.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      BUDGET_MODE           = "sync"
+      BUDGET_EMAILS         = var.alert_email
+      BUDGET_LEVELS_USD     = jsonencode(var.budget_alert_usd)
+    }
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "bun ${self.input.repo_root}/scripts/budget-alerts.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      BUDGET_MODE           = "destroy"
+    }
+  }
+}

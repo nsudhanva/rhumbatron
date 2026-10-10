@@ -30,6 +30,10 @@ const rootKeychain: Record<string, Record<string, string>> = {
     // ADR 0018: release observation (Builds API GETs) on the integration Worker.
     TF_VAR_builds_api_token: "rhumbatron-cloudflare-builds-token",
   },
+  // Billing budget alerts (ADR 0019) go to the account owner's address, kept out of source.
+  global: {
+    TF_VAR_alert_email: "rhumbatron-alert-email",
+  },
   // ADR 0017. Prod reuses dev's items for now (no new tokens): the K2 Consume-only token, the
   // Vertex service account (one GCP project; the per-gateway caps split the budget), the OpenRouter
   // key, and the Clerk dev instance. When the Clerk production instance exists, point the Clerk
