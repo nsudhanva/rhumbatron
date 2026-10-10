@@ -7,7 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { detectConflicts } from "@rhumbatron/conflict";
-import type { CompletionRequest, CompletionResult, ModelProvider } from "@rhumbatron/model-router";
+import type { CompletionRequest, CompletionResult } from "@rhumbatron/model-router";
 import type { Intent } from "@rhumbatron/protocol";
 import { describe, expect, it, vi } from "vitest";
 
@@ -111,7 +111,12 @@ const dataPair = [
 
 type Reply = { verdict: string; rationale: string; citations: string[] } | string;
 
-function setup(pair: Intent[], replies: Partial<Record<string, Reply>>, budgetUsd = 3) {
+function setup(
+  pair: Intent[],
+  replies: Partial<Record<string, Reply>>,
+  budgetUsd = 3,
+  allowOpus = true,
+) {
   const { db, d1 } = fakeD1();
   db.prepare(
     `INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd, created_by, created_at, updated_at)
@@ -132,7 +137,7 @@ function setup(pair: Intent[], replies: Partial<Record<string, Reply>>, budgetUs
       NOW,
     );
   }
-  const calls: { provider: ModelProvider; tier: string }[] = [];
+  const calls: { tier: string }[] = [];
   const events: unknown[] = [];
   const deps = {
     db: d1,
@@ -142,29 +147,28 @@ function setup(pair: Intent[], replies: Partial<Record<string, Reply>>, budgetUs
     emit: async (list: unknown[]) => {
       events.push(...list);
     },
-    callModel: async (
-      provider: ModelProvider,
-      req: CompletionRequest,
-    ): Promise<CompletionResult> => {
-      calls.push({ provider, tier: req.tier });
+    callModel: async (req: CompletionRequest): Promise<CompletionResult> => {
+      calls.push({ tier: req.tier });
       const reply = replies[req.tier];
+      const content = typeof reply === "string" ? reply : JSON.stringify(reply);
       return {
-        provider,
-        model: "google/gemini-3.8-flash",
-        content: typeof reply === "string" ? reply : JSON.stringify(reply),
+        provider: "anthropic",
+        model: "claude-sonnet-5-5",
+        tier: req.tier,
+        content,
         toolCalls: [],
-        finishReason: "stop",
+        message: { role: "assistant", content },
+        finishReason: "end_turn",
         inputTokens: 1000,
         outputTokens: 200,
-        reasoningTokens: 0,
-        cachedInputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
         costUsd: 0.0015,
         latencyMs: 10,
         gatewayLogId: null,
       };
     },
-    preferVertex: true,
-    vertexConfigured: true,
+    allowOpus,
     storePacket: async () => undefined,
     metric: () => undefined,
   };
@@ -331,5 +335,26 @@ describe("conflict review", () => {
     expect(spent.n).toBeCloseTo(0.003);
     expect(await reviewConflict(t.deps, ctx, id)).toEqual([]);
     expect(t.calls).toHaveLength(2);
+  });
+
+  it("keeps Sonnet's verdict final and calls no Opus while Opus is off", async () => {
+    const t = setup(
+      dataPair,
+      {
+        sonnet: {
+          verdict: "needs_more_evidence",
+          rationale: "Concurrent updates may lose writes; tests can decide.",
+          citations: ["intent:int_c:data:0", "intent:int_d:data:0"],
+        },
+      },
+      3,
+      false,
+    );
+    const id = await record(t.db, dataPair);
+    expect(await reviewConflict(t.deps, ctx, id)).toEqual(["sonnet"]);
+    expect(t.calls.map((c) => c.tier)).toEqual(["sonnet"]);
+    const review = JSON.parse(row(t.db, id).review_json);
+    expect(review.reviews.sonnet.deferred).toBeUndefined();
+    expect(review.reviews.opus).toBeUndefined();
   });
 });

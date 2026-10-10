@@ -4,7 +4,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { nextStep } from "@rhumbatron/model-router";
+import {
+  meteredComplete,
+  monthSpentUsd,
+  nextStep,
+  reserveSpend,
+  settleSpend,
+} from "@rhumbatron/model-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const spies = vi.hoisted(() => ({
@@ -19,16 +25,8 @@ vi.mock("@rhumbatron/integration/events", () => ({
 }));
 vi.mock("@cloudflare/sandbox", () => ({ getSandbox: spies.getSandbox }));
 
-const {
-  admitAgent,
-  admitSandbox,
-  CHANGE_LIMITS,
-  chooseProvider,
-  limitAttempts,
-  limitStop,
-  markProviderFlag,
-  releaseSandbox,
-} = await import("./limits.ts");
+const { admitAgent, admitSandbox, CHANGE_LIMITS, limitAttempts, limitStop, releaseSandbox } =
+  await import("./limits.ts");
 const { handleWake } = await import("./wake-consumer.ts");
 const { openWorkspace } = await import("./workspace.ts");
 
@@ -263,58 +261,52 @@ describe("max model attempts per Task at one tier", () => {
   });
 });
 
-// Gemini overflow (ADR 0016): the provider of a new run comes from today's D1 counters.
-describe("chooseProvider", () => {
-  const DAY = "2026-10-09";
-  const count = (db: DatabaseSync, counter: string, n: number, day = DAY) =>
-    db
-      .prepare("INSERT INTO usage_counters (day, counter, count) VALUES (?, ?, ?)")
-      .run(day, counter, n);
+// Monthly Anthropic budget (ADR 0021, rule 50): the only hard money stop. It must refuse exactly
+// at the budget, refuse atomically, settle to the exact cost, and stop without another provider.
+describe("monthly Anthropic budget", () => {
+  const MONTH = "2026-10";
 
-  it("uses OpenRouter until it is used up today, then Vertex", async () => {
-    const { db, d1 } = fakeD1();
-    const choose = () => chooseProvider(d1, { day: DAY, vertexConfigured: true });
-    expect((await choose()).provider).toBe("openrouter");
-    count(db, "openrouter-calls", 44);
-    expect((await choose()).provider).toBe("openrouter");
-    db.prepare("UPDATE usage_counters SET count = 45 WHERE counter = 'openrouter-calls'").run();
-    expect(await choose()).toEqual({
-      provider: "google-vertex-ai",
-      reason: "openrouter_daily_cap",
-    });
+  it("refuses the reservation that would pass the budget, and settles to the exact cost", async () => {
+    const { d1 } = fakeD1();
+    expect(await reserveSpend(d1, MONTH, 6, 10)).toBe(true);
+    expect(await reserveSpend(d1, MONTH, 4, 10)).toBe(true);
+    // Exactly at the budget: one more micro-dollar is refused, and nothing is written.
+    expect(await reserveSpend(d1, MONTH, 0.000001, 10)).toBe(false);
+    expect(await monthSpentUsd(d1, MONTH)).toBe(10);
+    // The 4 USD call cost 1.25: settling frees the rest for the next call.
+    await settleSpend(d1, MONTH, 4, 1.25);
+    expect(await monthSpentUsd(d1, MONTH)).toBeCloseTo(7.25, 6);
+    expect(await reserveSpend(d1, MONTH, 2.75, 10)).toBe(true);
+    expect(await reserveSpend(d1, "2026-11", 2.75, 10)).toBe(true);
   });
 
-  it("moves to Vertex after a rate limit today, and back to OpenRouter the next day", async () => {
+  it("stops the call before the network with spend_limited, and the Task with a budget stop", async () => {
     const { d1 } = fakeD1();
-    await markProviderFlag(d1, DAY, "openrouter-exhausted");
-    await markProviderFlag(d1, DAY, "openrouter-exhausted");
-    expect((await chooseProvider(d1, { day: DAY, vertexConfigured: true })).provider).toBe(
-      "google-vertex-ai",
-    );
-    expect((await chooseProvider(d1, { day: "2026-10-10", vertexConfigured: true })).provider).toBe(
-      "openrouter",
-    );
-  });
-
-  it("starts nothing once the Vertex spend cap was hit today, and names the $9 per 30 days cap", async () => {
-    const { d1 } = fakeD1();
-    await markProviderFlag(d1, DAY, "openrouter-exhausted");
-    await markProviderFlag(d1, DAY, "vertex-spend-limited");
-    const choice = await chooseProvider(d1, { day: DAY, vertexConfigured: true });
-    expect(choice).toEqual({ provider: null, reason: "vertex_spend_limit" });
-    const stop = limitStop(choice.reason);
-    expect(stop?.limit).toBe("vertex_spend_limit");
-    expect(stop?.text).toContain("$9 per 30 days");
-    // ADR 0017: each environment names its own share of the cap from its binding.
-    expect(limitStop(choice.reason, "4.5")?.text).toContain("$4.50 per 30 days");
-    // The spend-limit failure stops the Task; it never schedules a retry.
-    expect(nextStep("haiku", [{ tier: "haiku", kind: "spend_limited" }])).toEqual({
-      action: "stop",
-      reason: "vertex_spend_limit",
-    });
-    expect(limitAttempts({ action: "stop", reason: "vertex_spend_limit" }, [])).toEqual({
-      action: "stop",
-      reason: "vertex_spend_limit",
-    });
+    expect(await reserveSpend(d1, new Date().toISOString().slice(0, 7), 10, 10)).toBe(true);
+    let sent = 0;
+    const error = await meteredComplete(
+      { db: d1, budgetUsd: 10 },
+      {
+        accountId: "a",
+        gatewayId: "g",
+        apiKey: "k",
+        workspaceId: "w",
+        fetch: async () => {
+          sent += 1;
+          return new Response("{}");
+        },
+      },
+      { tier: "haiku", messages: [{ role: "user", content: "hi" }], maxOutputTokens: 10 },
+    ).catch((e: unknown) => e);
+    expect(sent).toBe(0);
+    expect((error as { kind?: string }).kind).toBe("spend_limited");
+    const step = nextStep("haiku", [{ tier: "haiku", kind: "spend_limited" }]);
+    expect(step).toEqual({ action: "stop", reason: "monthly_model_spend" });
+    expect(limitAttempts(step, [])).toEqual(step);
+    const stop = limitStop(step.action === "stop" ? step.reason : "", "15");
+    expect(stop?.limit).toBe("monthly_model_spend");
+    expect(stop?.text).toContain("$15 per calendar month");
+    expect(stop?.text).toContain("No other provider is tried");
+    expect(limitStop("monthly_model_spend")?.text).toContain("$10 per calendar month");
   });
 });

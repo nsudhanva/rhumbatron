@@ -1,11 +1,9 @@
 import {
   AGENT_DAILY_CALL_CAP,
+  anthropicMonthlyBudgetUsd,
   type FailureKind,
   type NextStep,
-  type ProviderChoice,
-  selectProvider,
-  USAGE_COUNTER,
-  vertexSpendLimit,
+  nextTier,
 } from "@rhumbatron/model-router";
 import type { ModelTier } from "@rhumbatron/protocol";
 
@@ -35,7 +33,7 @@ export type LimitKey =
   | "max_active_sandboxes_per_change"
   | "max_attempts_per_tier"
   | "daily_model_calls"
-  | "vertex_spend_limit"
+  | "monthly_model_spend"
   | "max_cost_usd_per_change";
 
 /** The minimum of D1 this module uses; D1Database satisfies it. */
@@ -60,11 +58,6 @@ export async function takeQuota(
 }
 
 const TRANSPORT = new Set<FailureKind>(["rate_limited", "timeout", "transient"]);
-const NEXT_TIER: Record<ModelTier, ModelTier | null> = {
-  haiku: "sonnet",
-  sonnet: "opus",
-  opus: null,
-};
 
 const agentLimitReason = (active: number) =>
   `Waiting: ${active} reasoning agents are active in this Change (limit ${CHANGE_LIMITS.maxActiveAgentsPerChange} per Change, AGENTS.md section 44). The Task starts when one finishes.`;
@@ -172,11 +165,13 @@ export async function noteSandboxRefused(db: Db, taskId: string, now: string) {
  * Applies the section 44 attempt limit to the escalation decision (section 23.3). The next attempt
  * at a tier that already had `maxAttemptsPerTier` attempts is refused: it escalates when an
  * intelligence failure happened at that tier and a stronger tier exists (never on transport
- * failures alone, section 42.8), and otherwise stops for re-plan.
+ * failures alone, section 42.8), and otherwise stops for re-plan. Sonnet is the top tier while Opus
+ * is off (ADR 0021).
  */
 export function limitAttempts(
   step: NextStep,
   previous: readonly { tier: ModelTier; failure_kind: string | null }[],
+  options: { allowOpus?: boolean } = {},
 ): NextStep {
   if (step.action !== "retry" && step.action !== "escalate") return step;
   const at = previous.filter((r) => r.tier === step.tier);
@@ -184,7 +179,7 @@ export function limitAttempts(
   const intelligence = at.some(
     (r) => r.failure_kind && !TRANSPORT.has(r.failure_kind as FailureKind),
   );
-  const next = NEXT_TIER[step.tier];
+  const next = nextTier(step.tier, options.allowOpus ?? true);
   if (intelligence && next) {
     return { action: "escalate", tier: next, reason: `max_attempts_at_${step.tier}` };
   }
@@ -197,8 +192,8 @@ export function limitAttempts(
  */
 export function limitStop(
   reason: string,
-  /** The `VERTEX_SPEND_LIMIT_USD` binding (ADR 0017); the $9 fallback when absent. */
-  vertexSpendLimitUsd?: string,
+  /** The `ANTHROPIC_MONTHLY_BUDGET_USD` binding (ADR 0021); the $10 fallback when absent. */
+  monthlyBudgetUsd?: string,
 ): { limit: LimitKey; text: string } | null {
   if (reason === "budget_exhausted") {
     return {
@@ -206,12 +201,12 @@ export function limitStop(
       text: `Budget stop: the daily agent model call cap (${AGENT_DAILY_CALL_CAP} calls per UTC day) was reached, or the run was cancelled. No new model work starts until a person raises the budget or the day rolls over.`,
     };
   }
-  if (reason === "vertex_spend_limit") {
-    const cap = vertexSpendLimit(vertexSpendLimitUsd);
-    const usd = Number.isInteger(cap.usd) ? String(cap.usd) : cap.usd.toFixed(2);
+  if (reason === "monthly_model_spend") {
+    const usd = anthropicMonthlyBudgetUsd(monthlyBudgetUsd);
+    const shown = Number.isInteger(usd) ? String(usd) : usd.toFixed(2);
     return {
-      limit: "vertex_spend_limit",
-      text: `Budget stop: the Gemini (Vertex AI) spend cap of $${usd} per ${cap.days} days was reached at the AI Gateway, and today's OpenRouter free calls are used up. No new model work starts until the ${cap.days}-day window frees budget, the UTC day rolls over, or a person raises the cap in Terraform (modules/ai).`,
+      limit: "monthly_model_spend",
+      text: `Budget stop: this environment's Anthropic model budget of $${shown} per calendar month is used up, or Anthropic or the AI Gateway refused the call for spend or billing. No other provider is tried. No new model work starts until the next month or until a person raises ANTHROPIC_MONTHLY_BUDGET_USD in Terraform.`,
     };
   }
   if (reason === "change_budget_exhausted") {
@@ -220,54 +215,11 @@ export function limitStop(
       text: "Budget stop: this Change's recorded model spend reached its budget (max_cost_usd_per_change, AGENTS.md section 44). No new model work starts until a person raises the Change budget.",
     };
   }
-  if (reason === "max_attempts_per_tier" || reason === "two_failures_at_opus") {
+  if (reason === "max_attempts_per_tier" || /^two_failures_at_(sonnet|opus)$/.test(reason)) {
     return {
       limit: "max_attempts_per_tier",
       text: `Budget stop: ${CHANGE_LIMITS.maxAttemptsPerTier} model attempts at one tier failed and no stronger tier is allowed (limit ${CHANGE_LIMITS.maxAttemptsPerTier} attempts per Task per tier, AGENTS.md section 44). The Task needs a re-plan.`,
     };
   }
   return null;
-}
-
-/**
- * Provider for a new run (ADR 0016): OpenRouter until today's OpenRouter is used up, then Gemini on
- * Vertex. One read of today's `usage_counters` rows; the AI Gateway spend cap is the money ceiling.
- */
-export async function chooseProvider(
-  db: Db,
-  input: { day: string; vertexConfigured: boolean; preferVertex?: boolean },
-): Promise<ProviderChoice> {
-  const rows = await db
-    .prepare("SELECT counter, count FROM usage_counters WHERE day = ? AND counter IN (?, ?, ?)")
-    .bind(
-      input.day,
-      USAGE_COUNTER.openrouterCalls,
-      USAGE_COUNTER.openrouterExhausted,
-      USAGE_COUNTER.vertexSpendLimited,
-    )
-    .all<{ counter: string; count: number }>();
-  const count = (counter: string) =>
-    (rows.results ?? []).find((r) => r.counter === counter)?.count ?? 0;
-  return selectProvider({
-    openrouterCallsToday: count(USAGE_COUNTER.openrouterCalls),
-    openrouterExhaustedToday: count(USAGE_COUNTER.openrouterExhausted) > 0,
-    vertexSpendLimitedToday: count(USAGE_COUNTER.vertexSpendLimited) > 0,
-    vertexConfigured: input.vertexConfigured,
-    preferVertex: input.preferVertex === true,
-  });
-}
-
-/** Marks a provider flag (`openrouter-exhausted`, `vertex-spend-limited`) for the day. Idempotent. */
-export async function markProviderFlag(
-  db: Db,
-  day: string,
-  counter: typeof USAGE_COUNTER.openrouterExhausted | typeof USAGE_COUNTER.vertexSpendLimited,
-) {
-  await db
-    .prepare(
-      `INSERT INTO usage_counters (day, counter, count) VALUES (?, ?, 1)
-       ON CONFLICT (day, counter) DO NOTHING`,
-    )
-    .bind(day, counter)
-    .run();
 }

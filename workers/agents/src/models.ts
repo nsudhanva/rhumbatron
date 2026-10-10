@@ -1,250 +1,161 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { createModels, createProvider, type MutableModels } from "@earendil-works/pi-ai/models";
 import {
-  type ModelProvider,
+  ANTHROPIC_PRICES,
+  anthropicPrice,
+  gatewayAnthropicUrl,
   TIER_MODELS,
-  TIER_VERTEX_MODEL,
-  vertexPrice,
+  TIER_REASONING_EFFORT,
 } from "@rhumbatron/model-router";
 import type { ModelTier } from "@rhumbatron/protocol";
 
 /**
- * Pi model access (ADR 0007, ADR 0009, ADR 0016). One pi-ai provider, `rhumbatron`, with two models
- * per tier, both through our AI Gateway:
- * - `tier-<t>`: OpenRouter with the tier's free-model fallback list ($0).
- * - `tier-<t>-vertex`: Gemini on Vertex AI through the gateway compat endpoint, priced from
- *   VERTEX_PRICES so Pi's usage records real cost. The gateway caps Vertex spend per environment.
- * The AgentDO picks the provider once per run. `beforeCall` runs before every model request and may
- * throw to stop a run (budget, daily cap); `onFailure` sees every failed provider response.
+ * Pi model access (ADR 0009, ADR 0021). One pi-ai provider, `rhumbatron`, with one model per tier
+ * on Pi's Anthropic Messages API, through our AI Gateway's Anthropic endpoint. Every request sends
+ * `anthropic-workspace-id` (the key is organization-level). Pi puts `cache_control` on the system
+ * prompt, the tool definitions, and the latest message, and prices each response from its usage
+ * fields with the costs below, cache reads and writes included.
+ * The AgentDO resolves the tier before the run (Opus off unless ALLOW_OPUS). `beforeCall` runs
+ * before every model request and may throw to stop a run (budgets, caps); `onFailure` sees every
+ * failed response.
  */
 
 export const PROVIDER_ID = "rhumbatron";
 
+/** Bounded context per call keeps the per-call reservation and spend small (section 24.3). */
 const TIER_LIMITS: Record<ModelTier, { contextWindow: number; maxTokens: number }> = {
   haiku: { contextWindow: 200_000, maxTokens: 4000 },
   sonnet: { contextWindow: 200_000, maxTokens: 8000 },
   opus: { contextWindow: 200_000, maxTokens: 8000 },
 };
 
-/** Request fields the gateway compat endpoint accepts for Vertex; anything else is dropped. */
-const VERTEX_FIELDS = new Set([
-  "model",
-  "messages",
-  "tools",
-  "tool_choice",
-  "max_tokens",
-  "max_completion_tokens",
-  "stream",
-  "stream_options",
-  "reasoning_effort",
-  "temperature",
-  "top_p",
-  "stop",
-]);
-
-/**
- * Gemini 3 rejects a replayed tool call without its thought signature (HTTP 400), and pi-ai does
- * not round-trip `extra_content`. Real signatures are kept per tool call id; a call whose signature
- * was lost (Durable Object eviction) gets Google's documented validator bypass value.
- */
-const SIGNATURE_BYPASS = "skip_thought_signature_validator";
-const MAX_SIGNATURES = 256;
+/** Largest prompt one Pi call can send: the reservation estimate before each call. */
+export const tierLimits = (tier: ModelTier) => TIER_LIMITS[tier];
 
 export type ModelAccess = {
   accountId: string;
   gatewayId: string;
   apiKey: string;
-  /** Base64 service account JSON. Without it, Vertex models fail with an auth error. */
-  vertexServiceAccount?: string;
-  beforeCall: (tier: ModelTier, provider: ModelProvider) => Promise<void>;
-  onFailure: (provider: ModelProvider, status: number | null, body: string) => Promise<void>;
+  workspaceId: string;
+  beforeCall: (tier: ModelTier) => Promise<void>;
+  onFailure: (status: number | null, body: string) => Promise<void>;
 };
 
-export const modelIdFor = (tier: ModelTier, provider: ModelProvider = "openrouter") =>
-  provider === "google-vertex-ai" ? `tier-${tier}-vertex` : `tier-${tier}`;
+export const modelIdFor = (tier: ModelTier) => `tier-${tier}`;
 
-export function parseModelId(id: string): { tier: ModelTier; provider: ModelProvider } {
-  const match = /^tier-(haiku|sonnet|opus)(-vertex)?$/.exec(id);
+export function parseModelId(id: string): { tier: ModelTier } {
+  const match = /^tier-(haiku|sonnet|opus)$/.exec(id);
   if (!match) throw new Error(`unknown model ${id}`);
-  return {
-    tier: match[1] as ModelTier,
-    provider: match[2] ? "google-vertex-ai" : "openrouter",
-  };
+  return { tier: match[1] as ModelTier };
 }
 
-/** Per-million-token prices of a tier's Vertex model in Pi's cost shape. Cache reads at full price. */
-export function vertexModelCost(tier: ModelTier) {
-  const price = vertexPrice(TIER_VERTEX_MODEL[tier]);
+/** A tier's Anthropic prices in Pi's cost shape (USD per million tokens). */
+export function tierModelCost(tier: ModelTier) {
+  const known = ANTHROPIC_PRICES[TIER_MODELS[tier]];
+  const price = known ?? anthropicPrice(TIER_MODELS[tier]);
+  const long = known?.longPrompt;
   return {
     input: price.input,
     output: price.output,
-    cacheRead: price.input,
-    cacheWrite: price.input,
+    cacheRead: price.cacheRead,
+    cacheWrite: price.cacheWrite5m,
+    ...(long
+      ? {
+          tiers: [
+            {
+              inputTokensAbove: long.aboveTokens,
+              input: long.input,
+              output: long.output,
+              cacheRead: long.cacheRead,
+              cacheWrite: long.cacheWrite5m,
+            },
+          ],
+        }
+      : {}),
   };
 }
 
-type ChatMessage = {
-  role?: string;
-  tool_calls?: { id?: string; extra_content?: unknown }[];
-};
-
-/** Rewrites a Pi payload for the Vertex compat endpoint. Exported for tests. */
-export function vertexPayload(
-  payload: Record<string, unknown>,
-  tier: ModelTier,
-  signatures: ReadonlyMap<string, string>,
-): Record<string, unknown> {
-  const body: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(payload)) {
-    if (VERTEX_FIELDS.has(key)) body[key] = value;
-  }
-  body.model = `google-vertex-ai/${TIER_VERTEX_MODEL[tier]}`;
-  const messages = Array.isArray(payload.messages) ? (payload.messages as ChatMessage[]) : [];
-  body.messages = messages.map((message) =>
-    message.role === "assistant" && message.tool_calls?.length
-      ? {
-          ...message,
-          tool_calls: message.tool_calls.map((call) => ({
-            ...call,
-            extra_content: {
-              google: {
-                thought_signature: (call.id && signatures.get(call.id)) || SIGNATURE_BYPASS,
-              },
-            },
-          })),
-        }
-      : message,
-  );
-  return body;
+/**
+ * Rewrites a Pi payload for a tier: the real model id, adaptive thinking with the text omitted
+ * (no reasoning is stored, AGENTS.md rule 32), and the tier's effort. Exported for tests.
+ */
+export function tierPayload(payload: Record<string, unknown>, tier: ModelTier) {
+  return {
+    ...payload,
+    model: TIER_MODELS[tier],
+    thinking: { type: "adaptive", display: "omitted" },
+    output_config: {
+      ...((payload.output_config as Record<string, unknown> | undefined) ?? {}),
+      effort: TIER_REASONING_EFFORT[tier],
+    },
+  };
 }
 
-type StreamChunk = {
-  error?: { code?: number | string; message?: string };
-  choices?: {
-    delta?: {
-      tool_calls?: { id?: string; extra_content?: { google?: { thought_signature?: string } } }[];
-    };
-  }[];
-};
-
 export function createTierModels(access: ModelAccess): MutableModels {
-  const gateway = `https://gateway.ai.cloudflare.com/v1/${access.accountId}/${access.gatewayId}`;
-  const openrouterUrl = `${gateway}/openrouter/v1`;
+  const baseUrl = gatewayAnthropicUrl(access.accountId, access.gatewayId);
   const tiers = Object.keys(TIER_MODELS) as ModelTier[];
-  const base = (tier: ModelTier) => ({
-    api: "openai-completions" as const,
+  const models: Model<"anthropic-messages">[] = tiers.map((tier) => ({
+    api: "anthropic-messages" as const,
     provider: PROVIDER_ID,
+    id: modelIdFor(tier),
+    name: `Rhumbatron ${tier} (${TIER_MODELS[tier]})`,
+    baseUrl,
+    headers: { "anthropic-workspace-id": access.workspaceId },
     reasoning: true,
     input: ["text" as const],
     contextWindow: TIER_LIMITS[tier].contextWindow,
     maxTokens: TIER_LIMITS[tier].maxTokens,
-  });
-  const models: Model<"openai-completions">[] = tiers.flatMap((tier) => [
-    {
-      ...base(tier),
-      id: modelIdFor(tier, "openrouter"),
-      name: `Rhumbatron ${tier}`,
-      baseUrl: openrouterUrl,
-      // OpenRouter :free models cost nothing (ADR 0007).
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      compat: { thinkingFormat: "openrouter" },
+    cost: tierModelCost(tier),
+    compat: {
+      forceAdaptiveThinking: true,
+      supportsTemperature: false,
+      // 5-minute cache only: a 1-hour write costs 2x input and runs rarely repeat after 5 minutes.
+      supportsLongCacheRetention: false,
     },
-    {
-      ...base(tier),
-      id: modelIdFor(tier, "google-vertex-ai"),
-      name: `Rhumbatron ${tier} (Gemini)`,
-      // The OpenAI client appends /chat/completions.
-      baseUrl: `${gateway}/compat`,
-      cost: vertexModelCost(tier),
-      compat: {
-        thinkingFormat: "openai",
-        supportsReasoningEffort: true,
-        supportsStore: false,
-        supportsDeveloperRole: false,
-        maxTokensField: "max_tokens",
-        sendSessionAffinityHeaders: false,
-        supportsLongCacheRetention: false,
-      },
-    },
-  ]);
-
-  // Thought signatures of this agent's recent Vertex tool calls (see SIGNATURE_BYPASS).
-  const signatures = new Map<string, string>();
-  const remember = (id: string, signature: string) => {
-    signatures.set(id, signature);
-    if (signatures.size > MAX_SIGNATURES) {
-      const oldest = signatures.keys().next().value;
-      if (oldest !== undefined) signatures.delete(oldest);
-    }
-  };
+  }));
 
   /** Reports every failed response or network failure, then hands the response to pi-ai. */
-  const observedFetch =
-    (provider: ModelProvider) =>
-    async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-      let response: Response;
-      try {
-        response = await fetch(input, init);
-      } catch (error) {
-        if (!init?.signal?.aborted) await access.onFailure(provider, null, "");
-        throw error;
-      }
-      if (!response.ok) {
-        const body = await response
-          .clone()
-          .text()
-          .catch(() => "");
-        await access.onFailure(provider, response.status, body.slice(0, 2000));
-      }
-      return response;
-    };
+  const observedFetch = async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    let response: Response;
+    try {
+      response = await fetch(input, init);
+    } catch (error) {
+      if (!init?.signal?.aborted) await access.onFailure(null, "");
+      throw error;
+    }
+    if (!response.ok) {
+      const body = await response
+        .clone()
+        .text()
+        .catch(() => "");
+      await access.onFailure(response.status, body.slice(0, 2000));
+    }
+    return response;
+  };
 
-  const api = openAICompletionsApi();
+  const api = anthropicMessagesApi();
   const withTier = <T extends object>(model: Model<Api>, options: T | undefined) => {
-    const { tier, provider } = parseModelId(model.id);
-    const vertex = provider === "google-vertex-ai";
+    const { tier } = parseModelId(model.id);
     return {
       ...options,
-      ...(vertex ? { apiKey: access.vertexServiceAccount ?? "" } : {}),
-      fetch: observedFetch(provider),
-      onPayload: (payload: unknown) => {
-        const body = payload as Record<string, unknown>;
-        if (vertex) return vertexPayload(body, tier, signatures);
-        // OpenRouter tries `models` in order; the alias id itself is never sent.
-        const [primary, ...rest] = TIER_MODELS[tier];
-        return { ...body, model: primary, models: [primary, ...rest] };
-      },
-      onProviderStreamEvent: async (data: unknown) => {
-        const chunk = data as StreamChunk | null;
-        if (!chunk || typeof chunk !== "object") return;
-        // OpenRouter can fail inside an HTTP 200 stream when every fallback model is limited.
-        if (chunk.error) {
-          const code = Number(chunk.error.code);
-          await access.onFailure(
-            provider,
-            Number.isFinite(code) ? code : null,
-            String(chunk.error.message ?? ""),
-          );
-        }
-        if (!vertex) return;
-        for (const call of chunk.choices?.[0]?.delta?.tool_calls ?? []) {
-          const signature = call.extra_content?.google?.thought_signature;
-          if (call.id && signature) remember(call.id, signature);
-        }
-      },
+      fetch: observedFetch,
+      onPayload: (payload: unknown) => tierPayload(payload as Record<string, unknown>, tier),
     };
   };
 
-  const provider = createProvider<"openai-completions">({
+  const provider = createProvider<"anthropic-messages">({
     id: PROVIDER_ID,
     name: "Rhumbatron tiers",
-    baseUrl: openrouterUrl,
-    headers: { "X-Title": "Rhumbatron" },
+    baseUrl,
+    headers: { "anthropic-workspace-id": access.workspaceId },
     auth: {
       apiKey: {
-        name: "OpenRouter API key",
-        resolve: async () => ({ auth: { apiKey: access.apiKey }, source: "OPENROUTER_API_KEY" }),
+        name: "Anthropic API key",
+        resolve: async () => ({ auth: { apiKey: access.apiKey }, source: "ANTHROPIC_API_KEY" }),
       },
     },
     models,
@@ -254,8 +165,8 @@ export function createTierModels(access: ModelAccess): MutableModels {
       },
       streamSimple(model, context, options) {
         // A rejected budget check must fail this request before it reaches the network.
-        const { tier, provider: modelProvider } = parseModelId(model.id);
-        const gate = access.beforeCall(tier, modelProvider);
+        const { tier } = parseModelId(model.id);
+        const gate = access.beforeCall(tier);
         const routed = withTier(model, options);
         const stream = api.streamSimple(model, context, {
           ...routed,

@@ -4,8 +4,6 @@ import {
   AGENT_DAILY_CALL_CAP,
   type CompletionRequest,
   type CompletionResult,
-  type ModelProvider,
-  OPENROUTER_DAILY_CALL_CAP,
   USAGE_COUNTER,
 } from "@rhumbatron/model-router";
 import { describe, expect, it, vi } from "vitest";
@@ -37,15 +35,17 @@ function required<T>(value: T | null | undefined): T {
 function fakeDeps(overrides: Partial<CompletionResult> = {}) {
   const objects = new Map<string, unknown>([[originalRef, { fullTranscript: logs[0]?.body }]]);
   const completion: CompletionResult = {
-    provider: "google-vertex-ai",
-    model: "test-haiku",
+    provider: "anthropic",
+    model: "claude-haiku-5-5",
+    tier: "haiku",
     content: JSON.stringify(summary),
     toolCalls: [],
-    finishReason: "stop",
+    message: { role: "assistant", content: JSON.stringify(summary) },
+    finishReason: "end_turn",
     inputTokens: 120,
     outputTokens: 60,
-    reasoningTokens: 0,
-    cachedInputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     costUsd: 0.001,
     latencyMs: 1,
     gatewayLogId: "test-log",
@@ -56,9 +56,8 @@ function fakeDeps(overrides: Partial<CompletionResult> = {}) {
     writeJson: vi.fn(async (key: string, value: unknown) => {
       objects.set(key, structuredClone(value));
     }),
-    chooseProvider: vi.fn(async (): Promise<ModelProvider | null> => "google-vertex-ai"),
     takeQuota: vi.fn(async (_counter: string, _cap: number) => true),
-    callModel: vi.fn(async (_provider: ModelProvider, _request: CompletionRequest) => completion),
+    callModel: vi.fn(async (_request: CompletionRequest) => completion),
     recordCall: vi.fn(async (_hash: string, _result: CompletionResult | null) => undefined),
   } satisfies CompactionDeps;
   return { deps, objects, completion };
@@ -117,7 +116,7 @@ describe("prior Task context compaction", () => {
     expect([...objects.keys()].some((key) => key.includes("/compact-"))).toBe(false);
   });
 
-  it("reuses the same source hash without a model call, provider lookup, or quota slot", async () => {
+  it("reuses the same source hash without a model call or quota slot", async () => {
     const { deps, objects } = fakeDeps();
     const first = await compactPriorLogs(deps, input);
     expect(first.compaction).toMatchObject(summary);
@@ -126,7 +125,6 @@ describe("prior Task context compaction", () => {
     expect(second.compaction).toEqual(first.compaction);
     expect(second.costUsd).toBe(0);
     expect(deps.callModel).toHaveBeenCalledTimes(1);
-    expect(deps.chooseProvider).toHaveBeenCalledTimes(1);
     expect(deps.takeQuota).toHaveBeenCalledTimes(1);
     expect(deps.recordCall).toHaveBeenCalledTimes(1);
     expect(objects.get(required(first.compaction).r2Key)).toMatchObject({
@@ -169,17 +167,13 @@ describe("prior Task context compaction", () => {
     expect(result.sourceRefs).toContain(originalRef);
   });
 
-  it("enforces the OpenRouter cap before requesting an agent call slot", async () => {
+  it("accounts for a call the monthly budget refused, and keeps the fallback", async () => {
     const { deps } = fakeDeps();
-    deps.chooseProvider.mockResolvedValue("openrouter");
-    deps.takeQuota.mockResolvedValue(false);
+    deps.callModel.mockRejectedValue(new Error("Monthly Anthropic budget reached"));
     const result = await compactPriorLogs(deps, input);
     expect(result.compaction).toBeNull();
-    expect(deps.takeQuota).toHaveBeenCalledExactlyOnceWith(
-      USAGE_COUNTER.openrouterCalls,
-      OPENROUTER_DAILY_CALL_CAP,
-    );
-    expect(deps.callModel).not.toHaveBeenCalled();
+    expect(result.costUsd).toBe(0);
+    expect(deps.recordCall).toHaveBeenCalledExactlyOnceWith(expect.any(String), null);
   });
 
   it.each([
@@ -207,7 +201,7 @@ describe("prior Task context compaction", () => {
   });
 
   it("rejects a length-limited response even if its partial JSON validates", async () => {
-    const { deps, completion } = fakeDeps({ finishReason: "length" });
+    const { deps, completion } = fakeDeps({ finishReason: "max_tokens" });
     const result = await compactPriorLogs(deps, input);
     expect(result.compaction).toBeNull();
     expect(result.costUsd).toBe(completion.costUsd);
@@ -233,7 +227,7 @@ describe("prior Task context compaction", () => {
     expect(compact.r2Key).toBe(`${prefix}/compact-${compact.sourceHash}.json`);
     expect(objects.get(compact.r2Key)).toMatchObject({ sourceRefs: result.sourceRefs });
     expect(deps.writeJson.mock.calls.every(([key]) => key !== originalRef)).toBe(true);
-    const [, request] = required(deps.callModel.mock.calls[0]);
+    const [request] = required(deps.callModel.mock.calls[0]);
     const prompt = required(request.messages.find((message) => message.role === "user")?.content);
     expect(prompt).toContain(sourceKey);
     expect(prompt).toContain(error);
@@ -255,11 +249,10 @@ describe("prior Task context compaction", () => {
     expect(deps.callModel).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the chosen Vertex provider and the Haiku tier with at most 800 output tokens", async () => {
+  it("uses the Haiku tier with at most 800 output tokens", async () => {
     const { deps } = fakeDeps();
     await compactPriorLogs(deps, input);
-    const [provider, request] = required(deps.callModel.mock.calls[0]);
-    expect(provider).toBe("google-vertex-ai");
+    const [request] = required(deps.callModel.mock.calls[0]);
     expect(request.tier).toBe("haiku");
     expect(request.maxOutputTokens).toBeLessThanOrEqual(800);
     expect(request.maxOutputTokens).toBe(COMPACTION_MAX_OUTPUT_TOKENS);

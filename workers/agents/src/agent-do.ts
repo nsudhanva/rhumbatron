@@ -16,19 +16,24 @@ import {
 } from "@rhumbatron/integration/events";
 import {
   AGENT_DAILY_CALL_CAP,
+  anthropicMonthlyBudgetUsd,
   CLEF_ROUTE_ABSTAIN_BELOW,
   checkRunBudget,
   classifyProviderFailure,
-  complete,
   type Failure,
   type FailureKind,
   MAX_CALLS_PER_RUN,
-  ModelCallError,
-  type ModelProvider,
+  meteredComplete,
+  monthSpentUsd,
   nextStep,
-  OPENROUTER_DAILY_CALL_CAP,
+  opusAllowed,
+  reserveEstimateUsd,
+  reserveSpend,
+  resolveTier,
   routeStep,
-  TIER_VERTEX_MODEL,
+  settleSpend,
+  spendMonth,
+  TIER_MODELS,
   taskBudgetUsd,
   USAGE_COUNTER,
   WorkersAiDecisionModel,
@@ -55,8 +60,8 @@ import {
 } from "./conflict-review.ts";
 import { declareIntentAndDetect } from "./conflicts.ts";
 import { compactPriorLogs } from "./context-compaction.ts";
-import { chooseProvider, limitAttempts, limitStop, markProviderFlag, takeQuota } from "./limits.ts";
-import { createTierModels, modelIdFor, PROVIDER_ID } from "./models.ts";
+import { limitAttempts, limitStop, takeQuota } from "./limits.ts";
+import { createTierModels, modelIdFor, PROVIDER_ID, tierLimits } from "./models.ts";
 import { taskRetrieval } from "./retrieval.ts";
 import type {
   AgentResumeEvent,
@@ -142,6 +147,13 @@ const log = (line: Record<string, unknown>) => console.warn(JSON.stringify(line)
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+/** Prompt tokens assumed when a Pi call is reserved on the monthly meter (ADR 0021). */
+const PI_RESERVE_PROMPT_TOKENS = 40_000;
+
+/** The monthly-meter reservation of one Pi call at a tier, settled to the exact cost later. */
+const piCallReserveUsd = (tier: ModelTier) =>
+  reserveEstimateUsd(TIER_MODELS[tier], tierLimits(tier).maxTokens, PI_RESERVE_PROMPT_TOKENS);
+
 export class AgentDO extends Agent<Env> implements AgentRuntime {
   private readonly registry = createRegistry();
   private prompt = "";
@@ -150,7 +162,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   /**
    * Recorded spend of each run as of its last progress write (one model call behind). In memory:
    * reading Pi's transcript inside the request gate could wait on the turn itself. Losing it on
-   * eviction only loosens the per-run cap; the gateway spend cap stays the hard ceiling.
+   * eviction only loosens the per-run cap; the monthly Anthropic meter stays the hard ceiling.
    */
   private readonly runSpendUsd = new Map<string, number>();
   /** Advisory Claims of the active run (ADR 0015). */
@@ -166,12 +178,10 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
           models: createTierModels({
             accountId: this.env.AI_ACCOUNT_ID,
             gatewayId: this.env.AI_GATEWAY_ID,
-            apiKey: this.env.OPENROUTER_API_KEY,
-            ...(this.env.VERTEX_SERVICE_ACCOUNT
-              ? { vertexServiceAccount: this.env.VERTEX_SERVICE_ACCOUNT }
-              : {}),
-            beforeCall: (tier, provider) => this.beforeModelCall(tier, provider),
-            onFailure: (provider, status, body) => this.onModelFailure(provider, status, body),
+            apiKey: this.env.ANTHROPIC_API_KEY,
+            workspaceId: this.env.ANTHROPIC_WORKSPACE_ID,
+            beforeCall: (tier) => this.beforeModelCall(tier),
+            onFailure: (status, body) => this.onModelFailure(status, body),
           }),
           registry: this.registry,
           // One retry for transient errors; escalation is ours, not Pi's (section 23.3).
@@ -203,6 +213,10 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     `);
     ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS run_reads (run_id TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0)",
+    );
+    // What each run has put on the monthly Anthropic meter so far: reservations plus settlements.
+    ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS run_meter (run_id TEXT PRIMARY KEY, metered_usd REAL NOT NULL DEFAULT 0)",
     );
     ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS run_workspaces (run_id TEXT PRIMARY KEY, ws_json TEXT NOT NULL)",
@@ -259,11 +273,11 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   }
 
   /** Budget gate before every model request (P6-09). Throwing fails the request, then the run. */
-  private async beforeModelCall(tier: ModelTier, provider: ModelProvider) {
+  private async beforeModelCall(tier: ModelTier) {
     const run = this.activeRun();
     if (!run) throw new Error("no active run");
-    // The gateway refused Vertex for its spend cap: never send another request in this run.
-    if (run.outcome === "spend_limited") throw new Error("Vertex spend cap reached");
+    // A spend stop (monthly budget, gateway spend limit, billing): never send another request.
+    if (run.outcome === "spend_limited") throw new Error("Anthropic spend stop reached");
     // A new call after a provider failure means Pi retried; the failure no longer ends the run.
     if (run.outcome && TRANSPORT_OUTCOMES.has(run.outcome)) {
       this.ctx.storage.sql.exec(
@@ -278,25 +292,6 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       spentUsd: this.runSpendUsd.get(run.run_id) ?? 0,
       budgetUsd: input.budgetUsd,
     });
-    // Our OpenRouter ceiling (ADR 0016): at 45 calls today OpenRouter counts as used up, this run
-    // fails as rate_limited, and its same-tier retry (section 42.8) starts on Vertex.
-    if (
-      budget.ok &&
-      provider === "openrouter" &&
-      !(await takeQuota(
-        this.env.DB,
-        today(),
-        USAGE_COUNTER.openrouterCalls,
-        OPENROUTER_DAILY_CALL_CAP,
-      ))
-    ) {
-      await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.openrouterExhausted);
-      this.ctx.storage.sql.exec(
-        "UPDATE agent_runs SET outcome = 'rate_limited' WHERE run_id = ?",
-        run.run_id,
-      );
-      throw new Error(`OpenRouter daily cap reached (${OPENROUTER_DAILY_CALL_CAP} calls)`);
-    }
     // The run's own cap is a Task failure (retry or escalate); the daily cap stops the Change.
     const daily =
       budget.ok &&
@@ -309,12 +304,34 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       );
       throw new Error(budget.ok ? "daily model call cap reached" : `run ${budget.reason}`);
     }
+    // Monthly Anthropic budget (ADR 0021): reserve this call's estimate, or stop the Change.
+    const reserveUsd = piCallReserveUsd(tier);
+    const admitted = await reserveSpend(
+      this.env.DB,
+      spendMonth(),
+      reserveUsd,
+      anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD),
+    );
+    if (!admitted) {
+      this.ctx.storage.sql.exec(
+        "UPDATE agent_runs SET outcome = 'spend_limited' WHERE run_id = ?",
+        run.run_id,
+      );
+      throw new Error("monthly Anthropic budget reached");
+    }
+    // Synchronous with the reservation, so a concurrent settlement sees both or neither.
     this.ctx.storage.sql.exec(
       "UPDATE agent_runs SET calls = calls + 1 WHERE run_id = ?",
       run.run_id,
     );
+    this.ctx.storage.sql.exec(
+      `INSERT INTO run_meter (run_id, metered_usd) VALUES (?, ?)
+       ON CONFLICT (run_id) DO UPDATE SET metered_usd = metered_usd + excluded.metered_usd`,
+      run.run_id,
+      reserveUsd,
+    );
     this.env.METRICS.writeDataPoint({
-      blobs: ["model_call", tier, input.taskId, provider],
+      blobs: ["model_call", tier, input.taskId, "anthropic"],
       doubles: [1],
       indexes: [input.projectId],
     });
@@ -325,21 +342,16 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   }
 
   /**
-   * A failed provider response (models.ts). Records the failure kind on the run so the run check
-   * ends it as that kind, and marks OpenRouter used up or the Vertex spend cap reached for the day
-   * so the next run picks its provider from that (ADR 0016). Never throws.
+   * A failed Anthropic or gateway response (models.ts). Records the failure kind on the run so the
+   * run check ends it as that kind: a spend stop ends the run as a budget stop. Never throws.
    */
-  private async onModelFailure(provider: ModelProvider, status: number | null, body: string) {
+  private async onModelFailure(status: number | null, body: string) {
     try {
       const run = this.activeRun();
-      const failure = classifyProviderFailure(provider, status, body);
-      if (failure.openrouterExhausted)
-        await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.openrouterExhausted);
-      if (failure.kind === "spend_limited")
-        await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.vertexSpendLimited);
+      const failure = classifyProviderFailure(status, body);
       const kind: FailureKind | null =
-        failure.kind === "spend_limited" || TRANSPORT_OUTCOMES.has(failure.kind)
-          ? (failure.kind as FailureKind)
+        failure === "spend_limited" || TRANSPORT_OUTCOMES.has(failure)
+          ? (failure as FailureKind)
           : null;
       if (run && kind) {
         // A recorded stop outcome wins; the spend cap overrides a transport failure.
@@ -353,9 +365,9 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       log({
         event: "agent.model_failed",
         runId: run?.run_id,
-        provider,
+        provider: "anthropic",
         status,
-        kind: failure.kind,
+        kind: failure,
       });
     } catch (error) {
       log({ event: "agent.model_failure_record_failed", message: String(error).slice(0, 200) });
@@ -400,6 +412,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     try {
       const usage = await this.usage();
       this.runSpendUsd.set(runId, usage.cost);
+      await this.settleMeter(runId, usage, false);
       await this.env.DB.prepare(
         `UPDATE task_runs SET model_calls = ?, input_tokens = ?, output_tokens = ?, cost_usd = ?,
            last_step = ?, progress_at = ?
@@ -418,6 +431,47 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         .run();
     } catch (error) {
       log({ event: "agent.progress_failed", runId, message: String(error).slice(0, 200) });
+    }
+  }
+
+  /**
+   * Brings this run's share of the monthly Anthropic meter to its exact cost so far plus the
+   * reservation of each admitted call that has no response yet (`final`: none are outstanding).
+   * The DO row and the target are computed together, synchronously, so concurrent settlements and
+   * reservations never double count. Reporting path: never throws.
+   */
+  private async settleMeter(
+    runId: string,
+    usage: { cost: number; responses: number },
+    final: boolean,
+  ) {
+    try {
+      const run = this.ctx.storage.sql
+        .exec<{ calls: number; tier: ModelTier }>(
+          "SELECT calls, tier FROM agent_runs WHERE run_id = ?",
+          runId,
+        )
+        .toArray()[0];
+      if (!run) return;
+      const metered =
+        this.ctx.storage.sql
+          .exec<{ metered_usd: number }>(
+            "SELECT metered_usd FROM run_meter WHERE run_id = ?",
+            runId,
+          )
+          .toArray()[0]?.metered_usd ?? 0;
+      const outstanding = final ? 0 : Math.max(0, run.calls - usage.responses);
+      const target = usage.cost + outstanding * piCallReserveUsd(run.tier);
+      if (Math.abs(target - metered) < 1e-6) return;
+      this.ctx.storage.sql.exec(
+        `INSERT INTO run_meter (run_id, metered_usd) VALUES (?, ?)
+         ON CONFLICT (run_id) DO UPDATE SET metered_usd = excluded.metered_usd`,
+        runId,
+        target,
+      );
+      await settleSpend(this.env.DB, spendMonth(), metered, target);
+    } catch (error) {
+      log({ event: "agent.meter_settle_failed", runId, message: String(error).slice(0, 200) });
     }
   }
 
@@ -469,7 +523,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       // Conflict reviews (P9-05, P9-06) spend from the same Change budget.
       this.env.DB.prepare(CONFLICT_REVIEW_SPEND_SQL).bind(input.changeId),
     ]);
-    // Recorded spend (Gemini overflow is paid, ADR 0016) comes off the Change budget first.
+    // Recorded spend (Claude is paid, ADR 0021) comes off the Change budget first.
     const changeSpentUsd = (spent?.results?.[0]?.n ?? 0) + (reviewSpent?.results?.[0]?.n ?? 0);
     let budgetUsd = taskBudgetUsd(
       task.budget_usd,
@@ -487,7 +541,12 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const lastTier = previous.results?.at(-1)?.tier;
     if (lastTier) {
       // Section 44: at most 2 attempts per tier before escalation or re-plan (limits.ts).
-      const step = limitAttempts(nextStep(lastTier, failures), previous.results ?? []);
+      const allowOpus = opusAllowed(this.env.ALLOW_OPUS);
+      const step = limitAttempts(
+        nextStep(lastTier, failures, { allowOpus }),
+        previous.results ?? [],
+        { allowOpus },
+      );
       if (step.action !== "retry" && step.action !== "escalate") {
         await this.failTask(input, task, step.reason);
         return { runId: "", accepted: false, state: { status: "idle" } };
@@ -523,7 +582,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         abstainBelow: CLEF_ROUTE_ABSTAIN_BELOW,
         allowCall: () => takeQuota(this.env.DB, today(), "clef-flash", 200),
       });
-      const routed = await routeStep(req, clef);
+      const routed = await routeStep(req, clef, { allowOpus: opusAllowed(this.env.ALLOW_OPUS) });
       tier = routed.decision.selectedTier;
       receipt = routed.receipt;
     }
@@ -540,25 +599,29 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const latestFailure = priorFailures.at(-1);
     if (latestFailure) latestFailure.sourceRefs = compacted.sourceRefs;
 
-    // Provider per run (ADR 0016): re-read after compaction consumes quota or hits a spend cap.
-    const choice = await chooseProvider(this.env.DB, {
-      day: today(),
-      vertexConfigured: Boolean(this.env.VERTEX_SERVICE_ACCOUNT),
-      preferVertex: this.env.MODEL_PROVIDER === "vertex",
-    });
-    if (choice.provider === null) {
-      await this.failTask(input, task, choice.reason);
+    // Monthly Anthropic budget (ADR 0021): a run starts only with room for its first call.
+    // Each call still reserves on the meter before it is sent.
+    const monthlyBudget = anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD);
+    if ((await monthSpentUsd(this.env.DB, spendMonth())) + piCallReserveUsd(tier) > monthlyBudget) {
+      await this.failTask(input, task, "monthly_model_spend");
       return { runId: "", accepted: false, state: { status: "idle" } };
     }
-    const provider = choice.provider;
+    // Policy (ADR 0021): a retry or escalation at opus runs on Sonnet while Opus is off.
+    const resolved = resolveTier(tier, opusAllowed(this.env.ALLOW_OPUS));
+    const requestedTier =
+      (receipt.requestedTier as ModelTier | undefined) ?? resolved.downgradedFrom;
+    tier = resolved.tier;
     receipt = {
       ...receipt,
-      provider,
-      providerReason: choice.reason,
-      ...(provider === "google-vertex-ai" ? { model: TIER_VERTEX_MODEL[tier] } : {}),
+      selectedTier: tier,
+      selectedModels: [resolved.model],
+      provider: "anthropic",
+      model: resolved.model,
+      ...(requestedTier ? { requestedTier, downgradeReason: "opus_disabled" } : {}),
       reasons: [
         ...((receipt.reasons as string[] | undefined) ?? []),
-        `provider:${provider}:${choice.reason}`,
+        ...(resolved.downgradedFrom ? ["opus_disabled"] : []),
+        "provider:anthropic",
       ],
     };
 
@@ -671,7 +734,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         ...input,
         taskKind: task.kind,
         budgetUsd,
-        provider,
+        provider: "anthropic",
         source: source ? { commit: source.commit, files: source.files } : null,
         stack,
       }),
@@ -749,7 +812,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     this.lastStep = null;
     const session = this.harness.session();
     await session.reset();
-    await session.setModel({ provider: PROVIDER_ID, id: modelIdFor(tier, provider) });
+    await session.setModel({ provider: PROVIDER_ID, id: modelIdFor(tier) });
     await this.harness.submit(
       "Work on the Task described in your instructions, then call complete_task or fail_task.",
       {
@@ -763,7 +826,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       taskId: input.taskId,
       runId,
       tier,
-      provider,
+      provider: "anthropic",
       attempt,
     });
     return { runId, accepted: true, state: { status: "running", runId, attempt, tier } };
@@ -819,7 +882,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     await stop();
     if (stillRunning) await this.harness.session().abort();
     // A recorded stop wins; a stuck run is a timeout; a provider failure ends the run as itself
-    // (section 42.8: rate limits and outages retry once at the same tier, on the next provider).
+    // (section 42.8: rate limits and outages retry once at the same tier).
     const recorded = run.outcome;
     const kind: FailureKind =
       recorded && STOP_OUTCOMES.has(recorded)
@@ -870,6 +933,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
 
     const now = new Date().toISOString();
     const usage = await this.usage();
+    await this.settleMeter(run.run_id, usage, true);
     // Preserve tool inputs (names/targets) and outputs only, never assistant reasoning. R2
     // retains this evidence after session.reset() clears Pi's previous transcript.
     const toolLogs = this.ctx.storage.sql
@@ -1033,7 +1097,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       return "Recorded. Stop now.";
     }
     const failures: Failure[] = [{ tier: run.tier, kind: result.kind }];
-    const step = nextStep(run.tier, failures);
+    const step = nextStep(run.tier, failures, { allowOpus: opusAllowed(this.env.ALLOW_OPUS) });
     log({
       event: "agent.run_failed",
       taskId: input.taskId,
@@ -1134,7 +1198,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const ctx = this.changeContext(input);
     const now = new Date().toISOString();
     // Section 44 budget stop: the Task and Change name the exact limit that was reached.
-    const stop = limitStop(reason, this.env.VERTEX_SPEND_LIMIT_USD);
+    const stop = limitStop(reason, this.env.ANTHROPIC_MONTHLY_BUDGET_USD);
     const budget = stop !== null;
     const graph = await this.env.DB.batch([
       this.env.DB.prepare("SELECT id, status FROM tasks WHERE change_id = ?").bind(input.changeId),
@@ -1187,20 +1251,35 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     ]);
   }
 
-  /** Token usage of the current transcript, from Pi's assistant entries. */
-  private async usage(): Promise<{ input: number; output: number; cost: number }> {
-    const total = { input: 0, output: 0, cost: 0 };
+  /**
+   * Token usage of the current transcript, from Pi's assistant entries. `input` counts every
+   * prompt token (uncached, cache reads, cache writes); `cost` is exact from the usage fields.
+   */
+  private async usage(): Promise<{
+    input: number;
+    output: number;
+    cost: number;
+    responses: number;
+  }> {
+    const total = { input: 0, output: 0, cost: 0, responses: 0 };
     try {
       for (const entry of await this.harness.session().messages()) {
         for (const message of entry.model ?? []) {
           const usage = (
             message as {
               role?: string;
-              usage?: { input?: number; output?: number; cost?: { total?: number } };
+              usage?: {
+                input?: number;
+                output?: number;
+                cacheRead?: number;
+                cacheWrite?: number;
+                cost?: { total?: number };
+              };
             }
           ).usage;
           if ((message as { role?: string }).role !== "assistant" || !usage) continue;
-          total.input += usage.input ?? 0;
+          total.responses += 1;
+          total.input += (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
           total.output += usage.output ?? 0;
           total.cost += usage.cost?.total ?? 0;
         }
@@ -1339,40 +1418,23 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
             httpMetadata: { contentType: "application/json" },
           });
         },
-        chooseProvider: async () =>
-          (
-            await chooseProvider(this.env.DB, {
-              day: today(),
-              vertexConfigured: Boolean(this.env.VERTEX_SERVICE_ACCOUNT),
-              preferVertex: this.env.MODEL_PROVIDER === "vertex",
-            })
-          ).provider,
         takeQuota: (counter, cap) => takeQuota(this.env.DB, today(), counter, cap),
-        callModel: async (provider, req) => {
-          try {
-            // One admitted provider per request. A fallback must go through admission too.
-            return await complete(
-              {
-                accountId: this.env.AI_ACCOUNT_ID,
-                gatewayId: this.env.AI_GATEWAY_ID,
-                apiKey: this.env.OPENROUTER_API_KEY,
-                ...(provider === "google-vertex-ai" && this.env.VERTEX_SERVICE_ACCOUNT
-                  ? { vertexServiceAccount: this.env.VERTEX_SERVICE_ACCOUNT, preferVertex: true }
-                  : {}),
-                timeoutMs: 45_000,
-              },
-              req,
-            );
-          } catch (error) {
-            if (error instanceof ModelCallError) {
-              if (error.kind === "spend_limited")
-                await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.vertexSpendLimited);
-              if (provider === "openrouter" && error.kind === "rate_limited")
-                await markProviderFlag(this.env.DB, today(), USAGE_COUNTER.openrouterExhausted);
-            }
-            throw error;
-          }
-        },
+        callModel: (req) =>
+          meteredComplete(
+            {
+              db: this.env.DB,
+              budgetUsd: anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD),
+            },
+            {
+              accountId: this.env.AI_ACCOUNT_ID,
+              gatewayId: this.env.AI_GATEWAY_ID,
+              apiKey: this.env.ANTHROPIC_API_KEY,
+              workspaceId: this.env.ANTHROPIC_WORKSPACE_ID,
+              allowOpus: opusAllowed(this.env.ALLOW_OPUS),
+              timeoutMs: 45_000,
+            },
+            req,
+          ),
         recordCall: async (sourceHash, result) => {
           // Charge the source attempt's existing usage ledger. Later Change spend queries and
           // reviews already sum task_runs; no separate budget table or migration is needed.

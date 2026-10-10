@@ -28,15 +28,15 @@ import {
 } from "@rhumbatron/integration/events";
 import {
   AGENT_DAILY_CALL_CAP,
+  anthropicMonthlyBudgetUsd,
   type CompletionRequest,
   type CompletionResult,
-  complete,
   ModelCallError,
-  type ModelProvider,
-  OPENROUTER_DAILY_CALL_CAP,
-  TIER_VERTEX_MODEL,
+  meteredComplete,
+  opusAllowed,
+  reserveEstimateUsd,
+  TIER_MODELS,
   USAGE_COUNTER,
-  vertexPrice,
 } from "@rhumbatron/model-router";
 import {
   type Challenge,
@@ -54,17 +54,17 @@ import {
   INACTIVE_CANDIDATE_STATUSES,
   type IntentSide,
 } from "./conflicts.ts";
-import { chooseProvider, markProviderFlag } from "./limits.ts";
 
 /**
  * Model review of recorded semantic conflicts (AGENTS.md sections 22.4, 32.3, 34.4.2; P9-05 and
  * P9-06). Runs off the agent's run path: AgentDO schedules it after `declareIntentAndDetect`
  * records a conflict, so a slow or failed review never blocks a run.
  *
- * Per conflict: Sonnet first; Opus only when `shouldEscalate` says so. At most one review per tier
- * per conflict: the tier's slot in `review_json.reviews` is reserved with one conditional D1
- * update before the call. Each call is admitted like an agent call: provider choice (ADR 0016),
- * the Change budget (section 44), and the daily call caps. Code applies a verdict through
+ * Per conflict: Sonnet first; Opus only when `shouldEscalate` says so and Opus is on (ALLOW_OPUS,
+ * ADR 0021); while Opus is off, Sonnet's verdict is final. At most one review per tier per
+ * conflict: the tier's slot in `review_json.reviews` is reserved with one conditional D1 update
+ * before the call. Each call is admitted like an agent call: the Change budget (section 44), the
+ * daily call cap, and the monthly Anthropic budget (meteredComplete). Code applies a verdict through
  * `applyVerdict`; the model output is a hypothesis with citations, never authority.
  */
 
@@ -89,10 +89,10 @@ export type ReviewDeps = {
   intents: (changeId: string) => Promise<Intent[]>;
   createChallenge: (challenge: Challenge) => Promise<boolean>;
   emit: (events: EventEnvelope[]) => Promise<void>;
-  /** Model call through the AI Gateway on the admitted provider. */
-  callModel: (provider: ModelProvider, req: CompletionRequest) => Promise<CompletionResult>;
-  preferVertex: boolean;
-  vertexConfigured: boolean;
+  /** Anthropic call through the AI Gateway, admitted by the monthly budget. */
+  callModel: (req: CompletionRequest) => Promise<CompletionResult>;
+  /** ALLOW_OPUS is "true": a Sonnet review can escalate to Opus. */
+  allowOpus: boolean;
   /** Stores the Context Packet as an Evidence Snapshot (section 27.5). Best effort. */
   storePacket: (key: string, packet: ContextPacket) => Promise<void>;
   metric: (point: AnalyticsEngineDataPoint) => void;
@@ -200,10 +200,8 @@ async function writeRecord(
     .run();
 }
 
-function costEstimateUsd(provider: ModelProvider, tier: ReviewTier, promptTokens: number) {
-  if (provider !== "google-vertex-ai") return 0;
-  const price = vertexPrice(TIER_VERTEX_MODEL[tier]);
-  return (promptTokens * price.input + REVIEW_MAX_OUTPUT_TOKENS[tier] * price.output) / 1_000_000;
+function costEstimateUsd(tier: ReviewTier, promptTokens: number) {
+  return reserveEstimateUsd(TIER_MODELS[tier], REVIEW_MAX_OUTPUT_TOKENS[tier], promptTokens);
 }
 
 /** The Challenge for a conflict a model confirmed (the detector writes one for a hard signal). */
@@ -364,33 +362,19 @@ export async function reviewConflict(
       return { kind: "refused" };
     };
 
-    // Admission (ADR 0016, section 44): provider, Change budget, then the tier slot and day caps.
-    const choice = await chooseProvider(deps.db, {
-      day: today(now),
-      vertexConfigured: deps.vertexConfigured,
-      preferVertex: deps.preferVertex,
-    });
-    if (choice.provider === null) return refuse(choice.reason);
-    const provider = choice.provider;
+    // Admission (section 44): Change budget, then the tier slot and the day cap. The monthly
+    // Anthropic budget admits the call itself (meteredComplete).
     const spend = await changeSpend(deps.db, ctx.changeId);
     const budget = checkReviewBudget({
       changeBudgetUsd: spend.budgetUsd,
       spentUsd: spend.spentUsd,
-      estimateUsd: costEstimateUsd(provider, tier, estimateTokens(messages.system + messages.user)),
+      estimateUsd: costEstimateUsd(tier, estimateTokens(messages.system + messages.user)),
     });
     if (!budget.ok) return refuse(budget.reason);
     if (!(await reserve(deps.db, conflictId, tier, now))) return { kind: "skipped" };
     const day = today(now);
-    const quota =
-      (provider !== "openrouter" ||
-        (await takeQuota(
-          deps.db,
-          day,
-          USAGE_COUNTER.openrouterCalls,
-          OPENROUTER_DAILY_CALL_CAP,
-        ))) &&
-      (await takeQuota(deps.db, day, USAGE_COUNTER.agentCalls, AGENT_DAILY_CALL_CAP));
-    if (!quota) return refuse("daily_model_calls");
+    if (!(await takeQuota(deps.db, day, USAGE_COUNTER.agentCalls, AGENT_DAILY_CALL_CAP)))
+      return refuse("daily_model_calls");
 
     const hash = await packetHash(packet);
     await deps
@@ -402,7 +386,7 @@ export async function reviewConflict(
 
     let result: CompletionResult;
     try {
-      result = await deps.callModel(provider, {
+      result = await deps.callModel({
         tier,
         messages: [
           { role: "system", content: messages.system },
@@ -413,14 +397,11 @@ export async function reviewConflict(
       });
     } catch (error) {
       const kind = error instanceof ModelCallError ? error.kind : "transient";
-      if (kind === "spend_limited") {
-        await markProviderFlag(deps.db, day, USAGE_COUNTER.vertexSpendLimited);
-      }
       await writeRecord(deps.db, conflictId, tier, {
         status: "failed",
         at: deps.now(),
         reason: kind,
-        provider,
+        provider: "anthropic",
         packetHash: hash,
       });
       deps.metric({
@@ -437,7 +418,7 @@ export async function reviewConflict(
       packetHash: hash,
       costUsd: result.costUsd,
       inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens + result.reasoningTokens,
+      outputTokens: result.outputTokens,
       escalationReasons: reasons,
     };
     const parsed = parseReviewOutput(result.content);
@@ -465,7 +446,8 @@ export async function reviewConflict(
       facts,
     );
     // Sonnet's verdict on a conflict that goes to Opus is recorded but not applied.
-    const deferred = tier === "sonnet" && shouldEscalate(reasons, { kind: "reviewed", effect });
+    const deferred =
+      deps.allowOpus && tier === "sonnet" && shouldEscalate(reasons, { kind: "reviewed", effect });
     const record: ConflictReviewRecord = {
       status: "done",
       at: deps.now(),
@@ -506,7 +488,8 @@ export async function reviewConflict(
   if (sonnet.kind === "refused" || sonnet.kind === "skipped") return ran;
   ran.push("sonnet");
   const firstReview: FirstReview = sonnet;
-  if (!shouldEscalate(reasons, firstReview)) return ran;
+  // Opus off (ADR 0021): escalation caps at Sonnet, whose verdict was applied above.
+  if (!deps.allowOpus || !shouldEscalate(reasons, firstReview)) return ran;
   const prior: PriorReview =
     sonnet.kind === "reviewed"
       ? {
@@ -682,22 +665,20 @@ export async function runConflictReviews(env: Env, job: ConflictReviewJob) {
     createChallenge: async (challenge) =>
       (await shard().createChallenge({ ...scope, challenge })).ok,
     emit: (events) => appendChangeEvents(env.RESOURCE_SHARD, job.ctx, events),
-    callModel: (provider, req) =>
-      complete(
+    callModel: (req) =>
+      meteredComplete(
+        { db: env.DB, budgetUsd: anthropicMonthlyBudgetUsd(env.ANTHROPIC_MONTHLY_BUDGET_USD) },
         {
           accountId: env.AI_ACCOUNT_ID,
           gatewayId: env.AI_GATEWAY_ID,
-          apiKey: env.OPENROUTER_API_KEY,
-          ...(env.VERTEX_SERVICE_ACCOUNT
-            ? { vertexServiceAccount: env.VERTEX_SERVICE_ACCOUNT }
-            : {}),
-          preferVertex: provider === "google-vertex-ai",
+          apiKey: env.ANTHROPIC_API_KEY,
+          workspaceId: env.ANTHROPIC_WORKSPACE_ID,
+          allowOpus: opusAllowed(env.ALLOW_OPUS),
           timeoutMs: 90_000,
         },
         req,
       ),
-    preferVertex: env.MODEL_PROVIDER === "vertex",
-    vertexConfigured: Boolean(env.VERTEX_SERVICE_ACCOUNT),
+    allowOpus: opusAllowed(env.ALLOW_OPUS),
     storePacket: async (key, packet) => {
       await env.EVIDENCE.put(key, JSON.stringify(packet), {
         httpMetadata: { contentType: "application/json" },

@@ -3,11 +3,9 @@ import {
   AGENT_DAILY_CALL_CAP,
   type CompletionRequest,
   type CompletionResult,
-  type ModelProvider,
-  OPENROUTER_DAILY_CALL_CAP,
-  TIER_VERTEX_MODEL,
+  reserveEstimateUsd,
+  TIER_MODELS,
   USAGE_COUNTER,
-  vertexPrice,
 } from "@rhumbatron/model-router";
 import { ContextCompaction } from "@rhumbatron/protocol";
 
@@ -26,9 +24,9 @@ type Compaction = NonNullable<CompileInput["compaction"]>;
 export type CompactionDeps = {
   readJson: (key: string) => Promise<unknown | null>;
   writeJson: (key: string, value: unknown) => Promise<void>;
-  chooseProvider: () => Promise<ModelProvider | null>;
   takeQuota: (counter: string, cap: number) => Promise<boolean>;
-  callModel: (provider: ModelProvider, req: CompletionRequest) => Promise<CompletionResult>;
+  /** Anthropic call admitted by the monthly budget (meteredComplete); throws on a refusal. */
+  callModel: (req: CompletionRequest) => Promise<CompletionResult>;
   /** Called for every admitted request, including failed/invalid completions. Must be durable. */
   recordCall: (sourceHash: string, result: CompletionResult | null) => Promise<void>;
 };
@@ -82,8 +80,7 @@ export async function compactPriorLogs(
         };
       }
     }
-    const provider = await deps.chooseProvider();
-    if (!provider || !Number.isFinite(input.budgetUsd) || input.budgetUsd <= 0) return fallback;
+    if (!Number.isFinite(input.budgetUsd) || input.budgetUsd <= 0) return fallback;
     // Most recent output has the most value when the source exceeds the bounded input window.
     const req: CompletionRequest = {
       tier: "haiku",
@@ -100,26 +97,19 @@ export async function compactPriorLogs(
       ],
       metadata: { kind: "context_compaction", sourceHash },
     };
-    const price = vertexPrice(TIER_VERTEX_MODEL.haiku);
-    const estimateUsd =
-      provider === "google-vertex-ai"
-        ? (estimateTokens(JSON.stringify(req.messages)) * price.input +
-            COMPACTION_MAX_OUTPUT_TOKENS * price.output) /
-          1_000_000
-        : 0;
+    const estimateUsd = reserveEstimateUsd(
+      TIER_MODELS.haiku,
+      COMPACTION_MAX_OUTPUT_TOKENS,
+      estimateTokens(JSON.stringify(req.messages)),
+    );
     if (estimateUsd > input.budgetUsd) return fallback;
-    if (
-      provider === "openrouter" &&
-      !(await deps.takeQuota(USAGE_COUNTER.openrouterCalls, OPENROUTER_DAILY_CALL_CAP))
-    )
-      return fallback;
     if (!(await deps.takeQuota(USAGE_COUNTER.agentCalls, AGENT_DAILY_CALL_CAP))) return fallback;
 
     let result: CompletionResult | null = null;
     try {
-      result = await deps.callModel(provider, req);
+      result = await deps.callModel(req);
     } catch {
-      // Provider failure flags are recorded by the caller. Still account for the request.
+      // A failed or refused call still took a daily call slot; account for the request.
     }
     // Invalid summaries still spent tokens. Failed requests still spent a daily call slot.
     fallback.costUsd = result?.costUsd ?? 0;
@@ -129,7 +119,7 @@ export async function compactPriorLogs(
       throw new CompactionAccountingError();
     }
     if (!result) return fallback;
-    if (result.finishReason === "length" || result.toolCalls.length > 0 || !result.content)
+    if (result.finishReason !== "end_turn" || result.toolCalls.length > 0 || !result.content)
       return fallback;
     const parsed = ContextCompaction.safeParse(JSON.parse(result.content));
     if (
