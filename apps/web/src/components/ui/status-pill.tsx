@@ -29,6 +29,7 @@ const VOCABULARY: Record<string, StatusView> = {
   accepted: { family: "ok", label: "Accepted" },
   healthy: { family: "ok", label: "Healthy" },
   live: { family: "ok", label: "Live" },
+  deployed: { family: "ok", label: "Deployed" },
   checked_supported: { family: "ok", label: "Supported" },
   // active
   running: { family: "active", label: "Running" },

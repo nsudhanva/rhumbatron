@@ -3,7 +3,12 @@ import { Button } from "@cloudflare/kumo";
 import { ArrowRight, CheckCircle, RocketLaunch } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { type ApprovalWithName, type CandidateDetail, promoteCandidate } from "../lib/api";
+import {
+  type ApprovalWithName,
+  type CandidateDetail,
+  promoteCandidate,
+  type Release,
+} from "../lib/api";
 import { generation, timeAgo } from "../lib/format";
 import { ApprovalDialog } from "./candidate/approval-dialog";
 import { Banner } from "./candidate/banner";
@@ -167,6 +172,9 @@ export function CandidatePromotion({
           Canonical Generation advanced {from} → {to}. The decision and Evidence stay on record.
         </p>
       )}
+      {candidate.status === "promoted" && candidate.release && (
+        <ReleaseStatus release={candidate.release} />
+      )}
       {candidate.status === "stale" && (
         <p className="text-[13px] text-pretty">
           {candidate.statusReason ?? "The canonical state moved."} A stale Candidate cannot promote.
@@ -216,3 +224,75 @@ function ApproverName({ approval, me }: { approval: ApprovalWithName; me: string
   return <Mono>{approval.approverUserId}</Mono>;
 }
 ApproverName.displayName = "ApproverName";
+
+/**
+ * Release of the promoted generation (AGENTS.md sections 21.3, 37, 42.10; ADR 0018). Workers
+ * Builds builds the canonical push; the integration Worker confirms the deployment and runs the
+ * smoke check. A failed release never moves the generation back: recovery is a new promotion.
+ */
+function ReleaseStatus({ release }: { release: Release }) {
+  const gen = generation(release.generation);
+  const commit = <Mono>{shortHash(release.commit)}</Mono>;
+  if (release.status === "queued" || release.status === "building") {
+    return (
+      <Banner family="progress" title={`Release: building ${gen}`}>
+        Workers Builds is building commit {commit}
+        {release.workerName ? (
+          <>
+            {" "}
+            for <Mono>{release.workerName}</Mono>
+          </>
+        ) : null}
+        . The smoke check runs after the deployment is confirmed.
+      </Banner>
+    );
+  }
+  if (release.status === "deployed") {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y border-kumo-rule py-2 text-[13px]">
+        <StatusPill status="deployed" />
+        <span>
+          Release: {gen} deployed
+          {release.versionId ? (
+            <>
+              {" "}
+              as version <Mono>{release.versionId.slice(0, 8)}</Mono>
+            </>
+          ) : null}
+          {release.finishedAt ? ` ${timeAgo(release.finishedAt)}` : ""}. Smoke check passed.
+        </span>
+        {release.url && (
+          <a
+            href={release.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-kumo-link underline-offset-2 hover:underline"
+          >
+            Open the app
+          </a>
+        )}
+      </div>
+    );
+  }
+  if (release.status === "superseded") {
+    return (
+      <p className="text-[13px] text-kumo-subtle">
+        Release of {gen} was superseded: a newer generation was promoted before it deployed.
+      </p>
+    );
+  }
+  return (
+    <Banner
+      family="danger"
+      title={
+        release.status === "smoke_failed"
+          ? `Release: ${gen} failed its smoke check`
+          : `Release: ${gen} did not deploy`
+      }
+    >
+      {release.failureReason ?? "No reason was recorded."} {gen} stays canonical; recover with a new
+      promotion.
+    </Banner>
+  );
+}
+ReleaseStatus.displayName = "ReleaseStatus";

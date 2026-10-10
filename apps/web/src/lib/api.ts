@@ -269,8 +269,25 @@ export type CandidateDetail = {
   approval: Approval | null;
   baseTree: string | null;
   promotedGeneration: number | null;
+  /** Release of the promoted generation (ADR 0018). Null until a release starts. */
+  release?: Release | null;
   createdAt: string;
   updatedAt: string;
+};
+
+/** One release of a promoted generation through Workers Builds (ADR 0018). */
+export type Release = {
+  id: string;
+  generation: number;
+  commit: string;
+  status: "queued" | "building" | "deployed" | "smoke_failed" | "failed" | "superseded";
+  buildUuid: string | null;
+  versionId: string | null;
+  url: string | null;
+  workerName: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  failureReason: string | null;
 };
 
 /** One recorded human decision, bound to the composed tree the approver saw. */
