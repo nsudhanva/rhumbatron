@@ -39,6 +39,9 @@ export const DecisionReceipt = z.object({
   decidedBy: z.enum(["rules", "clef"]),
   selectedTier: ModelTier,
   selectedModels: z.array(z.string()),
+  /** The tier the rules or Clef chose when policy lowered it (ADR 0021: Opus off). */
+  requestedTier: ModelTier.optional(),
+  downgradeReason: z.literal("opus_disabled").optional(),
   reasons: z.array(z.string()),
   signals: z.record(z.string(), z.unknown()),
   escalateOn: z.array(z.string()),
