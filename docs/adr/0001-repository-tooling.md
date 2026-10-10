@@ -7,7 +7,7 @@
 ## Context
 
 The frozen stack fixes Bun, Turborepo, TypeScript, Biome, Zod, Vitest, Terraform, and Wrangler.
-Phase 0 also needs secret scanning, Git hooks, dependency hygiene, and enforcement of the
+Phase 0 also needs secret scanning, Git hooks, dependency hygiene, and a check that enforces the
 Terraform-only rule. These are developer tools. They do not change the runtime stack.
 
 ## Decision
@@ -16,7 +16,7 @@ Terraform-only rule. These are developer tools. They do not change the runtime s
 |---|---|---|
 | Lint and format (TS, JSON, CSS) | Biome | Frozen choice. |
 | Type checking | TypeScript 7 (`tsc`) through Turborepo | Frozen choice. Latest stable. |
-| Cloudflare runtime types | `wrangler types` | Generated per Worker from `wrangler.jsonc`. Not committed. |
+| Cloudflare runtime types | `wrangler types` | Wrangler generates them per Worker from `wrangler.jsonc`. They are not committed. |
 | Secret scanning | gitleaks (system binary) | Mature default rules plus Cloudflare, R2, and Anthropic rules in `.gitleaks.toml`. |
 | Git hooks | lefthook (dev dependency) | Single binary, parallel jobs, no shell glue. |
 | Commit messages | commitlint, conventional config | Readable history for later release automation. |
@@ -30,11 +30,11 @@ Terraform-only rule. These are developer tools. They do not change the runtime s
 
 - Contributors need `gitleaks`, `terraform`, and `tflint` on `PATH`.
 - CI (Phase 14) runs the same `bun run check` command.
-- Unused-dependency failures mean a dependency is added only by the change that first imports it.
+- knip fails on unused dependencies. Add a dependency only in the commit that first imports it.
 
 ## Diagram
 
-Local gates in `lefthook.yml`. `bun install` runs `lefthook install` through the `prepare` script.
+`lefthook.yml` defines the local gates. `bun install` runs `lefthook install` through the `prepare` script.
 
 ```mermaid
 flowchart LR

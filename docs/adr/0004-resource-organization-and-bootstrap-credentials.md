@@ -11,8 +11,9 @@
    Gateway, Vectorize, and Durable Object namespaces. Provider 5.27 manages tags only on
    `cloudflare_worker`.
 2. Terraform needs an API token before it can run, and the state backend needs an R2 key. The
-   `cf` CLI OAuth session can create account tokens but cannot grant "Account API Tokens Write",
-   so a CLI-created Terraform token cannot create the backend key inside Terraform.
+   `cf` CLI OAuth session can create account tokens, but it cannot grant "Account API Tokens
+   Write". A Terraform token that the CLI creates therefore cannot create the backend key inside
+   Terraform.
 
 ## Decision
 
@@ -27,13 +28,13 @@
 
 ### Bootstrap credentials
 
-These credentials are the only Cloudflare objects created outside Terraform. All are created
-with the `cf` CLI and stored in the macOS Keychain, never in Git or Terraform files.
+These credentials are the only Cloudflare objects that the project creates outside Terraform.
+The `cf` CLI creates all of them. The macOS Keychain stores them, never Git or Terraform files.
 
 | Token | Scope | Keychain service |
 |---|---|---|
 | `rhumbatron-terraform-global` | Account: R2, D1, KV, Queues, Vectorize, Workers Scripts, AI Gateway, K2 Config, K2 Consume, Workers Containers (write), Account Settings (read). Zone `rhumbatron.com`: Zone (read), Zone Settings, DNS, Workers Routes (write). | `rhumbatron-cloudflare-api-token` |
-| `rhumbatron-k2-consumer-dev` | K2 Consume only. Passed to the event router as a Worker secret via Terraform. | `rhumbatron-k2-consumer-token-dev` |
+| `rhumbatron-k2-consumer-dev` | K2 Consume only. Terraform passes it to the event router as a Worker secret. | `rhumbatron-k2-consumer-token-dev` |
 | `rhumbatron-terraform-state-backend-global` | R2 object read/write on `rhumbatron-terraform-state-global` only. | `rhumbatron-r2-state-access-key-id`, `rhumbatron-r2-state-secret-access-key` |
 
 ## Rotation and changes

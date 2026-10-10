@@ -7,8 +7,8 @@
 
 ## Context
 
-Phase 5 turns one Change into a Work Graph and wakes only causally affected agents (AGENTS.md
-sections 21.1, 31). Task state needs idempotent transitions and durable events, and
+Phase 5 turns one Change into a Work Graph and wakes only causally affected Agents (AGENTS.md
+sections 21.1, 31). Task state needs idempotent transitions and durable events.
 ProjectRootDO must stay cold (section 13.1).
 
 ## Decision
@@ -19,8 +19,8 @@ ProjectRootDO must stay cold (section 13.1).
   tool call validated by Zod and an acyclicity check, one repair turn, one step retry), persist,
   record events, dispatch. Every step is idempotent: deterministic Task IDs, `INSERT OR IGNORE`,
   conditional status updates, stable event and command IDs.
-- Tasks and dependency edges live in D1 (`0003_work_graph.sql`). The Work Graph JSON, including
-  planner model, tokens, and cost, is stored in R2 under `work-graphs/`.
+- Tasks and dependency edges live in D1 (`0003_work_graph.sql`). R2 stores the Work Graph JSON,
+  including planner model, tokens, and cost, under `work-graphs/`.
 - Change and Task events go to the outbox of the ResourceShardDO that owns `change:<id>`
   (`appendEvents`, idempotent on event ID). Its alarm publishes to K2 as before.
 - Dispatch marks ready Tasks, records `task.ready`, sends `agent.wake` commands on
@@ -28,11 +28,12 @@ ProjectRootDO must stay cold (section 13.1).
 - The agents Worker consumes wakes, drops stale ones (Analytics Engine false-wakeup point),
   assigns the Task, and records `task.assigned` and `agent.woken`. The Agent Runtime is Phase 6.
 - The event router's `causal-router` subscription runs `routeEvent` (packages/causal-router).
-  Newly ready Tasks become a `change.dispatch` command on `rhumbatron-integration`; a service
+  Newly ready Tasks become a `change.dispatch` command on `rhumbatron-integration`. A service
   binding would create a coordinator → router → integration → coordinator dependency cycle.
 - Ambiguous resource overlaps go to Clef-flash (`@cf/cloudflare/clef-flash`, Workers AI) with
-  an abstain threshold of 0.7. Abstain or cap reached: wake (safe side). Cap: 200 calls per day
-  in `usage_counters`, far inside the Workers AI free daily allowance.
+  an abstain threshold of 0.7. If Clef-flash abstains or the cap is reached, the router wakes the
+  Agent (the safe side). The cap is 200 calls per day in `usage_counters`, far inside the Workers
+  AI free daily allowance.
 
 ## Free-tier budget
 

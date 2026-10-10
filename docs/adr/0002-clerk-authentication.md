@@ -7,7 +7,7 @@
 ## Context
 
 Rhumbatron needs user sign-in for `rhumbatron.com`. Cloudflare Access protects internal operator
-pages, but it is not a product sign-up flow for end users.
+pages. It has no product sign-up flow for end users.
 
 ## Decision
 
@@ -21,9 +21,9 @@ Use Clerk (application `Rhumbatron`, `app_3KOhGuEyKohDT9Lzrb2NvUVQZP4`) with
 ## Secrets
 
 - Local: `apps/web/.env.local`, written by `clerk init`, ignored by Git.
-- Remote: `CLERK_SECRET_KEY` becomes a Worker `secret_text` binding in Terraform, with the value
-  supplied through a `TF_VAR_` environment variable. It never appears in Terraform source.
-- `VITE_CLERK_PUBLISHABLE_KEY` is public and is inlined at build time.
+- Remote: Terraform makes `CLERK_SECRET_KEY` a Worker `secret_text` binding. A `TF_VAR_`
+  environment variable supplies the value, so it never appears in Terraform source.
+- `VITE_CLERK_PUBLISHABLE_KEY` is public. The build inlines it.
 
 ## Consequences
 
@@ -32,7 +32,7 @@ Use Clerk (application `Rhumbatron`, `app_3KOhGuEyKohDT9Lzrb2NvUVQZP4`) with
 
 ## Diagram
 
-One API call from a page. The browser never calls the API Worker directly; server functions use
+One API call from a page. The browser never calls the API Worker directly. Server functions use
 the `API` service binding.
 
 ```mermaid
@@ -61,9 +61,9 @@ sequenceDiagram
 - Prod sign-in is email and password only. Google sign-in is disabled on the production instance.
 - `envs/prod` manages the Clerk DNS records (`var.clerk_dns_records`, DNS only). The
   `clerk_production_instance` check warns when the prod key is not `pk_live_`.
-- The publishable key is not only inlined at build time. Prod also sets it as the `plain_text`
+- The build inlines the publishable key, and prod also sets it as the `plain_text`
   binding `VITE_CLERK_PUBLISHABLE_KEY` on the web Worker, so one bundle serves both environments
   (ADR 0017).
 - The API Worker verifies tokens with `@clerk/backend` `verifyToken` and checks `azp` against
   `CLERK_AUTHORIZED_PARTIES`. A token without `azp` passes only when
-  `CLERK_ALLOW_MISSING_AZP = "true"`: dev sets it for smoke tokens, prod sets `"false"`.
+  `CLERK_ALLOW_MISSING_AZP = "true"`. Dev sets it for smoke tokens. Prod sets `"false"`.

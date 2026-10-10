@@ -8,7 +8,7 @@
 
 Phase 4 needs K2 streams and subscriptions (AGENTS.md section 19). Provider 5.27 has no K2 resource.
 K2 is required for the current milestone, so section 11.4 steps 6 to 10 apply. K2 billing is not
-enabled during the beta; Rhumbatron must still stay within free limits (rule 50).
+enabled during the beta. Rhumbatron must still stay within free limits (rule 50).
 
 ## Decision
 
@@ -25,7 +25,7 @@ enabled during the beta; Rhumbatron must still stay within free limits (rule 50)
 
 ## Consumers
 
-K2 has no push delivery to Workers; consumers pull over HTTP with leases and acknowledgements.
+K2 has no push delivery to Workers. Consumers pull over HTTP with leases and acknowledgements.
 
 - `rhumbatron-event-router` consumes `project-view-projector` and `causal-router`.
 - Fast path: after a successful publish, the coordinator calls the router's `nudge(streamIndex)`
@@ -33,21 +33,21 @@ K2 has no push delivery to Workers; consumers pull over HTTP with leases and ack
 - Safety net: a 1-minute Cron Trigger sweeps one stream per tick (all 8 every 8 minutes).
 - Delivery is at least once. Consumers dedupe on `(consumer, event_id)` in D1
   (`processed_events`).
-- Free-tier budget: about 1,440 cron runs per day plus one nudge per publish; each invocation stays
-  under the 50-subrequest limit.
+- Free-tier budget: about 1,440 cron runs per day plus one nudge per publish. Each invocation
+  stays under the 50-subrequest limit.
 
 ## Deletion
 
 The adapter never deletes streams. A config change replaces `terraform_data`, and a destroy-time
-delete would then drop retained events. Removing a stream is a deliberate manual step recorded
-here; it is not safe to automate.
+delete would then drop retained events. To remove a stream, do it as a deliberate manual step
+and record it here. Automation is not safe for this step.
 
 ## Limits and cost
 
-- Account beta limits: 20 streams, 10 GB storage. Dev uses 8 streams; prod will need its own set
+- Account beta limits: 20 streams, 10 GB storage. Dev uses 8 streams. Prod will need its own set
   (16 of 20 total). Other projects on the account share these limits.
-- Billing is disabled in beta (at least 30 days' notice before it starts). Listed prices:
-  $0.04/GB produced, $0.04/GB consumed, $0.02/GB-month retained.
+- Billing is disabled in beta. Cloudflare gives at least 30 days' notice before it starts.
+  Listed prices: $0.04/GB produced, $0.04/GB consumed, $0.02/GB-month retained.
 
 ## Replacement
 
@@ -96,7 +96,7 @@ flowchart LR
 - The cron sweep also drains `audit-archiver` for its stream and writes NDJSON batches to R2
   (AGENTS.md section 19.1). The nudge path does not archive.
 - `analytics-projector` exists as a subscription, but no Worker consumes it yet.
-- A batch that fails 5 deliveries (`MAX_BATCH_FAILURES`) is dead-lettered and skipped
-  (`poison-batch.ts`, migration `0016_k2_batch_failures.sql`).
-- The cron sweep is removed while `local.paused = true`. The nudge path still runs.
-- K2 prices above are from the beta listing; they were not re-checked on this date.
+- The event router dead-letters and skips a batch that fails 5 deliveries
+  (`MAX_BATCH_FAILURES`, `poison-batch.ts`, migration `0016_k2_batch_failures.sql`).
+- Terraform removes the cron sweep while `local.paused = true`. The nudge path still runs.
+- The K2 prices above come from the beta listing. They were not re-checked on this date.

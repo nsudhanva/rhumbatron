@@ -16,7 +16,7 @@ AI Gateway as the model proxy.
 
 - Model provider: OpenRouter, called through the AI Gateway `rhumbatron-models-<env>`
   (Terraform `modules/ai`). The gateway uses the OpenRouter provider endpoint.
-- Only `:free` model variants. Model spend is $0; OpenRouter reports `cost: 0`.
+- Only `:free` model variants. Model spend is $0, and OpenRouter reports `cost: 0`.
 - The tier names stay `haiku`, `sonnet`, and `opus`, so the routing rules in section 23 do not
   change. `packages/model-router/src/models.ts` maps each tier to an ordered fallback list that
   OpenRouter applies on rate limits or outages:
@@ -34,35 +34,35 @@ AI Gateway as the model proxy.
 
 ## Paid backup: Gemini on Vertex AI
 
-- When every free model in a tier fails with a rate limit, outage, or timeout, the client retries once
-  on Vertex AI through the gateway's compat endpoint: haiku uses `google/gemini-3.5-flash-lite`;
-  sonnet and opus use `google/gemini-3.8-flash`.
+- When every free model in a tier fails with a rate limit, outage, or timeout, the client retries
+  once on Vertex AI through the gateway's compat endpoint. Haiku uses
+  `google/gemini-3.5-flash-lite`. Sonnet and opus use `google/gemini-3.8-flash`.
 - Billing: GCP project `sudhanva-personal`, billing account with $10 of credit. Spend beyond the
-  credit would reach a card, so the gateway enforces a hard cap: `spend_limits` in `modules/ai`, $9
-  per 2,592,000-second window, filtered to the `google-vertex-ai` provider. Requests over the cap
-  get HTTP 429. The gateway's cost estimate is eventually consistent, so a burst can pass the cap
-  slightly; the $1 margin covers that.
+  credit would reach a card, so the gateway enforces a hard cap. The cap is `spend_limits` in
+  `modules/ai`: $9 per 2,592,000-second window, filtered to the `google-vertex-ai` provider.
+  Requests over the cap get HTTP 429. The gateway's cost estimate is eventually consistent, so a
+  burst can pass the cap slightly. The $1 margin covers that.
 - Credential: service account `vertex-express@sudhanva-personal` (roles `aiplatform.expressUser`,
   `aiplatform.user`). Its JSON key, with `region: global` added and base64-encoded, is in the
-  Keychain as `rhumbatron-vertex-sa-dev` and reaches Workers only as a `secret_text` binding. The
-  newest Gemini models are served only from `global`. Rotate the key if it is exposed.
-- The client prices Vertex calls itself (Vertex reports no cost); prices match the gateway's
-  estimate. An unpriced model is charged at the highest known rate, never $0.
+  Keychain as `rhumbatron-vertex-sa-dev` and reaches Workers only as a `secret_text` binding. Vertex
+  serves the newest Gemini models only from `global`. Rotate the key if it is exposed.
+- The client prices Vertex calls itself, because Vertex reports no cost. The prices match the
+  gateway's estimate. The client charges an unpriced model at the highest known rate, never $0.
 
 ## Gateway settings (free tier)
 
 - Rate limit 20 requests per minute, sliding, which matches the OpenRouter free-model limit.
 - Logs kept, capped at 10,000 with oldest deleted. No Logpush, guardrails, or DLP (billable).
 - Cache off. Two exponential retries for transient upstream errors.
-- Authentication off: a caller still needs an OpenRouter key, and the rate limit caps log volume.
+- Authentication off. A caller still needs an OpenRouter key, and the rate limit caps log volume.
 
 ## Limits and risks
 
 - OpenRouter free limits: 20 requests per minute; 50 requests per day for accounts with under
   $10 of lifetime credit purchases, 1,000 per day after that. Free-model calls do not spend
-  credits. At 50 per day a full demo Change will not fit, so the project needs either the
+  credits. At 50 per day a full demo Change does not fit, so the project needs either the
   one-time $10 purchase or tight call budgets.
-- Free capacity is a shared upstream pool. Expect 429s; the fallback lists and the retry policy
+- Free capacity is a shared upstream pool. Expect 429s. The fallback lists and the retry policy
   in section 42.8 absorb them.
 - Free providers can log or train on prompts. Send only demo fixture code. Do not send customer
   source or secrets through free models.
@@ -72,7 +72,7 @@ AI Gateway as the model proxy.
 ## Consequences
 
 - Section 5.4 model names now mean tiers, not vendors. Decision Receipts record the model that
-  actually answered.
+  answered.
 - Switching back to Claude needs only a new tier map and a key, because the gateway and the
   router stay the same.
 
@@ -101,7 +101,7 @@ flowchart TD
   (`vertex_spend_limit_usd`, ADR 0017). The agents and API Workers read it from
   `VERTEX_SPEND_LIMIT_USD` for budget-stop and Costs page text. The code fallback is still $9.
   The "$1 margin over $10 of credit" reasoning above no longer matches these caps.
-- Dev sets `model_provider = "vertex"`: Root Planner and agent calls go to Gemini, not to OpenRouter.
+- Dev sets `model_provider = "vertex"`. Root Planner and Agent calls go to Gemini instead of OpenRouter.
   Prod keeps `openrouter`, with Vertex as fallback and overflow.
 - Agents now use Vertex too, as daily overflow (ADR 0016). The agent caps are 45 OpenRouter calls
   and 400 calls on all providers per day.

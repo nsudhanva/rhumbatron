@@ -9,7 +9,7 @@
 
 AGENTS.md section 11.5 prefers `cloudflare_worker` + `cloudflare_worker_version` +
 `cloudflare_workers_deployment`. Cloudflare rejects Durable Object class migrations
-(`new_sqlite_classes`, renames, deletes) in version uploads; they need a full script deploy.
+(`new_sqlite_classes`, renames, deletes) in version uploads. They need a full script deploy.
 
 ## Decision
 
@@ -17,7 +17,7 @@ AGENTS.md section 11.5 prefers `cloudflare_worker` + `cloudflare_worker_version`
   `cloudflare_workers_script` (full deploy, supports `migrations`). Today: `rhumbatron-coordinator`.
   Later: `rhumbatron-agents`.
 - All other Workers keep `modules/worker` (version + deployment), which canary rollout needs later.
-- Migrations are expressed as a transition from the live tag to the target tag. `old_tag` must
+- Each migration is a transition from the live tag to the target tag. `old_tag` must
   equal the live tag, or Cloudflare rejects the upload (412, code 10079). Steady state is
   `old_tag = new_tag = <live tag>` with no class changes. Never edit an applied tag.
 
@@ -57,9 +57,9 @@ flowchart TD
 
 - `rhumbatron-agents` now deploys through `modules/durable-worker` (ADR 0009), with migration v1
   for `AgentDO`. Both Durable Object Workers are in steady state `v1 -> v1` in dev and prod.
-- The `Sandbox` class is in its own Worker, `rhumbatron-sandbox-<env>`. It is deployed by
-  `scripts/sandbox-deploy.ts` (`terraform_data.sandbox_worker`) in one full upload, not by this
-  module (ADR 0012).
+- The `Sandbox` class is in its own Worker, `rhumbatron-sandbox-<env>`.
+  `scripts/sandbox-deploy.ts` (`terraform_data.sandbox_worker`) deploys it in one full upload.
+  This module does not deploy it (ADR 0012).
 - A fresh root needs two applies. `local.bootstrap = true` omits the coordinator's
   `EVENT_ROUTER` binding (a cycle) and, in `envs/prod`, uploads the first migrations with
   `new_tag = "v1"` and the classes (ADR 0012, ADR 0017).
