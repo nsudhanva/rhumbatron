@@ -86,6 +86,34 @@ export const ChangeDetail = Change.extend({
 });
 export type ChangeDetail = z.infer<typeof ChangeDetail>;
 
+/**
+ * `POST /v1/changes/:changeId/budget` request (section 44 rule 5: a person raises the budget).
+ * The new budget can only be equal or higher; the same cap as Change creation applies.
+ */
+export const RaiseBudgetRequest = z.object({
+  budgetUsd: z.number().positive().max(100),
+});
+export type RaiseBudgetRequest = z.infer<typeof RaiseBudgetRequest>;
+
+/** Result of a person's cancel or budget raise on one Change. A repeat returns `repeated: true`. */
+export const ChangeCommandOutcome = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("recorded"),
+    changeId: Id,
+    changeStatus: ChangeStatus,
+    budgetUsd: z.number().nonnegative(),
+    repeated: z.boolean(),
+    /** Tasks woken again after a budget raise. Empty for a cancel. */
+    dispatchedTaskIds: z.array(Id),
+  }),
+  z.object({
+    status: z.literal("refused"),
+    reason: z.enum(["not_found", "change_closed", "not_cancellable", "budget_lower"]),
+    detail: z.string(),
+  }),
+]);
+export type ChangeCommandOutcome = z.infer<typeof ChangeCommandOutcome>;
+
 /** `POST /v1/projects` request. */
 /** Source templates a Project can start from (AGENTS.md section 54). */
 export const ProjectTemplate = z.enum(["empty", "acme-shop"]);
