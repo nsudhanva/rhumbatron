@@ -6,12 +6,12 @@ import {
   CreateProjectRequest,
   Project,
   type ProjectPolicies,
-  ProjectTemplate,
   Task,
 } from "@rhumbatron/protocol";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
+import { fixturesEnabled } from "./fixtures.ts";
 import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
@@ -153,14 +153,13 @@ async function sendCleanup(env: Env, projectId: string) {
   );
 }
 
-const ProvisionRequest = z.object({ template: ProjectTemplate });
-
-/** Queues source provisioning. The command ID is stable per Project, so a retry is harmless. */
-async function sendProvision(
-  env: Env,
-  projectId: string,
-  template: z.infer<typeof ProjectTemplate>,
-) {
+/**
+ * Queues source provisioning: the Project's Artifacts repo with one commit (a `.gitignore`), or the
+ * Acme Shop fixture for internal demo and smoke scripts. The integration Worker seeds only a
+ * Project whose canonical source is unassigned, so a repeat never overwrites a repository. The
+ * command ID is stable per Project, so a retry is harmless.
+ */
+async function sendProvision(env: Env, projectId: string, fixture?: "acme-shop") {
   await env.INTEGRATION_COMMANDS.send(
     {
       commandId: `cmd_${projectId.slice(5)}_provision`,
@@ -168,10 +167,60 @@ async function sendProvision(
       projectId,
       attempt: 0,
       createdAt: new Date().toISOString(),
-      payload: { template },
+      payload: fixture ? { fixture } : {},
     },
     { contentType: "json" },
   );
+}
+
+type CreateProjectContext = Context<AppEnv>;
+
+/**
+ * Creates a Project owned by the caller's personal organization, then queues its repository.
+ * Shared by the public route (empty repository) and the fixture route (Acme Shop source).
+ */
+async function createProject(
+  c: CreateProjectContext,
+  body: CreateProjectRequest,
+  fixture?: "acme-shop",
+) {
+  const { userId, orgId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+  const projectId = `proj_${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+
+  const inserted = await c.env.DB.prepare(
+    `INSERT INTO projects (id, org_id, name, slug, status, canonical_generation, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'active', 0, ?, ?) ON CONFLICT (org_id, slug) DO NOTHING`,
+  )
+    .bind(projectId, orgId, body.name, body.slug, now, now)
+    .run();
+  if (inserted.meta.changes === 0) {
+    return fail(c, 409, "conflict", `Project slug "${body.slug}" already exists`);
+  }
+
+  // Both initializers are idempotent, so a retry after a partial failure is safe. The view goes
+  // first: ProjectRootDO emits project.created, and the projector needs the view to exist.
+  await projectView(c.env, projectId).initialize({
+    projectId,
+    name: body.name,
+    canonicalGeneration: 0,
+  });
+
+  await projectRoot(c.env, projectId).initialize({
+    projectId,
+    orgId,
+    ...UNASSIGNED_ARTIFACT,
+    generation: 0,
+    policyVersion: DEFAULT_POLICIES.modelPolicyVersion,
+  });
+  // The integration Worker creates the Artifacts repo with its first commit (S0), so agents always
+  // have a repository to write to (ADR 0010, ADR 0020).
+  await sendProvision(c.env, projectId, fixture);
+  const project = await loadProject(c.env, projectId);
+  if (!project || !(await canAccessProject(c.env.DB, userId, projectId))) {
+    throw new Error("Project was not readable after creation");
+  }
+  return respond(c, apiData(Project), { data: project }, 201);
 }
 
 export const projects = new Hono<AppEnv>()
@@ -180,45 +229,15 @@ export const projects = new Hono<AppEnv>()
   .use("/v1/changes/*", requireAuth)
 
   // P3-08: create a Project owned by the caller's personal organization.
-  .post("/v1/projects", validate("json", CreateProjectRequest), async (c) => {
-    const { userId, orgId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
-    const body = c.req.valid("json");
-    const projectId = `proj_${crypto.randomUUID()}`;
-    const now = new Date().toISOString();
+  .post("/v1/projects", validate("json", CreateProjectRequest), (c) =>
+    createProject(c, c.req.valid("json")),
+  )
 
-    const inserted = await c.env.DB.prepare(
-      `INSERT INTO projects (id, org_id, name, slug, status, canonical_generation, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'active', 0, ?, ?) ON CONFLICT (org_id, slug) DO NOTHING`,
-    )
-      .bind(projectId, orgId, body.name, body.slug, now, now)
-      .run();
-    if (inserted.meta.changes === 0) {
-      return fail(c, 409, "conflict", `Project slug "${body.slug}" already exists`);
-    }
-
-    // Both initializers are idempotent, so a retry after a partial failure is safe. The view goes
-    // first: ProjectRootDO emits project.created, and the projector needs the view to exist.
-    await projectView(c.env, projectId).initialize({
-      projectId,
-      name: body.name,
-      canonicalGeneration: 0,
-    });
-
-    await projectRoot(c.env, projectId).initialize({
-      projectId,
-      orgId,
-      ...UNASSIGNED_ARTIFACT,
-      generation: 0,
-      policyVersion: DEFAULT_POLICIES.modelPolicyVersion,
-    });
-    // The integration Worker creates the Artifacts repo and seeds the template (ADR 0010). An empty
-    // Project gets its repo only when seeded, so smoke and scratch Projects leave no repos behind.
-    if (body.template !== "empty") await sendProvision(c.env, projectId, body.template);
-    const project = await loadProject(c.env, projectId);
-    if (!project || !(await canAccessProject(c.env.DB, userId, projectId))) {
-      throw new Error("Project was not readable after creation");
-    }
-    return respond(c, apiData(Project), { data: project }, 201);
+  // Internal demo and smoke scripts: a Project seeded with the Acme Shop fixture (AGENTS.md
+  // section 54). Not part of the product; 404 where fixtures are off.
+  .post("/v1/fixtures/projects", requireAuth, validate("json", CreateProjectRequest), async (c) => {
+    if (!fixturesEnabled(c.env)) return fail(c, 404, "not_found", "Not found");
+    return createProject(c, c.req.valid("json"), "acme-shop");
   })
 
   // Projects the caller can open, newest first (UI navigation). Archived Projects are hidden.
@@ -290,21 +309,17 @@ export const projects = new Hono<AppEnv>()
     });
   })
 
-  // Seeds the source of a Project that has none yet, for example the Acme Shop demo (P12-12).
-  .post(
-    "/v1/projects/:projectId/provision",
-    validate("param", ProjectIdParam),
-    validate("json", ProvisionRequest),
-    async (c) => {
-      const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
-      const { projectId } = c.req.valid("param");
-      const access = await projectAccess(c.env.DB, userId, projectId);
-      if (!access) return fail(c, 404, "not_found", "Project not found");
-      if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
-      await sendProvision(c.env, projectId, c.req.valid("json").template);
-      return c.json({ data: { queued: true } }, 202);
-    },
-  )
+  // Creates the empty repository of a Project that has no source yet (Projects created before
+  // every Project got one). A no-op for a Project with source.
+  .post("/v1/projects/:projectId/provision", validate("param", ProjectIdParam), async (c) => {
+    const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+    const { projectId } = c.req.valid("param");
+    const access = await projectAccess(c.env.DB, userId, projectId);
+    if (!access) return fail(c, 404, "not_found", "Project not found");
+    if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
+    await sendProvision(c.env, projectId);
+    return c.json({ data: { queued: true } }, 202);
+  })
 
   // Integration smoke check: the Project Sandbox runs the fixture's Bun tests (section 49.3).
   .post("/v1/projects/:projectId/sandbox-smoke", validate("param", ProjectIdParam), async (c) => {

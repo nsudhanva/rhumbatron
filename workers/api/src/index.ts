@@ -19,6 +19,7 @@ import { productGraph } from "./product-graph.ts";
 import { projects } from "./projects.ts";
 import { releases } from "./releases.ts";
 import { screenshots } from "./screenshots.ts";
+import { suggestions } from "./suggestions.ts";
 import { verification } from "./verification.ts";
 import { workspace } from "./workspace.ts";
 import { workspaceManifest } from "./workspace-manifest.ts";
@@ -59,6 +60,7 @@ app.route("/", decisions);
 app.route("/", notifications);
 app.route("/", releases);
 app.route("/", apps);
+app.route("/", suggestions);
 app.route("/", projects);
 
 app.notFound((c) => fail(c, 404, "not_found", "Route not found"));
