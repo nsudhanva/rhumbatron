@@ -1,0 +1,12 @@
+// Local development configuration only. Terraform owns the remote Worker (envs/prod/docs.tf).
+// Assets-only Worker: no script, so every request is a free static asset request.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "rhumbatron-docs",
+  "compatibility_date": "2026-10-08",
+  "assets": {
+    "directory": "./dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}

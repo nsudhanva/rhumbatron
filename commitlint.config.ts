@@ -20,6 +20,7 @@ export default {
         "migrations",
         "containers",
         "docs",
+        "docs-site",
         "scripts",
       ],
     ],

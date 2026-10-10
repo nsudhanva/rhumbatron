@@ -12,9 +12,9 @@ const root = resolve(import.meta.dir, "..");
 type Deployable = {
   name: string;
   dir: string;
-  /** Directory that holds the Worker modules after build. */
-  outDir: string;
-  mainModule: string;
+  /** Directory that holds the Worker modules after build. Omit for an assets-only Worker. */
+  outDir?: string;
+  mainModule?: string;
   assetsDir?: string;
 };
 
@@ -26,6 +26,8 @@ const deployables: Deployable[] = [
     mainModule: "index.js",
     assetsDir: "apps/web/dist/client",
   },
+  // docs.rhumbatron.com: assets-only Worker, no script (envs/prod/docs.tf).
+  { name: "docs", dir: "apps/docs", assetsDir: "apps/docs/dist" },
   ...["api", "coordinator", "agents", "event-router", "integration", "indexer", "sandbox"].map(
     (name) => ({
       name,
@@ -80,8 +82,8 @@ await $`bunx turbo build ${["--filter=./apps/*", "--filter=./workers/*"]}`.cwd(r
 
 const manifest: Record<string, unknown> = {};
 for (const d of deployables) {
-  const outDir = join(root, d.outDir);
-  const files = await listFiles(outDir);
+  const outDir = join(root, d.outDir ?? d.dir);
+  const files = d.outDir ? await listFiles(outDir) : [];
   const modules = files
     .filter((f) => !f.includes("/.vite/") && contentType(f))
     .map((f) => ({
@@ -92,7 +94,7 @@ for (const d of deployables) {
   const assetFiles = d.assetsDir ? await listFiles(join(root, d.assetsDir)) : [];
   manifest[d.name] = {
     ...(await readWranglerConfig(d.dir)),
-    main_module: d.mainModule,
+    main_module: d.mainModule ?? null,
     modules,
     assets_directory: d.assetsDir ?? null,
     bundle_sha256: await hashFiles([...files, ...assetFiles], root),

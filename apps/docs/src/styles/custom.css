@@ -1,0 +1,31 @@
+/* Small brand touches only: the Rhumbatron red accent (DESIGN.md section 2.4). */
+:root {
+  --sl-color-accent-low: #3d140c;
+  --sl-color-accent: #ff563c;
+  --sl-color-accent-high: #ffc4b8;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #ffe0d9;
+  --sl-color-accent: #ae1800;
+  --sl-color-accent-high: #4d170e;
+}
+
+/* Mermaid diagrams: centered, scrollable when wide, source text muted until rendered. */
+.sl-markdown-content pre.mermaid {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  margin-block: 1.5rem;
+  padding: 1rem;
+  background: transparent;
+  border: 1px solid var(--sl-color-hairline);
+  font-size: var(--sl-text-xs);
+  color: var(--sl-color-gray-3);
+  white-space: pre;
+}
+
+.sl-markdown-content pre.mermaid[data-processed] {
+  color: inherit;
+  white-space: normal;
+}
