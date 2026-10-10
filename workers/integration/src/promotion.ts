@@ -7,8 +7,10 @@ import {
   type PromotionBlock,
 } from "@rhumbatron/evidence";
 import {
+  type Actor,
   type ApprovalOutcome,
   type ApprovalView,
+  type ChangeStatus,
   type PromotionBlockView,
   type PromotionOutcome,
   PromotionRequest,
@@ -18,9 +20,10 @@ import {
 import { DEFAULT_POLICY } from "./candidate-composer.ts";
 import { candidateFork } from "./candidate-sandbox.ts";
 import { syncCanonicalSource } from "./canonical-source.ts";
+import { changeAfterPromotion, PROMOTABLE_FROM } from "./change-status.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
-import { startRelease } from "./release.ts";
+import { hasReleaseTarget, startRelease } from "./release.ts";
 
 /**
  * Human approval and promotion (AGENTS.md sections 36, 40.2, 42.9, 60; ADR 0013). Called only by
@@ -40,6 +43,7 @@ type CandidateRow = {
   plan_json: string | null;
   promoted_generation: number | null;
   project_id: string;
+  change_status: ChangeStatus;
   risk_tier: string | null;
   org_id: string;
   slug: string;
@@ -60,7 +64,8 @@ type ApprovalRow = {
 async function loadCandidate(env: Env, candidateId: string) {
   return env.DB.prepare(
     `SELECT c.id, c.change_id, c.base_generation, c.status, c.composed_commit, c.composed_tree,
-            c.base_tree, c.plan_json, c.promoted_generation, ch.project_id, ch.risk_tier,
+            c.base_tree, c.plan_json, c.promoted_generation, ch.project_id,
+            ch.status AS change_status, ch.risk_tier,
             p.org_id, p.slug
      FROM candidates c JOIN changes ch ON ch.id = c.change_id
      JOIN projects p ON p.id = ch.project_id WHERE c.id = ?`,
@@ -189,15 +194,18 @@ async function markStale(
 /** Product metadata mirrors of the authoritative transition. Safe to repeat. */
 async function recordPromoted(env: Env, row: CandidateRow, generation: number) {
   const now = new Date().toISOString();
+  // With a release target the Change is `releasing` until ReleaseWorkflow finishes (release.ts);
+  // without one, promotion completes it. A Change already past promotion keeps its status.
+  const next = changeAfterPromotion(await hasReleaseTarget(env, row.project_id));
   await env.DB.batch([
     env.DB.prepare(
       `UPDATE candidates SET status = 'promoted', promoted_generation = ?, status_reason = NULL,
          updated_at = ? WHERE id = ?`,
     ).bind(generation, now, row.id),
     env.DB.prepare(
-      `UPDATE changes SET status = 'completed', updated_at = ?
-       WHERE id = ? AND status NOT IN ('completed', 'cancelled', 'failed')`,
-    ).bind(now, row.change_id),
+      `UPDATE changes SET status = ?, updated_at = ?
+       WHERE id = ? AND status IN (SELECT value FROM json_each(?))`,
+    ).bind(next, now, row.change_id, JSON.stringify(PROMOTABLE_FROM)),
     env.DB.prepare(
       `UPDATE projects SET canonical_generation = MAX(canonical_generation, ?), updated_at = ?
        WHERE id = ?`,
@@ -252,17 +260,53 @@ async function promoted(
 }
 
 /**
+ * A Change in `awaiting_approval` whose Candidates are no longer verified (rejected or stale) is
+ * back to `verifying`: no decision is pending, and a new Candidate can still be verified.
+ */
+const settleAwaitingApproval = (env: Env, changeId: string, now: string) =>
+  env.DB.prepare(
+    `UPDATE changes SET status = 'verifying', updated_at = ?
+     WHERE id = ? AND status = 'awaiting_approval'
+       AND NOT EXISTS (SELECT 1 FROM candidates WHERE change_id = ? AND status = 'verified')`,
+  ).bind(now, changeId, changeId);
+
+/** A refused compare-and-swap leaves promotion: the Change returns to its status before it. */
+async function leavePromoting(env: Env, row: CandidateRow) {
+  const now = new Date().toISOString();
+  // A retry after a crash read `promoting` as the prior status; `verifying` is the open fallback.
+  const prior = row.change_status === "promoting" ? "verifying" : row.change_status;
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE changes SET status = ?, updated_at = ? WHERE id = ? AND status = 'promoting'",
+    ).bind(prior, now, row.change_id),
+    settleAwaitingApproval(env, row.change_id, now),
+  ]);
+}
+
+/**
+ * Who asked for a promotion. `manual` is a person in the UI. `auto` is the verification workflow
+ * applying policy `autoPromoteRiskTiers` (actor kind `system`). Both take the same path below.
+ */
+export type PromotionTrigger = {
+  trigger: "manual" | "auto";
+  actor: { kind: Exclude<Actor["kind"], "agent">; id: string };
+};
+
+/**
  * Promotes a verified Candidate by compare-and-swap. Idempotency key: Candidate ID + base
  * generation (section 60). A retry after success returns `alreadyPromoted` and repairs the source
- * sync if it did not finish.
+ * sync if it did not finish. The Change is `promoting` from the precondition check until the
+ * compare-and-swap decides; then `releasing` or `completed`, or back to its prior status.
  */
 export async function promoteCandidate(
   env: Env,
-  input: { candidateId: string; actorUserId: string },
+  input: { candidateId: string } & PromotionTrigger,
 ): Promise<PromotionOutcome> {
   const row = await loadCandidate(env, input.candidateId);
   if (!row) throw new Error(`Candidate ${input.candidateId} not found`);
   if (row.status === "promoted" && row.promoted_generation !== null) {
+    // Repairs the Change status too, if the first attempt stopped after the compare-and-swap.
+    await recordPromoted(env, row, row.promoted_generation);
     return promoted(env, row, row.promoted_generation, true);
   }
 
@@ -315,6 +359,30 @@ export async function promoteCandidate(
     return { status: "blocked", candidateId: row.id, blocks: check.blocks.map(blockView) };
   }
 
+  // Section 36 runs on an open Change only. The guard also loses a race against a cancel cleanly.
+  const now = new Date().toISOString();
+  const entered = await env.DB.prepare(
+    `UPDATE changes SET status = 'promoting', updated_at = ?
+     WHERE id = ? AND status IN (SELECT value FROM json_each(?))`,
+  )
+    .bind(now, row.change_id, JSON.stringify(PROMOTABLE_FROM))
+    .run();
+  if (!entered.meta.changes) {
+    const change = await env.DB.prepare("SELECT status FROM changes WHERE id = ?")
+      .bind(row.change_id)
+      .first<{ status: string }>();
+    return {
+      status: "blocked",
+      candidateId: row.id,
+      blocks: [
+        {
+          kind: "not_verified",
+          detail: `The Change is ${change?.status ?? "missing"}; its Candidates cannot promote.`,
+        },
+      ],
+    };
+  }
+
   const ctx = contextOf(row);
   const request = PromotionRequest.parse({
     projectId: row.project_id,
@@ -330,8 +398,15 @@ export async function promoteCandidate(
     await changeEvent(
       ctx,
       "canonical.promotion.requested",
-      { ...request, approvalId: check.approvalId },
-      { key: `${row.id}:${row.base_generation}`, actor: { kind: "user", id: input.actorUserId } },
+      {
+        ...request,
+        approvalId: check.approvalId,
+        trigger: input.trigger,
+        ...(input.trigger === "auto"
+          ? { riskTier: riskOf(row), policy: "autoPromoteRiskTiers" }
+          : {}),
+      },
+      { key: `${row.id}:${row.base_generation}`, actor: input.actor },
     ),
   ]);
 
@@ -343,7 +418,7 @@ export async function promoteCandidate(
     candidateTreeSha: request.candidateTree,
     policyVersion: request.policyVersion,
     changeId: request.changeId,
-    actor: { kind: "user", id: input.actorUserId },
+    actor: input.actor,
     correlationId: request.changeId,
     requiredEvidenceIds: request.requiredEvidenceIds,
     approvalId: check.approvalId,
@@ -354,6 +429,7 @@ export async function promoteCandidate(
     return promoted(env, row, result.generation, result.alreadyPromoted);
   }
   if (result.reason === "policy_mismatch") {
+    await leavePromoting(env, row);
     return {
       status: "blocked",
       candidateId: row.id,
@@ -372,6 +448,7 @@ export async function promoteCandidate(
     result.detail.current.generation,
     result.detail.reason === "tree_mismatch",
   );
+  await leavePromoting(env, row);
   return {
     status: "stale",
     candidateId: row.id,
@@ -444,16 +521,17 @@ export async function decideApproval(
     return { status: "refused", reason: "already_decided", approval: toApprovalView(stored) };
   }
   if (stored.decision === "rejected") {
-    await env.DB.prepare(
-      `UPDATE candidates SET status = 'rejected', status_reason = ?, updated_at = ?
-       WHERE id = ? AND status = 'verified'`,
-    )
-      .bind(
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE candidates SET status = 'rejected', status_reason = ?, updated_at = ?
+         WHERE id = ? AND status = 'verified'`,
+      ).bind(
         `Rejected by a human approver${input.reason ? `: ${input.reason}` : "."}`.slice(0, 500),
         now,
         row.id,
-      )
-      .run();
+      ),
+      settleAwaitingApproval(env, row.change_id, now),
+    ]);
   }
   const ctx = contextOf(row);
   await appendChangeEvents(env.RESOURCE_SHARD, ctx, [

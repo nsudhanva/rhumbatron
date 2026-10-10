@@ -2,6 +2,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import {
   AnyCommandEnvelope,
   type ApprovalOutcome,
+  type ChangeCommandOutcome,
   type PromotionOutcome,
   type ReleaseInjectionOutcome,
 } from "@rhumbatron/protocol";
@@ -12,6 +13,7 @@ import {
   createCandidate,
   startCandidateVerification,
 } from "./candidate-create.ts";
+import { cancelChange, raiseChangeBudget } from "./change-commands.ts";
 import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { handleFixtureCommand } from "./fixture-changesets.ts";
@@ -193,7 +195,28 @@ export default class Integration extends WorkerEntrypoint<Env> {
     candidateId: string;
     actorUserId: string;
   }): Promise<PromotionOutcome> {
-    return promoteCandidate(this.env, input);
+    return promoteCandidate(this.env, {
+      candidateId: input.candidateId,
+      trigger: "manual",
+      actor: { kind: "user", id: input.actorUserId },
+    });
+  }
+
+  /** Cancels a Change before promotion starts (section 16.1). Safe to repeat. */
+  async cancelChange(input: {
+    changeId: string;
+    actorUserId: string;
+  }): Promise<ChangeCommandOutcome> {
+    return cancelChange(this.env, input);
+  }
+
+  /** A person raises a Change budget; a budget-blocked Change resumes (section 44). */
+  async raiseChangeBudget(input: {
+    changeId: string;
+    budgetUsd: number;
+    actorUserId: string;
+  }): Promise<ChangeCommandOutcome> {
+    return raiseChangeBudget(this.env, input);
   }
 
   /**

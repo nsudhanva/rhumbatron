@@ -15,15 +15,17 @@ const agentIdFor = (taskId: string) => `agt_${taskId.slice(4)}`;
 
 /**
  * Marks every pending Task with completed dependencies `ready`, records `task.ready`, and sends one
- * wake command per ready Task that has not had one. Safe to repeat: the status update is
- * conditional, IDs are stable, and `wake_sent_at` is written only after the send succeeds.
+ * wake command per ready Task that has not had one, only while the Change is `running`. Safe to
+ * repeat: the status update is conditional, IDs are stable, and `wake_sent_at` is written only
+ * after the send succeeds.
  */
 export async function dispatchReadyTasks(
   env: Env,
   ctx: ChangeContext,
   budgetRemainingUsd: number,
 ): Promise<string[]> {
-  const [tasks, deps] = await env.DB.batch([
+  const [change, tasks, deps] = await env.DB.batch([
+    env.DB.prepare("SELECT status FROM changes WHERE id = ?").bind(ctx.changeId),
     env.DB.prepare(
       "SELECT id, status, semantic_resource, kind, wake_sent_at FROM tasks WHERE change_id = ?",
     ).bind(ctx.changeId),
@@ -32,6 +34,9 @@ export async function dispatchReadyTasks(
        JOIN tasks t ON t.id = d.task_id WHERE t.change_id = ?`,
     ).bind(ctx.changeId),
   ]);
+  // Only a running Change dispatches: a cancelled, budget-blocked, or finished one starts nothing.
+  const changeStatus = (change?.results?.[0] as { status?: string } | undefined)?.status;
+  if (changeStatus !== "running") return [];
   const rows = (tasks?.results ?? []) as TaskRow[];
   const edges = (deps?.results ?? []) as { task_id: string; depends_on_task_id: string }[];
   const graph: GraphTask[] = rows.map((r) => ({

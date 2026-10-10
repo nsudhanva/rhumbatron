@@ -395,7 +395,8 @@ async function openChange(
   if (change.project_status === "archived") {
     return { status: "refused", reason: "archived", detail: "Project is archived" };
   }
-  if (["cancelled", "failed", "completed"].includes(change.status)) {
+  // Past promotion, the Change already advanced canonical once: no second Candidate composes.
+  if (["cancelled", "failed", "completed", "promoting", "releasing"].includes(change.status)) {
     return { status: "refused", reason: "change_closed", detail: `Change is ${change.status}` };
   }
   const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;

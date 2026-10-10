@@ -5,6 +5,7 @@ import type {
   ReleaseStatus,
   ReleaseView,
 } from "@rhumbatron/protocol";
+import { changeAfterRelease } from "./change-status.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import {
   addedRoutesFromContract,
@@ -88,6 +89,24 @@ const loadTarget = (env: Env, projectId: string) =>
     .bind(projectId)
     .first<ReleaseTarget>();
 
+/** Whether a promotion of this Project starts a release (ADR 0018). */
+export const hasReleaseTarget = async (env: Env, projectId: string) =>
+  (await loadTarget(env, projectId)) !== null;
+
+/**
+ * A `releasing` Change ends with its release: `completed` when it deployed or a newer generation
+ * superseded it, `failed` when it did not deploy (change-status.ts). Only `releasing` moves, so a
+ * later injected smoke failure (P13-12) never reopens a completed Change.
+ */
+const settleReleasingChange = (env: Env, changeId: string, status: ReleaseStatus) => {
+  const next = changeAfterRelease(status);
+  return next
+    ? env.DB.prepare(
+        "UPDATE changes SET status = ?, updated_at = ? WHERE id = ? AND status = 'releasing'",
+      ).bind(next, new Date().toISOString(), changeId)
+    : null;
+};
+
 export async function loadRelease(env: Env, releaseId: string): Promise<LoadedRelease | null> {
   const release = await env.DB.prepare("SELECT * FROM releases WHERE id = ?")
     .bind(releaseId)
@@ -153,6 +172,12 @@ export async function startRelease(
         `UPDATE releases SET status = 'superseded', finished_at = ?, failure_reason = ?
          WHERE project_id = ? AND generation < ? AND status IN ('queued', 'building')`,
       ).bind(now, `Superseded by S${input.generation}.`, input.projectId, input.generation),
+      // Their Changes still promoted: the newer generation's release owns the deployment.
+      env.DB.prepare(
+        `UPDATE changes SET status = 'completed', updated_at = ?
+         WHERE status = 'releasing' AND id IN (SELECT change_id FROM releases
+           WHERE project_id = ? AND generation < ? AND status = 'superseded')`,
+      ).bind(now, input.projectId, input.generation),
     ]);
     try {
       await env.RELEASE_WORKFLOW.create({ id: releaseId, params: { releaseId } });
@@ -222,6 +247,8 @@ export async function transitionRelease(
     .bind(loaded.release.id)
     .first<{ status: ReleaseStatus }>();
   const status = after?.status ?? loaded.release.status;
+  const settle = settleReleasingChange(env, loaded.release.change_id, status);
+  if (settle) await settle.run();
   if (status === to && events.length > 0) {
     await appendChangeEvents(env.RESOURCE_SHARD, loaded.ctx, events);
   }
