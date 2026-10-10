@@ -288,6 +288,18 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       const remaining = selectedCriteria(planned.criteria, [...excluded]);
       if (nothingSelected(remaining)) {
         await step.do("stop unselected request", async () => {
+          // Keep what was asked for visible on the request, although nothing of it is built.
+          await this.env.DB.prepare(
+            `UPDATE changes SET acceptance_criteria_json = ?, invariants_json = ?, risk_tier = ?
+             WHERE id = ? AND status = 'compiling'`,
+          )
+            .bind(
+              JSON.stringify(planned.plan.acceptanceCriteria),
+              JSON.stringify(planned.plan.invariants),
+              planned.plan.riskTier,
+              changeId,
+            )
+            .run();
           const fields = await this.env.DB.prepare(
             "SELECT outcome_reason, outcome_winner_change_id, outcome_decided_by FROM changes WHERE id = ?",
           )
