@@ -100,13 +100,13 @@ locals {
   bootstrap = false
 }
 
-# Per-environment caps (ADR 0017). The approved Sandbox (10 h/month, HOM-192) and Browser Run
-# (500 s/day) budgets are split evenly between dev and prod; each Worker reads its share from a
-# binding and enforces it on this environment's D1 meter. The Anthropic budget per calendar month
+# Per-environment caps (ADR 0017). The approved Sandbox budget (20 h/month: dev 5 h, prod 15 h)
+# and the Browser Run budget (500 s/day, split evenly) are shared between dev and prod; each
+# Worker reads its share from a binding and enforces it on this environment's D1 meter. The Anthropic budget per calendar month
 # (var.anthropic_monthly_budget_usd, ADR 0021) is enforced the same way by every model caller.
 locals {
   caps = {
-    sandbox_monthly_seconds = 18000 # 5 h of the 10 h total
+    sandbox_monthly_seconds = 18000 # 5 h of the 20 h total
     browser_daily_seconds   = 250   # half of the 500 s guard, under the 600 s free figure
   }
   cap_bindings = {
@@ -528,9 +528,9 @@ module "indexer_worker" {
 # Sandbox Worker (ADR 0012): hosts the Sandbox container class. Provider 5.27 cannot attach a
 # container to a Durable Object class, so a temporary adapter deploys it in one upload (code,
 # migration, container metadata) and creates the container application, as Wrangler does. It
-# changes only when the Sandbox SDK bundle or its settings change. Caps (HOM-192): 1 instance,
-# sleeps after 2 minutes idle (in code), 5-hour monthly meter in D1 (local.caps; prod has the
-# other 5 h, ADR 0017).
+# changes only when the Sandbox SDK bundle or its settings change. Caps: 1 instance, sleeps
+# after 2 minutes idle (in code), 5-hour monthly meter in D1 (local.caps; prod has the other
+# 15 h of 20, ADR 0017).
 locals {
   sandbox_worker = {
     script_name         = "rhumbatron-sandbox-${local.environment}"

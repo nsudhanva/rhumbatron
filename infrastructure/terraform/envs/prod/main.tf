@@ -127,13 +127,13 @@ resource "cloudflare_dns_record" "clerk" {
   comment = "Clerk production instance (managed by Terraform, envs/prod)"
 }
 
-# Per-environment caps (ADR 0017). The approved Sandbox (10 h/month, HOM-192) and Browser Run
-# (500 s/day) budgets are split evenly between dev and prod; each Worker reads its share from a
-# binding and enforces it on this environment's D1 meter. The Anthropic budget per calendar month
+# Per-environment caps (ADR 0017). The approved Sandbox budget (20 h/month: dev 5 h, prod 15 h)
+# and the Browser Run budget (500 s/day, split evenly) are shared between dev and prod; each
+# Worker reads its share from a binding and enforces it on this environment's D1 meter. The Anthropic budget per calendar month
 # (var.anthropic_monthly_budget_usd, ADR 0021) is enforced the same way by every model caller.
 locals {
   caps = {
-    sandbox_monthly_seconds = 18000 # 5 h of the 10 h total
+    sandbox_monthly_seconds = 54000 # 15 h of the 20 h total
     browser_daily_seconds   = 250   # half of the 500 s guard, under the 600 s free figure
   }
   cap_bindings = {
@@ -591,8 +591,8 @@ module "indexer_worker" {
 }
 
 # Sandbox Worker (ADR 0012): hosts the Sandbox container class through the temporary adapter.
-# Caps (HOM-192), per environment: 1 instance, sleeps after 2 minutes idle (in code), 5-hour
-# monthly meter in this environment's D1 (local.caps; dev has the other 5 h, ADR 0017).
+# Caps, per environment: 1 instance, sleeps after 2 minutes idle (in code), 15-hour monthly
+# meter in this environment's D1 (local.caps; dev has the other 5 h of 20, ADR 0017).
 locals {
   sandbox_worker = {
     script_name         = "rhumbatron-sandbox-${local.environment}"
