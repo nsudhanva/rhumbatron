@@ -16,19 +16,32 @@
  * Fixture routes are checked only where FIXTURES_ENABLED answers them. Every Project the run
  * creates is archived at the end, also when a check fails. Cost per run: about 120 API requests,
  * about 15 D1 row writes, 1 cleanup Queue message.
+ *
+ * Live apps (Phase 16) exist only on prod. There the run also creates one acme-shop Project: one
+ * app build (no Sandbox), its host checks, code reads, edit and rollback requests that are all
+ * refused (the unchanged-content edit creates and deletes one Artifacts fork), and "Remove app".
+ * Dev checks the same routes' shapes and refusals on the Project without source.
  */
 
 import { $ } from "bun";
 import {
   ApiErrorBody,
+  AppProvisionOutcome,
+  AppRemoveOutcome,
+  AppVersionLink,
   apiData,
+  CandidatePreview,
   Change,
   ChangeClaims,
   ChangeCommandOutcome,
   ChangeDetail,
+  ChangeSetAttribution,
+  CodeVersions,
+  CodeView,
   FeedPage,
   HealthResponse,
   Project,
+  ProjectApp,
   ProjectReleases,
   ProjectStats,
   RunProgress,
@@ -487,6 +500,17 @@ const ArchiveView: Spec = {
   },
 };
 
+/** `GET /v1/projects/:id/app`, from protocol schemas (the view schema is local to the API). */
+const ProjectAppView = apiData(
+  CandidatePreview.pick({ enabled: true }).extend({
+    app: ProjectApp.nullable(),
+    versions: AppVersionLink.array(),
+  }),
+);
+type CodeViewData = ReturnType<typeof CodeView.parse>;
+type CodeVersionsData = ReturnType<typeof CodeVersions.parse>;
+type ProjectAppView = { enabled: boolean; app: ProjectApp | null; versions: AppVersionLink[] };
+
 /* ------------------------------------------------------------------------------------------ */
 /* Live endpoint                                                                               */
 /* ------------------------------------------------------------------------------------------ */
@@ -533,6 +557,449 @@ async function live(path: string, auth: boolean): Promise<LiveResult> {
 }
 
 /* ------------------------------------------------------------------------------------------ */
+/* Live apps and code (Phase 16, ADR 0020)                                                     */
+/* ------------------------------------------------------------------------------------------ */
+
+const APPS_DOMAIN = "rhumbatron.com";
+const APP_READY_TIMEOUT_MS = 90_000;
+const APP_REMOVED_TIMEOUT_MS = 30_000;
+
+type HostRes = { status: number; headers: Headers; text: string };
+
+/** A request to an app host (no Rhumbatron session; apps have no real login). */
+async function appHost(url: string, headers: Record<string, string> = {}): Promise<HostRes> {
+  try {
+    const response = await fetch(url, {
+      headers,
+      redirect: "manual",
+      signal: AbortSignal.timeout(20_000),
+    });
+    return { status: response.status, headers: response.headers, text: await response.text() };
+  } catch (error) {
+    return { status: 0, headers: new Headers(), text: String(error) };
+  }
+}
+
+const hostBrief = (r: HostRes) => `${r.status} ${r.text.replace(/\s+/g, " ").slice(0, 160)}`;
+
+/** `Set-Cookie` values that name a Domain: an app must never set a cookie beyond its host. */
+const domainCookies = (r: HostRes) =>
+  r.headers.getSetCookie().filter((c) => /;\s*domain\s*=/i.test(c));
+
+const ACME_TITLE = /<title>\s*Acme Shop\s*<\/title>/i;
+
+/** Polls `GET /v1/projects/:id/app` until `done`, or until the timeout; returns the last view. */
+async function pollApp(
+  projectId: string,
+  done: (view: ProjectAppView) => boolean,
+  timeoutMs: number,
+): Promise<{ view: ProjectAppView | null; ms: number }> {
+  const start = Date.now();
+  let view: ProjectAppView | null = null;
+  while (Date.now() - start < timeoutMs) {
+    const r = await call("GET", `/v1/projects/${projectId}/app`);
+    if (r.status === 200) {
+      view = data<ProjectAppView>(r);
+      if (done(view)) break;
+    }
+    await Bun.sleep(3_000);
+  }
+  return { view, ms: Date.now() - start };
+}
+
+/** Polls an app host until it answers `status`, or until the timeout. */
+async function pollHost(url: string, status: number, timeoutMs: number) {
+  const start = Date.now();
+  let last = await appHost(url);
+  while (last.status !== status && Date.now() - start < timeoutMs) {
+    await Bun.sleep(2_000);
+    last = await appHost(url);
+  }
+  return last;
+}
+
+/**
+ * Edit validation only: every request here is refused, so nothing is committed. `source` is the
+ * live tree and one file of it when the Project has canonical source, else null (dev).
+ */
+async function editChecks(
+  projectId: string,
+  source: { tree: string; path: string; content: string | null } | null,
+) {
+  const edits = `/v1/projects/${projectId}/code/edits`;
+  const tree = source?.tree ?? "0".repeat(40);
+  const path = source?.path ?? "src/app.ts";
+  const edit = (body: Record<string, unknown>) =>
+    call("POST", edits, {
+      body: { path, content: "e2e\n", baseTree: tree, message: "e2e", ...body },
+    });
+  const reason = (r: string) => (j: unknown) => same("reason", errorDetails(j)?.reason, r);
+
+  expectError(
+    "POST code/edits bad path (../x) is 400",
+    await edit({ path: "../x" }),
+    400,
+    "invalid_request",
+    reason("invalid_path"),
+  );
+  expectError(
+    "POST code/edits over 256 KB is 413",
+    await edit({ content: "a".repeat(256 * 1024 + 1) }),
+    413,
+    "invalid_request",
+    reason("too_large"),
+  );
+  expectError(
+    "POST code/edits binary content (NUL) is 400",
+    await edit({ content: "e2e\u0000binary\n" }),
+    400,
+    "invalid_request",
+    reason("binary"),
+  );
+  expectError(
+    "POST code/edits missing message is 400",
+    await edit({ message: "" }),
+    400,
+    "invalid_request",
+  );
+  if (!source) {
+    expectError(
+      "POST code/edits without canonical source is 409",
+      await edit({}),
+      409,
+      "conflict",
+      reason("no_source"),
+    );
+    skip("POST code/edits wrong baseTree and unchanged content", "no canonical source");
+    return;
+  }
+  expectError(
+    "POST code/edits wrong baseTree is 409",
+    await edit({ baseTree: tree === "f".repeat(40) ? "e".repeat(40) : "f".repeat(40) }),
+    409,
+    "conflict",
+    reason("stale_base"),
+  );
+  if (source.content === null) {
+    report("POST code/edits unchanged content is 400", false, `${path} has no stored content`);
+    return;
+  }
+  expectError(
+    "POST code/edits unchanged content is 400",
+    await edit({ content: source.content }),
+    400,
+    "invalid_request",
+    reason("no_change"),
+  );
+}
+
+/** Rollback validation only: every request here is refused, so no rollback runs. */
+async function rollbackChecks(projectId: string, generation: number, hasSource: boolean) {
+  const rollback = (body: unknown) => call("POST", `/v1/projects/${projectId}/rollback`, { body });
+  const reason = (r: string) => (j: unknown) => same("reason", errorDetails(j)?.reason, r);
+  expectError(
+    "POST rollback invalid body is 400",
+    await rollback({ targetGeneration: -1, expectedGeneration: generation }),
+    400,
+    "invalid_request",
+  );
+  expectError(
+    "POST rollback to the current generation is 409",
+    await rollback({ targetGeneration: generation, expectedGeneration: generation }),
+    409,
+    "conflict",
+    reason(hasSource ? "not_earlier" : "no_source"),
+  );
+  expectError(
+    "POST rollback wrong expectedGeneration is 409",
+    await rollback({ targetGeneration: generation, expectedGeneration: generation + 5 }),
+    409,
+    "conflict",
+    reason(hasSource ? "stale" : "no_source"),
+  );
+}
+
+/**
+ * Phase 16 checks. On every environment: response shapes on a Project without source, unknown IDs,
+ * and edit and rollback validation. Where apps are on (prod): the app Project's live host, cookie
+ * isolation, code routes on real source, and "Remove app". No Change plans or verifies, and no
+ * route here starts a Sandbox.
+ */
+async function liveApps(
+  projectId: string,
+  changeId: string,
+  appsOn: boolean,
+  appProjectId: string | null,
+) {
+  // Unknown IDs and membership.
+  for (const [method, sub, body] of [
+    ["GET", "app", undefined],
+    ["POST", "app", undefined],
+    ["DELETE", "app", undefined],
+    ["GET", "code", undefined],
+    ["GET", "versions", undefined],
+    ["POST", "rollback", { targetGeneration: 0, expectedGeneration: 1 }],
+    [
+      "POST",
+      "code/edits",
+      { path: "src/app.ts", content: "x\n", baseTree: "0".repeat(40), message: "e2e" },
+    ],
+  ] as const) {
+    expectError(
+      `${method} /v1/projects/:id/${sub} unknown is 404`,
+      await call(method, `/v1/projects/${unknownProject}/${sub}`, { body }),
+      404,
+      "not_found",
+    );
+  }
+  for (const path of [
+    `/v1/candidates/${unknownCandidate}/preview`,
+    `/v1/candidates/${unknownCandidate}/diff`,
+    `/v1/changesets/${unknownChangeSet}/diff`,
+    `/v1/changes/${unknownChange}/changesets`,
+  ]) {
+    expectError(
+      `GET ${path.replace(/\/(cand|cs|chg)_[^/]+/, "/:id")} unknown is 404`,
+      await call("GET", path),
+      404,
+      "not_found",
+    );
+  }
+  expect(
+    "GET /v1/changes/:id/changesets (none)",
+    await call("GET", `/v1/changes/${changeId}/changesets`),
+    200,
+    apiData(ChangeSetAttribution.array()),
+    (j) => same("changesets", (j as { data: unknown[] }).data.length, 0),
+  );
+
+  // A Project without source: shapes and refusals (both environments).
+  expectError(
+    "GET code without canonical source is 404",
+    await call("GET", `/v1/projects/${projectId}/code`),
+    404,
+    "not_found",
+  );
+  expectError(
+    "GET code malformed tree is 400",
+    await call("GET", `/v1/projects/${projectId}/code?tree=xyz`),
+    400,
+    "invalid_request",
+  );
+  expect(
+    "GET versions without source is empty",
+    await call("GET", `/v1/projects/${projectId}/versions`),
+    200,
+    apiData(CodeVersions),
+    (j) => {
+      const v = (j as { data: CodeVersionsData }).data;
+      return same("liveGeneration", v.liveGeneration, 0) ?? same("versions", v.versions.length, 0);
+    },
+  );
+  expect(
+    "DELETE /v1/projects/:id/app without an app is not_found",
+    await call("DELETE", `/v1/projects/${projectId}/app`),
+    200,
+    apiData(AppRemoveOutcome),
+    (j) => same("status", (j as { data: AppRemoveOutcome }).data.status, "not_found"),
+  );
+  if (!appsOn) {
+    expect(
+      "POST /v1/projects/:id/app is disabled without apps",
+      await call("POST", `/v1/projects/${projectId}/app`),
+      200,
+      apiData(AppProvisionOutcome),
+      (j) => same("status", (j as { data: AppProvisionOutcome }).data.status, "disabled"),
+    );
+    await rollbackChecks(projectId, 0, false);
+    await editChecks(projectId, null);
+    skip("live app host, cookies, code on source, remove app", "apps are off on this environment");
+    return;
+  }
+  if (!appProjectId) {
+    report("live app checks", false, "the app Project was not created");
+    return;
+  }
+
+  // 1. The acme-shop Project goes live.
+  const ready = await pollApp(
+    appProjectId,
+    (v) => v.app?.status === "ready" || v.app?.status === "failed",
+    APP_READY_TIMEOUT_MS,
+  );
+  const app = ready.view?.app ?? null;
+  report(
+    `app is ready within ${APP_READY_TIMEOUT_MS / 1000} s`,
+    app?.status === "ready",
+    app
+      ? `status ${app.status} after ${Math.round(ready.ms / 1000)} s ${app.failureReason ?? ""}`
+      : "no app row",
+  );
+  if (app?.status !== "ready") return;
+  const appUrl = `https://${app.label}.${APPS_DOMAIN}`;
+  report(
+    "app view names the production host at S0",
+    app.url === appUrl && app.generation === 0 && typeof app.commit === "string",
+    `got ${JSON.stringify(app).slice(0, 200)}`,
+  );
+
+  const home = await pollHost(`${appUrl}/`, 200, 15_000);
+  report(
+    "GET app host / is 200 with the Acme Shop title",
+    home.status === 200 && ACME_TITLE.test(home.text),
+    hostBrief(home),
+  );
+  const products = await appHost(`${appUrl}/api/products`);
+  let productCount = -1;
+  try {
+    const list = (JSON.parse(products.text) as { products?: unknown }).products;
+    productCount = Array.isArray(list) ? list.length : -1;
+  } catch {}
+  report(
+    "GET app host /api/products is 200 with products (demo identity)",
+    products.status === 200 && productCount > 0,
+    hostBrief(products),
+  );
+
+  // 2. Cookies: no Domain cookie out; only the app's own (prefixed) cookies in.
+  const domainSet = [home, products].flatMap(domainCookies);
+  report("app host sets no Domain cookie", domainSet.length === 0, domainSet.join(" | "));
+  const foreign = await appHost(`${appUrl}/api/products`, {
+    cookie: "acme_user=mallory; __session=e2e; __client_uat=1",
+  });
+  report(
+    "app never sees foreign cookies (unprefixed acme_user=mallory is ignored)",
+    foreign.status === 200,
+    hostBrief(foreign),
+  );
+  const own = await appHost(`${appUrl}/api/products`, { cookie: "rba_acme_user=mallory" });
+  report(
+    "app sees its own host cookie (rba_acme_user=mallory is rejected)",
+    own.status === 401,
+    hostBrief(own),
+  );
+  const header = await appHost(`${appUrl}/api/products`, { "x-user-id": "mallory" });
+  report("app rejects an unknown fake user (x-user-id)", header.status === 401, hostBrief(header));
+
+  // 3. Unknown hosts.
+  const rand = crypto.randomUUID().replaceAll("-", "").slice(0, 10);
+  const unknown = await appHost(`https://zz-e2e-none-${rand}.${APPS_DOMAIN}/`);
+  report(
+    "unknown app host is 404 (no-store, noindex, no cookie)",
+    unknown.status === 404 &&
+      unknown.headers.get("cache-control") === "no-store" &&
+      unknown.headers.get("x-robots-tag") === "noindex" &&
+      unknown.headers.getSetCookie().length === 0,
+    hostBrief(unknown),
+  );
+  const noPreview = await appHost(`https://zz${rand.slice(0, 6)}--${app.label}.${APPS_DOMAIN}/`);
+  report("unknown preview of a live app is 404", noPreview.status === 404, hostBrief(noPreview));
+
+  // Version host of S0 ("Open" on the Versions page).
+  const withVersions = await pollApp(appProjectId, (v) => v.versions.length > 0, 15_000);
+  const s0 = withVersions.view?.versions.find((v) => v.generation === 0);
+  const s0Url = `https://v0000000--${app.label}.${APPS_DOMAIN}`;
+  report("app view lists the S0 version host", s0?.url === s0Url, JSON.stringify(s0 ?? null));
+  const s0Home = await appHost(`${s0Url}/`);
+  report(
+    "GET S0 version host / is 200 with the Acme Shop title",
+    s0Home.status === 200 && ACME_TITLE.test(s0Home.text),
+    hostBrief(s0Home),
+  );
+
+  // 4. Code routes on real source.
+  const treeRes = await call("GET", `/v1/projects/${appProjectId}/code`);
+  expect("GET code returns the live tree", treeRes, 200, apiData(CodeView), (j) => {
+    const v = (j as { data: CodeViewData }).data;
+    if (v.kind !== "tree") return `expected a tree, got ${v.kind}`;
+    if (!v.live) return "tree is not live";
+    return v.files.some((f) => f.path === "src/app.ts") ? null : "src/app.ts missing";
+  });
+  const tree = treeRes.status === 200 ? data<CodeViewData>(treeRes) : null;
+  let file: CodeViewData | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await call("GET", `/v1/projects/${appProjectId}/code?path=src/app.ts`);
+    file = r.status === 200 ? data<CodeViewData>(r) : null;
+    if (file?.kind === "file" && file.content !== null) break;
+    await Bun.sleep(2_000);
+  }
+  report(
+    "GET code?path=src/app.ts returns its content",
+    file?.kind === "file" && typeof file.content === "string" && file.content.includes("Hono"),
+    `got ${JSON.stringify(file).slice(0, 200)}`,
+  );
+  expectError(
+    "GET code?path of a missing file is 404",
+    await call("GET", `/v1/projects/${appProjectId}/code?path=src/e2e-none.ts`),
+    404,
+    "not_found",
+  );
+  expect(
+    "GET versions returns S0",
+    await call("GET", `/v1/projects/${appProjectId}/versions`),
+    200,
+    apiData(CodeVersions),
+    (j) => {
+      const v = (j as { data: CodeVersionsData }).data;
+      const first = v.versions[0];
+      return (
+        same("liveGeneration", v.liveGeneration, 0) ??
+        same("versions", v.versions.length, 1) ??
+        same("generation", first?.generation, 0) ??
+        same("live", first?.live, true) ??
+        same("treeSha", first?.treeSha, tree?.treeSha)
+      );
+    },
+  );
+
+  // 5 and 6. Edit and rollback validation on real source: all refused.
+  await editChecks(
+    appProjectId,
+    tree
+      ? {
+          tree: tree.treeSha,
+          path: "src/app.ts",
+          content: file?.kind === "file" ? file.content : null,
+        }
+      : null,
+  );
+  await rollbackChecks(appProjectId, 0, true);
+
+  // 7. Remove app: 202, then every host answers 410.
+  expect(
+    "DELETE /v1/projects/:id/app is 202 removing",
+    await call("DELETE", `/v1/projects/${appProjectId}/app`),
+    202,
+    apiData(AppRemoveOutcome),
+    (j) => same("status", (j as { data: AppRemoveOutcome }).data.status, "removing"),
+  );
+  const gone = await pollHost(`${appUrl}/`, 410, APP_REMOVED_TIMEOUT_MS);
+  report(
+    `app host is 410 within ${APP_REMOVED_TIMEOUT_MS / 1000} s of removal`,
+    gone.status === 410,
+    hostBrief(gone),
+  );
+  const s0Gone = await pollHost(`${s0Url}/`, 410, APP_REMOVED_TIMEOUT_MS);
+  report("S0 version host is 410 after removal", s0Gone.status === 410, hostBrief(s0Gone));
+  expect(
+    "GET app after removal shows removed",
+    await call("GET", `/v1/projects/${appProjectId}/app`),
+    200,
+    ProjectAppView,
+    (j) => {
+      const v = (j as { data: ProjectAppView }).data;
+      return v.app
+        ? (same("status", v.app.status, "removed") ?? same("versions", v.versions.length, 0))
+        : null;
+    },
+  );
+
+  const archive = await call("DELETE", `/v1/projects/${appProjectId}`);
+  if (archive.status === 200) archived.add(appProjectId);
+  expect("DELETE archives the app Project", archive, 200, ArchiveView);
+}
+
+/* ------------------------------------------------------------------------------------------ */
 /* Run                                                                                         */
 /* ------------------------------------------------------------------------------------------ */
 
@@ -543,6 +1010,7 @@ const unknownChange = `chg_${crypto.randomUUID()}`;
 const unknownCandidate = `cand_${crypto.randomUUID().replaceAll("-", "")}`;
 const unknownDeadLetter = `dl_${crypto.randomUUID().replaceAll("-", "")}`;
 const unknownTask = `tsk_${crypto.randomUUID()}`;
+const unknownChangeSet = `cs_${crypto.randomUUID().replaceAll("-", "")}`;
 
 async function run() {
   console.log(`E2E ${environment}: ${base}\n`);
@@ -608,6 +1076,18 @@ async function run() {
     ["POST", "/v1/notifications/read"],
     ["POST", `/v1/dead-letters/${unknownDeadLetter}/retry`],
     ["POST", `/v1/dead-letters/${unknownDeadLetter}/dismiss`],
+    // Live apps and code (Phase 16).
+    ["GET", `/v1/projects/${p}/app`],
+    ["POST", `/v1/projects/${p}/app`],
+    ["DELETE", `/v1/projects/${p}/app`],
+    ["POST", `/v1/projects/${p}/rollback`],
+    ["GET", `/v1/projects/${p}/code`],
+    ["GET", `/v1/projects/${p}/versions`],
+    ["POST", `/v1/projects/${p}/code/edits`],
+    ["GET", `/v1/changes/${ch}/changesets`],
+    ["GET", `/v1/changesets/${unknownChangeSet}/diff`],
+    ["GET", `/v1/candidates/${cand}/diff`],
+    ["GET", `/v1/candidates/${cand}/preview`],
   ];
   const unauthorized: string[] = [];
   for (const [method, path] of authRoutes) {
@@ -659,6 +1139,35 @@ async function run() {
   );
   if (!okProject) throw new Error("Project creation failed; later checks need it");
   const projectId = created[0] as string;
+
+  // Live apps (Phase 16) exist only on prod. The acme-shop app Project is created now, so its
+  // provisioning overlaps the checks below; its own checks run before the archive section.
+  const appsOn = environment === "prod";
+  expect(
+    `GET /v1/projects/:id/app (enabled ${appsOn}, no app)`,
+    await call("GET", `/v1/projects/${projectId}/app`),
+    200,
+    ProjectAppView,
+    (j) => {
+      const v = (j as { data: ProjectAppView }).data;
+      return (
+        same("enabled", v.enabled, appsOn) ??
+        same("app", v.app, null) ??
+        same("versions", v.versions.length, 0)
+      );
+    },
+  );
+  let appProjectId: string | null = null;
+  if (appsOn) {
+    const createdApp = await call("POST", "/v1/projects", {
+      body: { name: "E2E App", slug: `${slug}-app`, template: "acme-shop" },
+    });
+    if (createdApp.status === 201) {
+      appProjectId = data<{ id: string }>(createdApp).id;
+      created.push(appProjectId);
+    }
+    expect("POST /v1/projects creates an acme-shop app Project", createdApp, 201, apiData(Project));
+  }
 
   expectError(
     "POST /v1/projects duplicate slug is 409",
@@ -1412,6 +1921,9 @@ async function run() {
     );
   }
 
+  // Live apps and code (Phase 16).
+  await liveApps(projectId, changeId, appsOn, appProjectId);
+
   // Archive.
   const archive = await call("DELETE", `/v1/projects/${projectId}`);
   if (archive.status === 200) archived.add(projectId);
@@ -1479,6 +1991,14 @@ async function run() {
     409,
     "conflict",
   );
+  if (appsOn) {
+    expectError(
+      "POST /v1/projects/:id/app on an archived Project is 409",
+      await call("POST", `/v1/projects/${projectId}/app`),
+      409,
+      "conflict",
+    );
+  }
 }
 
 try {
