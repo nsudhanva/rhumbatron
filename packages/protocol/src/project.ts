@@ -114,15 +114,14 @@ export const ChangeCommandOutcome = z.discriminatedUnion("status", [
 ]);
 export type ChangeCommandOutcome = z.infer<typeof ChangeCommandOutcome>;
 
-/** `POST /v1/projects` request. */
-/** Source templates a Project can start from (AGENTS.md section 54). */
-export const ProjectTemplate = z.enum(["empty", "acme-shop"]);
-export type ProjectTemplate = z.infer<typeof ProjectTemplate>;
-
+/**
+ * `POST /v1/projects` request: a name and a slug. Every Project starts from an empty repository
+ * (one commit with a `.gitignore`); agents build the app from nothing. Unknown keys, such as the
+ * retired `template`, are ignored.
+ */
 export const CreateProjectRequest = z.object({
   name: Project.shape.name,
   slug: Slug,
-  template: ProjectTemplate.default("empty"),
 });
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequest>;
 

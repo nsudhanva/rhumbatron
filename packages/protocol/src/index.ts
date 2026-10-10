@@ -12,5 +12,6 @@ export * from "./event.ts";
 export * from "./model.ts";
 export * from "./project.ts";
 export * from "./release.ts";
+export * from "./suggestions.ts";
 export * from "./work-graph.ts";
 export * from "./workspace.ts";

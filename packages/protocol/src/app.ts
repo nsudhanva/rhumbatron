@@ -264,3 +264,23 @@ export const RollbackOutcome = z.discriminatedUnion("status", [
   z.object({ status: z.literal("refused"), reason: RollbackRefusal, detail: z.string() }),
 ]);
 export type RollbackOutcome = z.infer<typeof RollbackOutcome>;
+
+/* ------------------------------------------------------------------------------------------ */
+/* App conventions (blank Projects)                                                            */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * The shape every Project's app must have, stated as instructions, not template files: a Project
+ * starts from an empty repository and agents create the app. The verification plan
+ * (packages/evidence plan.ts) runs `bun run typecheck`, `bun test` and `bun run contract`; the apps
+ * builder bundles `src/worker.ts` and serves `public/`.
+ */
+export const APP_CONVENTIONS = [
+  "The app is a Cloudflare Worker in TypeScript, run with Bun. src/worker.ts default-exports { fetch(request, env, ctx) }. Use Hono 4.13.13: src/app.ts exports createApp() that returns the Hono app; API routes live under /api.",
+  'Static files (HTML, CSS, client JavaScript) live in public/ and are served before the Worker runs; public/index.html is the home page. wrangler.jsonc: { "main": "src/worker.ts", "compatibility_date": "2026-10-08", "assets": { "directory": "./public", "not_found_handling": "none" } }.',
+  'package.json ("type": "module") has the scripts "typecheck" (tsc --noEmit), "test" (bun test), "contract" (bun run scripts/contract.ts) and "dev" (bun run src/server.ts: a Bun.serve server on PORT, default 8787, serving /api from the app and the rest from public/). devDependencies: typescript 7.0.2 and @types/bun 1.4.2. tsconfig.json: strict, module ESNext, moduleResolution Bundler, types ["bun"], noEmit.',
+  'scripts/contract.ts prints the API route table as one JSON line, {"routes":["GET /api/health", ...]}: sorted unique "METHOD /path" from createApp().routes, without method ALL. It imports src/app.ts from the directory in the CONTRACT_ROOT environment variable, else from the current directory, so the base commit can be read too.',
+  "Tests are bun:test files under test/; at least one test must exist and pass.",
+  "Storage: env.DATA is a string key-value store (get, put, delete, list({ prefix, limit })), values up to 128 KiB. Memory is lost between requests. The app has no network access.",
+  "No real authentication: no passwords, no email sign-in, no auth SDKs (the build rejects them). When the goal asks for accounts or users, build a fake identity: a demo user picker stored in a cookie, read on the server.",
+] as const;
