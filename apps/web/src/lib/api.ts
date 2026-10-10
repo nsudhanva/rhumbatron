@@ -216,6 +216,32 @@ export const getChange = createServerFn()
   .inputValidator((changeId: string) => changeId)
   .handler(({ data }) => call<ChangeDetail>(`/v1/changes/${data}`));
 
+type ChangeCommandResult = {
+  status: "recorded";
+  changeId: string;
+  changeStatus: string;
+  budgetUsd: number;
+  repeated: boolean;
+  dispatchedTaskIds: string[];
+};
+
+/** Cancels a Change before promotion starts (AGENTS.md section 16.1). Safe to repeat. */
+export const cancelChange = createServerFn({ method: "POST" })
+  .inputValidator((changeId: string) => changeId)
+  .handler(({ data }) =>
+    call<ChangeCommandResult>(`/v1/changes/${data}/cancel`, { method: "POST", body: {} }),
+  );
+
+/** Raises a Change budget; a budget-blocked Change resumes (section 44 rule 5). */
+export const raiseChangeBudget = createServerFn({ method: "POST" })
+  .inputValidator((input: { changeId: string; budgetUsd: number }) => input)
+  .handler(({ data }) =>
+    call<ChangeCommandResult>(`/v1/changes/${data.changeId}/budget`, {
+      method: "POST",
+      body: { budgetUsd: data.budgetUsd },
+    }),
+  );
+
 export const listTasks = createServerFn()
   .inputValidator((changeId: string) => changeId)
   .handler(({ data }) => call<TaskDetail[]>(`/v1/changes/${data}/tasks`));

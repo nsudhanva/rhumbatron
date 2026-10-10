@@ -111,7 +111,7 @@ export function runDuration(run: TaskRun, now = Date.now()) {
   return formatDuration(Math.max(0, (end - new Date(run.startedAt).getTime()) / 1000));
 }
 
-const ACTIVE_CHANGE = new Set(["created", "compiling", "running"]);
+const ACTIVE_CHANGE = new Set(["created", "compiling", "running", "promoting", "releasing"]);
 const ACTIVE_TASK = new Set(["ready", "assigned", "running"]);
 
 export function isLive(change: ChangeDetail | undefined, tasks: TaskDetail[] | undefined) {

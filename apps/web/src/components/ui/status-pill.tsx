@@ -41,6 +41,8 @@ const VOCABULARY: Record<string, StatusView> = {
   composing: { family: "active", label: "Composing" },
   composed: { family: "active", label: "Composed" },
   verifying: { family: "active", label: "Verifying" },
+  promoting: { family: "active", label: "Promoting" },
+  releasing: { family: "active", label: "Releasing" },
   deploying: { family: "active", label: "Deploying" },
   building: { family: "active", label: "Building" },
   // attention

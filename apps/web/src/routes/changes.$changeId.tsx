@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { deriveActivity } from "../components/agents/activity-model";
 import { AgentActivity } from "../components/agents/agent-activity";
 import { CandidateList } from "../components/candidate-list";
+import { CancelChange, RaiseBudget } from "../components/change/change-controls";
 import {
   ChangeStats,
   CriteriaList,
@@ -287,16 +288,23 @@ function ChangeView() {
           </>
         }
         actions={
-          <Link
-            to="/changes/$changeId/flight"
-            params={{ changeId }}
-            className={cn(buttonVariants({ variant: "primary" }), "gap-1.5")}
-          >
-            <Airplane size={16} aria-hidden />
-            Open Flight Control
-          </Link>
+          <>
+            <CancelChange changeId={data.id} status={data.status} />
+            <Link
+              to="/changes/$changeId/flight"
+              params={{ changeId }}
+              className={cn(buttonVariants({ variant: "primary" }), "gap-1.5")}
+            >
+              <Airplane size={16} aria-hidden />
+              Open Flight Control
+            </Link>
+          </>
         }
       />
+
+      {data.status === "budget_blocked" && (
+        <RaiseBudget changeId={data.id} budgetUsd={data.budgetUsd} />
+      )}
 
       <DeadLetters projectId={data.projectId} changeId={data.id} />
 
@@ -344,7 +352,9 @@ function ChangeView() {
       <CandidateList
         changeId={changeId}
         candidates={candidateList}
-        canCompose={!["cancelled", "failed", "completed"].includes(data.status)}
+        canCompose={
+          !["cancelled", "failed", "completed", "promoting", "releasing"].includes(data.status)
+        }
       />
 
       <div className="grid gap-7 min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
