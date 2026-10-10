@@ -7,6 +7,7 @@ import {
   type ReleaseInjectionOutcome,
 } from "@rhumbatron/protocol";
 import { z } from "zod";
+import { provisionApp } from "./app-provision.ts";
 import {
   type CreateCandidateOutcome,
   composeChangeCandidates,
@@ -51,6 +52,11 @@ async function isArchived(env: Env, projectId: string) {
     .bind(projectId)
     .first<{ status: string }>();
   return row?.status === "archived";
+}
+
+async function logAppProvision(env: Env, projectId: string) {
+  const result = await provisionApp(env, projectId);
+  console.warn(JSON.stringify({ event: "app.provision", projectId, ...result }));
 }
 
 /**
@@ -104,7 +110,7 @@ async function handleCommand(
     return;
   }
   if (
-    ["project.provision", "candidate.verify", "candidate.create"].includes(
+    ["project.provision", "app.provision", "candidate.verify", "candidate.create"].includes(
       command.data.commandType,
     ) &&
     (await isArchived(env, command.data.projectId))
@@ -121,6 +127,13 @@ async function handleCommand(
         ...result,
       }),
     );
+    // Live apps (ADR 0020): the S0 bundle and production pointer. Prod only; dev returns disabled.
+    if (env.APPS) await logAppProvision(env, command.data.projectId);
+    return;
+  }
+  // "Deploy app" for a Project that existed before live apps, or a retry after a failed build.
+  if (command.data.commandType === "app.provision") {
+    await logAppProvision(env, command.data.projectId);
     return;
   }
   // Dev-only Wishlist fixture ChangeSets (P9-08); refused outside dev inside the handler.

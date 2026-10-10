@@ -144,6 +144,12 @@ export async function cleanupProject(env: CleanupEnv, projectId: string): Promis
   if (project.status !== "archived")
     return { ...result, status: "skipped", detail: "not archived" };
   if (project.cleaned_at) return { ...result, status: "done", detail: "already cleaned" };
+  // Live apps (ADR 0020): the app host answers 410 at once; its bundles go with the prefixes below.
+  await env.DB.prepare(
+    "UPDATE app_deployments SET status = 'removed', updated_at = ? WHERE project_id = ? AND status != 'removed'",
+  )
+    .bind(new Date().toISOString(), projectId)
+    .run();
 
   const budget = REPO_DELETES_PER_MESSAGE;
   const forks = await pendingProjectForks(env.DB, projectId, budget + 1);
@@ -159,7 +165,12 @@ export async function cleanupProject(env: CleanupEnv, projectId: string): Promis
   if ((await pendingProjectForks(env.DB, projectId, 1)).length > 0) return result;
 
   let more = false;
-  for (const prefix of [`source/${projectId}/`, `context/${projectId}/`]) {
+  for (const prefix of [
+    `source/${projectId}/`,
+    `context/${projectId}/`,
+    `apps/${projectId}/`,
+    `app-previews/${projectId}/`,
+  ]) {
     const cleared = await clearPrefix(env.EVIDENCE, prefix);
     result.objectsDeleted += cleared.n;
     more ||= cleared.more;

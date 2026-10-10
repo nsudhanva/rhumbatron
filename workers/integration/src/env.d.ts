@@ -17,4 +17,13 @@ interface Env {
   BUILDS_API_TOKEN?: string;
   /** Account of the release Workers (the Builds API path). */
   BUILDS_ACCOUNT_ID?: string;
+  /**
+   * Live apps bundle builder (ADR 0020): service binding to the apps Worker's `AppBuilder`
+   * entrypoint. Prod only; absent on dev, where `app.provision` is a no-op.
+   */
+  APPS?: {
+    build(
+      input: import("@rhumbatron/protocol").AppBuildInput,
+    ): Promise<import("@rhumbatron/protocol").AppBuildResult>;
+  };
 }
