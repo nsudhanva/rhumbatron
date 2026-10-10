@@ -59,6 +59,16 @@ export function LiveAppLine({ projectId, hasSource }: { projectId: string; hasSo
     ) : null;
   }
   if (app.status === "removed") {
+    // Cleanup done: only the tombstone is left (its hosts answer 410), and it can publish again.
+    if (app.commit === null && hasSource) {
+      return (
+        <span className="flex basis-full items-center gap-x-3">
+          <span>App removed</span>
+          <span aria-hidden>·</span>
+          {action("Deploy app")}
+        </span>
+      );
+    }
     return (
       <span className="basis-full">App removed · its bundles and data are deleted by cleanup</span>
     );
