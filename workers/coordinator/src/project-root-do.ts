@@ -332,13 +332,14 @@ export class ProjectRootDO extends DurableObject<Env> {
 
   /**
    * Publishes due outbox rows to K2, then schedules the next attempt if any remain. The guard
-   * (alarm-guard.ts) counts the fire, keeps a retry at least 1 s out, and stops at the daily cap.
+   * (alarm-guard.ts) counts the fire, defers RPC reschedules while it runs, keeps a retry at least
+   * 1 s out, and stops at the daily cap.
    */
   override async alarm(): Promise<void> {
-    const now = Date.now();
-    this.alarms.countFire(now);
-    const published = await this.outbox.publishAllDue(now);
-    await this.alarms.schedule(this.outbox.nextDueAt(), Date.now(), published > 0);
+    await this.alarms.run(
+      async (now) => (await this.outbox.publishAllDue(now)) > 0,
+      () => this.outbox.nextDueAt(),
+    );
   }
 
   private async scheduleAlarm() {

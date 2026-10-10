@@ -42,9 +42,15 @@ variable "clerk_authorized_parties" {
 }
 
 variable "clerk_dns_records" {
-  description = "DNS-only CNAMEs that the Clerk production instance asks for, keyed by host label (for example \"clerk\" or \"clk._domainkey\"). Empty until the instance exists."
+  description = "DNS-only CNAMEs that the Clerk production instance asks for, keyed by host label (from `clerk deploy status`)."
   type        = map(string)
-  default     = {}
+  default = {
+    "clerk"           = "frontend-api.clerk.services"
+    "accounts"        = "accounts.clerk.services"
+    "clkmail"         = "mail.pnpp7hg79vb2.clerk.services"
+    "clk._domainkey"  = "dkim1.pnpp7hg79vb2.clerk.services"
+    "clk2._domainkey" = "dkim2.pnpp7hg79vb2.clerk.services"
+  }
 }
 
 variable "k2_consumer_token" {

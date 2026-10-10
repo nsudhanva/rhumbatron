@@ -34,12 +34,11 @@ const rootKeychain: Record<string, Record<string, string>> = {
   global: {
     TF_VAR_alert_email: "rhumbatron-alert-email",
   },
-  // ADR 0017. Prod reuses dev's items for now (no new tokens): the K2 Consume-only token, the
-  // Vertex service account (one GCP project; the per-gateway caps split the budget), the OpenRouter
-  // key, and the Clerk dev instance. When the Clerk production instance exists, point the Clerk
-  // entries at `rhumbatron-clerk-secret-key-prod` / `rhumbatron-clerk-publishable-key-prod`.
+  // ADR 0017. Prod reuses dev's K2 Consume-only token, Vertex service account (one GCP project;
+  // the per-gateway caps split the budget), and OpenRouter key. Clerk is the production instance.
   prod: {
-    TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-dev",
+    TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-prod",
+    TF_VAR_clerk_publishable_key: "rhumbatron-clerk-publishable-key-prod",
     TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-dev",
     TF_VAR_openrouter_api_key: "rhumbatron-openrouter-api-key",
     TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-dev",
@@ -48,15 +47,7 @@ const rootKeychain: Record<string, Record<string, string>> = {
 };
 
 // Public, non-secret values read from a local file when no Keychain item holds them.
-// Prod's Clerk publishable key is the dev instance's key that the web build inlines (ADR 0017).
-const rootFiles: Record<string, Record<string, { file: string; key: string }>> = {
-  prod: {
-    TF_VAR_clerk_publishable_key: {
-      file: "apps/web/.env.local",
-      key: "VITE_CLERK_PUBLISHABLE_KEY",
-    },
-  },
-};
+const rootFiles: Record<string, Record<string, { file: string; key: string }>> = {};
 
 const [root, ...args] = process.argv.slice(2);
 const dir = root ? roots[root] : undefined;

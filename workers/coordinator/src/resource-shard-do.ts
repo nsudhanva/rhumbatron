@@ -390,8 +390,14 @@ export class ResourceShardDO extends DurableObject<Env> {
 
   /** Expires overdue claims, prunes old finished rows, publishes the outbox, sets the next alarm. */
   override async alarm(): Promise<void> {
-    const now = Date.now();
-    this.alarms.countFire(now);
+    await this.alarms.run(
+      (now) => this.alarmWork(now),
+      () => this.alarmDueAt(),
+    );
+  }
+
+  /** One alarm fire's work. True when it expired a claim or published an event. */
+  private async alarmWork(now: number): Promise<boolean> {
     const expired = this.ctx.storage.transactionSync(() => {
       const count = this.expireOverdue(now);
       this.sql.exec(
@@ -405,7 +411,7 @@ export class ResourceShardDO extends DurableObject<Env> {
       return count;
     });
     const published = await this.outbox.publishAllDue(now);
-    await this.rescheduleAlarm(expired + published > 0);
+    return expired + published > 0;
   }
 
   /**
@@ -512,20 +518,24 @@ export class ResourceShardDO extends DurableObject<Env> {
   }
 
   /**
-   * `progressed` is given only by `alarm()`. The guard (alarm-guard.ts) deletes the alarm when no
-   * work is pending, keeps an alarm-driven retry at least 1 s out, and stops at the daily cap.
+   * After an RPC write. The guard (alarm-guard.ts) deletes the alarm when no work is pending,
+   * defers while an alarm runs (that alarm reschedules from `alarmDueAt()` when it ends), and stops
+   * at the daily cap.
    */
-  private async rescheduleAlarm(progressed?: boolean) {
+  private async rescheduleAlarm() {
+    await this.alarms.schedule(this.alarmDueAt(), Date.now());
+  }
+
+  /** One alarm serves both lease expiry and outbox publishing: the earlier of the two, or null. */
+  private alarmDueAt(): number | null {
     const active = this.sql
       .exec<ClaimRow>("SELECT * FROM claims WHERE status = 'active'")
       .toArray()
       .map(fromRow);
-    // One alarm serves both lease expiry and outbox publishing: take the earlier of the two.
     const candidates = [nextAlarmAt(active), this.outbox.nextDueAt()].filter(
       (t): t is number => t !== null,
     );
-    const dueAt = candidates.length === 0 ? null : Math.min(...candidates);
-    await this.alarms.schedule(dueAt, Date.now(), progressed);
+    return candidates.length === 0 ? null : Math.min(...candidates);
   }
 
   /**

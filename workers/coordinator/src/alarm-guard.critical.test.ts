@@ -1,5 +1,7 @@
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
+  AlarmGuard,
   countFire,
   DAILY_ALARM_CAP,
   type GuardState,
@@ -47,6 +49,18 @@ describe("alarm guard", () => {
     expect(planAlarm(now, now, capped, false).action).toBe("capped");
   });
 
+  it("defers an RPC write while an alarm is in flight, so it cannot queue a superseded alarm", () => {
+    expect(planAlarm(now - 5_000, now, fresh, false, DAILY_ALARM_CAP, true)).toEqual({
+      action: "defer",
+    });
+    expect(planAlarm(null, now, fresh, false, DAILY_ALARM_CAP, true)).toEqual({ action: "defer" });
+    // The handler's own reschedule is never deferred.
+    expect(planAlarm(now, now, fresh, true, DAILY_ALARM_CAP, true)).toEqual({
+      action: "set",
+      at: now + MIN_ALARM_DELAY_MS,
+    });
+  });
+
   it("counts fires per UTC day and starts again on a new day", () => {
     expect(countFire(fresh, now)).toMatchObject({ day: "2026-10-09", fired: 2 });
     const tomorrow = Date.parse("2026-10-10T00:00:01Z");
@@ -70,5 +84,71 @@ describe("alarm guard", () => {
     }
     expect(fires).toBe(DAILY_ALARM_CAP);
     expect(t - start).toBeLessThan(86_400_000);
+  });
+});
+
+/** SqlStorage over node:sqlite, plus a storage stub that records alarm writes. */
+function fakeObject() {
+  const db = new DatabaseSync(":memory:");
+  const sql = {
+    exec: (query: string, ...params: unknown[]) => {
+      const statement = db.prepare(query);
+      if (statement.columns().length > 0) {
+        const rows = statement.all(...(params as never[]));
+        return { toArray: () => rows };
+      }
+      statement.run(...(params as never[]));
+      return { toArray: () => [] };
+    },
+  } as unknown as SqlStorage;
+  const writes: (number | null)[] = [];
+  const storage = {
+    setAlarm: async (at: number) => void writes.push(at),
+    deleteAlarm: async () => void writes.push(null),
+  } as unknown as DurableObjectStorage;
+  return { sql, storage, writes };
+}
+
+describe("AlarmGuard.run", () => {
+  it("writes the alarm once per fire: an RPC write during the fire defers to the handler", async () => {
+    const { sql, storage, writes } = fakeObject();
+    const guard = new AlarmGuard(sql, storage, "test");
+    guard.migrate();
+    let due: number | null = null;
+    await guard.run(
+      async () => {
+        // An RPC write lands while the handler awaits I/O: new work is due now.
+        due = Date.now();
+        await guard.schedule(due, Date.now());
+        expect(writes).toEqual([]);
+        return true;
+      },
+      () => due,
+    );
+    // One write, from the handler, at least the minimum delay out: no second queued alarm.
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toBeGreaterThanOrEqual((due ?? 0) + MIN_ALARM_DELAY_MS - 5);
+
+    // After the fire an RPC write keeps its immediate cadence again.
+    await guard.schedule(Date.now(), Date.now());
+    expect(writes).toHaveLength(2);
+  });
+
+  it("still reschedules pending work when the fire throws", async () => {
+    const { sql, storage, writes } = fakeObject();
+    const guard = new AlarmGuard(sql, storage, "test");
+    guard.migrate();
+    const due = Date.now();
+    await expect(
+      guard.run(
+        async () => {
+          throw new Error("boom");
+        },
+        () => due,
+      ),
+    ).rejects.toThrow("boom");
+    expect(writes).toHaveLength(1);
+    await guard.schedule(null, Date.now());
+    expect(writes).toEqual([writes[0], null]);
   });
 });

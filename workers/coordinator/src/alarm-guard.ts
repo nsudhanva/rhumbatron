@@ -7,6 +7,11 @@
  *      made no progress, the floor doubles per idle fire up to MAX_STALL_DELAY_MS.
  *   3. At most DAILY_ALARM_CAP fires per object per UTC day. Past the cap nothing is rescheduled,
  *      an error is logged, and the next RPC write on a later day schedules again.
+ * One more rule keeps alarms from superseding each other. Only one `alarm()` runs at a time, so an
+ * RPC write that sets the alarm while the handler awaits I/O queues a second invocation; the
+ * handler's own reschedule then overrides it, and Cloudflare reports it as `clientDisconnected`
+ * (outcome `canceled`). While an alarm is in flight an RPC write therefore defers: the handler
+ * reads pending work again when it ends, so the deferred work is still scheduled.
  * The decision functions are pure, so they are unit tested; `AlarmGuard` applies them.
  */
 
@@ -25,6 +30,7 @@ export type GuardState = {
 };
 
 export type AlarmPlan =
+  | { action: "defer" }
   | { action: "delete" }
   | { action: "set"; at: number }
   | { action: "capped"; fired: number };
@@ -44,7 +50,8 @@ export function rescheduleFloorMs(stalled: number): number {
 
 /**
  * Decides the next alarm. `fromAlarm` is set when the caller is the alarm handler itself, the only
- * place a self-perpetuating loop can form; an RPC write keeps its immediate cadence.
+ * place a self-perpetuating loop can form; an RPC write keeps its immediate cadence. `inFlight` is
+ * set while an alarm handler runs: an RPC write then defers to the handler's own reschedule.
  */
 export function planAlarm(
   dueAt: number | null,
@@ -52,7 +59,9 @@ export function planAlarm(
   state: GuardState,
   fromAlarm: boolean,
   cap = DAILY_ALARM_CAP,
+  inFlight = false,
 ): AlarmPlan {
+  if (inFlight && !fromAlarm) return { action: "defer" };
   if (dueAt === null) return { action: "delete" };
   if (state.day === utcDay(now) && state.fired >= cap) {
     return { action: "capped", fired: state.fired };
@@ -65,6 +74,9 @@ type GuardRow = { day: string; fired: number; stalled: number };
 
 /** Applies the plan on one Durable Object. State lives in its own SQLite table. */
 export class AlarmGuard {
+  /** In memory: an alarm handler of this instance is running. Eviction ends the handler too. */
+  private inFlight = false;
+
   constructor(
     private readonly sql: SqlStorage,
     private readonly storage: DurableObjectStorage,
@@ -100,9 +112,27 @@ export class AlarmGuard {
     );
   }
 
-  /** Call first in `alarm()`, before any work that can throw, so every fire is counted. */
-  countFire(now: number) {
+  /** Counts the fire before any work that can throw, so every fire is counted. */
+  private countFire(now: number) {
     this.write(countFire(this.read(), now));
+  }
+
+  /**
+   * Runs one alarm fire: counts it, defers RPC reschedules while `work` runs, then sets the next
+   * alarm from `dueAt()` read after the work, also when the work throws. `work` returns true when
+   * it made progress. Use it as the whole body of `alarm()`.
+   */
+  async run(work: (now: number) => Promise<boolean>, dueAt: () => number | null) {
+    const now = Date.now();
+    this.countFire(now);
+    this.inFlight = true;
+    let progressed = false;
+    try {
+      progressed = await work(now);
+    } finally {
+      this.inFlight = false;
+      await this.schedule(dueAt(), Date.now(), progressed);
+    }
   }
 
   /**
@@ -128,8 +158,8 @@ export class AlarmGuard {
   }
 
   /**
-   * Sets, moves, or deletes the alarm. `progressed` is given only by the alarm handler: true when
-   * the fire did useful work (published, expired), false when work stayed due without progress.
+   * Sets, moves, or deletes the alarm. `progressed` is given only by `run()`: true when the fire
+   * did useful work (published, expired), false when work stayed due without progress.
    */
   async schedule(dueAt: number | null, now: number, progressed?: boolean) {
     const fromAlarm = progressed !== undefined;
@@ -138,7 +168,8 @@ export class AlarmGuard {
       state = { ...state, stalled: progressed ? 0 : state.stalled + 1 };
       this.write(state);
     }
-    const plan = planAlarm(dueAt, now, state, fromAlarm);
+    const plan = planAlarm(dueAt, now, state, fromAlarm, DAILY_ALARM_CAP, this.inFlight);
+    if (plan.action === "defer") return;
     if (plan.action === "set") {
       await this.storage.setAlarm(plan.at);
       return;
