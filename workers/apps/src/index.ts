@@ -12,6 +12,7 @@ import { routeAppRequest } from "./router.ts";
 
 export { AppAssets } from "./assets.ts";
 export { AppBuilder } from "./builder.ts";
+export { AppChecker } from "./checker.ts";
 export { AppData, AppDataDO } from "./data.ts";
 
 export default {
