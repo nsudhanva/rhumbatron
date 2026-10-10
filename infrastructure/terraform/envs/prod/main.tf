@@ -45,6 +45,8 @@ module "state" {
     events   = 365
     evidence = null
     tmp      = 7
+    # Live app preview bundles (ADR 0020, P16-22). Production bundles live under apps/.
+    "app-previews" = 7
   }
 }
 
@@ -173,7 +175,7 @@ module "api_worker" {
     content_type = m.content_type
   }]
 
-  bindings = [
+  bindings = concat([
     { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
     { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-api-${local.environment}" },
     # Prod hosts only: no localhost.
@@ -201,7 +203,10 @@ module "api_worker" {
     # The Costs page shows this environment's caps (ADR 0017).
     local.cap_bindings.sandbox,
     local.cap_bindings.vertex,
-  ]
+    ],
+    # Live apps (ADR 0020): the API shows an app URL only while the routes serve it.
+    local.apps.routing ? [{ type = "plain_text", name = "APPS_DOMAIN", text = local.apps.domain }] : [],
+  )
 
   custom_domains = [{
     hostname = local.hostnames.api
@@ -452,10 +457,13 @@ module "integration_worker" {
     # Read. Bound on this Worker only; never logged.
     { type = "secret_text", name = "BUILDS_API_TOKEN", text = var.builds_api_token },
     { type = "plain_text", name = "BUILDS_ACCOUNT_ID", text = var.account_id },
+    # Live apps (ADR 0020): bundle builds over RPC to the apps Worker. Prod only; without this
+    # binding (dev) `app.provision` is a no-op.
+    { type = "service", name = "APPS", service = local.apps_worker.script_name, entrypoint = "AppBuilder" },
   ]
 
   # New code may read tables a pending migration creates (for example `releases`, 0015).
-  depends_on = [terraform_data.sandbox_worker, terraform_data.d1_migrations]
+  depends_on = [terraform_data.sandbox_worker, terraform_data.d1_migrations, terraform_data.apps_worker]
 }
 
 # Workflows: a Change uses about 7 steps.
@@ -644,6 +652,134 @@ resource "terraform_data" "sandbox_worker_teardown" {
       SANDBOX_CONFIG        = self.input.config
     }
   }
+}
+
+# Live apps (Phase 16, ADR 0020). Prod only: dev has no apps Worker, route, or wildcard record.
+# One router Worker serves every Project at <label>.rhumbatron.com through Dynamic Workers. User
+# apps never need Terraform: a deploy is an R2 bundle plus a D1 pointer (runtime data).
+locals {
+  apps = {
+    domain = var.zone_name
+
+    # Off until the owner accepts the routing layout (ADR 0020, "Routing"). Cloudflare runs a
+    # Workers route before a Worker custom domain on the same hostname, so `*.rhumbatron.com/*`
+    # alone would capture api, www, dev, and api-dev. With routing on, Terraform adds the proxied
+    # wildcard record, the wildcard route, one route without a Worker per custom-domain host (it
+    # negates the wildcard there), and APPS_DOMAIN on the API (the "Live at" line).
+    routing = false
+
+    # Every Worker custom domain under the zone, dev and prod. The apex does not match `*.`. The
+    # Clerk records are DNS-only, so no Worker route runs on them.
+    bypass_hosts = [
+      local.hostnames.api,
+      "www.${local.hostnames.web}",
+      "dev.${var.zone_name}",
+      "api-dev.${var.zone_name}",
+    ]
+  }
+
+  apps_worker = {
+    script_name         = "rhumbatron-apps-${local.environment}"
+    main_module         = local.bundles.apps.main_module
+    compatibility_date  = local.bundles.apps.compatibility_date
+    compatibility_flags = local.bundles.apps.compatibility_flags
+    modules             = local.bundles.apps.modules
+    bundle_sha256       = local.bundles.apps.bundle_sha256
+    sqlite_classes      = ["AppDataDO"]
+    head_sampling_rate  = 1
+    # Same names as workers/apps/wrangler.jsonc. Provider 5.27 has no worker_loader type, so the
+    # adapter uploads these as they are.
+    bindings = [
+      { type = "plain_text", name = "ENVIRONMENT", text = local.environment },
+      { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-apps-${local.environment}" },
+      { type = "plain_text", name = "APPS_DOMAIN", text = var.zone_name },
+      { type = "worker_loader", name = "LOADER" },
+      # Pointer reads (router) only; the integration Worker writes app_deployments.
+      module.state.bindings.DB,
+      # Bundles under apps/ and app-previews/ (builder writes, router reads).
+      module.state.bindings.EVIDENCE,
+      { type = "durable_object_namespace", name = "APP_DATA", class_name = "AppDataDO" },
+    ]
+  }
+}
+
+# Deploys the apps Worker on any bundle or configuration change (temporary adapter, section 11.4).
+# No destroy provisioner here: a replacement must never delete the live Worker and its app data.
+resource "terraform_data" "apps_worker" {
+  triggers_replace = { config = jsonencode(local.apps_worker) }
+  input = {
+    account_id = var.account_id
+    repo_root  = local.repo_root
+    config     = jsonencode(local.apps_worker)
+  }
+
+  provisioner "local-exec" {
+    command = "bun ${self.input.repo_root}/scripts/apps-deploy.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      APPS_MODE             = "deploy"
+      APPS_ACCOUNT_ID       = self.input.account_id
+      APPS_REPO_ROOT        = self.input.repo_root
+      APPS_CONFIG           = self.input.config
+    }
+  }
+
+  # The router reads app_deployments (migration 0018).
+  depends_on = [terraform_data.apps_worker_teardown, terraform_data.d1_migrations]
+}
+
+# Deletes the apps Worker (and all app data in AppDataDO) on a real destroy only. Keyed by the name.
+resource "terraform_data" "apps_worker_teardown" {
+  input = {
+    account_id = var.account_id
+    repo_root  = local.repo_root
+    config     = jsonencode({ script_name = local.apps_worker.script_name, bindings = [], sqlite_classes = [] })
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "bun ${self.input.repo_root}/scripts/apps-deploy.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      APPS_MODE             = "destroy"
+      APPS_ACCOUNT_ID       = self.input.account_id
+      APPS_REPO_ROOT        = self.input.repo_root
+      APPS_CONFIG           = self.input.config
+    }
+  }
+}
+
+# Proxied wildcard so every app label resolves. Explicit records (custom domains, Clerk) keep
+# priority over a wildcard in DNS. `100::` is the originless placeholder: the route answers.
+resource "cloudflare_dns_record" "apps_wildcard" {
+  count = local.apps.routing ? 1 : 0
+
+  zone_id = module.dns.zone_id
+  name    = join(".", ["*", var.zone_name])
+  type    = "AAAA"
+  content = "100::"
+  proxied = true
+  ttl     = 1
+  comment = "Live apps wildcard (managed by Terraform, envs/prod, ADR 0020)"
+}
+
+resource "cloudflare_workers_route" "apps" {
+  count = local.apps.routing ? 1 : 0
+
+  zone_id = module.dns.zone_id
+  pattern = "*.${var.zone_name}/*"
+  script  = local.apps_worker.script_name
+
+  depends_on = [terraform_data.apps_worker, cloudflare_workers_route.apps_bypass]
+}
+
+# A route without a Worker negates less specific patterns (Workers routes docs), so these hosts
+# keep going straight to their custom-domain Workers. Created before the wildcard route.
+resource "cloudflare_workers_route" "apps_bypass" {
+  for_each = local.apps.routing ? toset(local.apps.bypass_hosts) : toset([])
+
+  zone_id = module.dns.zone_id
+  pattern = "${each.value}/*"
 }
 
 # Release target for the Acme Shop demo Project (AGENTS.md section 37, ADR 0014). Terraform owns

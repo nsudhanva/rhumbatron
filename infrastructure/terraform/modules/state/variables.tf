@@ -19,5 +19,7 @@ variable "evidence_retention_days" {
     events   = optional(number)
     evidence = optional(number)
     tmp      = optional(number, 7)
+    # Live app preview bundles (ADR 0020). Production bundles under apps/ never expire here.
+    app-previews = optional(number)
   })
 }
