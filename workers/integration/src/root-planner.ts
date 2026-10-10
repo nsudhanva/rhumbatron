@@ -39,7 +39,7 @@ Call ${SUBMIT_TOOL} exactly once. Do not write any other text.`;
 export type PlannerInput = {
   goal: string;
   projectName: string;
-  /** Canonical file paths; null when unknown (no source index). */
+  /** Current canonical tree's file paths; null when the source is unavailable. */
   files?: string[] | null;
 };
 
@@ -103,6 +103,24 @@ export class PlannerError extends Error {
     readonly lastErrors: string[],
   ) {
     super(message);
+  }
+}
+
+/** Validation failures cross the Workflow step boundary as data; model failures still retry. */
+export type PlannerStepResult =
+  | { ok: true; planned: PlannerResult }
+  | { ok: false; errors: string[] };
+
+export async function planChangeResult(
+  input: PlannerInput,
+  complete: Complete,
+  options: { allowOpus?: boolean } = {},
+): Promise<PlannerStepResult> {
+  try {
+    return { ok: true, planned: await planChange(input, complete, options) };
+  } catch (error) {
+    if (!(error instanceof PlannerError)) throw error;
+    return { ok: false, errors: error.lastErrors };
   }
 }
 
@@ -216,6 +234,7 @@ export async function planChange(
       };
     }
     lastErrors = outcome.errors;
+    console.warn(JSON.stringify({ event: "planner.invalid", errors: lastErrors, attempt }));
 
     // Repair turn: show the model its own call and the exact validation errors.
     if (call) {

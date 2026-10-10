@@ -37,6 +37,7 @@ export type ChangeDetail = {
   baseGeneration: number;
   budgetUsd: number;
   workGraphRef?: string;
+  blockedReason?: string | null;
 };
 
 export type Intent = {

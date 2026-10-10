@@ -79,6 +79,8 @@ export type Change = z.infer<typeof Change>;
 
 /** `GET /v1/changes/:changeId`: the Change plus its planned risk tier and record times. */
 export const ChangeDetail = Change.extend({
+  /** Persisted planning failure or blocked work reason; null when none is recorded. */
+  blockedReason: z.string().nullable().optional(),
   /** Set by the Root Planner when it compiles the Work Graph; null before. */
   riskTier: RiskTier.nullable(),
   createdAt: Timestamp,

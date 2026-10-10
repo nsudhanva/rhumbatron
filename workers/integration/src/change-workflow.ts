@@ -1,11 +1,10 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { anthropicMonthlyBudgetUsd, meteredComplete, opusAllowed } from "@rhumbatron/model-router";
-import { sourceIndexKey } from "@rhumbatron/protocol";
+import { readTreeFiles } from "./code-store.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent, qualify } from "./events.ts";
-import type { SourceIndex } from "./provision.ts";
-import { PlannerError, type PlannerResult, planChange } from "./root-planner.ts";
+import { type PlannerStepResult, planChangeResult } from "./root-planner.ts";
 
 /**
  * ChangeWorkflow (AGENTS.md section 21.1), first slice: load the Change, compile the Work Graph,
@@ -33,19 +32,14 @@ type Loaded = {
   projectName: string;
   budgetUsd: number;
   status: string;
-  /** Canonical file paths for the planner (null without a source index). */
-  files?: string[] | null;
 };
 
-/** The canonical file list from its R2 index: one DO read and one R2 read. */
+/** Resolve the current canonical tree, then read its code store or tree listing. */
 async function canonicalFiles(env: Env, projectId: string): Promise<string[] | null> {
   const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
   const canonical = await root.get(root.idFromName(projectId)).getCanonical();
   if (!canonical || canonical.artifactRef === "unassigned") return null;
-  const index = await env.EVIDENCE.get(sourceIndexKey(projectId, canonical.treeSha));
-  if (!index) return null;
-  const parsed = (await index.json().catch(() => null)) as SourceIndex | null;
-  return Array.isArray(parsed?.files) ? parsed.files.slice(0, 2000) : null;
+  return readTreeFiles(env, projectId, canonical.treeSha);
 }
 
 const taskIdFor = (changeId: string, key: string) => `tsk_${changeId.slice(4)}_${key}`;
@@ -75,8 +69,6 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         projectName: row.name,
         budgetUsd: row.budget_usd,
         status: row.status,
-        // Planner input only: a read failure plans without the list, never fails the Change.
-        files: await canonicalFiles(this.env, row.project_id).catch(() => null),
       };
     });
     // A missing Change, or one that already compiled, needs no work.
@@ -97,15 +89,18 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
     // Cancelled before planning: no model call is spent on it.
     if (compiling === "cancelled") return { cancelled: true };
 
-    let planned: PlannerResult;
+    let result: PlannerStepResult;
     try {
-      planned = await step.do(
+      result = await step.do(
         "plan work graph",
         // One retry for transient model failures. Each attempt makes at most two model calls.
         { retries: { limit: 1, delay: "30 seconds", backoff: "constant" }, timeout: "5 minutes" },
-        async () =>
-          planChange(
-            { goal: loaded.goal, projectName: loaded.projectName, files: loaded.files ?? null },
+        async () => {
+          // Resolve at planning time (and again on transient retries), not in cached load output.
+          // Unknown source is not an empty repository and must not force a bootstrap Task.
+          const files = await canonicalFiles(this.env, ctx.projectId).catch(() => null);
+          return planChangeResult(
+            { goal: loaded.goal, projectName: loaded.projectName, files },
             (req) =>
               // Monthly Anthropic budget (ADR 0021): a refusal fails the step with spend_limited.
               meteredComplete(
@@ -123,22 +118,42 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
                 { ...req, metadata: { ...req.metadata, changeId } },
               ),
             { allowOpus: opusAllowed(this.env.ALLOW_OPUS) },
-          ),
+          );
+        },
       );
     } catch (error) {
-      await step.do("mark failed", async () => {
-        await this.env.DB.prepare(
-          "UPDATE changes SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'compiling'",
-        )
-          .bind(new Date().toISOString(), changeId)
-          .run();
-      });
-      const reason =
-        error instanceof PlannerError
-          ? error.lastErrors.slice(0, 3)
-          : [String(error).slice(0, 200)];
-      return { failed: true, reason };
+      // Model failures reach here only after the Workflow's transient retry is exhausted.
+      result = { ok: false, errors: [String(error).slice(0, 200)] };
     }
+    if (!result.ok) {
+      const errors = result.errors;
+      const reason = `Planning failed: ${errors.join("; ")}`;
+      const failed = await step.do("mark failed", async () => {
+        await this.env.DB.prepare(
+          `UPDATE changes SET status = 'failed', blocked_reason = ?, updated_at = ?
+           WHERE id = ? AND status = 'compiling'`,
+        )
+          .bind(reason, new Date().toISOString(), changeId)
+          .run();
+        const row = await this.env.DB.prepare("SELECT status FROM changes WHERE id = ?")
+          .bind(changeId)
+          .first<{ status: string }>();
+        return row?.status === "failed";
+      });
+      if (!failed) return { cancelled: true };
+      await step.do("record failed event", async () => {
+        await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
+          await changeEvent(ctx, "change.failed", {
+            status: "failed",
+            phase: "planning",
+            reason,
+            errors,
+          }),
+        ]);
+      });
+      return { failed: true, reason: errors };
+    }
+    const { planned } = result;
 
     const workGraphRef = `work-graphs/${ctx.projectId}/${changeId}.json`;
     await step.do("persist work graph", async () => {

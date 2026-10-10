@@ -17,6 +17,7 @@ import {
 import { ChangeFilesChanged } from "../components/code/files-changed";
 import { ConflictCard } from "../components/conflict-card";
 import { DeadLetters } from "../components/dead-letters";
+import { SectionError } from "../components/project/feedback";
 import { useEventFeed } from "../components/project/use-event-feed";
 import { TaskPanel } from "../components/task-detail";
 import { EmptyState } from "../components/ui/empty-state";
@@ -302,6 +303,10 @@ function ChangeView() {
           </>
         }
       />
+
+      {data.status === "failed" && data.blockedReason?.startsWith("Planning failed:") && (
+        <SectionError message={data.blockedReason} className="whitespace-pre-wrap text-sm" />
+      )}
 
       {data.status === "budget_blocked" && (
         <RaiseBudget changeId={data.id} budgetUsd={data.budgetUsd} />

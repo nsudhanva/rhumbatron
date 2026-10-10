@@ -45,6 +45,7 @@ type ChangeRow = {
   acceptance_criteria_json: string;
   invariants_json: string;
   work_graph_ref: string | null;
+  blocked_reason: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -60,6 +61,7 @@ function toDetail(row: ChangeRow): ChangeDetail {
     baseGeneration: row.base_generation,
     ...(row.work_graph_ref ? { workGraphRef: row.work_graph_ref } : {}),
     budgetUsd: row.budget_usd,
+    blockedReason: row.blocked_reason,
     rolloutPolicy: { target: "preview" },
     riskTier: ChangeDetail.shape.riskTier.parse(row.risk_tier),
     createdAt: row.created_at,
@@ -88,7 +90,8 @@ export const changeDetail = new Hono<AppEnv>()
     const { changeId } = c.req.valid("param");
     const row = await c.env.DB.prepare(
       `SELECT id, project_id, goal, status, base_generation, risk_tier, budget_usd,
-              acceptance_criteria_json, invariants_json, work_graph_ref, created_at, updated_at
+              acceptance_criteria_json, invariants_json, work_graph_ref, blocked_reason,
+              created_at, updated_at
        FROM changes WHERE id = ?`,
     )
       .bind(changeId)

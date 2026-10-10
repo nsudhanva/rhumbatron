@@ -32,7 +32,9 @@ export async function walkTree(repo: ArtifactsRepo, treeSha: string): Promise<Co
   const pending: [string, string][] = [["", treeSha]];
   while (pending.length > 0 && entries.length < MAX_FILES) {
     const [prefix, hash] = pending.shift() ?? ["", ""];
-    for (const entry of (await repo.readTree(hash)) ?? []) {
+    const tree = await repo.readTree(hash);
+    if (!tree) throw new Error("canonical tree is unavailable");
+    for (const entry of tree) {
       const path = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.type === "tree") pending.push([path, entry.hash]);
       else if (entry.type === "blob" || entry.type === "exec") {
@@ -48,6 +50,47 @@ async function readManifest(env: CodeEnv, key: string): Promise<CodeManifest | n
   if (!object) return null;
   const parsed = CodeManifest.safeParse(await object.json().catch(() => null));
   return parsed.success ? parsed.data : null;
+}
+
+/** Only a matching tree can supply planner context, including a genuinely empty file list. */
+export function selectCanonicalFiles(
+  treeSha: string,
+  manifest: CodeManifest | null,
+  index: unknown,
+): string[] | null {
+  if (manifest?.treeSha === treeSha) return manifest.entries.map((e) => e.path);
+  if (
+    index &&
+    typeof index === "object" &&
+    "treeSha" in index &&
+    index.treeSha === treeSha &&
+    "files" in index &&
+    Array.isArray(index.files) &&
+    index.files.every((file): file is string => typeof file === "string")
+  ) {
+    return index.files.slice(0, MAX_FILES);
+  }
+  return null;
+}
+
+/** Read paths without copying blobs or waiting for the asynchronous source index. */
+export async function readTreeFiles(
+  env: Pick<Env, "EVIDENCE" | "ARTIFACTS">,
+  projectId: string,
+  treeSha: string,
+): Promise<string[] | null> {
+  const manifest = await readManifest(env, codeManifestKey(projectId, treeSha)).catch(() => null);
+  const files = selectCanonicalFiles(treeSha, manifest, null);
+  // `complete` describes blob copying, not whether the manifest lists this tree's paths.
+  if (files !== null) return files;
+  try {
+    using repo = await env.ARTIFACTS.get(projectId);
+    return (await walkTree(repo, treeSha)).map((entry) => entry.path);
+  } catch {
+    // Fallback still names the requested tree; never use an earlier generation's index.
+    const index = await env.EVIDENCE.get(sourceIndexKey(projectId, treeSha));
+    return selectCanonicalFiles(treeSha, null, index ? await index.json().catch(() => null) : null);
+  }
 }
 
 /** A blob is done when it is in R2, or when it is too large to copy. */

@@ -1,7 +1,13 @@
 // The planner output is untrusted model text. Only a schema-valid, acyclic graph may reach D1.
 import type { CompletionRequest, CompletionResult } from "@rhumbatron/model-router";
-import { describe, expect, it } from "vitest";
-import { isEmptyRepository, PlannerError, parsePlan, planChange } from "./root-planner.ts";
+import { describe, expect, it, vi } from "vitest";
+import {
+  isEmptyRepository,
+  PlannerError,
+  parsePlan,
+  planChange,
+  planChangeResult,
+} from "./root-planner.ts";
 
 const task = (key: string, dependsOn: string[] = []) => ({
   key,
@@ -101,5 +107,56 @@ describe("planChange", () => {
     await expect(
       planChange({ goal: "Add wishlists", projectName: "Acme" }, async () => reply(null)),
     ).rejects.toBeInstanceOf(PlannerError);
+  });
+});
+
+describe("planner Workflow step result", () => {
+  it("preserves validation errors across serialization and logs each invalid attempt", async () => {
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const invalid = plan([task("t1", ["t9"])]);
+      const expected = parsePlan(invalid);
+      expect(expected.ok).toBe(false);
+      const complete = vi.fn(async () => {
+        const result = reply(invalid);
+        result.message.content = "private model reasoning must not be stored";
+        return result;
+      });
+      const result = await planChangeResult(
+        { goal: "Add wishlists", projectName: "Acme" },
+        complete,
+      );
+      expect(JSON.parse(JSON.stringify(result))).toEqual(expected);
+      expect(complete).toHaveBeenCalledTimes(2);
+      expect(warnings.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([
+        { event: "planner.invalid", errors: !expected.ok ? expected.errors : [], attempt: 1 },
+        { event: "planner.invalid", errors: !expected.ok ? expected.errors : [], attempt: 2 },
+      ]);
+      expect(JSON.stringify(result)).not.toContain("private model reasoning");
+    } finally {
+      warnings.mockRestore();
+    }
+  });
+
+  it("returns a valid plan as serializable data", async () => {
+    const result = await planChangeResult(
+      { goal: "Add wishlists", projectName: "Acme" },
+      async () => reply(plan([task("t1")])),
+    );
+    expect(JSON.parse(JSON.stringify(result))).toMatchObject({
+      ok: true,
+      planned: { attempts: 1, order: ["t1"] },
+    });
+  });
+
+  it("lets transient model errors throw so the Workflow can retry", async () => {
+    const error = new Error("model request timed out");
+    const complete = vi.fn(async () => {
+      throw error;
+    });
+    await expect(
+      planChangeResult({ goal: "Add wishlists", projectName: "Acme" }, complete),
+    ).rejects.toBe(error);
+    expect(complete).toHaveBeenCalledTimes(1);
   });
 });
