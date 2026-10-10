@@ -20,7 +20,7 @@ import { handleFixtureCommand } from "./fixture-changesets.ts";
 import { cleanupProject, forkRetentionDays, sweepForks } from "./project-cleanup.ts";
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
-import { injectReleaseFailure } from "./release.ts";
+import { injectReleaseFailure, recoverStuckRelease } from "./release.ts";
 
 export { ChangeWorkflow } from "./change-workflow.ts";
 export { ReleaseWorkflow } from "./release-workflow.ts";
@@ -76,6 +76,15 @@ async function handleCommand(
     });
     console.warn(JSON.stringify({ event: "forks.sweep", ...result }));
     return result.more ? "continue" : undefined;
+  }
+  // A Change stuck in `releasing` (event router sweep, HOM-204). Bounded: one Change per command.
+  if (command.data.commandType === "release.recover") {
+    if (!command.data.changeId) return;
+    const result = await recoverStuckRelease(env, command.data.changeId);
+    console.warn(
+      JSON.stringify({ event: "release.recover", changeId: command.data.changeId, ...result }),
+    );
+    return;
   }
   if (
     ["project.provision", "candidate.verify", "candidate.create"].includes(

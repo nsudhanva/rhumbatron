@@ -1,6 +1,7 @@
 import type { ChangeCommandOutcome, ChangeStatus, TaskStatus } from "@rhumbatron/protocol";
 import {
   CANCELLABLE_FROM,
+  CHANGE_CANCELLED_REASON,
   canCancel,
   restoreAfterBudgetRaise,
   TERMINAL_CHANGE_STATUSES,
@@ -95,11 +96,10 @@ export async function cancelChange(
          AND ${cancelled}`,
     ).bind(now, row.id, row.id),
     env.DB.prepare(
-      `UPDATE candidates SET status = 'rejected', status_reason = 'The Change was cancelled.',
-         updated_at = ?
+      `UPDATE candidates SET status = 'rejected', status_reason = ?, updated_at = ?
        WHERE change_id = ? AND status IN ('composing', 'composed', 'verifying', 'verified')
          AND ${cancelled}`,
-    ).bind(now, row.id, row.id),
+    ).bind(CHANGE_CANCELLED_REASON, now, row.id, row.id),
   ]);
   const after = await loadChange(env, row.id);
   if (!after) return notFound(row.id);

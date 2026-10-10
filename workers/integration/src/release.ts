@@ -5,7 +5,7 @@ import type {
   ReleaseStatus,
   ReleaseView,
 } from "@rhumbatron/protocol";
-import { changeAfterRelease } from "./change-status.ts";
+import { changeAfterRelease, releaseRecovery } from "./change-status.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import {
   addedRoutesFromContract,
@@ -94,18 +94,34 @@ export const hasReleaseTarget = async (env: Env, projectId: string) =>
   (await loadTarget(env, projectId)) !== null;
 
 /**
- * A `releasing` Change ends with its release: `completed` when it deployed or a newer generation
- * superseded it, `failed` when it did not deploy (change-status.ts). Only `releasing` moves, so a
- * later injected smoke failure (P13-12) never reopens a completed Change.
+ * The fact that a Change ended after promotion (`change.completed` or `change.failed`), so the
+ * live view leaves its `promoting` or `releasing` status (section 13.3). One stable ID per Change:
+ * a repeat after a lost reply dedupes in the shard outbox.
  */
-const settleReleasingChange = (env: Env, changeId: string, status: ReleaseStatus) => {
-  const next = changeAfterRelease(status);
-  return next
-    ? env.DB.prepare(
-        "UPDATE changes SET status = ?, updated_at = ? WHERE id = ? AND status = 'releasing'",
-      ).bind(next, new Date().toISOString(), changeId)
-    : null;
-};
+export const changeEndedEvent = (
+  ctx: ChangeContext,
+  status: "completed" | "failed",
+  payload: Record<string, unknown>,
+) =>
+  changeEvent(ctx, status === "completed" ? "change.completed" : "change.failed", {
+    status,
+    ...payload,
+  });
+
+/**
+ * Moves a `releasing` Change to `next` and reports whether the Change is in `next` afterwards.
+ * Only `releasing` moves, so a later injected smoke failure (P13-12) never reopens a completed
+ * Change. One D1 batch.
+ */
+async function endReleasingChange(env: Env, changeId: string, next: "completed" | "failed") {
+  const [, after] = await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE changes SET status = ?, updated_at = ? WHERE id = ? AND status = 'releasing'",
+    ).bind(next, new Date().toISOString(), changeId),
+    env.DB.prepare("SELECT status FROM changes WHERE id = ?").bind(changeId),
+  ]);
+  return (after?.results?.[0] as { status?: string } | undefined)?.status === next;
+}
 
 export async function loadRelease(env: Env, releaseId: string): Promise<LoadedRelease | null> {
   const release = await env.DB.prepare("SELECT * FROM releases WHERE id = ?")
@@ -153,7 +169,7 @@ export async function startRelease(
     if (!target) return null;
     const releaseId = releaseIdFor(input.projectId, input.generation);
     const now = new Date().toISOString();
-    await env.DB.batch([
+    const [, , supersededChanges] = await env.DB.batch([
       env.DB.prepare(
         `INSERT OR IGNORE INTO releases (id, project_id, change_id, candidate_id, generation,
            commit_sha, status, started_at)
@@ -176,7 +192,8 @@ export async function startRelease(
       env.DB.prepare(
         `UPDATE changes SET status = 'completed', updated_at = ?
          WHERE status = 'releasing' AND id IN (SELECT change_id FROM releases
-           WHERE project_id = ? AND generation < ? AND status = 'superseded')`,
+           WHERE project_id = ? AND generation < ? AND status = 'superseded')
+         RETURNING id, base_generation`,
       ).bind(now, input.projectId, input.generation),
     ]);
     try {
@@ -186,6 +203,11 @@ export async function startRelease(
       const existing = await env.RELEASE_WORKFLOW.get(releaseId).catch(() => null);
       if (!existing) throw error;
     }
+    await recordSupersededChanges(
+      env,
+      input,
+      (supersededChanges?.results ?? []) as { id: string; base_generation: number }[],
+    );
     return { releaseId };
   } catch (error) {
     console.error(
@@ -197,6 +219,43 @@ export async function startRelease(
       }),
     );
     return null;
+  }
+}
+
+/** `change.completed` for older Changes a newer release superseded. Never fails the release. */
+async function recordSupersededChanges(
+  env: Env,
+  input: { projectId: string; generation: number },
+  changes: { id: string; base_generation: number }[],
+) {
+  if (changes.length === 0) return;
+  try {
+    const project = await env.DB.prepare("SELECT org_id, slug FROM projects WHERE id = ?")
+      .bind(input.projectId)
+      .first<{ org_id: string; slug: string }>();
+    if (!project) return;
+    for (const change of changes) {
+      const ctx: ChangeContext = {
+        projectId: input.projectId,
+        orgId: project.org_id,
+        projectSlug: project.slug,
+        changeId: change.id,
+        baseGeneration: change.base_generation,
+      };
+      await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+        await changeEndedEvent(ctx, "completed", {
+          releaseStatus: "superseded",
+          reason: `Superseded by the release of S${input.generation}.`,
+        }),
+      ]);
+    }
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "release.superseded_events_failed",
+        message: String(error).slice(0, 300),
+      }),
+    );
   }
 }
 
@@ -247,11 +306,31 @@ export async function transitionRelease(
     .bind(loaded.release.id)
     .first<{ status: ReleaseStatus }>();
   const status = after?.status ?? loaded.release.status;
-  const settle = settleReleasingChange(env, loaded.release.change_id, status);
-  if (settle) await settle.run();
-  if (status === to && events.length > 0) {
-    await appendChangeEvents(env.RESOURCE_SHARD, loaded.ctx, events);
-  }
+  // A `releasing` Change ends with its release: `completed` when it deployed or a newer generation
+  // superseded it, `failed` when it did not deploy (change-status.ts).
+  const next = changeAfterRelease(status);
+  const ended = next ? await endReleasingChange(env, loaded.release.change_id, next) : false;
+  const all = [
+    ...(status === to ? events : []),
+    ...(next && ended
+      ? [
+          await changeEndedEvent(loaded.ctx, next, {
+            releaseId: loaded.release.id,
+            releaseStatus: status,
+            generation: loaded.release.generation,
+            ...(loaded.release.failure_reason || fields.failureReason
+              ? {
+                  reason: (fields.failureReason ?? loaded.release.failure_reason ?? "").slice(
+                    0,
+                    300,
+                  ),
+                }
+              : {}),
+          }),
+        ]
+      : []),
+  ];
+  if (all.length > 0) await appendChangeEvents(env.RESOURCE_SHARD, loaded.ctx, all);
   return status;
 }
 
@@ -274,6 +353,150 @@ export const releaseEvent = <T extends Record<string, unknown>>(
     },
     { key: `${loaded.release.id}${suffix}`, actor: ACTOR },
   );
+
+/* ------------------------------------------------------------------------------------------ */
+/* Stuck-release recovery (HOM-204)                                                            */
+/* ------------------------------------------------------------------------------------------ */
+
+type ReleasingChangeRow = {
+  id: string;
+  project_id: string;
+  status: string;
+  updated_at: string;
+  base_generation: number;
+  org_id: string;
+  slug: string;
+  has_target: number;
+};
+
+/**
+ * Recovers one Change stuck in `releasing` (event router sweep, command `release.recover`).
+ * Deterministic: `releaseRecovery` decides from D1 rows. A release still in flight is marked
+ * failed through the normal guarded transition, so a late ReleaseWorkflow step cannot reopen it.
+ * A release that never started is recorded as a failed release row, so its reason shows with
+ * the Project's releases. The generation stays promoted (section 42.10): recovery is the next
+ * promotion, whose release supersedes or follows this one as usual. Safe to repeat.
+ */
+export async function recoverStuckRelease(
+  env: Env,
+  changeId: string,
+  now = Date.now(),
+): Promise<{ status: string; recovery?: string }> {
+  const row = await env.DB.prepare(
+    `SELECT c.id, c.project_id, c.status, c.updated_at, c.base_generation, p.org_id, p.slug,
+            EXISTS (SELECT 1 FROM release_targets t WHERE t.project_id = c.project_id) AS has_target
+     FROM changes c JOIN projects p ON p.id = c.project_id WHERE c.id = ?`,
+  )
+    .bind(changeId)
+    .first<ReleasingChangeRow>();
+  if (row?.status !== "releasing") return { status: row?.status ?? "missing" };
+  const promotedOf = `SELECT id FROM candidates WHERE change_id = ? AND status = 'promoted'`;
+  const [releases, candidates] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT * FROM releases WHERE candidate_id IN (${promotedOf})
+       ORDER BY generation DESC LIMIT 1`,
+    ).bind(changeId),
+    env.DB.prepare(
+      `SELECT id, promoted_generation, composed_commit FROM candidates
+       WHERE change_id = ? AND status = 'promoted' AND promoted_generation IS NOT NULL
+       ORDER BY promoted_generation DESC LIMIT 1`,
+    ).bind(changeId),
+  ]);
+  const release = (releases?.results?.[0] as ReleaseRow | undefined) ?? null;
+  const decision = releaseRecovery({
+    hasReleaseTarget: row.has_target === 1,
+    release: release ? { status: release.status, startedAt: release.started_at } : null,
+    releasingSince: row.updated_at,
+    now,
+  });
+  const ctx: ChangeContext = {
+    projectId: row.project_id,
+    orgId: row.org_id,
+    projectSlug: row.slug,
+    changeId,
+    baseGeneration: row.base_generation,
+  };
+  const end = async (next: "completed" | "failed", payload: Record<string, unknown>) => {
+    if (await endReleasingChange(env, changeId, next)) {
+      await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+        await changeEndedEvent(ctx, next, { ...payload, recovered: true }),
+      ]);
+    }
+  };
+
+  switch (decision.kind) {
+    case "wait":
+      break;
+    case "settle":
+      await end(decision.change, {
+        ...(release ? { releaseId: release.id, releaseStatus: release.status } : {}),
+      });
+      break;
+    case "complete":
+      await end("completed", { reason: decision.reason });
+      break;
+    case "fail_release": {
+      const loaded = release ? await loadRelease(env, release.id) : null;
+      if (!loaded) break;
+      // Ends the Change too (transitionRelease), with `change.failed`.
+      await transitionRelease(env, loaded, "failed", { failureReason: decision.reason }, [
+        await releaseEvent(loaded, "deployment.failed", {
+          status: "failed",
+          reason: decision.reason,
+          recovered: true,
+        }),
+      ]);
+      break;
+    }
+    case "fail_unstarted": {
+      const candidate = candidates?.results?.[0] as
+        | { id: string; promoted_generation: number; composed_commit: string | null }
+        | undefined;
+      if (!candidate) {
+        await end("failed", { reason: decision.reason });
+        break;
+      }
+      const releaseId = releaseIdFor(row.project_id, candidate.promoted_generation);
+      const at = new Date(now).toISOString();
+      // A release row of this generation that appeared meanwhile is left to its own workflow.
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO releases (id, project_id, change_id, candidate_id, generation,
+           commit_sha, status, started_at, finished_at, failure_reason)
+         VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?)`,
+      )
+        .bind(
+          releaseId,
+          row.project_id,
+          changeId,
+          candidate.id,
+          candidate.promoted_generation,
+          candidate.composed_commit ?? "",
+          at,
+          at,
+          decision.reason,
+        )
+        .run();
+      const loaded = await loadRelease(env, releaseId);
+      if (!loaded) break;
+      if (loaded.release.status !== "failed") {
+        // Another release attempt started after the sweep read: the next sweep decides again.
+        return { status: row.status, recovery: "wait" };
+      }
+      await transitionRelease(env, loaded, "failed", {}, [
+        await releaseEvent(loaded, "deployment.failed", {
+          status: "failed",
+          reason: decision.reason,
+          recovered: true,
+        }),
+      ]);
+      break;
+    }
+  }
+  const after = await env.DB.prepare("SELECT status FROM changes WHERE id = ?")
+    .bind(changeId)
+    .first<{ status: string }>();
+  return { status: after?.status ?? "missing", recovery: decision.kind };
+}
 
 /* ------------------------------------------------------------------------------------------ */
 /* Builds API (user-scoped token: Workers Builds Configuration Edit + Workers Scripts Read)     */

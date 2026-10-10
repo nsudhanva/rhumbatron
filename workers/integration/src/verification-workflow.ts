@@ -40,6 +40,7 @@ import {
   runContractCheck,
   settleSandbox,
 } from "./candidate-sandbox.ts";
+import { CHANGE_CANCELLED_REASON, verificationHalt } from "./change-status.ts";
 import { classifyBrowser, classifySecurity } from "./check-semantics.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
@@ -63,9 +64,16 @@ const FINAL = new Set(["verified", "rejected", "stale", "promoted"]);
 /** Remove the checkout only while the Sandbox is still awake; a sleeping one already lost it. */
 const AWAKE_MS = 90_000;
 
+/** A step that found the Change cancelled or the Candidate final before it did any work. */
+type Halt = { halted: NonNullable<ReturnType<typeof verificationHalt>> };
+const isHalt = (value: unknown): value is Halt =>
+  typeof value === "object" && value !== null && "halted" in value;
+
 type Loaded = {
   ctx: ChangeContext;
   status: string;
+  /** Absent in a step result cached before this field existed. */
+  changeStatus?: string;
   createdAt: string;
   goal: string;
   riskTier: RiskTier;
@@ -86,6 +94,7 @@ type CandidateRow = {
   status: string;
   change_set_ids_json: string;
   created_at: string;
+  change_status: string;
   project_id: string;
   goal: string;
   risk_tier: string | null;
@@ -121,8 +130,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       async (): Promise<Loaded | null> => {
         const row = await this.env.DB.prepare(
           `SELECT c.id, c.change_id, c.base_generation, c.status, c.change_set_ids_json, c.created_at,
-                ch.project_id, ch.goal, ch.risk_tier, ch.invariants_json, ch.acceptance_criteria_json,
-                p.org_id, p.slug
+                ch.status AS change_status, ch.project_id, ch.goal, ch.risk_tier,
+                ch.invariants_json, ch.acceptance_criteria_json, p.org_id, p.slug
          FROM candidates c JOIN changes ch ON ch.id = c.change_id
          JOIN projects p ON p.id = ch.project_id WHERE c.id = ?`,
         )
@@ -176,6 +185,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
             baseGeneration: row.base_generation,
           },
           status: row.status,
+          changeStatus: row.change_status,
           createdAt: row.created_at,
           goal: row.goal,
           riskTier: RiskTier.catch("medium").parse(row.risk_tier ?? "medium"),
@@ -212,6 +222,15 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         ]);
         return status;
       });
+
+    // Section 44: a cancelled Change starts no Sandbox or Browser Run time. Each later step checks
+    // again before its work (`guard`), so an in-flight run stops at its next step boundary.
+    const stop = async (halt: Halt) => {
+      if (halt.halted !== "change_cancelled") return { skipped: halt.halted };
+      await finish("rejected", CHANGE_CANCELLED_REASON);
+      return { status: "rejected", reason: "change_cancelled" };
+    };
+    if (loaded.changeStatus === "cancelled") return stop({ halted: "change_cancelled" });
 
     if (!loaded.canonical?.commit) {
       await finish("rejected", "Project has no canonical source to compose on.");
@@ -268,31 +287,38 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       return { status: "rejected", reason: compatibility.kind };
     }
 
-    let fork: string;
+    let forked: string | Halt;
     try {
-      fork = await step.do(
+      forked = await step.do(
         "fork candidate repo",
         { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" } },
-        async () => {
-          const name = await forkCandidate(this.env, ctx.projectId, candidateId);
-          await this.env.DB.prepare(
-            "UPDATE candidates SET artifact_ref = ?, updated_at = ? WHERE id = ?",
-          )
-            .bind(`artifacts://${name}@main`, new Date().toISOString(), candidateId)
-            .run();
-          return name;
-        },
+        () =>
+          this.guard(candidateId, async () => {
+            const name = await forkCandidate(this.env, ctx.projectId, candidateId);
+            await this.env.DB.prepare(
+              "UPDATE candidates SET artifact_ref = ?, updated_at = ? WHERE id = ?",
+            )
+              .bind(`artifacts://${name}@main`, new Date().toISOString(), candidateId)
+              .run();
+            return name;
+          }),
       );
     } catch (error) {
       await finish("rejected", `Could not fork the canonical repo: ${String(error).slice(0, 200)}`);
       return { status: "rejected", reason: "fork_failed" };
     }
+    if (isHalt(forked)) return stop(forked);
+    const fork = forked;
 
     // Reserve before the Sandbox opens (HOM-192). A retried reservation can only over-count.
-    const reservation = await step.do("reserve sandbox", async () => ({
-      ok: await reserveSandbox(this.env.DB, this.env.SANDBOX_MONTHLY_SECONDS),
-      at: Date.now(),
-    }));
+    const reserved = await step.do("reserve sandbox", () =>
+      this.guard(candidateId, async () => ({
+        ok: await reserveSandbox(this.env.DB, this.env.SANDBOX_MONTHLY_SECONDS),
+        at: Date.now(),
+      })),
+    );
+    if (isHalt(reserved)) return stop(reserved);
+    const reservation = reserved;
     if (!reservation.ok) {
       await finish("rejected", "Monthly Sandbox budget reached; no check ran.");
       return { status: "rejected", reason: "sandbox_budget" };
@@ -301,26 +327,28 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     let lastSandboxAt = reservation.at;
     let gated: { status: string; promotable: boolean; gaps: CheckGap[] } | null = null;
     let humanApprovalRequired = false;
+    let halt: Halt | null = null;
     try {
       // Step 2 (P10-03): compose the ChangeSets in Work Graph order.
-      let composed: Composition & { at: number };
+      let composedOrHalt: (Composition & { at: number }) | Halt;
       try {
-        composed = await step.do(
+        composedOrHalt = await step.do(
           "compose candidate",
           {
             retries: { limit: 1, delay: "20 seconds", backoff: "constant" },
             timeout: "10 minutes",
           },
-          async () => {
-            const result = await composeCandidate(this.env, {
-              projectId: ctx.projectId,
-              candidateId,
-              baseCommit,
-              sources,
-              commitTime: Math.floor(Date.parse(loaded.createdAt) / 1000),
-            });
-            return { ...result, at: Date.now() };
-          },
+          () =>
+            this.guard(candidateId, async () => {
+              const result = await composeCandidate(this.env, {
+                projectId: ctx.projectId,
+                candidateId,
+                baseCommit,
+                sources,
+                commitTime: Math.floor(Date.parse(loaded.createdAt) / 1000),
+              });
+              return { ...result, at: Date.now() };
+            }),
         );
       } catch (error) {
         // No composed source means no Evidence can exist: the Candidate cannot ship.
@@ -329,6 +357,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         ]);
         return { status: "rejected", reason: "composition_error" };
       }
+      if (isHalt(composedOrHalt)) return await stop(composedOrHalt);
+      const composed = composedOrHalt;
       lastSandboxAt = composed.at;
       if (!composed.ok) {
         await step.do("record merge conflict", async () =>
@@ -357,52 +387,56 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       const { commit, tree } = composed;
 
       // Step 3: the risk-based Verification Plan (sections 34.1, 34.2, 53).
-      const plan = await step.do("record composition and plan", async () => {
-        const files = sources.flatMap((s) => s.files);
-        const scope = verificationTouches({
-          goal: loaded.goal,
-          invariants: loaded.invariants,
-          acceptanceCriteria: loaded.acceptanceCriteria,
-          files,
-          touchesAuthorization: loaded.touchesAuthorization,
-        });
-        const built: VerificationPlan = buildVerificationPlan({
-          candidateId,
-          riskTier: loaded.riskTier,
-          policy: DEFAULT_POLICY,
-          ...scope,
-        });
-        await this.env.DB.prepare(
-          `UPDATE candidates SET status = 'verifying', artifact_ref = ?, composed_commit = ?,
+      const planned = await step.do("record composition and plan", () =>
+        this.guard(candidateId, async () => {
+          const files = sources.flatMap((s) => s.files);
+          const scope = verificationTouches({
+            goal: loaded.goal,
+            invariants: loaded.invariants,
+            acceptanceCriteria: loaded.acceptanceCriteria,
+            files,
+            touchesAuthorization: loaded.touchesAuthorization,
+          });
+          const built: VerificationPlan = buildVerificationPlan({
+            candidateId,
+            riskTier: loaded.riskTier,
+            policy: DEFAULT_POLICY,
+            ...scope,
+          });
+          await this.env.DB.prepare(
+            `UPDATE candidates SET status = 'verifying', artifact_ref = ?, composed_commit = ?,
              composed_tree = ?, base_tree = ?, plan_json = ?, updated_at = ?
            WHERE id = ? AND status IN ('composing', 'composed', 'verifying')`,
-        )
-          .bind(
-            `artifacts://${fork}@${commit}`,
-            commit,
-            tree,
-            loaded.canonical?.treeSha ?? null,
-            JSON.stringify(built),
-            new Date().toISOString(),
-            candidateId,
           )
-          .run();
-        await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
-          await changeEvent(
-            ctx,
-            "candidate.composed",
-            {
+            .bind(
+              `artifacts://${fork}@${commit}`,
+              commit,
+              tree,
+              loaded.canonical?.treeSha ?? null,
+              JSON.stringify(built),
+              new Date().toISOString(),
               candidateId,
-              artifactRef: `artifacts://${fork}@${commit}`,
-              composedTree: tree,
-              changeSetIds: composed.merged,
-              requiredCheckIds: built.requiredCheckIds,
-            },
-            { key: candidateId, actor: ACTOR },
-          ),
-        ]);
-        return built;
-      });
+            )
+            .run();
+          await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
+            await changeEvent(
+              ctx,
+              "candidate.composed",
+              {
+                candidateId,
+                artifactRef: `artifacts://${fork}@${commit}`,
+                composedTree: tree,
+                changeSetIds: composed.merged,
+                requiredCheckIds: built.requiredCheckIds,
+              },
+              { key: candidateId, actor: ACTOR },
+            ),
+          ]);
+          return built;
+        }),
+      );
+      if (isHalt(planned)) return await stop(planned);
+      const plan = planned;
 
       // Contract changes the ChangeSets declared; the contract check fails on any other.
       const declared = loaded.changeSets.flatMap(
@@ -421,12 +455,18 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
               timeout: check.timeoutMs + 6 * 60_000,
             },
             () =>
-              check.kind === "contract"
-                ? this.runContract(ctx, candidateId, { commit, baseCommit }, declared, check)
-                : check.kind === "browser"
-                  ? this.runBrowser(ctx, candidateId, commit, check)
-                  : this.runCheck(ctx, candidateId, commit, check),
+              this.guard(candidateId, () =>
+                check.kind === "contract"
+                  ? this.runContract(ctx, candidateId, { commit, baseCommit }, declared, check)
+                  : check.kind === "browser"
+                    ? this.runBrowser(ctx, candidateId, commit, check)
+                    : this.runCheck(ctx, candidateId, commit, check),
+              ),
           );
+          if (isHalt(at)) {
+            halt = at;
+            break;
+          }
           if (at) lastSandboxAt = at;
         } catch (error) {
           // The check produced no result: record the gap. Never a pass (section 34.4.1).
@@ -448,53 +488,59 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         }
       }
 
+      if (halt) return await stop(halt);
+
       // Steps 9-10: gate on authoritative Evidence rows.
-      gated = await step.do("gate required checks", async () => {
-        const rows = await this.env.DB.prepare(
-          "SELECT * FROM evidence_index WHERE candidate_id = ?",
-        )
-          .bind(candidateId)
-          .all<EvidenceRow>();
-        const records = (rows.results ?? []).map(toRecord);
-        const gate = gateRequiredChecks(plan, records);
-        const status = gate.promotable ? "verified" : "rejected";
-        const p95 = records.find((r) => r.checkId === "performance")?.metrics?.p95Ms;
-        const score = {
-          ...gate,
-          humanApprovalRequired: plan.humanApprovalRequired,
-          ...(p95 === undefined ? {} : { p95Ms: p95 }),
-        };
-        const reason = gate.promotable
-          ? null
-          : `Required checks not satisfied: ${gate.gaps.map((g) => `${g.checkId} (${g.reason})`).join(", ")}`;
-        await this.env.DB.prepare(
-          `UPDATE candidates SET status = ?, status_reason = ?, score_json = ?, updated_at = ?
-           WHERE id = ? AND status = 'verifying'`,
-        )
-          .bind(status, reason, JSON.stringify(score), new Date().toISOString(), candidateId)
-          .run();
-        const events: EventEnvelope[] = [
-          await changeEvent(
-            ctx,
-            "verification.completed",
-            { candidateId, status, ...score },
-            { key: candidateId, actor: ACTOR },
-          ),
-        ];
-        // Section 36 rule 4: a gated Candidate waits for a human decision before promotion.
-        if (gate.promotable && plan.humanApprovalRequired) {
-          events.push(
+      const gateStep = await step.do("gate required checks", () =>
+        this.guard(candidateId, async () => {
+          const rows = await this.env.DB.prepare(
+            "SELECT * FROM evidence_index WHERE candidate_id = ?",
+          )
+            .bind(candidateId)
+            .all<EvidenceRow>();
+          const records = (rows.results ?? []).map(toRecord);
+          const gate = gateRequiredChecks(plan, records);
+          const status = gate.promotable ? "verified" : "rejected";
+          const p95 = records.find((r) => r.checkId === "performance")?.metrics?.p95Ms;
+          const score = {
+            ...gate,
+            humanApprovalRequired: plan.humanApprovalRequired,
+            ...(p95 === undefined ? {} : { p95Ms: p95 }),
+          };
+          const reason = gate.promotable
+            ? null
+            : `Required checks not satisfied: ${gate.gaps.map((g) => `${g.checkId} (${g.reason})`).join(", ")}`;
+          await this.env.DB.prepare(
+            `UPDATE candidates SET status = ?, status_reason = ?, score_json = ?, updated_at = ?
+             WHERE id = ? AND status = 'verifying'`,
+          )
+            .bind(status, reason, JSON.stringify(score), new Date().toISOString(), candidateId)
+            .run();
+          const events: EventEnvelope[] = [
             await changeEvent(
               ctx,
-              "approval.requested",
-              { candidateId, riskTier: loaded.riskTier, policyVersion: plan.policyVersion },
+              "verification.completed",
+              { candidateId, status, ...score },
               { key: candidateId, actor: ACTOR },
             ),
-          );
-        }
-        await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, events);
-        return { status, promotable: gate.promotable, gaps: gate.gaps };
-      });
+          ];
+          // Section 36 rule 4: a gated Candidate waits for a human decision before promotion.
+          if (gate.promotable && plan.humanApprovalRequired) {
+            events.push(
+              await changeEvent(
+                ctx,
+                "approval.requested",
+                { candidateId, riskTier: loaded.riskTier, policyVersion: plan.policyVersion },
+                { key: candidateId, actor: ACTOR },
+              ),
+            );
+          }
+          await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, events);
+          return { status, promotable: gate.promotable, gaps: gate.gaps };
+        }),
+      );
+      if (isHalt(gateStep)) return await stop(gateStep);
+      gated = gateStep;
       humanApprovalRequired = plan.humanApprovalRequired;
     } finally {
       await step.do("settle sandbox", async () => {
@@ -562,6 +608,22 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       );
       return { ...gated, promotion: "auto_failed" };
     }
+  }
+
+  /**
+   * Runs `work` unless the Change was cancelled or the Candidate is already final (one indexed D1
+   * read). Called at the start of each step, so a cancel stops the run at its next step boundary
+   * and spends no more Sandbox or Browser Run time.
+   */
+  private async guard<T>(candidateId: string, work: () => Promise<T>): Promise<T | Halt> {
+    const row = await this.env.DB.prepare(
+      `SELECT c.status, ch.status AS change_status
+       FROM candidates c JOIN changes ch ON ch.id = c.change_id WHERE c.id = ?`,
+    )
+      .bind(candidateId)
+      .first<{ status: string; change_status: string }>();
+    const halted = verificationHalt(row?.change_status ?? null, row?.status ?? null);
+    return halted ? { halted } : work();
   }
 
   /** Diffs the route table against the base and records contract Evidence (section 34.1). */

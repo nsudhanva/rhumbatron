@@ -65,13 +65,19 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
     if (!loaded || !["created", "compiling"].includes(loaded.status)) return { skipped: true };
     const { ctx } = loaded;
 
-    await step.do("mark compiling", async () => {
+    const compiling = await step.do("mark compiling", async () => {
       await this.env.DB.prepare(
         "UPDATE changes SET status = 'compiling', updated_at = ? WHERE id = ? AND status = 'created'",
       )
         .bind(new Date().toISOString(), changeId)
         .run();
+      const row = await this.env.DB.prepare("SELECT status FROM changes WHERE id = ?")
+        .bind(changeId)
+        .first<{ status: string }>();
+      return row?.status ?? null;
     });
+    // Cancelled before planning: no model call is spent on it.
+    if (compiling === "cancelled") return { cancelled: true };
 
     let planned: PlannerResult;
     try {
@@ -117,6 +123,11 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       });
       const now = new Date().toISOString();
       const { plan } = planned;
+      // A cancel during `compiling` wins: the planned Tasks are kept as history, already
+      // `cancelled`, so nothing dispatches them. Evaluated inside the batch transaction, so a cancel
+      // either commits first (Tasks insert cancelled) or after (cancelChange cancels them).
+      const taskStatus = `CASE WHEN EXISTS (SELECT 1 FROM changes WHERE id = ? AND status = 'cancelled')
+        THEN 'cancelled' ELSE 'pending' END`;
       const statements = plan.tasks.flatMap((t) => {
         const id = taskIdFor(changeId, t.key);
         const resources = t.semanticResources.map((r) => qualify(ctx, r));
@@ -125,12 +136,13 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
             `INSERT OR IGNORE INTO tasks (id, change_id, kind, semantic_resource, status, complexity,
                risk_tier, model_policy, task_key, title, objective, acceptance_criteria_json,
                semantic_resources_json, route_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ${taskStatus}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).bind(
             id,
             changeId,
             t.kind,
             resources[0] ?? null,
+            changeId,
             t.complexity,
             t.riskTier,
             "policy-1",
@@ -172,7 +184,12 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       ]);
     });
 
-    await step.do("record compiled events", async () => {
+    const compiled = await step.do("record compiled events", async () => {
+      // A Change cancelled while it compiled records no compile: its Tasks are already cancelled.
+      const change = await this.env.DB.prepare("SELECT status FROM changes WHERE id = ?")
+        .bind(changeId)
+        .first<{ status: string }>();
+      if (change?.status === "cancelled") return false;
       const { plan } = planned;
       const events = await Promise.all([
         changeEvent(ctx, "change.compiled", {
@@ -203,7 +220,9 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         ),
       ]);
       await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, events);
+      return true;
     });
+    if (compiled === false) return { cancelled: true, tasks: planned.plan.tasks.length };
 
     const spent = planned.calls.reduce((sum, c) => sum + c.costUsd, 0);
     const ready = await step.do("dispatch ready tasks", async () =>

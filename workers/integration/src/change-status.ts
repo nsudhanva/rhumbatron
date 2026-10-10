@@ -1,4 +1,9 @@
-import type { ChangeStatus, ReleaseStatus, TaskStatus } from "@rhumbatron/protocol";
+import {
+  type ChangeStatus,
+  RELEASE_STUCK_AFTER_MS,
+  type ReleaseStatus,
+  type TaskStatus,
+} from "@rhumbatron/protocol";
 
 /**
  * Change status transitions after the Work Graph (AGENTS.md sections 21.1, 36, 37, 44). Pure and
@@ -66,6 +71,80 @@ export function changeAfterRelease(status: ReleaseStatus): "completed" | "failed
     case "building":
       return null;
   }
+}
+
+/** What the stuck-release sweep does with one `releasing` Change (section 42.10). */
+export type ReleaseRecovery =
+  /** Not stuck yet. */
+  | { kind: "wait" }
+  /** The release finished but the Change was not settled: settle it as the release did. */
+  | { kind: "settle"; change: "completed" | "failed" }
+  /** No release target and no release: promotion is the end of the Change (ADR 0013). */
+  | { kind: "complete"; reason: string }
+  /** The release is still queued or building: mark it failed, which fails the Change. */
+  | { kind: "fail_release"; reason: string }
+  /** No release row exists although the Project has a release target: record a failed one. */
+  | { kind: "fail_unstarted"; reason: string };
+
+const minutes = (ms: number) => Math.round(ms / 60_000);
+
+/**
+ * Deterministic recovery of a Change stuck in `releasing`. Never reopens a canonical transition:
+ * the generation stays promoted, and recovery is a later promotion (section 42.10). A timestamp
+ * that does not parse counts as old, so a bad row cannot hold a Change forever.
+ */
+export function releaseRecovery(input: {
+  hasReleaseTarget: boolean;
+  release: { status: ReleaseStatus; startedAt: string } | null;
+  /** `changes.updated_at`: the promotion wrote `releasing` and nothing else moves it. */
+  releasingSince: string;
+  now: number;
+}): ReleaseRecovery {
+  const { release } = input;
+  const settled = release ? changeAfterRelease(release.status) : null;
+  if (settled) return { kind: "settle", change: settled };
+  const since = [input.releasingSince, release?.startedAt]
+    .map((at) => (at ? Date.parse(at) : Number.NaN))
+    .filter(Number.isFinite);
+  if (since.length > 0 && input.now - Math.max(...since) < RELEASE_STUCK_AFTER_MS) {
+    return { kind: "wait" };
+  }
+  const after = minutes(RELEASE_STUCK_AFTER_MS);
+  if (release) {
+    return {
+      kind: "fail_release",
+      reason: `The release stayed ${release.status} for more than ${after} minutes; its ReleaseWorkflow did not finish.`,
+    };
+  }
+  if (!input.hasReleaseTarget) {
+    return {
+      kind: "complete",
+      reason: "The Project has no release target; promotion completed the Change.",
+    };
+  }
+  return {
+    kind: "fail_unstarted",
+    reason: `No release started within ${after} minutes of promotion: the canonical source sync or the release start failed.`,
+  };
+}
+
+/** Candidate reason when a cancel stops it (cancelChange and the verification workflow). */
+export const CHANGE_CANCELLED_REASON = "change cancelled";
+
+/**
+ * Whether an in-flight CandidateVerificationWorkflow stops before its next step (section 44:
+ * stop new expensive work). A cancelled Change stops it first; then a Candidate that is already
+ * final (stale after `canonical.advanced`, rejected, promoted) or gone has nothing left to verify.
+ */
+export function verificationHalt(
+  changeStatus: string | null,
+  candidateStatus: string | null,
+): "change_cancelled" | "candidate_final" | null {
+  if (changeStatus === "cancelled") return "change_cancelled";
+  if (candidateStatus === null || ["rejected", "stale", "promoted"].includes(candidateStatus)) {
+    return "candidate_final";
+  }
+  return null;
 }
 
 /** Task stops that set the Change `budget_blocked` (agents limits.ts `limitStop`). */

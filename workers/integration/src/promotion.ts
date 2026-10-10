@@ -23,7 +23,7 @@ import { syncCanonicalSource } from "./canonical-source.ts";
 import { changeAfterPromotion, PROMOTABLE_FROM } from "./change-status.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
-import { hasReleaseTarget, startRelease } from "./release.ts";
+import { changeEndedEvent, hasReleaseTarget, startRelease } from "./release.ts";
 
 /**
  * Human approval and promotion (AGENTS.md sections 36, 40.2, 42.9, 60; ADR 0013). Called only by
@@ -197,7 +197,7 @@ async function recordPromoted(env: Env, row: CandidateRow, generation: number) {
   // With a release target the Change is `releasing` until ReleaseWorkflow finishes (release.ts);
   // without one, promotion completes it. A Change already past promotion keeps its status.
   const next = changeAfterPromotion(await hasReleaseTarget(env, row.project_id));
-  await env.DB.batch([
+  const results = await env.DB.batch([
     env.DB.prepare(
       `UPDATE candidates SET status = 'promoted', promoted_generation = ?, status_reason = NULL,
          updated_at = ? WHERE id = ?`,
@@ -210,7 +210,17 @@ async function recordPromoted(env: Env, row: CandidateRow, generation: number) {
       `UPDATE projects SET canonical_generation = MAX(canonical_generation, ?), updated_at = ?
        WHERE id = ?`,
     ).bind(generation, now, row.project_id),
+    env.DB.prepare("SELECT status FROM changes WHERE id = ?").bind(row.change_id),
   ]);
+  // Without a release target, promotion ends the Change: say so, so the live view leaves
+  // `promoting` (section 13.3). A `releasing` Change ends with its release (release.ts).
+  const status = (results.at(-1)?.results?.[0] as { status?: string } | undefined)?.status;
+  if (next === "completed" && status === "completed") {
+    const ctx = contextOf(row);
+    await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+      await changeEndedEvent(ctx, "completed", { candidateId: row.id, generation }),
+    ]);
+  }
 }
 
 async function promoted(

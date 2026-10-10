@@ -9,8 +9,10 @@ import {
   changeAfterRelease,
   PROMOTABLE_FROM,
   type RestorableTask,
+  releaseRecovery,
   restoreAfterBudgetRaise,
   TERMINAL_CHANGE_STATUSES,
+  verificationHalt,
 } from "./change-status.ts";
 
 const t = (
@@ -78,5 +80,78 @@ describe("restoreAfterBudgetRaise", () => {
     expect(restoreAfterBudgetRaise(g)).toEqual({ ready: [], pending: [] });
     const once = [t("a", "completed"), t("b", "ready", ["a"]), t("c", "pending", ["b"])];
     expect(restoreAfterBudgetRaise(once)).toEqual({ ready: [], pending: [] });
+  });
+});
+
+describe("releaseRecovery (HOM-204)", () => {
+  const promotedAt = "2026-10-09T10:00:00.000Z";
+  const at = (minutes: number) => Date.parse(promotedAt) + minutes * 60_000;
+  const recover = (
+    minutes: number,
+    release: {
+      status: "queued" | "building" | "deployed" | "failed" | "smoke_failed" | "superseded";
+      startedAt: string;
+    } | null,
+    hasReleaseTarget = true,
+  ) => releaseRecovery({ hasReleaseTarget, release, releasingSince: promotedAt, now: at(minutes) });
+
+  it("waits while a release can still be live", () => {
+    expect(recover(44, null).kind).toBe("wait");
+    expect(recover(44, { status: "building", startedAt: promotedAt }).kind).toBe("wait");
+    // A release that a promotion retry started later is measured from its own start.
+    expect(recover(60, { status: "queued", startedAt: "2026-10-09T10:30:00.000Z" }).kind).toBe(
+      "wait",
+    );
+  });
+
+  it("fails an in-flight release, records an unstarted one, and completes without a target", () => {
+    for (const [decided, kind] of [
+      [recover(46, { status: "building", startedAt: promotedAt }), "fail_release"],
+      [recover(46, { status: "queued", startedAt: promotedAt }), "fail_release"],
+      [recover(46, null), "fail_unstarted"],
+      [recover(46, null, false), "complete"],
+    ] as const) {
+      expect(decided.kind).toBe(kind);
+      expect("reason" in decided && decided.reason.length > 0).toBe(true);
+    }
+  });
+
+  it("settles a finished release at once, as the release ended", () => {
+    expect(recover(1, { status: "deployed", startedAt: promotedAt })).toEqual({
+      kind: "settle",
+      change: "completed",
+    });
+    expect(recover(1, { status: "superseded", startedAt: promotedAt })).toEqual({
+      kind: "settle",
+      change: "completed",
+    });
+    expect(recover(1, { status: "smoke_failed", startedAt: promotedAt })).toEqual({
+      kind: "settle",
+      change: "failed",
+    });
+  });
+
+  it("treats an unparseable timestamp as old, so a bad row cannot hold a Change", () => {
+    expect(
+      releaseRecovery({ hasReleaseTarget: true, release: null, releasingSince: "nope", now: at(0) })
+        .kind,
+    ).toBe("fail_unstarted");
+  });
+});
+
+describe("verificationHalt (HOM-204)", () => {
+  it("stops on a cancelled Change before anything else", () => {
+    expect(verificationHalt("cancelled", "verifying")).toBe("change_cancelled");
+    expect(verificationHalt("cancelled", "rejected")).toBe("change_cancelled");
+  });
+
+  it("stops on a final or missing Candidate and continues otherwise", () => {
+    for (const status of ["rejected", "stale", "promoted", null]) {
+      expect(verificationHalt("verifying", status)).toBe("candidate_final");
+    }
+    for (const status of ["composing", "verifying"]) {
+      expect(verificationHalt("verifying", status)).toBeNull();
+      expect(verificationHalt("running", status)).toBeNull();
+    }
   });
 });
