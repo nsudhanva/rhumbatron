@@ -34,7 +34,7 @@ import {
   WorkersAiDecisionModel,
 } from "@rhumbatron/model-router";
 import type { ModelTier, RouteRequest, TaskStatus } from "@rhumbatron/protocol";
-import { Agent } from "agents";
+import { Agent, type Schedule } from "agents";
 import { PiHarness } from "agents/harness/pi";
 import {
   acquireRunClaims,
@@ -126,6 +126,12 @@ const MAX_FILE_CHARS = 24_000;
 
 /** Run checks happen once a minute; after this many the run is treated as stuck. */
 const MAX_RUN_CHECKS = 15;
+/**
+ * Seconds between run checks. The check is an interval schedule, not a one-shot that schedules the
+ * next one: a `schedule()` call inside an alarm re-arms the alarm mid-fire, which queues a second
+ * alarm that the Agents SDK then overrides (`clientDisconnected`). An interval re-times its own row.
+ */
+const RUN_CHECK_INTERVAL_S = 60;
 
 /** Recorded run outcomes that end the run as that failure kind. */
 const STOP_OUTCOMES = new Set<string>(["budget_exhausted", "run_call_cap", "spend_limited"]);
@@ -748,7 +754,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         operationId: runId,
       },
     );
-    await this.scheduleGuarded(60, "checkRun", { runId });
+    await this.watchRun(runId);
     log({
       event: "agent.run_started",
       agentId: input.agentId,
@@ -761,24 +767,43 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     return { runId, accepted: true, state: { status: "running", runId, attempt, tier } };
   }
 
-  /** Detects runs that ended without calling a terminal tool, or that are stuck. */
-  async checkRun(payload: { runId: string }) {
+  /**
+   * Starts the once-a-minute run check. Idempotent per run (same callback, interval, payload), and
+   * each fire counts against the daily alarm cap like any self-scheduled callback.
+   */
+  private async watchRun(runId: string) {
+    if (!this.alarmGuard.admitSchedule(Date.now(), "checkRun")) return;
+    await this.scheduleEvery(RUN_CHECK_INTERVAL_S, "checkRun", { runId });
+  }
+
+  /**
+   * Detects runs that ended without calling a terminal tool, or that are stuck. Runs from the
+   * interval `watchRun` sets; it cancels that interval once the run is over. A one-shot check left
+   * from an older deploy moves the run to the interval.
+   */
+  async checkRun(payload: { runId: string }, schedule?: Schedule<{ runId: string }>) {
+    const interval = schedule?.type === "interval" ? schedule.id : null;
+    const stop = async () => {
+      if (interval) await this.cancelSchedule(interval);
+    };
     const run = this.ctx.storage.sql
       .exec<RunRow>("SELECT * FROM agent_runs WHERE run_id = ?", payload.runId)
       .toArray()[0];
-    if (run?.status !== "running") return;
+    if (run?.status !== "running") return stop();
     const pending = await this.harness.pending();
     const stillRunning = pending.some((p) => p.operationId === run.run_id);
     if (stillRunning && run.checks < MAX_RUN_CHECKS) {
+      if (interval && !this.alarmGuard.admitSchedule(Date.now(), "checkRun")) return stop();
       this.ctx.storage.sql.exec(
         "UPDATE agent_runs SET checks = checks + 1 WHERE run_id = ?",
         run.run_id,
       );
-      await this.scheduleGuarded(60, "checkRun", payload);
+      if (!interval) await this.watchRun(run.run_id);
       // The one-minute run check is the main renewal tick: the lease is two minutes.
       await this.renewClaims(run.run_id, JSON.parse(run.input_json) as AgentRunInput);
       return;
     }
+    await stop();
     if (stillRunning) await this.harness.session().abort();
     // A recorded stop wins; a stuck run is a timeout; a provider failure ends the run as itself
     // (section 42.8: rate limits and outages retry once at the same tier, on the next provider).
@@ -1061,7 +1086,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
    */
   private async scheduleGuarded<T>(
     delaySeconds: number,
-    callback: "checkRun" | "retryTask" | "reviewConflicts",
+    callback: "retryTask" | "reviewConflicts",
     payload: T,
   ): Promise<boolean> {
     if (!this.alarmGuard.admitSchedule(Date.now(), callback)) return false;
