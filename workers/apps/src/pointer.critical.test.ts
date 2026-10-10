@@ -71,6 +71,8 @@ describe("selectDeployment", () => {
     expect(
       selectDeployment(prod, [row({ ...none, status: "failed", failure_reason: "auth" })]),
     ).toEqual({ kind: "failed", reason: "auth" });
+    // An empty repository: nothing built yet, never a bundle to serve.
+    expect(selectDeployment(prod, [row({ ...none, status: "ready" })])).toEqual({ kind: "empty" });
   });
 
   it("answers removed for the app and all its previews", () => {

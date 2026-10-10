@@ -37,6 +37,8 @@ export type Selection =
   | { kind: "not_found" }
   | { kind: "removed" }
   | { kind: "building" }
+  /** The Project's source has no app code yet (`ready` with no bundle, app-provision.ts). */
+  | { kind: "empty" }
   | { kind: "failed"; reason: string };
 
 function channelFor(host: AppHost): string | null {
@@ -70,6 +72,7 @@ export function selectDeployment(host: AppHost, rows: DeploymentRow[]): Selectio
   if (target.status === "failed") {
     return { kind: "failed", reason: target.failure_reason ?? "The build failed." };
   }
+  if (target.status === "ready") return { kind: "empty" };
   return { kind: "building" };
 }
 

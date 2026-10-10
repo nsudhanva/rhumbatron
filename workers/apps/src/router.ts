@@ -4,6 +4,7 @@ import { decodeModules } from "./bundle.ts";
 import { appRequestHeaders, appResponseHeaders } from "./cookies.ts";
 import {
   buildingPage,
+  emptyPage,
   errorPage,
   failedPage,
   limitPage,
@@ -50,6 +51,7 @@ export async function routeAppRequest(
   if (selection.kind === "not_found") return notFoundPage();
   if (selection.kind === "removed") return removedPage();
   if (selection.kind === "building") return buildingPage();
+  if (selection.kind === "empty") return emptyPage();
   if (selection.kind === "failed") return failedPage(selection.reason);
 
   const bundle = await loadBundle(env.EVIDENCE, selection.bundleKey);

@@ -33,6 +33,9 @@ export const buildingPage = () =>
     "retry-after": "10",
   });
 
+/** A Project with no app code yet: an empty repository before its first Change ships. */
+export const emptyPage = () => page(200, "Nothing built yet", "Tell Rhumbatron what to make.");
+
 export const failedPage = (reason: string) =>
   page(503, "Build failed", `The latest build of this app failed: ${reason.slice(0, 300)}`, {
     "retry-after": "60",
