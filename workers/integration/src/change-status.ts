@@ -17,6 +17,7 @@ export const TERMINAL_CHANGE_STATUSES: readonly ChangeStatus[] = [
   "completed",
   "cancelled",
   "failed",
+  "not_selected",
 ];
 
 /**

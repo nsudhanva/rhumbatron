@@ -53,6 +53,10 @@ export const ChangeStatus = z.enum([
   "cancelled",
   "failed",
   "budget_blocked",
+  /** A conflicting request lost to a higher-priority request (docs/plans/phase-17a-shared-projects.md). */
+  "not_selected",
+  /** A conflicting request waits for the Project owner to decide. */
+  "awaiting_owner",
 ]);
 export type ChangeStatus = z.infer<typeof ChangeStatus>;
 
