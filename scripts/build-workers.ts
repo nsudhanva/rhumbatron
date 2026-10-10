@@ -28,14 +28,21 @@ const deployables: Deployable[] = [
   },
   // docs.rhumbatron.com: assets-only Worker, no script (envs/prod/docs.tf).
   { name: "docs", dir: "apps/docs", assetsDir: "apps/docs/dist" },
-  ...["api", "coordinator", "agents", "event-router", "integration", "indexer", "sandbox"].map(
-    (name) => ({
-      name,
-      dir: `workers/${name}`,
-      outDir: `workers/${name}/dist`,
-      mainModule: "index.js",
-    }),
-  ),
+  ...[
+    "api",
+    "coordinator",
+    "agents",
+    "event-router",
+    "integration",
+    "indexer",
+    "sandbox",
+    "apps",
+  ].map((name) => ({
+    name,
+    dir: `workers/${name}`,
+    outDir: `workers/${name}/dist`,
+    mainModule: "index.js",
+  })),
 ];
 
 async function listFiles(dir: string): Promise<string[]> {

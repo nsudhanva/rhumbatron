@@ -1,0 +1,33 @@
+// Local development configuration only. A Terraform-run adapter deploys the remote Worker in one
+// upload with its worker_loader binding and Durable Object migration (ADR 0020). Prod only.
+// Keep binding names identical to infrastructure/terraform/envs/prod (local.apps_worker).
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "rhumbatron-apps",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-08",
+  // @cloudflare/worker-bundler needs Node.js APIs.
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "SERVICE_NAME": "rhumbatron-apps",
+    "APPS_DOMAIN": "localhost"
+  },
+  // Dynamic Workers: one isolate per app version, loaded on demand.
+  "worker_loaders": [{ "binding": "LOADER" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rhumbatron-control-local",
+      "database_id": "local",
+      "migrations_dir": "../../migrations/d1"
+    }
+  ],
+  // App bundles under apps/ and app-previews/ (ADR 0020).
+  "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
+  // Per-app key-value storage behind the DATA binding (P16-09).
+  "durable_objects": { "bindings": [{ "name": "APP_DATA", "class_name": "AppDataDO" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AppDataDO"] }]
+}

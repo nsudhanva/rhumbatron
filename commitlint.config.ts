@@ -16,6 +16,7 @@ export default {
         "protocol",
         "model-router",
         "sandbox",
+        "apps",
         "terraform",
         "migrations",
         "containers",
