@@ -1,7 +1,7 @@
 # D1 migrations
 
 SQL migrations for the control database (`rhumbatron-control-<env>`). Files `0001_init.sql`
-through `0020_goal_suggestions.sql` exist today.
+through `0021_task_attempts_reset.sql` exist today.
 
 - Name files `NNNN_description.sql` (lowercase letters, digits, and underscores). The runner
   rejects other names.

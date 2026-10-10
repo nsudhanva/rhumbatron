@@ -107,6 +107,7 @@ type TaskRow = {
   route_json: string | null;
   task_key: string | null;
   updated_at: string;
+  attempts_reset_at: string | null;
   goal: string;
   invariants_json: string;
   budget_usd: number;
@@ -517,7 +518,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const task = await this.env.DB.prepare(
       `SELECT t.id, t.status, t.kind, t.title, t.objective, t.acceptance_criteria_json, t.semantic_resources_json,
               t.semantic_resource, t.risk_tier, t.complexity, t.route_json, t.task_key, t.updated_at,
-              c.goal, c.invariants_json, c.budget_usd, c.acceptance_criteria_json AS change_criteria_json,
+              t.attempts_reset_at, c.goal, c.invariants_json, c.budget_usd, c.acceptance_criteria_json AS change_criteria_json,
               c.updated_at AS change_updated_at
        FROM tasks t JOIN changes c ON c.id = t.change_id WHERE t.id = ?`,
     )
@@ -527,15 +528,20 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       return { runId: "", accepted: false, state: { status: "idle" } };
     }
 
-    const previous = await this.env.DB.prepare(
-      "SELECT attempt, tier, failure_kind FROM task_runs WHERE task_id = ? ORDER BY attempt",
+    const allRuns = await this.env.DB.prepare(
+      "SELECT attempt, tier, failure_kind, started_at FROM task_runs WHERE task_id = ? ORDER BY attempt",
     )
       .bind(input.taskId)
-      .all<{ attempt: number; tier: ModelTier; failure_kind: string | null }>();
-    const failures: Failure[] = (previous.results ?? [])
+      .all<{ attempt: number; tier: ModelTier; failure_kind: string | null; started_at: string }>();
+    // A person's budget raise after a repeated-failure stop opens a new attempt window (0021).
+    const resetAt = task.attempts_reset_at;
+    const previous = {
+      results: (allRuns.results ?? []).filter((r) => !resetAt || r.started_at >= resetAt),
+    };
+    const failures: Failure[] = previous.results
       .filter((r) => r.failure_kind)
       .map((r) => ({ tier: r.tier, kind: r.failure_kind as FailureKind }));
-    const attempt = (previous.results?.length ?? 0) + 1;
+    const attempt = (allRuns.results?.length ?? 0) + 1;
     const flags = JSON.parse(task.route_json ?? "{}") as Record<string, boolean>;
     const [openTasks, spent, reviewSpent] = await this.env.DB.batch<{ n: number }>([
       this.env.DB.prepare(

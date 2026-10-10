@@ -549,7 +549,7 @@ module "agents_worker" {
   }
 
   # The SANDBOX binding needs the Sandbox Worker and its class to exist first; MEMORY its index.
-  depends_on = [terraform_data.sandbox_worker, terraform_data.vectorize_index]
+  depends_on = [terraform_data.sandbox_worker, terraform_data.vectorize_index, terraform_data.d1_migrations]
 }
 
 # Indexer (AGENTS.md section 12.7, Phase 7): exact symbol and dependency indexes, the Product Graph

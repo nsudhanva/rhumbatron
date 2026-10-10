@@ -187,9 +187,11 @@ export async function raiseChangeBudget(
     const moveTask = (id: string, to: "ready" | "pending") =>
       env.DB.prepare(
         `UPDATE tasks SET status = ?, assigned_agent_id = NULL, wake_sent_at = NULL,
+           attempts_reset_at = CASE WHEN blocked_limit = 'max_attempts_per_tier' THEN ?
+             ELSE attempts_reset_at END,
            blocked_limit = NULL, blocked_reason = NULL, updated_at = ?
          WHERE id = ? AND status = 'blocked' AND ${blocked}`,
-      ).bind(to, now, id, row.id);
+      ).bind(to, now, now, id, row.id);
     statements.push(
       ...restore.ready.map((id) => moveTask(id, "ready")),
       ...restore.pending.map((id) => moveTask(id, "pending")),
