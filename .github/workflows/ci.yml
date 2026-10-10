@@ -35,7 +35,7 @@ jobs:
           bun-version-file: package.json
 
       - name: Cache Bun packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -61,7 +61,7 @@ jobs:
         run: bun run cf:bundle
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.16.4
           terraform_wrapper: false
