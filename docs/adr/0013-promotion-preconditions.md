@@ -93,6 +93,16 @@ compare-and-swap and its own write. It already wakes the agents of active Tasks 
   (`workers/coordinator/src/promotion-cas.ts`). The order is: already promoted, generation, tree,
   then policy version.
 
+## Update (2026-10-09, HOM-200)
+
+- `autoPromoteRiskTiers` is built. After the gate, the verification workflow calls the pure function
+  `autoPromoteDecision`. Then it calls `promoteCandidate` with trigger `auto` and actor
+  `system:auto-promotion`. That is the same path and the same preconditions as a manual promote.
+  A plan or policy tier that needs approval is never automatic. An unknown risk tier is never
+  automatic either.
+- Promotion now writes the Change statuses `promoting`, then `releasing` or `completed`. See the
+  change lifecycle page for the full state machine.
+
 ## Diagram
 
 Preconditions in the integration Worker (`checkPromotion`). It returns every block at once.

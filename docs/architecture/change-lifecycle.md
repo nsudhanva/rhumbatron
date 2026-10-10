@@ -144,8 +144,8 @@ sequenceDiagram
 
 Notes:
 
-- Promotion is a human action in the UI. `autoPromoteRiskTiers` exists in the policy object, but no code reads it.
-- The Change moves to `completed` at promotion. The release runs after that and has its own status.
+- Promotion is a human action in the UI, except under policy `autoPromoteRiskTiers`. When the verified Candidate needs no human approval and the Change risk tier is listed (`low` in `policy-1`), the verification workflow calls the same `promoteCandidate` path with actor `system:auto-promotion`. `canonical.promotion.requested` then records `trigger: "auto"`. All section 36 preconditions still apply. A Candidate that needs approval never promotes automatically (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
+- The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a release target, else `completed`. The release then ends the Change as `completed` (deployed or superseded) or `failed`.
 - After `canonical.advanced`, the causal router marks every other in-flight Candidate on an older base `stale`.
 
 ## Status state machines
@@ -163,16 +163,38 @@ stateDiagram-v2
   compiling --> failed: planner failed
   running --> verifying: last Task completed
   running --> budget_blocked: budget or limit stop
-  verifying --> completed: Candidate promoted
+  budget_blocked --> running: person raises the budget
+  verifying --> awaiting_approval: verified Candidate needs approval
+  awaiting_approval --> verifying: no verified Candidate left
+  verifying --> promoting: promotion requested
+  awaiting_approval --> promoting: promotion requested
+  promoting --> verifying: compare-and-swap refused
+  promoting --> releasing: advanced, release target exists
+  promoting --> completed: advanced, no release target
+  releasing --> completed: deployed or superseded
+  releasing --> failed: release failed
+  created --> cancelled: person cancels
+  running --> cancelled: person cancels
+  verifying --> cancelled: person cancels
+  awaiting_approval --> cancelled: person cancels
+  budget_blocked --> cancelled: person cancels
   completed --> [*]
   failed --> [*]
+  cancelled --> [*]
 ```
 
-The enum `ChangeStatus` also has `awaiting_approval`, `promoting`, `releasing`, and `cancelled`.
-No code writes these four values today.
-The UI reads them, so they are reserved.
-No code path leaves `budget_blocked` today.
-`AGENTS.md` section 44 asks for a human budget raise. That action does not exist yet.
+The pure rules are in `workers/integration/src/change-status.ts`.
+A refused compare-and-swap returns the Change to its status before `promoting`.
+A verified Candidate can also promote from `running` or `budget_blocked`.
+
+- `POST /v1/changes/:changeId/cancel` works until promotion starts.
+  It cancels the open Tasks and rejects the open Candidates.
+  Dispatch runs only for a `running` Change.
+  A running agent run stops at its next one-minute run check.
+- `POST /v1/changes/:changeId/budget` raises `budget_usd`. The budget can never go down.
+  A `budget_blocked` Change returns to `running`, the only status a budget stop leaves.
+  Its budget-stopped Tasks become ready again, and their blocked dependents become pending.
+  Then the normal dispatch runs (section 44 rule 5).
 
 ### Task status
 
@@ -195,7 +217,7 @@ stateDiagram-v2
   failed --> [*]
 ```
 
-`cancelled` is in the enum, but no code writes it.
+A Change cancel moves the open Tasks to `cancelled`. A budget raise moves the budget-stopped Tasks from `blocked` back to `ready`.
 
 ### Candidate status
 
