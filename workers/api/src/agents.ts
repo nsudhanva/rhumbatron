@@ -62,8 +62,11 @@ const RunView = z.object({
   failureReason: z.string().nullable(),
   /** Decision Receipt: who routed this attempt and why (section 23.5). */
   decidedBy: z.string().nullable(),
-  /** Model provider of the attempt from its Decision Receipt; null on receipts before ADR 0016. */
-  provider: z.enum(["openrouter", "google-vertex-ai"]).nullable(),
+  /**
+   * Model provider of the attempt from its Decision Receipt: `anthropic` since ADR 0021, the
+   * earlier providers on older receipts, null before ADR 0016.
+   */
+  provider: z.enum(["anthropic", "openrouter", "google-vertex-ai"]).nullable(),
   reasons: z.array(z.string()),
   /** The previous attempt's tier when this attempt moved up a tier. */
   escalatedFrom: ModelTier.nullable(),
@@ -233,7 +236,9 @@ function toRuns(rows: RunRow[]): z.infer<typeof RunView>[] {
         r.status === "failed" && typeof outcome?.reason === "string" ? outcome.reason : null,
       decidedBy: r.decided_by,
       provider:
-        receipt?.provider === "openrouter" || receipt?.provider === "google-vertex-ai"
+        receipt?.provider === "anthropic" ||
+        receipt?.provider === "openrouter" ||
+        receipt?.provider === "google-vertex-ai"
           ? receipt.provider
           : null,
       reasons: Array.isArray(receipt?.reasons)

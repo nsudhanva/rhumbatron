@@ -15,11 +15,10 @@ import { canAccessProject, ensureIdentity } from "./identity.ts";
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
 /**
- * Mirrors packages/model-router/src/budget.ts (AGENT_DAILY_CALL_CAP, OPENROUTER_DAILY_CALL_CAP,
- * MAX_CALLS_PER_RUN) and the `usage_counters` keys in provider.ts (ADR 0016).
+ * Mirrors packages/model-router/src/budget.ts (AGENT_DAILY_CALL_CAP, MAX_CALLS_PER_RUN,
+ * ANTHROPIC_MONTHLY_BUDGET_FALLBACK_USD) and the `usage_counters` keys in provider.ts (ADR 0021).
  */
 const AGENT_DAILY_CALL_CAP = 400;
-const OPENROUTER_DAILY_CALL_CAP = 45;
 const MAX_CALLS_PER_RUN = { haiku: 16, sonnet: 32, opus: 32 } as const;
 /** Mirrors CLEF_DAILY_CAP in workers/event-router/src/causal.ts. */
 const CLEF_DAILY_CAP = 200;
@@ -30,12 +29,12 @@ const CLEF_DAILY_CAP = 200;
  */
 const SANDBOX_MONTHLY_SECONDS = 36_000;
 
-/** Fallback for the `VERTEX_SPEND_LIMIT_USD` binding; mirrors VERTEX_SPEND_LIMIT in model-router. */
-const VERTEX_SPEND_LIMIT_USD = 9;
+/** Fallback for the `ANTHROPIC_MONTHLY_BUDGET_USD` binding (ADR 0021). */
+const ANTHROPIC_MONTHLY_BUDGET_USD = 10;
 
-const vertexSpendLimitUsd = (configured?: string) => {
+const anthropicMonthlyBudgetUsd = (configured?: string) => {
   const n = Number(configured);
-  return configured && Number.isFinite(n) && n >= 0 ? n : VERTEX_SPEND_LIMIT_USD;
+  return configured && Number.isFinite(n) && n >= 0 ? n : ANTHROPIC_MONTHLY_BUDGET_USD;
 };
 
 const sandboxMonthlySeconds = (configured?: string) => {
@@ -122,14 +121,10 @@ const CostView = z.object({
     month: z.string(),
     agentModelCallsToday: z.number().int(),
     agentDailyCallCap: z.number().int(),
-    /** Agent calls sent to OpenRouter today; past the cap (or a 429) runs use Gemini (ADR 0016). */
-    openrouterCallsToday: z.number().int(),
-    openrouterDailyCallCap: z.number().int(),
-    openrouterUsedUpToday: z.boolean(),
-    /** The gateway refused Gemini for its spend cap today. */
-    vertexSpendLimitedToday: z.boolean(),
-    /** This environment's gateway Vertex cap in USD per 30 days (ADR 0017). */
-    vertexSpendLimitUsd: z.number(),
+    /** Anthropic spend this calendar month in this environment, open reservations included. */
+    anthropicSpentUsdMonth: z.number(),
+    /** This environment's Anthropic budget in USD per calendar month (ADR 0021). */
+    anthropicMonthlyBudgetUsd: z.number(),
     clefFlashCallsToday: z.number().int(),
     clefDailyCap: z.number().int(),
     sandboxSecondsMonth: z.number().int(),
@@ -215,9 +210,8 @@ export const cost = new Hono<AppEnv>().get(
       db
         .prepare(
           `SELECT day, counter, count FROM usage_counters
-           WHERE (day >= ? AND day <= ? AND counter IN ('agent-model-calls', 'clef-flash',
-                    'openrouter-calls', 'openrouter-exhausted', 'vertex-spend-limited'))
-              OR (day = ? AND counter = 'sandbox-seconds')`,
+           WHERE (day >= ? AND day <= ? AND counter IN ('agent-model-calls', 'clef-flash'))
+              OR (day = ? AND counter IN ('sandbox-seconds', 'anthropic-usd-micro'))`,
         )
         .bind(days[0], day, month),
     ]);
@@ -377,13 +371,8 @@ export const cost = new Hono<AppEnv>().get(
           month,
           agentModelCallsToday: meter(day, "agent-model-calls"),
           agentDailyCallCap: AGENT_DAILY_CALL_CAP,
-          openrouterCallsToday: meter(day, "openrouter-calls"),
-          openrouterDailyCallCap: OPENROUTER_DAILY_CALL_CAP,
-          openrouterUsedUpToday:
-            meter(day, "openrouter-exhausted") > 0 ||
-            meter(day, "openrouter-calls") >= OPENROUTER_DAILY_CALL_CAP,
-          vertexSpendLimitedToday: meter(day, "vertex-spend-limited") > 0,
-          vertexSpendLimitUsd: vertexSpendLimitUsd(c.env.VERTEX_SPEND_LIMIT_USD),
+          anthropicSpentUsdMonth: meter(month, "anthropic-usd-micro") / 1_000_000,
+          anthropicMonthlyBudgetUsd: anthropicMonthlyBudgetUsd(c.env.ANTHROPIC_MONTHLY_BUDGET_USD),
           clefFlashCallsToday: meter(day, "clef-flash"),
           clefDailyCap: CLEF_DAILY_CAP,
           sandboxSecondsMonth: meter(month, "sandbox-seconds"),
