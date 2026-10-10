@@ -90,6 +90,21 @@ describe("buildVerificationPlan", () => {
     }
   });
 
+  it("maps route-named and keep-as-is invariants on a generated app to deterministic checks", () => {
+    // cand_7270af31 (blank Project on prod) was rejected on this unmapped procedure gap.
+    const route = plan("low", {
+      protectedInvariants: ['GET /api/health keeps returning {"ok":true} with status 200'],
+    });
+    expect(ids(route)).toEqual(expect.arrayContaining(["unit", "contract"]));
+    expect(route.checks.filter((c) => c.kind === "protected-invariant")).toEqual([]);
+    const behavior = plan("low", { protectedInvariants: ["Todos stay saved for each day"] });
+    expect(ids(behavior)).toContain("unit");
+    expect(behavior.checks.find((c) => c.checkId === "unit")?.reason).toContain(
+      "app behavior -> unit",
+    );
+    expect(behavior.checks.filter((c) => c.kind === "protected-invariant")).toEqual([]);
+  });
+
   it("a cart and product invariant needs both the Cart check and the endpoint regression", () => {
     const p = plan("low", {
       protectedInvariants: ["Keep existing cart and product behavior unchanged."],

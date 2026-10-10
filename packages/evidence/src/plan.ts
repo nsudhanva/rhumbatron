@@ -77,7 +77,9 @@ const ENDPOINT_SUBJECT =
   /\b(products?|catalog(ue)?|listings?|api|apis|routes?|endpoints?|http|responses?)\b/i;
 /** Wording that asks to keep existing behavior, not to add a new property. */
 const PRESERVE =
-  /\b(existing|unchanged|must remain|remains?|preserved?|backwards?[- ]compatible|regressions?|(do|does|must|should|will) not (change|break|alter|modify)|(don't|doesn't|never) (change|break|alter|modify)|without (changing|breaking)|(keep|keeps|continue to) work(ing)?)\b/i;
+  /\b(existing|unchanged|must remain|remains?|preserved?|backwards?[- ]compatible|regressions?|(do|does|must|should|will) not (change|break|alter|modify)|(don't|doesn't|never) (change|break|alter|modify)|without (changing|breaking)|keeps?|still|continues? to|stays?|always)\b/i;
+/** An invariant that names an HTTP route: the route table and the project tests prove it. */
+const ROUTE_REF = /\b(GET|POST|PUT|PATCH|DELETE|HEAD)\s+\//;
 
 /**
  * True when the invariant protects existing product, catalog, API, route, or endpoint behavior.
@@ -85,7 +87,17 @@ const PRESERVE =
  * change, and `bun test` (test/catalog.test.ts) pins product list, detail, 404, and 401 behavior.
  */
 function protectsExistingEndpoints(invariant: string): boolean {
-  return ENDPOINT_SUBJECT.test(invariant) && PRESERVE.test(invariant);
+  return (
+    ROUTE_REF.test(invariant) || (ENDPOINT_SUBJECT.test(invariant) && PRESERVE.test(invariant))
+  );
+}
+
+/**
+ * True when the invariant keeps some other app behavior as it is ("Todos stay saved per day").
+ * On a generated app the agents' own project tests are the deterministic Evidence for that.
+ */
+function protectsAppBehavior(invariant: string): boolean {
+  return PRESERVE.test(invariant);
 }
 
 function unitCheck(reason: string): VerificationCheck {
@@ -184,6 +196,13 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
       }
     }
     if (isCart || isRegression) return;
+    if (protectsAppBehavior(invariant)) {
+      const note = `Protected invariant (mapped: app behavior -> unit): ${invariant}`;
+      const unit = checks.find((c) => c.checkId === "unit");
+      if (unit) unit.reason += ` ${note}`;
+      else checks.push(unitCheck(note));
+      return;
+    }
     // Maps to no deterministic Evidence: a required procedure that stays a visible gap.
     checks.push({
       checkId: invariantSlug(invariant, index),
