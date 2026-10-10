@@ -56,12 +56,12 @@ module "async" {
   environment = local.environment
 }
 
-# Own gateway, own logs and rate limit; the Vertex cap is per gateway (ADR 0017).
+# Own gateway, own logs and rate limit; the Anthropic spend limit is per gateway (ADR 0021).
 module "ai" {
-  source                 = "../../modules/ai"
-  account_id             = var.account_id
-  environment            = local.environment
-  vertex_spend_limit_usd = var.vertex_spend_limit_usd
+  source          = "../../modules/ai"
+  account_id      = var.account_id
+  environment     = local.environment
+  spend_limit_usd = var.anthropic_monthly_budget_usd
 }
 
 # Vectorize semantic memory (P1-10, P7-05). Provider 5.27 has no Vectorize index resource, so a
@@ -129,17 +129,17 @@ resource "cloudflare_dns_record" "clerk" {
 
 # Per-environment caps (ADR 0017). The approved Sandbox (10 h/month, HOM-192) and Browser Run
 # (500 s/day) budgets are split evenly between dev and prod; each Worker reads its share from a
-# binding and enforces it on this environment's D1 meter. The Vertex cap is per gateway
-# (var.vertex_spend_limit_usd) and is mirrored to the Workers for budget-stop and Costs page text.
+# binding and enforces it on this environment's D1 meter. The Anthropic budget per calendar month
+# (var.anthropic_monthly_budget_usd, ADR 0021) is enforced the same way by every model caller.
 locals {
   caps = {
     sandbox_monthly_seconds = 18000 # 5 h of the 10 h total
     browser_daily_seconds   = 250   # half of the 500 s guard, under the 600 s free figure
   }
   cap_bindings = {
-    sandbox = { type = "plain_text", name = "SANDBOX_MONTHLY_SECONDS", text = tostring(local.caps.sandbox_monthly_seconds) }
-    browser = { type = "plain_text", name = "BROWSER_DAILY_SECONDS", text = tostring(local.caps.browser_daily_seconds) }
-    vertex  = { type = "plain_text", name = "VERTEX_SPEND_LIMIT_USD", text = tostring(var.vertex_spend_limit_usd) }
+    sandbox   = { type = "plain_text", name = "SANDBOX_MONTHLY_SECONDS", text = tostring(local.caps.sandbox_monthly_seconds) }
+    browser   = { type = "plain_text", name = "BROWSER_DAILY_SECONDS", text = tostring(local.caps.browser_daily_seconds) }
+    anthropic = { type = "plain_text", name = "ANTHROPIC_MONTHLY_BUDGET_USD", text = tostring(var.anthropic_monthly_budget_usd) }
   }
 }
 
@@ -202,7 +202,7 @@ module "api_worker" {
     { type = "plain_text", name = "FIXTURES_ENABLED", text = "true" },
     # The Costs page shows this environment's caps (ADR 0017).
     local.cap_bindings.sandbox,
-    local.cap_bindings.vertex,
+    local.cap_bindings.anthropic,
     ],
     # Live apps (ADR 0020): the API shows an app URL only while the routes serve it.
     local.apps.routing ? [{ type = "plain_text", name = "APPS_DOMAIN", text = local.apps.domain }] : [],
@@ -439,12 +439,15 @@ module "integration_worker" {
     { type = "workflow", name = "CANDIDATE_WORKFLOW", workflow_name = "rhumbatron-candidate-verification-${local.environment}", class_name = "CandidateVerificationWorkflow" },
     # One Artifacts repo per Project; the namespace is created on first use (ADR 0010).
     { type = "artifacts", name = "ARTIFACTS", namespace = "rhumbatron-projects-${local.environment}" },
-    # Models go through the AI Gateway (ADR 0007): OpenRouter free models, Vertex AI backup.
+    # Root Planner model calls: Anthropic Claude through the AI Gateway (ADR 0021). The key is
+    # organization-level, so every request also sends the workspace ID.
     { type = "plain_text", name = "AI_ACCOUNT_ID", text = var.account_id },
     { type = "plain_text", name = "AI_GATEWAY_ID", text = module.ai.gateway_id },
-    { type = "secret_text", name = "OPENROUTER_API_KEY", text = var.openrouter_api_key },
-    { type = "secret_text", name = "VERTEX_SERVICE_ACCOUNT", text = var.vertex_service_account },
+    { type = "secret_text", name = "ANTHROPIC_API_KEY", text = var.anthropic_api_key },
+    { type = "plain_text", name = "ANTHROPIC_WORKSPACE_ID", text = var.anthropic_workspace_id },
     { type = "plain_text", name = "MODEL_PROVIDER", text = var.model_provider },
+    { type = "plain_text", name = "ALLOW_OPUS", text = tostring(var.allow_opus) },
+    local.cap_bindings.anthropic,
     # Browser Run for the Candidate browser check (AGENTS.md section 35). Capped in code: one
     # session of at most 55 s per check, 2 per Candidate, BROWSER_DAILY_SECONDS per UTC day (D1).
     { type = "browser", name = "BROWSER" },
@@ -522,16 +525,17 @@ module "agents_worker" {
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
     # Analytics Engine datasets are created on first write. Wakeups, model calls, run outcomes.
     { type = "analytics_engine", name = "METRICS", dataset = "rhumbatron_metrics_${local.environment}" },
-    # Models through the AI Gateway (ADR 0007); Workers AI only for Clef-flash, capped per day.
+    # Models: Anthropic Claude through the AI Gateway (ADR 0021); Workers AI only for Clef-flash,
+    # capped per day. The key is organization-level, so every request sends the workspace ID.
     { type = "plain_text", name = "AI_ACCOUNT_ID", text = var.account_id },
     { type = "plain_text", name = "AI_GATEWAY_ID", text = module.ai.gateway_id },
-    { type = "secret_text", name = "OPENROUTER_API_KEY", text = var.openrouter_api_key },
-    # Gemini overflow when OpenRouter is used up for the day; spend capped by the gateway (ADR 0016).
-    { type = "secret_text", name = "VERTEX_SERVICE_ACCOUNT", text = var.vertex_service_account },
+    { type = "secret_text", name = "ANTHROPIC_API_KEY", text = var.anthropic_api_key },
+    { type = "plain_text", name = "ANTHROPIC_WORKSPACE_ID", text = var.anthropic_workspace_id },
     { type = "plain_text", name = "MODEL_PROVIDER", text = var.model_provider },
+    { type = "plain_text", name = "ALLOW_OPUS", text = tostring(var.allow_opus) },
     { type = "ai", name = "AI" },
     local.cap_bindings.sandbox,
-    local.cap_bindings.vertex,
+    local.cap_bindings.anthropic,
     # Semantic memory, read-only: one top-k query per agent run, capped at 1,000 per day (P7-06).
     { type = "vectorize", name = "MEMORY", index_name = local.vectorize_index.name },
   ]

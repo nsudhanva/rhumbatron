@@ -45,6 +45,6 @@ output "coordinator_worker" {
 }
 
 output "ai_gateway_id" {
-  description = "AI Gateway that proxies OpenRouter (ADR 0007)."
+  description = "AI Gateway that proxies Anthropic (ADR 0021)."
   value       = module.ai.gateway_id
 }

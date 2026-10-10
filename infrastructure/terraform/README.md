@@ -41,7 +41,7 @@ flowchart TB
 | `dns` | Implemented | Reads the `rhumbatron.com` zone. Outputs `zone_id` and `zone_name`. Manages no records. |
 | `state` | Implemented | D1 `rhumbatron-control-<env>`, R2 `rhumbatron-evidence-<env>` with lifecycle rules, KV `rhumbatron-config-<env>`. |
 | `async` | Implemented | Six Queues `rhumbatron-<purpose>-<env>`. |
-| `ai` | Implemented | AI Gateway `rhumbatron-models-<env>` with the Vertex spend limit (ADR 0007, 0016, 0017). |
+| `ai` | Implemented | AI Gateway `rhumbatron-models-<env>` with the Anthropic spend limit (ADR 0021). |
 | `security` | Implemented | Zone settings only. WAF, rate limits, Access, and Turnstile come after the protected endpoint exists. |
 | `code-storage` | Placeholder | No resources. |
 | `observability` | Placeholder | No resources. Log settings are in `worker` and `durable-worker`. |
@@ -62,8 +62,9 @@ Each env root keeps some resources inline: queue consumers, Workflows, the relea
 | R2 `evidence/` retention | none | 30 days | kept |
 | R2 `tmp/` retention | none | 7 days | 7 days |
 | Clerk instance | development | development | production (ADR 0017) |
-| `MODEL_PROVIDER` | - | `vertex` | `openrouter` |
-| Vertex spend cap per 30 days | - | $40 | $10 |
+| `MODEL_PROVIDER` | - | `anthropic` | `anthropic` |
+| Anthropic budget per calendar month | - | $15 | $10 |
+| `ALLOW_OPUS` | - | `false` | `false` |
 | `www` | none | none | Custom domain of the prod web Worker; the Worker returns 301 to the apex |
 
 Hostnames stay one label deep so Universal SSL covers them.
@@ -102,11 +103,11 @@ in the environment wins. The wrapper refuses `-auto-approve`.
 | `TF_VAR_clerk_secret_key` | `rhumbatron-clerk-secret-key-dev` / `-prod` | dev / prod |
 | `TF_VAR_clerk_publishable_key` | `rhumbatron-clerk-publishable-key-prod` | prod |
 | `TF_VAR_k2_consumer_token` | `rhumbatron-k2-consumer-token-dev` | dev, prod |
-| `TF_VAR_openrouter_api_key` | `rhumbatron-openrouter-api-key` | dev, prod |
-| `TF_VAR_vertex_service_account` | `rhumbatron-vertex-sa-dev` | dev, prod |
+| `TF_VAR_anthropic_api_key` | `rhumbatron-anthropic-api-key` | dev, prod |
+| `TF_VAR_anthropic_workspace_id` | `rhumbatron-anthropic-workspace-id` (not secret) | dev, prod |
 | `TF_VAR_builds_api_token` | `rhumbatron-cloudflare-builds-token` | dev, prod |
 
-Prod reuses the dev K2, OpenRouter, Vertex, and Builds items (ADR 0017). See ADR 0004 for token
+Prod reuses the dev K2 and Builds items (ADR 0017) and the Anthropic items (ADR 0021). See ADR 0004 for token
 scopes.
 
 ## Backend configuration

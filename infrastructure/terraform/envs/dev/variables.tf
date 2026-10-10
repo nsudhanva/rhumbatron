@@ -26,33 +26,48 @@ variable "k2_consumer_token" {
   sensitive   = true
 }
 
-variable "openrouter_api_key" {
-  description = "OpenRouter key for free models (ADR 0007). Loaded from the Keychain by `bun run tf dev`."
+variable "anthropic_api_key" {
+  description = "Anthropic API key (organization-level) for Claude through the AI Gateway (ADR 0021). Loaded from the Keychain (`rhumbatron-anthropic-api-key`) by `bun run tf dev`."
   type        = string
   sensitive   = true
 }
 
-variable "vertex_service_account" {
-  description = "Base64 Vertex AI service account JSON with region (ADR 0007). Loaded from the Keychain."
+variable "anthropic_workspace_id" {
+  description = "Anthropic workspace ID, sent as `anthropic-workspace-id` on every request because the key is organization-level (ADR 0021). Not a secret. Loaded from the Keychain (`rhumbatron-anthropic-workspace-id`)."
   type        = string
-  sensitive   = true
-}
-
-variable "model_provider" {
-  description = "Model provider mode for agents and the Root Planner: \"vertex\" sends every call to Gemini (ADR 0016); \"openrouter\" tries free models first."
-  type        = string
-  default     = "vertex"
 
   validation {
-    condition     = contains(["vertex", "openrouter"], var.model_provider)
-    error_message = "model_provider must be \"vertex\" or \"openrouter\"."
+    condition     = can(regex("^wrkspc_[A-Za-z0-9]+$", var.anthropic_workspace_id))
+    error_message = "anthropic_workspace_id must look like wrkspc_..."
   }
 }
 
-variable "vertex_spend_limit_usd" {
-  description = "AI Gateway spend cap on Vertex AI per 30 days for the dev gateway. Dev $40 + prod $10 = the approved ~$50 (ADR 0017)."
+variable "anthropic_monthly_budget_usd" {
+  description = "Anthropic budget in USD per calendar month for this environment, enforced in code on the D1 meter and mirrored to the gateway spend limit. Dev $15 + prod $10 = the approved $25 total (ADR 0021)."
   type        = number
-  default     = 40
+  default     = 15
+
+  validation {
+    condition     = var.anthropic_monthly_budget_usd >= 0 && var.anthropic_monthly_budget_usd <= 15
+    error_message = "Raising the dev Anthropic budget above $15 needs a new approval (ADR 0021)."
+  }
+}
+
+variable "model_provider" {
+  description = "Model provider for agents and the Root Planner. Only \"anthropic\" exists (ADR 0021); OpenRouter and Gemini on Vertex AI are removed."
+  type        = string
+  default     = "anthropic"
+
+  validation {
+    condition     = var.model_provider == "anthropic"
+    error_message = "model_provider must be \"anthropic\"."
+  }
+}
+
+variable "allow_opus" {
+  description = "true lets the opus tier run Claude Opus 5.5; false (default) runs it on Sonnet 5.5 and records the downgrade (ADR 0021)."
+  type        = bool
+  default     = false
 }
 
 variable "builds_api_token" {
