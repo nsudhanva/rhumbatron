@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { recomposeDecision } from "./app-release-model.ts";
 import {
+  nothingSelected,
   priorityWins,
   type RequestInput,
   requestsOverlap,
@@ -118,5 +119,31 @@ describe("request compatibility boundaries", () => {
         kind: "skip",
         reason: "change_closed",
       });
+  });
+});
+
+describe("partial selection keeps only real work", () => {
+  const c = (id: string, text: string) => ({ id, text });
+  it("treats a quality-gate-only remainder as nothing selected", () => {
+    expect(nothingSelected([c("c3", "typecheck, test and contract all pass")])).toBe(true);
+    expect(nothingSelected([c("c3", "bun test passes")])).toBe(true);
+    expect(nothingSelected([])).toBe(true);
+  });
+  it("keeps a remainder with a product criterion", () => {
+    expect(
+      nothingSelected([
+        c("c1", "Each day shows a Clear completed button that deletes checked items"),
+        c("c3", "typecheck, test and contract all pass"),
+      ]),
+    ).toBe(false);
+    // A product criterion that mentions tests is not a quality gate.
+    expect(
+      nothingSelected([
+        c(
+          "c2",
+          "Adding a todo with an empty title shows an error and the test for it passes when the user retries",
+        ),
+      ]),
+    ).toBe(false);
   });
 });

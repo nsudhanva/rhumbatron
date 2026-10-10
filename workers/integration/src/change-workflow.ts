@@ -12,7 +12,7 @@ import {
   releaseClosedRequests,
   requestRoot,
 } from "./request-check.ts";
-import { requestsOverlap, selectedCriteria } from "./request-policy.ts";
+import { nothingSelected, requestsOverlap, selectedCriteria } from "./request-policy.ts";
 import { type PlannerStepResult, planChangeResult } from "./root-planner.ts";
 
 /**
@@ -286,7 +286,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
     }
     if (excluded.size > 0) {
       const remaining = selectedCriteria(planned.criteria, [...excluded]);
-      if (remaining.length === 0) {
+      if (nothingSelected(remaining)) {
         await step.do("stop unselected request", async () => {
           const fields = await this.env.DB.prepare(
             "SELECT outcome_reason, outcome_winner_change_id, outcome_decided_by FROM changes WHERE id = ?",

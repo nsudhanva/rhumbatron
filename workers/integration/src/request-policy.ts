@@ -160,6 +160,28 @@ export function priorityWins(
     ? { winner: a.changeId, loser: b.changeId }
     : { winner: b.changeId, loser: a.changeId };
 }
+/**
+ * A criterion that only restates the quality gate ("typecheck, test and contract all pass"). The
+ * planner adds one to most Changes. It never conflicts, so it must not keep a losing request alive
+ * as a "partial" selection with nothing of the request left to build.
+ */
+const GATE_WORDS = new Set(
+  (
+    "typecheck type check checks test tests unit contract lint build bun run npm all and or the " +
+    "pass passes passing succeed succeeds green must should still existing are is with no errors"
+  ).split(" "),
+);
+const CHECK_WORDS = new Set(["typecheck", "test", "tests", "contract", "lint", "build"]);
+export function isQualityGate(criterion: Criterion): boolean {
+  const words = criterion.text.toLowerCase().match(/[a-z]+/g) ?? [];
+  return words.some((w) => CHECK_WORDS.has(w)) && words.every((w) => GATE_WORDS.has(w));
+}
+
+/** True when nothing but quality-gate criteria is left after the losing ones are removed. */
+export function nothingSelected(remaining: readonly Criterion[]): boolean {
+  return remaining.every(isQualityGate);
+}
+
 export function selectedCriteria(
   criteria: readonly Criterion[],
   excluded: readonly string[],
