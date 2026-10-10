@@ -9,6 +9,7 @@ import { feedStatements } from "./feed.ts";
 import {
   APPLY_DELTA_CAP,
   ARCHIVE_SUBSCRIPTION,
+  type ConsumedBatch,
   K2Client,
   K2Error,
   MAX_CONSUMES_PER_SUBSCRIPTION,
@@ -18,6 +19,7 @@ import {
   sweepStreamIndex,
 } from "./k2-consumer.ts";
 import { isMaintenanceTick, queueMaintenance } from "./maintenance.ts";
+import { batchKey, countBatchFailure, deadLetterBatch, shouldSkipBatch } from "./poison-batch.ts";
 import { decodeEnvelope, groupByProject, planProjects, toViewDelta } from "./projector.ts";
 
 /**
@@ -25,8 +27,10 @@ import { decodeEnvelope, groupByProject, planProjects, toViewDelta } from "./pro
  * `project-view-projector` updates ProjectViewDO; `causal-router` wakes affected agents (section 31).
  * Subrequest budget per invocation, worst case, both subscriptions on one stream:
  *   per subscription: 1 resolve + 2 consume + 2 ack/nack + 2 D1 claim batches + 2 D1 release batches
+ *     + 2 D1 batches for one failed delivery (count, dead-letter); a failure ends the subscription
  *   shared: at most APPLY_DELTA_CAP (15) applyDelta calls
- *   total: 2 * 9 + 15 = 33, below the Workers Free limit of 50.
+ *   total: 2 * 11 + 15 = 37, below the Workers Free limit of 50.
+ * A batch that keeps failing is skipped after MAX_BATCH_FAILURES deliveries (poison-batch.ts).
  * The projector's event feed rows (feed.ts) ride in its D1 claim batch: no extra subrequest.
  */
 
@@ -56,12 +60,18 @@ const errorInfo = (error: unknown) =>
     ? { code: error.code, status: error.status, retryable: error.retryable, message: error.message }
     : { message: error instanceof Error ? error.message : "unknown error" };
 
+/**
+ * Outcome of one batch. `failure` is set when processing failed, so the delivery counts toward the
+ * poison limit. A nack without it (events deferred by the applyDelta cap) is not a failure.
+ */
+type BatchOutcome = { fresh: number; ack: boolean; failure?: string };
+
 /** Handles one consumed batch. Returns the number of fresh events and whether to ack. */
 async function handleBatch(
   run: Run,
   sub: SubscriptionName,
   records: { content: string }[],
-): Promise<{ fresh: number; ack: boolean }> {
+): Promise<BatchOutcome> {
   const events: EventEnvelope[] = [];
   let invalid = 0;
   for (const record of records) {
@@ -100,8 +110,9 @@ async function handleBatch(
         sub,
         fresh.map((e) => e.eventId),
       );
-      log({ event: "router.route_failed", stream: run.streamIndex, ...errorInfo(error) });
-      return { fresh: 0, ack: false };
+      const info = errorInfo(error);
+      log({ event: "router.route_failed", stream: run.streamIndex, ...info });
+      return { fresh: 0, ack: false, failure: info.message };
     }
   }
 
@@ -149,7 +160,65 @@ async function handleBatch(
     deferred: deferred.length,
     failed,
   });
-  return { fresh: fresh.length - unapplied.length, ack: unapplied.length === 0 };
+  return {
+    fresh: fresh.length - unapplied.length,
+    ack: unapplied.length === 0,
+    ...(failed > 0 ? { failure: `${failed} applyDelta call(s) failed` } : {}),
+  };
+}
+
+/**
+ * A failed delivery: counts it, and at the limit dead-letters the batch and acks it, so one poison
+ * batch cannot block its subscription forever. Below the limit, or when counting fails, it nacks.
+ */
+async function failedDelivery(
+  run: Run,
+  sub: SubscriptionName,
+  subscriptionId: string,
+  batch: ConsumedBatch,
+  workerId: string,
+  failure: string,
+): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    const key = await batchKey(batch.records);
+    const failures = await countBatchFailure(run.env.DB, sub, key, failure, now);
+    if (shouldSkipBatch(failures)) {
+      const events = batch.records
+        .map((r) => decodeEnvelope(r.content))
+        .filter((e): e is EventEnvelope => e !== null);
+      await deadLetterBatch(
+        run.env.DB,
+        {
+          consumer: sub,
+          stream: run.streamIndex,
+          key,
+          events,
+          records: batch.records.length,
+          failures,
+          error: failure,
+        },
+        now,
+      );
+      await run.k2.ack(subscriptionId, batch.batchId, workerId);
+      console.error(
+        JSON.stringify({
+          event: "router.batch_dead_lettered",
+          stream: run.streamIndex,
+          sub,
+          batchKey: key,
+          failures,
+          records: batch.records.length,
+          error: failure.slice(0, 200),
+        }),
+      );
+      return;
+    }
+    log({ event: "router.batch_failed", stream: run.streamIndex, sub, batchKey: key, failures });
+  } catch (error) {
+    log({ event: "router.batch_count_failed", stream: run.streamIndex, sub, ...errorInfo(error) });
+  }
+  await run.k2.nack(subscriptionId, batch.batchId, workerId);
 }
 
 async function runSubscription(run: Run, sub: SubscriptionName): Promise<number> {
@@ -163,21 +232,25 @@ async function runSubscription(run: Run, sub: SubscriptionName): Promise<number>
       const batch = await run.k2.consume(subscriptionId, workerId);
       if (!batch) break;
 
-      let outcome: { fresh: number; ack: boolean };
+      let outcome: BatchOutcome;
       try {
         stage = "process";
         outcome = await handleBatch(run, sub, batch.records);
       } catch (error) {
-        log({ event: "router.process_failed", stream: run.streamIndex, sub, ...errorInfo(error) });
+        const info = errorInfo(error);
+        log({ event: "router.process_failed", stream: run.streamIndex, sub, ...info });
         stage = "nack";
-        await run.k2.nack(subscriptionId, batch.batchId, workerId);
+        await failedDelivery(run, sub, subscriptionId, batch, workerId, info.message);
         break;
       }
 
       processed += outcome.fresh;
       stage = outcome.ack ? "ack" : "nack";
       if (outcome.ack) await run.k2.ack(subscriptionId, batch.batchId, workerId);
-      else {
+      else if (outcome.failure) {
+        await failedDelivery(run, sub, subscriptionId, batch, workerId, outcome.failure);
+        break;
+      } else {
         await run.k2.nack(subscriptionId, batch.batchId, workerId);
         break;
       }
