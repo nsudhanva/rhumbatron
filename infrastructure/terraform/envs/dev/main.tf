@@ -612,6 +612,12 @@ resource "cloudflare_worker" "acme_shop" {
       head_sampling_rate = 1
     }
   }
+
+  # Workers Builds runs `wrangler deploy` from the Project's own wrangler.jsonc, which sets the
+  # workers.dev preview setting at runtime (ADR 0014: Builds owns this Worker's deployments).
+  lifecycle {
+    ignore_changes = [subdomain]
+  }
 }
 
 # One consumer for all wake commands. Poison commands go to the dead-letter Queue (section 42.7).
