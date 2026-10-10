@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { DeadLetters } from "../components/dead-letters";
 import { EventStream } from "../components/project/event-stream";
 import { SectionError, SkeletonBar, SkeletonRows } from "../components/project/feedback";
+import { LiveAppLine } from "../components/project/live-app";
 import {
   ACTIVE_CHANGE_STATUSES,
   ChangeStatusPill,
@@ -149,6 +150,7 @@ function Overview() {
               ) : (
                 <span>No source yet</span>
               )}
+              <LiveAppLine projectId={projectId} hasSource={assigned} />
             </>
           )
         }

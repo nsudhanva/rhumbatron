@@ -199,6 +199,30 @@ export const getProject = createServerFn()
     }>(`/v1/projects/${data}`),
   );
 
+/** Live app of a Project (ADR 0020). `enabled` is false where apps are not served (dev). */
+export type ProjectAppView = {
+  enabled: boolean;
+  app: {
+    label: string;
+    url: string;
+    status: "building" | "ready" | "failed" | "removed";
+    commit: string | null;
+    generation: number | null;
+    failureReason: string | null;
+    updatedAt: string;
+  } | null;
+};
+
+export const getProjectApp = createServerFn()
+  .inputValidator((projectId: string) => projectId)
+  .handler(({ data }) => call<ProjectAppView>(`/v1/projects/${data}/app`));
+
+export const deployProjectApp = createServerFn({ method: "POST" })
+  .inputValidator((projectId: string) => projectId)
+  .handler(({ data }) =>
+    call<{ status: "queued" | "disabled" }>(`/v1/projects/${data}/app`, { method: "POST" }),
+  );
+
 export const createChange = createServerFn({ method: "POST" })
   .inputValidator((input: { projectId: string; goal: string; budgetUsd: number }) => input)
   .handler(({ data }) =>
