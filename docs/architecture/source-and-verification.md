@@ -157,8 +157,8 @@ That is a gap, never a pass (section 34.4.1).
 ### Which checks run
 
 `buildVerificationPlan` picks checks from the policy tier and from what the ChangeSets touch.
-The policy is `DEFAULT_POLICY` (`policy-1`) in `workers/integration/src/candidate-composer.ts`.
-D1 has no `project_policies` table, unlike `AGENTS.md` section 14.
+Verification plans with `DEFAULT_POLICY` (`policy-1`) in `workers/integration/src/candidate-composer.ts`.
+D1 `project_policies` (migration 0017) stores a per-Project policy, but only promotion and approval read it.
 
 ```mermaid
 flowchart LR
