@@ -40,6 +40,9 @@ Rules:
 - Cleanup never lists the namespace. It deletes only names it derives from one Project's rows, so it cannot reach another Project.
 - Every git access uses a short-lived repo token (600 s) that is revoked after use.
 - Provisioning stores a file index at `source/<project>/<tree>/index.json` in R2. Agents read that index instead of walking the repo.
+- The same step fills the code store (P16-16): `source/<project>/<tree>/code.json` maps paths to Git blob IDs, and each blob is copied once to `source/<project>/blobs/<blob>`. A promotion copies only the blobs that its previous tree did not have. Files over 1 MB are listed but not copied.
+- Patches for the code view: an agent publish stores `git diff` of its own work at `source/<project>/patches/changesets/<cs>.patch` and sets `patchRef`; a Candidate composition stores the Candidate-vs-base diff at `source/<project>/patches/candidates/<cand>.patch`. Each patch stops at 512 KB, at a line boundary, and records `truncated` and the full size in R2 metadata.
+- Everything above lives under `source/<project>/`, so no lifecycle rule expires it and archive cleanup removes it.
 - A new Project starts at Canonical Generation 0. `AGENTS.md` shows `S1841` for the demo; the code starts at `S0`.
 
 ## Composition and promotion in Git terms
