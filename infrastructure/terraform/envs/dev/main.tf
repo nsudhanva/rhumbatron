@@ -327,6 +327,9 @@ module "event_router_worker" {
     { type = "queue", name = "INDEXING", queue_name = module.async.queues["indexing"].name },
     # Workers AI for Clef-flash only, capped at 200 calls per day in code (rule 50).
     { type = "ai", name = "AI" },
+    # analytics-projector (section 41.1): one data point per lifecycle Event, own dataset so the
+    # source points in METRICS are not counted twice. About 1,000 points on a busy day (free 100k).
+    { type = "analytics_engine", name = "EVENT_METRICS", dataset = "rhumbatron_event_metrics_${local.environment}" },
   ]
 
   # Paused: no safety-net sweep; publish nudges still deliver events.
@@ -359,7 +362,13 @@ module "integration_worker" {
     { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-integration-${local.environment}" },
     module.state.bindings.DB,
     module.state.bindings.EVIDENCE,
+    # Read-through Project policy snapshot, 5-minute TTL; D1 project_policies is the source of truth.
+    # Tens of reads and writes per day (KV free: 100,000 reads, 1,000 writes).
+    module.state.bindings.CONFIG,
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
+    # Section 20 (HOM-202): Workflow start commands. This Worker produces and consumes them.
+    { type = "queue", name = "VERIFICATION_COMMANDS", queue_name = module.async.queues["verification"].name },
+    { type = "queue", name = "RELEASE_COMMANDS", queue_name = module.async.queues["release"].name },
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
     # Candidate composition and checks run in the Project Sandbox (ADR 0012).
@@ -629,6 +638,38 @@ resource "cloudflare_queue_consumer" "integration" {
   dead_letter_queue = module.async.queues["dead-letter"].name
   settings = {
     batch_size       = 10
+    max_retries      = 3
+    max_wait_time_ms = 1000
+    retry_delay      = 30
+  }
+}
+
+# `verification.start` and `release.start` (section 20, HOM-202): the integration Worker starts the
+# existing Workflow; the instance ID is the command's idempotency key, so a redelivery starts
+# nothing new. Batch 5 keeps one invocation at about 20 subrequests (Workers Free: 50). Queues: about
+# 3 operations per Candidate and per release.
+resource "cloudflare_queue_consumer" "verification" {
+  account_id        = var.account_id
+  queue_id          = module.async.queues["verification"].id
+  script_name       = module.integration_worker.name
+  type              = "worker"
+  dead_letter_queue = module.async.queues["dead-letter"].name
+  settings = {
+    batch_size       = 5
+    max_retries      = 3
+    max_wait_time_ms = 1000
+    retry_delay      = 30
+  }
+}
+
+resource "cloudflare_queue_consumer" "release" {
+  account_id        = var.account_id
+  queue_id          = module.async.queues["release"].id
+  script_name       = module.integration_worker.name
+  type              = "worker"
+  dead_letter_queue = module.async.queues["dead-letter"].name
+  settings = {
+    batch_size       = 5
     max_retries      = 3
     max_wait_time_ms = 1000
     retry_delay      = 30
