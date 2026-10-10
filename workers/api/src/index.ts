@@ -1,5 +1,6 @@
 import { HealthResponse, VersionResponse } from "@rhumbatron/protocol";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { activity } from "./activity.ts";
 import { agents } from "./agents.ts";
 import { candidates } from "./candidates.ts";
@@ -57,6 +58,12 @@ app.route("/", projects);
 app.notFound((c) => fail(c, 404, "not_found", "Route not found"));
 
 app.onError((err, c) => {
+  // Hono's validators throw HTTPException for client errors, for example malformed JSON (400).
+  if (err instanceof HTTPException && err.status < 500) {
+    const code =
+      err.status === 401 ? "unauthorized" : err.status === 404 ? "not_found" : "invalid_request";
+    return c.json(errorBody(code, err.message || "Invalid request"), err.status);
+  }
   console.error(err);
   return c.json(errorBody("internal", "Internal error"), 500);
 });
