@@ -144,6 +144,46 @@ export function requestFields(row: RequestColumns, viewerUserId: string) {
   };
 }
 
+/**
+ * Conflicting criterion pairs with their text. `criteria_json` holds `{ a, b, why }` with criterion
+ * IDs (a is change_a); the review inputs hold each side's `{ id, text }` list.
+ */
+function citedCriteria(
+  criteriaJson: string | null,
+  reviewJson: string | null,
+  changeA: string | null,
+  changeB: string | null,
+) {
+  type Pair = { a?: unknown; b?: unknown; why?: unknown };
+  type Side = { changeId?: string; criteria?: { id?: unknown; text?: unknown }[] };
+  let pairs: Pair[] = [];
+  let inputs: { a?: Side; b?: Side } = {};
+  try {
+    pairs = JSON.parse(criteriaJson ?? "[]") as Pair[];
+    inputs = (JSON.parse(reviewJson ?? "{}") as { inputs?: typeof inputs }).inputs ?? {};
+  } catch {
+    return [];
+  }
+  const text = new Map<string, string>();
+  for (const side of [inputs.a, inputs.b]) {
+    for (const c of side?.criteria ?? []) {
+      if (typeof c.id === "string" && typeof c.text === "string") {
+        text.set(`${side?.changeId}:${c.id}`, c.text);
+      }
+    }
+  }
+  // Both sides number criteria c1..cn, so the lookup is per Change: `a` IDs belong to change_a.
+  const find = (changeId: string | null, id: unknown) =>
+    typeof id === "string" ? (text.get(`${changeId}:${id}`) ?? null) : null;
+  return (Array.isArray(pairs) ? pairs : []).slice(0, 30).map((p) => ({
+    a: typeof p.a === "string" ? p.a : "",
+    b: typeof p.b === "string" ? p.b : "",
+    why: typeof p.why === "string" ? p.why : "",
+    aText: find(changeA, p.a),
+    bText: find(changeB, p.b),
+  }));
+}
+
 /* ------------------------------------------------------------------------------------------ */
 /* Routes                                                                                     */
 /* ------------------------------------------------------------------------------------------ */
@@ -433,7 +473,7 @@ export const members = new Hono<AppEnv>()
         return fail(c, 404, "not_found", "Change not found");
       }
       const rows = await c.env.DB.prepare(
-        `SELECT r.id, r.verdict, r.criteria_json, r.policy, r.winner_change_id, r.loser_change_id,
+        `SELECT r.id, r.verdict, r.criteria_json, r.review_json, r.policy, r.winner_change_id, r.loser_change_id,
                 r.decided_by, r.decided_at, r.created_at,
                 a.id AS a_id, a.goal AS a_goal, a.status AS a_status, a.created_by AS a_by,
                 ua.display_name AS a_name, ua.email AS a_email,
@@ -461,7 +501,12 @@ export const members = new Hono<AppEnv>()
         data: (rows.results ?? []).map((r) => ({
           id: r.id,
           verdict: r.verdict,
-          criteria: JSON.parse(r.criteria_json ?? "[]") as unknown[],
+          criteria: citedCriteria(
+            r.criteria_json ?? null,
+            r.review_json ?? null,
+            r.a_id ?? null,
+            r.b_id ?? null,
+          ),
           policy: r.policy,
           winnerChangeId: r.winner_change_id,
           loserChangeId: r.loser_change_id,
