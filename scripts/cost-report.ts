@@ -35,10 +35,10 @@ type Level = "OK" | "WARN" | "ALERT" | "ERROR";
 const lines: { level: Level; area: string; detail: string }[] = [];
 const report = (level: Level, area: string, detail: string) => lines.push({ level, area, detail });
 
-/** OK below 60 %, WARN below 85 %, ALERT above (of a free or included limit). */
-function usage(area: string, used: number, limit: number, unit: string) {
+/** OK below 60 %, WARN below `alertAt` (85 %), ALERT above (of a free or included limit). */
+function usage(area: string, used: number, limit: number, unit: string, alertAt = 0.85) {
   const ratio = limit > 0 ? used / limit : 0;
-  const level: Level = ratio >= 0.85 ? "ALERT" : ratio >= 0.6 ? "WARN" : "OK";
+  const level: Level = ratio >= alertAt ? "ALERT" : ratio >= 0.6 ? "WARN" : "OK";
   report(
     level,
     area,
@@ -220,10 +220,10 @@ await section("r2", async () => {
 });
 
 /** Read-only D1 query on the control database with the D1 token. */
-async function d1Query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+async function d1Query<T>(sql: string, params: unknown[] = [], database = env): Promise<T[]> {
   if (!d1Token) throw new Error("set CLOUDFLARE_D1_TOKEN");
   const dbs = await get<{ uuid: string; name: string }[]>("/d1/database", d1Token);
-  const db = dbs.find((d) => d.name === `rhumbatron-control-${env}`);
+  const db = dbs.find((d) => d.name === `rhumbatron-control-${database}`);
   if (!db) throw new Error("control database not found");
   const response = await fetch(`${api}/d1/database/${db.uuid}/query`, {
     method: "POST",
@@ -317,6 +317,70 @@ await section("rhumbatron meters", async () => {
     value("sandbox-seconds") / 3600,
     DEV_SANDBOX_HOURS,
     "hours (HOM-192 cap, dev share)",
+  );
+});
+
+/**
+ * Live apps (prod only, ADR 0020, P16-21). Caps: `APP_BUILDS_PER_DAY` in
+ * workers/integration/src/app-release.ts (enforced before every build), and the Workers Paid
+ * allowances for Dynamic Workers (1,000 created per month), requests, and CPU (shared).
+ */
+const APP_BUILDS_PER_DAY = 60;
+const DYNAMIC_WORKERS_PER_MONTH = 1_000;
+
+await section("apps", async () => {
+  const data = await graphql<{
+    viewer: {
+      accounts: {
+        workersInvocationsAdaptive: { sum: { requests: number; cpuTimeUs: number } }[];
+      }[];
+    };
+  }>(
+    `query ($account: string!, $since: Time!, $until: Time!, $script: string!) { viewer { accounts(filter: {accountTag: $account}) {
+      workersInvocationsAdaptive(limit: 10, filter: {datetime_geq: $since, datetime_leq: $until, scriptName: $script}) {
+        sum { requests cpuTimeUs } } } } }`,
+    { account: accountId, since, until, script: "rhumbatron-apps-prod" },
+  );
+  const rows = data.viewer.accounts[0]?.workersInvocationsAdaptive ?? [];
+  const requests = rows.reduce((n, r) => n + r.sum.requests, 0);
+  const cpuMs = rows.reduce((n, r) => n + r.sum.cpuTimeUs, 0) / 1000;
+  // Monthly allowances, as a daily share (10 M requests and 30 M CPU-ms per month, shared).
+  usage("apps router requests 24h", requests, 333_000, "requests (daily share of 10 M/month)", 0.8);
+  usage("apps router cpu 24h", cpuMs, 1_000_000, "ms (daily share of 30 M/month)", 0.8);
+  if (!d1Token) {
+    report("WARN", "apps", "set CLOUDFLARE_D1_TOKEN to read app builds and bundles");
+    return;
+  }
+  const [builds] = await d1Query<{ count: number }>(
+    "SELECT count FROM usage_counters WHERE day = ? AND counter = 'app-builds'",
+    [today],
+    "prod",
+  );
+  // Live app meters alert at 80 % (docs/plans/phase-16-live-apps.md P16-21).
+  usage("app builds today", builds?.count ?? 0, APP_BUILDS_PER_DAY, "builds (daily cap)", 0.8);
+  const [bundles] = await d1Query<{ versions: number; bytes: number; previews: number }>(
+    `SELECT COUNT(*) AS versions, COALESCE(SUM(bytes), 0) AS bytes,
+            COALESCE(SUM(preview), 0) AS previews
+     FROM (SELECT bundle_key, MAX(bundle_bytes) AS bytes,
+                  MAX(bundle_key LIKE 'app-previews/%') AS preview
+           FROM app_deployments WHERE status = 'ready' AND bundle_key IS NOT NULL
+           GROUP BY bundle_key)`,
+    [],
+    "prod",
+  );
+  // A loaded version is one Dynamic Worker per day, so ready bundles bound the daily count.
+  usage(
+    "app versions that can load",
+    (bundles?.versions ?? 0) * 30,
+    DYNAMIC_WORKERS_PER_MONTH,
+    `Dynamic Workers per month at most (${bundles?.versions ?? 0} bundles, ${bundles?.previews ?? 0} previews)`,
+    0.8,
+  );
+  usage(
+    "app bundle bytes in r2",
+    (bundles?.bytes ?? 0) / 1e6,
+    1_000,
+    "MB (of the 10 GB R2 allowance)",
   );
 });
 
