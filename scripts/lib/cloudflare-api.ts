@@ -49,11 +49,21 @@ export async function cfApiForm<T>(
   form: FormData,
   method = "PUT",
 ): Promise<T> {
-  const response = await fetch(url, {
-    method,
-    headers: { authorization: `Bearer ${token}` },
-    body: form,
-  });
+  // A script upload is a full replace, so a dropped connection is safe to retry (seen: ECONNRESET).
+  let response: Response | undefined;
+  for (let attempt = 1; !response; attempt++) {
+    try {
+      response = await fetch(url, {
+        method,
+        headers: { authorization: `Bearer ${token}` },
+        body: form,
+      });
+    } catch (error) {
+      if (attempt >= 3) throw error;
+      console.warn(`${method} ${new URL(url).pathname}: ${String(error)}; retry ${attempt} of 2`);
+      await Bun.sleep(2000 * attempt);
+    }
+  }
   const body = (await response.json()) as ApiEnvelope<T>;
   if (!response.ok || !body.success) {
     const message = body.errors?.map((e) => `${e.code ?? ""} ${e.message}`.trim()).join("; ");
