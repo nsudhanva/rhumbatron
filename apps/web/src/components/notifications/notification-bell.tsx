@@ -6,8 +6,8 @@ import { formatBadge, NOTIFICATION_KEYS, plural } from "./notification-keys";
 
 /**
  * Inbox entry point in the shell header (DESIGN.md 6.1, 8.4, 10). A square bell with a square
- * count badge: accent while an item needs a decision, ink while there are only unread updates
- * (principle 2: the accent marks what needs a decision).
+ * count badge: red while an item needs a decision, blue while there are only unread updates
+ * (the red badge marks what needs a decision).
  *
  * Load cost: this module holds only the button, the count read, and the title and live-region
  * hooks. The popover (Kumo/Base UI) and the inbox list are one lazy chunk, fetched when the

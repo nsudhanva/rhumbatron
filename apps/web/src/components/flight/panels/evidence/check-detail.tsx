@@ -40,9 +40,9 @@ export function DetailBlock({
 }) {
   return (
     <section className="grid min-w-0 content-start gap-1.5">
-      <div className="flex items-end justify-between gap-3 border-b-2 border-kumo-divider pb-1">
+      <div className="flex items-end justify-between gap-3 border-b border-kumo-rule pb-1">
         <h3 className="type-h6">{label}</h3>
-        {meta !== undefined && <span className="text-[11px] text-kumo-subtle">{meta}</span>}
+        {meta !== undefined && <span className="text-[12px] text-kumo-subtle">{meta}</span>}
       </div>
       {children}
     </section>

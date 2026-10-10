@@ -76,9 +76,10 @@ function TreeRowFrame({
 }
 
 /**
- * Tree list of the canonical Artifact and its forks (DESIGN.md 9.11): mono 12px rows with
- * box-drawing prefixes. Each fork row is a button; the whole row is the target, and the selected
- * row carries the faint fill and the 2px accent bar (section 10). Scrolls sideways when narrow.
+ * Tree list of the live code (canonical Artifact) and its forks, shown behind "Show as tree" on
+ * the Code page: mono 12px rows with box-drawing prefixes. Each fork row is a button; the whole
+ * row is the target, and the selected row carries the faint fill and a 2px accent bar. Scrolls
+ * sideways when narrow.
  */
 export function ForkTree({
   root,
@@ -98,7 +99,7 @@ export function ForkTree({
           aria-hidden
           className={cn(
             COLUMNS,
-            "type-label border-b-2 border-kumo-divider px-2 pb-2 font-sans text-kumo-subtle",
+            "border-b border-kumo-rule px-2 pb-2 font-sans text-[12px] text-kumo-subtle",
           )}
         >
           <span>Repo</span>
@@ -108,7 +109,7 @@ export function ForkTree({
           <span>State</span>
           <span className="text-right">Status</span>
         </div>
-        <ul aria-label="Canonical Artifact and forks">
+        <ul aria-label="Live code and its copies">
           <li className={cn(COLUMNS, "border-b border-kumo-rule px-2 py-2")}>
             <TreeRowFrame
               strong
@@ -117,8 +118,8 @@ export function ForkTree({
               base={generation(root.generation)}
               hash={shortSha(root.hash) ?? <span className="text-kumo-subtle">{EMPTY}</span>}
               stat={<span className="text-kumo-subtle">{EMPTY}</span>}
-              state="canonical"
-              pill={<Tag>Canonical</Tag>}
+              state="live code"
+              pill={<Tag>Live</Tag>}
             />
           </li>
           {rows.map((row, index) => {
@@ -132,7 +133,7 @@ export function ForkTree({
                   onClick={() => onSelect(row.key)}
                   className={cn(
                     COLUMNS,
-                    "w-full cursor-pointer px-2 py-2 text-left transition-colors duration-(--rh-dur-ui) hover:bg-kumo-row-hover focus-visible:outline-offset-[-2px]",
+                    "w-full cursor-pointer px-2 py-2 text-left transition-colors duration-150 hover:bg-kumo-row-hover focus-visible:outline-offset-[-2px]",
                     selected && "bg-kumo-faint shadow-[inset_2px_0_0_var(--color-accent-500)]",
                   )}
                 >

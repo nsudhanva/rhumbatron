@@ -2,23 +2,23 @@ import { cn } from "@cloudflare/kumo";
 import { type ReactNode, useId } from "react";
 
 /**
- * Page anatomy (DESIGN.md 6.2). A page is:
+ * Page anatomy (docs/ux/research-2026-10-09.md 8.3). A page is:
  *
  *   <Page>
  *     <PageTitle kicker="Project" title={project.name} actions={<Button variant="primary">…</Button>} />
- *     <StatStrip>…</StatStrip>
  *     <Section label="Changes" meta={<Mono subtle>{count}</Mono>}>…rows…</Section>
  *     <TwoUp>
- *       <Section label="Acceptance criteria">…</Section>
- *       <Section label="Protected invariants">…</Section>
+ *       <Section label="Done when">…</Section>
+ *       <Section label="Must not change">…</Section>
  *     </TwoUp>
  *   </Page>
  */
 
 /**
- * The page's <main> landmark: max 1320px, padding 24 top / 28 sides / 48 bottom (16px sides
- * on narrow screens), 28px between sections. Pass `gap="tight"` for 24px. Pass `width="full"`
- * for a full-bleed console (Flight Control) that keeps the same padding without the max width.
+ * The page's <main> landmark: max 1200px, padding 24 top / 24 sides / 48 bottom (16px sides
+ * on narrow screens), 32px between sections. Pass `gap="tight"` for 16px (the card gap). Pass
+ * `width="full"` for a full-bleed console (Debug view) that keeps the padding without the max
+ * width.
  */
 export function Page({
   children,
@@ -34,9 +34,9 @@ export function Page({
   return (
     <main
       className={cn(
-        "mx-auto grid w-full content-start px-7 pt-6 pb-12 max-[720px]:px-4",
-        width === "page" && "max-w-[1320px]",
-        gap === "normal" ? "gap-7" : "gap-6",
+        "mx-auto grid w-full content-start px-6 pt-6 pb-12 max-[720px]:px-4",
+        width === "page" && "max-w-[1200px]",
+        gap === "normal" ? "gap-8" : "gap-4",
         className,
       )}
     >
@@ -47,10 +47,10 @@ export function Page({
 Page.displayName = "Page";
 
 /**
- * Title block: kicker (uppercase, accent) above the h1, page actions aligned bottom right.
- * Actions wrap below the title on narrow widths. One h1 per page. `size="detail"` uses the
- * 32px h2 scale for detail pages (Change, Candidate), still rendered as the page's <h1>.
- * `meta` is an optional line under the title (mono IDs, base generation, age).
+ * Title block: an optional small context line (`kicker`, 12px subtle) above the h1, page
+ * actions aligned bottom right. Actions wrap below the title on narrow widths. One h1 per page:
+ * 24px, or 20px with `size="detail"` for detail pages (Change, Version) whose title is long.
+ * `meta` is an optional line under the title (age, base release, cost).
  */
 export function PageTitle({
   kicker,
@@ -69,8 +69,8 @@ export function PageTitle({
 }) {
   return (
     <header className={cn("flex flex-wrap items-end justify-between gap-x-6 gap-y-3", className)}>
-      <div className="grid min-w-0 gap-2">
-        {kicker && <p className="type-kicker text-kumo-accent">{kicker}</p>}
+      <div className="grid min-w-0 gap-1">
+        {kicker && <p className="type-meta text-kumo-subtle">{kicker}</p>}
         <h1 className={cn("min-w-0 break-words", size === "page" ? "type-h1" : "type-h2")}>
           {title}
         </h1>
@@ -87,9 +87,9 @@ export function PageTitle({
 PageTitle.displayName = "PageTitle";
 
 /**
- * Section label row (DESIGN.md 6.2.3): the `h6` style label on the left, an optional count,
- * meta or ghost link on the right, above a 2px divider. Renders an <h2> by default so the
- * document outline stays correct; pass `as="h3"` inside a sub-section.
+ * Section label row: a 16px/600 heading on the left, an optional count, meta or link on the
+ * right, above a 1px rule. Renders an <h2> by default so the document outline stays correct;
+ * pass `as="h3"` inside a sub-section.
  */
 export function SectionLabel({
   children,
@@ -107,11 +107,11 @@ export function SectionLabel({
   return (
     <div
       className={cn(
-        "flex min-h-7 items-end justify-between gap-3 border-b-2 border-kumo-divider pb-2",
+        "flex min-h-7 items-end justify-between gap-3 border-b border-kumo-rule pb-2",
         className,
       )}
     >
-      <Heading id={id} className="type-h6">
+      <Heading id={id} className="type-h3">
         {children}
       </Heading>
       {meta && (
@@ -122,7 +122,7 @@ export function SectionLabel({
 }
 SectionLabel.displayName = "SectionLabel";
 
-/** A labelled section: SectionLabel, then the content 12px below the divider. */
+/** A labelled section: SectionLabel, then the content 12px below the rule. */
 export function Section({
   label,
   meta,
@@ -148,12 +148,12 @@ export function Section({
 }
 Section.displayName = "Section";
 
-/** Two-up row (6.2.4): columns of at least 420px that wrap, 28px gap. */
+/** Two-up row: columns of at least 420px that wrap; 24px between columns, 32px when stacked. */
 export function TwoUp({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
       className={cn(
-        "grid grid-cols-[repeat(auto-fit,minmax(min(100%,420px),1fr))] gap-7",
+        "grid grid-cols-[repeat(auto-fit,minmax(min(100%,420px),1fr))] gap-x-6 gap-y-8",
         className,
       )}
     >

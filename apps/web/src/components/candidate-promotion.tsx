@@ -1,22 +1,28 @@
 import { useUser } from "@clerk/tanstack-react-start";
 import { Button } from "@cloudflare/kumo";
-import { ArrowRight, CheckCircle, RocketLaunch } from "@phosphor-icons/react";
+import { ArrowRight, CheckCircle, HandPalm, RocketLaunch } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { type ApprovalWithName, type CandidateDetail, promoteCandidate } from "../lib/api";
-import { generation, timeAgo } from "../lib/format";
+import {
+  type ApprovalWithName,
+  type CandidateDetail,
+  promoteCandidate,
+  type Release,
+} from "../lib/api";
+import { generation, generationCode, timeAgo } from "../lib/format";
 import { ApprovalDialog } from "./candidate/approval-dialog";
 import { Banner } from "./candidate/banner";
 import { type CheckRow, gateRule, shortHash } from "./candidate/model";
+import { TechnicalDetails } from "./candidate/technical-details";
+import { KeyValue } from "./ui/key-value";
 import { Mono } from "./ui/mono";
 import { StatusPill } from "./ui/status-pill";
 
 /**
- * Human gate and promotion for one Candidate (AGENTS.md sections 36, 38.4). The buttons only send
- * a request: the API takes the approver from the session, and the integration Worker plus
- * ProjectRootDO re-check every precondition. A disabled button here is a hint, not the gate.
- * Feedback is optimistic but honest (DESIGN.md 10): progress while the request runs, success only
- * after the compare-and-swap returns.
+ * "Your approval and shipping" for one version (AGENTS.md sections 36, 38.4; spec 7.4 steps 4-5).
+ * The buttons only send a request: the API takes the approver from the session, and the server
+ * re-checks every condition before the release advances. A disabled button here is a hint, not
+ * the gate. Feedback is honest: progress while the request runs, success only after it returns.
  */
 export function CandidatePromotion({
   candidate,
@@ -47,26 +53,29 @@ export function CandidatePromotion({
   const verified = candidate.status === "verified" && candidate.gate?.promotable === true;
   const awaitingApproval = verified && candidate.approvalRequired && !approval;
   const canPromote = verified && (!candidate.approvalRequired || approval?.decision === "granted");
-  const from = generation(candidate.baseGeneration);
-  const to = generation(candidate.promotedGeneration ?? candidate.baseGeneration + 1);
+  const fromGen = candidate.baseGeneration;
+  const toGen = candidate.promotedGeneration ?? candidate.baseGeneration + 1;
+  const from = generation(fromGen);
+  const to = generation(toGen);
   const rule = gateRule(candidate, riskTier);
   const promoted = promote.data;
+  const shipped = candidate.status === "promoted" || !!promoted;
 
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <div className="grid gap-1">
-          <p className="flex items-center gap-2 font-mono text-[20px] font-semibold tabular-nums">
+          <p className="flex items-center gap-2 text-[16px] font-semibold">
             <span>{from}</span>
             <ArrowRight size={16} aria-label="to" className="text-kumo-subtle" />
-            <span className={candidate.status === "promoted" ? "" : "text-kumo-subtle"}>{to}</span>
+            <span className={shipped ? "" : "text-kumo-subtle"}>{to}</span>
           </p>
-          <p className="max-w-[760px] text-[13px] text-pretty">{rule}</p>
+          <p className="max-w-[760px] text-[14px] text-pretty">{rule}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {awaitingApproval && (
             <>
-              <Button variant="primary" icon={CheckCircle} onClick={() => setDialogOpen(true)}>
+              <Button variant="primary" icon={HandPalm} onClick={() => setDialogOpen(true)}>
                 Review and approve
               </Button>
               <Button variant="secondary" onClick={() => setDialogOpen(true)}>
@@ -81,41 +90,53 @@ export function CandidatePromotion({
               loading={promote.isPending}
               onClick={() => promote.mutate()}
             >
-              Promote {from} → {to}
+              Ship {to}
             </Button>
           )}
         </div>
       </div>
 
       {approval && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y border-kumo-rule py-2 text-[13px]">
-          <StatusPill status={approval.decision === "granted" ? "approved" : "rejected"} />
-          <span>
-            {approval.decision === "granted" ? "Approved" : "Rejected"} by{" "}
-            <ApproverName approval={approval} me={user ? `usr_${user.id}` : null} />{" "}
-            {timeAgo(approval.createdAt)} for tree <Mono>{shortHash(approval.candidateTree)}</Mono>{" "}
-            under <Mono>{approval.policyVersion}</Mono>
-          </span>
-          {approval.reason && <span className="text-kumo-subtle">· {approval.reason}</span>}
+        <div className="grid gap-1 border-y border-kumo-rule py-2 text-[14px]">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {approval.decision === "granted" ? (
+              <StatusPill status="approved" />
+            ) : (
+              <StatusPill status="rejected" label="Rejected" />
+            )}
+            <span>
+              {approval.decision === "granted" ? "Approved" : "Rejected"} by{" "}
+              <ApproverName approval={approval} me={user ? `usr_${user.id}` : null} />{" "}
+              {timeAgo(approval.createdAt)}
+              {approval.reason ? `: ${approval.reason}` : ""}
+            </span>
+          </div>
+          <TechnicalDetails>
+            <KeyValue
+              items={[
+                { label: "Approved tree", value: approval.candidateTree, mono: true },
+                { label: "Policy", value: approval.policyVersion, mono: true },
+              ]}
+            />
+          </TechnicalDetails>
         </div>
       )}
 
-      {decided && !approval && (
-        <Banner family="progress" title="Recording the decision">
-          The decision was accepted. Refreshing the Candidate to show it.
+      {decided && !approval && !promote.isPending && !promoted && (
+        <Banner family="progress" title="Saving your decision">
+          Your decision was accepted. Refreshing this version to show it.
         </Banner>
       )}
 
       {promote.isPending && (
-        <Banner family="progress" title={`Promoting ${from} → ${to}`}>
-          ProjectRootDO checks every precondition, runs the compare-and-swap, then syncs the
-          canonical source. Waiting for the result.
+        <Banner family="progress" title={`Shipping ${to}...`}>
+          Checking every condition, saving the release, then syncing the code.
         </Banner>
       )}
       {promote.isError && (
         <Banner
           family="danger"
-          title="Promotion did not happen"
+          title="Shipping failed"
           action={
             <Button
               size="sm"
@@ -127,24 +148,36 @@ export function CandidatePromotion({
             </Button>
           }
         >
-          {promote.error.message} The Canonical Generation did not change.
+          {promote.error.message.replace(/\.?$/, ".")} Nothing changed in the live release.
         </Banner>
       )}
       {promoted && (
         <Banner
           family="success"
-          title={`Promoted · ${generation(promoted.fromGeneration)} → ${generation(promoted.generation)}`}
+          title={`Shipped: ${generation(promoted.fromGeneration)} → ${generation(promoted.generation)}`}
         >
           {promoted.alreadyPromoted
-            ? "This Candidate was already promoted; the generation did not advance twice."
-            : "The compare-and-swap succeeded. The Canonical Generation advanced once."}{" "}
-          Tree <Mono>{shortHash(promoted.treeSha)}</Mono>.
+            ? "This version was already shipped; the release did not advance twice."
+            : `${label} is now ${generation(promoted.generation)}.`}
+          <TechnicalDetails className="pt-1">
+            <KeyValue
+              items={[
+                {
+                  label: "Transition",
+                  value: `${generationCode(promoted.fromGeneration)} → ${generationCode(promoted.generation)}`,
+                  mono: true,
+                },
+                { label: "Tree", value: promoted.treeSha, mono: true },
+                { label: "Source commit", value: promoted.sourceCommit, mono: true },
+              ]}
+            />
+          </TechnicalDetails>
         </Banner>
       )}
       {promoted && !promoted.sourceSynced && (
         <Banner
           family="attention"
-          title="Source sync did not finish"
+          title="Release saved; code copy did not finish"
           action={
             <Button
               size="sm"
@@ -157,30 +190,34 @@ export function CandidatePromotion({
             </Button>
           }
         >
-          {generation(promoted.generation)} is canonical, but the canonical source was not updated.
-          Retry is safe: the generation does not advance twice.
+          {generation(promoted.generation)} is saved, but its code was not copied yet. Retrying is
+          safe: the release does not advance twice.
         </Banner>
       )}
 
       {!promoted && candidate.status === "promoted" && (
-        <p className="text-[13px]">
-          Canonical Generation advanced {from} → {to}. The decision and Evidence stay on record.
+        <p className="flex items-center gap-2 text-[14px]">
+          <CheckCircle size={16} className="shrink-0 text-kumo-success" aria-hidden />
+          Shipped: {from} → {to}.
         </p>
       )}
+      {candidate.status === "promoted" && candidate.release && (
+        <ReleaseStatus release={candidate.release} />
+      )}
       {candidate.status === "stale" && (
-        <p className="text-[13px] text-pretty">
-          {candidate.statusReason ?? "The canonical state moved."} A stale Candidate cannot promote.
-          Compose a new Candidate on the current generation.
+        <p className="text-[14px] text-pretty">
+          This version is out of date because another change shipped first, so it can't ship. Run
+          the checks again to build it on the current release.
         </p>
       )}
       {!verified && !["promoted", "stale"].includes(candidate.status) && !approval && (
-        <p className="text-[13px] text-kumo-subtle">
-          Promotion opens after every required check passes with supporting Evidence.
+        <p className="text-[14px] text-kumo-subtle">
+          Shipping opens after every required check passes.
         </p>
       )}
       {verified && candidate.approvalRequired && approval?.decision === "rejected" && (
-        <p className="text-[13px] text-kumo-subtle">
-          A rejected Candidate cannot promote. The first decision is final.
+        <p className="text-[14px] text-kumo-subtle">
+          A rejected version can't ship. The first decision is final.
         </p>
       )}
 
@@ -194,6 +231,8 @@ export function CandidatePromotion({
           rule={rule}
           onDecided={(decision) => {
             setDecided(decision);
+            // "Approve and ship": the approval is recorded, so ship right away.
+            if (decision === "approve") promote.mutate();
             void refresh();
           }}
         />
@@ -216,3 +255,73 @@ function ApproverName({ approval, me }: { approval: ApprovalWithName; me: string
   return <Mono>{approval.approverUserId}</Mono>;
 }
 ApproverName.displayName = "ApproverName";
+
+/**
+ * Deployment of a shipped release (AGENTS.md sections 21.3, 37, 42.10; ADR 0018). The release is
+ * built from the saved code, deployed, then smoke-checked. A failed deployment never moves the
+ * release back: the previous app stays live and recovery is a new ship.
+ */
+function ReleaseStatus({ release }: { release: Release }) {
+  const gen = generation(release.generation);
+  const details = (
+    <TechnicalDetails className="pt-1">
+      <KeyValue
+        items={[
+          { label: "Worker", value: release.workerName, mono: true },
+          { label: "Commit", value: shortHash(release.commit), mono: true },
+          { label: "Version", value: release.versionId, mono: true },
+          { label: "Release", value: generationCode(release.generation), mono: true },
+        ]}
+      />
+    </TechnicalDetails>
+  );
+  if (release.status === "queued" || release.status === "building") {
+    return (
+      <Banner family="progress" title={`Deploying ${gen}`}>
+        Building the release, then running a smoke check.
+        {details}
+      </Banner>
+    );
+  }
+  if (release.status === "deployed") {
+    return (
+      <div className="grid gap-1 border-y border-kumo-rule py-2 text-[14px]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <StatusPill status="deployed" label="Live" />
+          <span className="font-semibold">{gen} is live</span>
+          {release.url && (
+            <a
+              href={release.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-kumo-link underline-offset-2 hover:underline"
+            >
+              Open the app
+            </a>
+          )}
+          {release.finishedAt && (
+            <span className="text-[12px] text-kumo-subtle">
+              deployed {timeAgo(release.finishedAt)}
+            </span>
+          )}
+        </div>
+        {details}
+      </div>
+    );
+  }
+  if (release.status === "superseded") {
+    return (
+      <p className="text-[14px] text-kumo-subtle">
+        {gen} was replaced by a newer release before it deployed.
+      </p>
+    );
+  }
+  return (
+    <Banner family="danger" title={`${gen} was saved but did not deploy`}>
+      Your previous app is still live.
+      {release.failureReason ? ` ${release.failureReason}` : ""}
+      {details}
+    </Banner>
+  );
+}
+ReleaseStatus.displayName = "ReleaseStatus";

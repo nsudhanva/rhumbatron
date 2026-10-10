@@ -9,9 +9,9 @@ import type {
 import type { ActivityInput } from "./activity-model";
 
 /**
- * Fixture records for the agent-activity preview (`AgentActivityPreview` in agent-activity.tsx).
- * They are shaped exactly like the API responses and go through the same derivation as the
- * Change page: the Wishlist story with one design conflict, two Candidates, a rejected loser and
+ * Fixture records for the Debug view preview (`/design/flight`, via flight-fixture.ts). They are
+ * shaped exactly like the API responses and go through the same derivation as the live Debug
+ * view: the Wishlist story with one design conflict, two Candidates, a rejected loser and
  * a promoted winner. Built inside a function so product bundles drop it when unused.
  */
 

@@ -47,7 +47,7 @@ export function UsageMeters({
             unit="calls"
             points={days.map((d) => ({ label: d.day, value: d.count }))}
           />
-          <p className="font-mono text-[10px] text-kumo-subtle">
+          <p className="font-mono text-[12px] text-kumo-subtle">
             last {days.length} days · peak {formatNumber(Math.max(0, ...days.map((d) => d.count)))}
           </p>
         </div>
@@ -84,10 +84,10 @@ export function UsageMeters({
         <CapMeter label="monthly cap" value={sandboxHours} cap={sandboxCap} format={formatHours} />
       </StatCell>
       <StatCell
-        label="Clef-flash today"
+        label="Decision model today"
         value={formatNumber(meters.clefFlashCallsToday)}
         unit={`/ ${formatNumber(meters.clefDailyCap)}`}
-        footnote="account-wide · wakeups and routes"
+        footnote="Clef-flash · account-wide · wakeups and routes"
       >
         <CapMeter
           label="daily cap"
@@ -99,7 +99,7 @@ export function UsageMeters({
       <StatCell
         label="Project model spend"
         value={formatCost(projectSpend)}
-        footnote={`${formatNumber(projectCalls)} calls · newest ${formatNumber(changes.length)} Changes`}
+        footnote={`${formatNumber(projectCalls)} calls · newest ${formatNumber(changes.length)} changes`}
       />
     </StatStrip>
   );

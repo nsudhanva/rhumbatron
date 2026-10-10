@@ -31,10 +31,10 @@ function statsOf(changeSet: WorkspaceChangeSet): WorkspaceFileStat[] {
 }
 
 /**
- * ChangeSet diff summary in the diff viewer dress (DESIGN.md 9.10): an elevated mono well whose
- * header shows the fork and commit, then `+N −M`. One row per changed file: index gutter, sign
- * column, path, and the file's green/red counts with a proportional bar. Line-level hunks are not
- * stored, so the raw `git diff --stat` is one click away instead.
+ * "Files changed" for one code change (ChangeSet): a header with the file count and `+N −M`,
+ * then one row per changed file with an index gutter, sign column, path, and the file's
+ * green/red counts with a proportional bar. The fork and commits sit in the header's tooltip.
+ * Line-level hunks are not stored, so the raw `git diff --stat` is one click away instead.
  */
 export function DiffSummary({ changeSet }: { changeSet: WorkspaceChangeSet }) {
   const stats = statsOf(changeSet);
@@ -43,24 +43,22 @@ export function DiffSummary({ changeSet }: { changeSet: WorkspaceChangeSet }) {
   const digits = Math.max(2, String(stats.length).length);
   return (
     <div className="grid min-w-0 gap-3">
-      <figure className="min-w-0 rule-ink bg-kumo-elevated">
-        <figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-kumo-rule px-3 py-2 font-mono text-[12px]">
-          <span className="min-w-0 truncate">
-            <span className="font-semibold">{changeSet.fork}</span>
-            <span className="text-kumo-subtle">
-              {" "}
-              @ {shortSha(changeSet.commit)} ← {shortSha(changeSet.baseCommit)}
-            </span>
+      <figure className="min-w-0 overflow-hidden rounded-lg border border-kumo-rule bg-kumo-base">
+        <figcaption
+          title={`${changeSet.fork} @ ${shortSha(changeSet.commit)} from ${shortSha(changeSet.baseCommit)}`}
+          className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-kumo-rule px-3 py-2 text-[13px]"
+        >
+          <span className="font-semibold">
+            {formatNumber(stats.length)} {stats.length === 1 ? "file" : "files"} changed
           </span>
-          <span className="flex items-baseline gap-3">
-            <AddsDels adds={changeSet.insertions} dels={changeSet.deletions} />
-            <span className="text-kumo-subtle">
-              {formatNumber(stats.length)} {stats.length === 1 ? "file" : "files"}
-            </span>
-          </span>
+          <AddsDels
+            adds={changeSet.insertions}
+            dels={changeSet.deletions}
+            className="font-mono text-[12px]"
+          />
         </figcaption>
         {stats.length === 0 ? (
-          <p className="px-3 py-2 font-mono text-[12px] text-kumo-subtle">No files recorded.</p>
+          <p className="px-3 py-2 text-[12px] text-kumo-subtle">No files recorded.</p>
         ) : (
           <ol
             aria-label="Changed files"
@@ -106,7 +104,7 @@ export function DiffSummary({ changeSet }: { changeSet: WorkspaceChangeSet }) {
                       style={{ width: `${(adds / widest) * 100}%` }}
                     />
                     <span
-                      className="h-full bg-accent-500"
+                      className="h-full bg-kumo-danger"
                       style={{ width: `${(dels / widest) * 100}%` }}
                     />
                   </span>
@@ -116,10 +114,10 @@ export function DiffSummary({ changeSet }: { changeSet: WorkspaceChangeSet }) {
           </ol>
         )}
       </figure>
-      <p className="text-[11px] text-kumo-subtle">
+      <p className="text-[12px] text-kumo-subtle">
         Totals are exact from git.
-        {estimated && " Italic per-file counts are split from a scaled stat bar."} Line-level hunks
-        are not stored with the ChangeSet; the commit is in the Artifacts fork.
+        {estimated && " Italic per-file counts are estimated from a scaled stat bar."} Line-by-line
+        changes are not stored here; the saved commit holds them.
       </p>
       {changeSet.diffStat && (
         <details className="group">

@@ -1,8 +1,6 @@
 import { env } from "cloudflare:workers";
 import { ClerkProvider } from "@clerk/tanstack-react-start";
 import { LinkProvider } from "@cloudflare/kumo";
-import archivo400 from "@fontsource/archivo/files/archivo-latin-400-normal.woff2?url";
-import archivo600 from "@fontsource/archivo/files/archivo-latin-600-normal.woff2?url";
 import type { QueryClient } from "@tanstack/react-query";
 import {
   Asset,
@@ -40,23 +38,14 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       {
         name: "description",
         content:
-          "Rhumbatron lets many agents propose many futures of one codebase. Only verified evidence advances the canonical state.",
+          "Describe a change to your app. AI agents build it, automatic checks decide which version ships, and you approve the risky ones.",
       },
       // Light is the default mode (DESIGN.md 3.1; the boot script applies a stored dark choice).
       // The ground color: meta tags cannot read CSS tokens.
       { name: "color-scheme", content: "light" },
-      { name: "theme-color", content: "#f3f2f2" },
+      { name: "theme-color", content: "#f7f8fa" },
     ],
     links: [
-      // Archivo 400/600 carry almost all text; fetch them with the stylesheet, not after it.
-      // Production only: the dev server serves the stylesheet's fonts from another URL.
-      ...(import.meta.env.PROD ? [archivo400, archivo600] : []).map((href) => ({
-        rel: "preload",
-        as: "font",
-        type: "font/woff2",
-        href,
-        crossOrigin: "anonymous" as const,
-      })),
       { rel: "stylesheet", href: appCss },
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
     ],

@@ -15,7 +15,7 @@ const SOCKET: Record<LiveStatus, string> = {
 };
 
 /**
- * Systems View detail of the event plane (AGENTS.md 8.2, 19, 38.7): where this Project's events
+ * Technical detail of the event plane, shown only with "Show technical details" on (AGENTS.md 8.2, 19, 38.7): where this Project's events
  * flow and how far the feed trails the facts. Ingest lag is recorded time minus occurred time:
  * outbox publish delay, K2 delivery and the projector write together. The loaded rows are the
  * sample; nothing here is a release signal.
@@ -40,7 +40,7 @@ export function EventPlane({
   }, [events]);
 
   return (
-    <Section label="Event plane" meta="Systems View">
+    <Section label="Stream, lag and retention">
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] gap-x-7 gap-y-3">
         <KeyValue
           items={[

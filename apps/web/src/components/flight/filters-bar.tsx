@@ -61,7 +61,7 @@ function Chip({
     >
       {children}
       {count !== undefined && (
-        <span className="font-mono text-[11px] tabular-nums opacity-70">{formatNumber(count)}</span>
+        <span className="font-mono text-[12px] tabular-nums opacity-70">{formatNumber(count)}</span>
       )}
     </button>
   );
@@ -136,7 +136,7 @@ export function FiltersBar() {
 
       <fieldset className="flex flex-wrap items-center gap-1.5">
         <legend className="sr-only">Model tier</legend>
-        <span aria-hidden className="text-[11px] tracking-[0.08em] text-kumo-subtle uppercase">
+        <span aria-hidden className="text-[12px] text-kumo-subtle">
           Tier
         </span>
         {TIER_FILTERS.map((tier) => (
@@ -162,7 +162,7 @@ export function FiltersBar() {
       {families.length > 0 && (
         <fieldset className="flex flex-wrap items-center gap-1.5">
           <legend className="sr-only">Event families</legend>
-          <span aria-hidden className="text-[11px] tracking-[0.08em] text-kumo-subtle uppercase">
+          <span aria-hidden className="text-[12px] text-kumo-subtle">
             Events
           </span>
           {families.map(({ family, count }) => (

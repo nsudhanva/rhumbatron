@@ -4,6 +4,7 @@ import {
   type CheckVerdict,
   candidateLabels,
   checkRows,
+  criterion,
   isActive,
   p95Budget,
   p95Of,
@@ -21,7 +22,7 @@ export type ChangeRef = ProjectVerification["changes"][number];
 
 export type VerifiedCandidate = {
   candidate: CandidateDetail;
-  /** "Baseline", "Candidate A", ... within its Change (same names as the compare page). */
+  /** "Baseline", "Version A", ... within its Change (same names as the compare page). */
   label: string;
   change: ChangeRef | undefined;
   /** Candidates of the same Change in this window; the compare link needs at least two. */
@@ -94,56 +95,34 @@ export function stagesOf(c: CandidateDetail): Set<Stage> {
   return stages;
 }
 
+/** Counts for the one summary sentence under the title. */
 export function stats(items: VerifiedCandidate[]) {
-  const count = (status: CandidateDetail["status"]) =>
-    items.filter((i) => i.candidate.status === status).length;
-  const required = items.flatMap((i) => i.rows.filter((r) => r.required));
-  const p95s = items
-    .filter((i) => !isActive(i.candidate) && i.p95 !== null)
-    .map((i) => i.p95 as number)
-    .sort((a, b) => a - b);
-  const budget = items.find((i) => i.budget !== null)?.budget ?? null;
+  const count = (...status: CandidateDetail["status"][]) =>
+    items.filter((i) => status.includes(i.candidate.status)).length;
   return {
     total: items.length,
-    verified: count("verified") + count("promoted"),
-    promoted: count("promoted"),
-    rejected: count("rejected"),
-    stale: count("stale"),
-    inFlight: items.filter((i) => isActive(i.candidate)).length,
-    requiredMet: required.filter((r) => r.verdict === "pass").length,
-    requiredTotal: required.length,
-    requiredFailed: required.filter((r) => r.verdict === "fail").length,
-    requiredGaps: required.filter((r) => r.verdict === "gap").length,
-    requiredPending: required.filter((r) => r.verdict === "pending").length,
-    medianP95: median(p95s),
-    p95Measured: p95s.length,
-    p95Values: p95s,
-    budget,
+    passed: count("verified", "promoted"),
+    setAside: count("rejected"),
+    outOfDate: count("stale"),
+    checking: items.filter((i) => isActive(i.candidate)).length,
   };
 }
 
-function median(sorted: number[]): number | null {
-  if (sorted.length === 0) return null;
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1
-    ? (sorted[mid] as number)
-    : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
-}
-
-/** Gate words for a table row: "7 / 7 met", "5 / 7 met · performance timed out". */
-export function gateWords(item: VerifiedCandidate): string {
+/** Check words for a table row: "7 of 7 passed", "5 of 7 passed · Performance over the limit". */
+export function checksWords(item: VerifiedCandidate): string {
   const { tally, candidate } = item;
   if (tally.total === 0) {
-    return isActive(candidate) ? "plan pending" : (candidate.statusReason ?? "no required checks");
+    return isActive(candidate) ? "Checks not planned yet" : "No required checks";
   }
-  const head = `${tally.met} / ${tally.total} met`;
+  const head = `${tally.met} of ${tally.total} passed`;
   const problem = tally.failed[0] ?? tally.gaps[0];
   if (problem) {
     const more = tally.failed.length + tally.gaps.length - 1;
+    const name = criterion(problem, item.budget).title;
     const reason = REASON_WORDS[problem.reason ?? "missing"];
-    return `${head} · ${problem.kind}: ${reason}${more > 0 ? ` · +${more} more` : ""}`;
+    return `${head} · ${name} ${reason}${more > 0 ? ` · ${more} more` : ""}`;
   }
-  if (tally.pending.length > 0) return `${head} · ${tally.pending.length} pending`;
+  if (tally.pending.length > 0) return `${head} · ${tally.pending.length} queued`;
   return head;
 }
 

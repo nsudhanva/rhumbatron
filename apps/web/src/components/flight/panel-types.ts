@@ -1,5 +1,5 @@
 /**
- * Shared panel contract. Every Flight Control panel is a named export with this signature and is
+ * Shared panel contract. Every Debug view panel is a named export with this signature and is
  * loaded lazily by the page (flight-page.tsx) so the route's first paint stays small.
  *
  *   export function DagPanel({ focused }: PanelProps) { const { state } = useFlight(); ... }

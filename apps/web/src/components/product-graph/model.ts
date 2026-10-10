@@ -1,7 +1,7 @@
 import type { ProductGraph, ProductGraphEdge, ProductGraphNode } from "../../lib/api";
 
 /**
- * Product Graph view model (AGENTS.md 28, 38.3; DESIGN.md 9.13). Pure functions: the graph the
+ * Product map view model (internal name Product Graph; AGENTS.md 28, 38.3; DESIGN.md 9.13). Pure functions: the graph the
  * API derived, a zoom level and a Change in, the visible subgraph with node states and a
  * deterministic layered layout out.
  *
@@ -40,10 +40,11 @@ export type GraphView = {
   positions: Map<string, { x: number; y: number }>;
 };
 
+/** Plain labels (spec 7.6): "affected" areas are the ones the change edits. */
 export const STATE_LABEL: Record<AreaState, string> = {
   new: "New",
-  affected: "Affected",
-  protected: "Protected",
+  affected: "Changed",
+  protected: "Must not change",
   unchanged: "Unchanged",
 };
 

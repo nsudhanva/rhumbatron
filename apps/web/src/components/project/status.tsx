@@ -1,10 +1,10 @@
 import { cn } from "@cloudflare/kumo";
-import { EMPTY } from "../../lib/format";
 import { type StatusFamily, StatusPill } from "../ui/status-pill";
 
 /**
- * Project and Change status words for the project pages. The shared vocabulary in
- * components/ui/status-pill covers most values; these fill the gaps without changing it.
+ * Change status words for the project pages (research 7.4): one plain word per Change status.
+ * The shared vocabulary in components/ui/status-pill covers Tasks, checks and versions; a
+ * Change reads differently ("Building", not "Running"), so its words live here.
  */
 
 /** Change statuses that still have work in flight (protocol `ChangeStatus`). */
@@ -18,10 +18,19 @@ export const ACTIVE_CHANGE_STATUSES = new Set([
   "releasing",
 ]);
 
-/** Change statuses the shared vocabulary does not know yet. */
+/** The headline word per Change status (research 7.4, "Status headline formulas"). */
 const CHANGE_OVERRIDES: Record<string, { family: StatusFamily; label: string }> = {
-  promoting: { family: "active", label: "Promoting" },
-  releasing: { family: "active", label: "Releasing" },
+  created: { family: "idle", label: "Queued" },
+  compiling: { family: "active", label: "Planning" },
+  running: { family: "active", label: "Building" },
+  verifying: { family: "active", label: "Checking" },
+  awaiting_approval: { family: "attention", label: "Needs your approval" },
+  promoting: { family: "active", label: "Shipping" },
+  releasing: { family: "active", label: "Publishing" },
+  completed: { family: "ok", label: "Shipped" },
+  failed: { family: "danger", label: "Failed" },
+  budget_blocked: { family: "attention", label: "Paused" },
+  cancelled: { family: "idle", label: "Cancelled" },
 };
 
 export function ChangeStatusPill({ status }: { status: string }) {
@@ -31,44 +40,37 @@ export function ChangeStatusPill({ status }: { status: string }) {
 ChangeStatusPill.displayName = "ChangeStatusPill";
 
 /**
- * A Project is `active` or `archived`. "Active" here means open for work, not "running right
- * now", so it reads as ok rather than the inverted ink of the active family.
+ * Task progress: "3 of 5 tasks done" above a 4px bar that turns success when complete. With no
+ * Tasks yet it reads "No tasks yet".
  */
-const PROJECT_STATUS: Record<string, { family: StatusFamily; label: string }> = {
-  active: { family: "ok", label: "Active" },
-  archived: { family: "idle", label: "Archived" },
-};
-
-export function ProjectStatusPill({ status }: { status: string }) {
-  return <StatusPill status={status} {...(PROJECT_STATUS[status] ?? {})} />;
-}
-ProjectStatusPill.displayName = "ProjectStatusPill";
-
-/**
- * Task progress for a table cell (DESIGN.md 9.1): a 4px inline bar with the mono "done / total"
- * beside it. Complete turns `success`. With no Tasks yet the cell reads as an em dash.
- */
-export function TaskProgress({ done, total }: { done: number; total: number }) {
+export function TaskProgress({
+  done,
+  total,
+  className,
+}: {
+  done: number;
+  total: number;
+  className?: string;
+}) {
   if (total === 0) {
-    return <span className="font-mono text-[12px] text-kumo-subtle">{EMPTY}</span>;
+    return <p className={cn("text-[12px] text-kumo-subtle", className)}>No tasks yet</p>;
   }
   const complete = done >= total;
   return (
-    <span className="inline-flex w-full max-w-40 items-center justify-end gap-2">
-      <span aria-hidden className="h-1 min-w-10 grow bg-kumo-recessed">
+    <div className={cn("grid gap-1.5", className)}>
+      <p className="text-[12px] text-kumo-subtle tabular-nums">
+        {done} of {total} tasks done
+      </p>
+      <span aria-hidden className="block h-1 overflow-hidden rounded-full bg-kumo-recessed">
         <span
           className={cn(
-            "block h-full transition-[width] duration-(--rh-dur-bar)",
-            complete ? "bg-kumo-success" : "bg-kumo-ink",
+            "block h-full rounded-full transition-[width] duration-(--rh-dur-bar)",
+            complete ? "bg-kumo-success" : "bg-accent-500",
           )}
           style={{ width: `${Math.min(100, (done / total) * 100)}%` }}
         />
       </span>
-      <span className="font-mono text-[12px] whitespace-nowrap tabular-nums">
-        {done} / {total}
-        <span className="sr-only"> Tasks done</span>
-      </span>
-    </span>
+    </div>
   );
 }
 TaskProgress.displayName = "TaskProgress";

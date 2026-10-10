@@ -2,18 +2,18 @@ import { cn } from "@cloudflare/kumo";
 import type { ReactNode } from "react";
 
 const VARIANTS = {
-  accent: "bg-accent-100 text-accent-800",
-  neutral: "bg-tone-100 text-tone-800",
-  outline: "border border-accent-500 text-kumo-accent",
+  accent: "bg-kumo-info-tint text-kumo-info",
+  neutral: "bg-tone-200 text-tone-800",
+  outline: "border border-kumo-line text-kumo-default",
 } as const;
 
 export type TagVariant = keyof typeof VARIANTS;
 
 /**
- * Descriptive tag, not a status (DESIGN.md 8.3): 11px, +0.02em, 3 x 10px, square.
- * Use `outline` for qualifiers such as "Risk high" or a variant label on a card.
+ * Descriptive tag, not a status: 12px, 2 x 8px, 6px radius, no icon (a status pill always has
+ * one). Use `outline` for qualifiers such as "High risk" or a variant label on a card.
  *
- *   <Tag variant="outline">Risk high</Tag>
+ *   <Tag variant="outline">High risk</Tag>
  */
 export function Tag({
   variant = "neutral",
@@ -27,9 +27,9 @@ export function Tag({
   return (
     <span
       className={cn(
-        "inline-flex w-fit shrink-0 items-center px-2.5 py-[3px] text-[11px] leading-tight tracking-[0.02em] whitespace-nowrap",
+        "inline-flex w-fit shrink-0 items-center rounded-md px-2 py-0.5 text-[12px] leading-4 whitespace-nowrap",
         VARIANTS[variant],
-        variant === "outline" && "py-[2px]",
+        variant === "outline" && "py-[1px]",
         className,
       )}
     >

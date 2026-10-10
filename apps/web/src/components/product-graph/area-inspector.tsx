@@ -6,26 +6,25 @@ import { EmptyState } from "../ui/empty-state";
 import { KeyValue } from "../ui/key-value";
 import { StatusPill } from "../ui/status-pill";
 import { Tag } from "../ui/tag";
+import { Term } from "../ui/term";
 import { type AreaView, describeOrigin, type GraphView, STATE_LABEL, type Zoom } from "./model";
 
 /**
- * Area inspector beside the Product Graph (DESIGN.md 9.13, 10): repeats the selected area as
- * text. Rows under 1px rules; machine values in mono; status as a word.
+ * Area details beside the product map: repeats the selected area as text in plain words. Rows
+ * under 1px rules; machine values (IDs, resource keys) in mono; status through StatusPill.
  */
 
 const STATE_EXPLAIN: Record<AreaView["state"], string> = {
-  new: "First touched by this scope. It is not in the seeded source and no earlier listed Change touched it.",
-  affected:
-    "Touched by this scope. It already exists in the seeded source or in an earlier Change.",
-  protected:
-    "Holds a policy protected resource. Changes here must keep the protected invariant unchanged.",
-  unchanged: "Not touched by this scope. Shown because a touched area depends on it, or it on one.",
+  new: "This change adds it. It is not in the existing code and no earlier change touched it.",
+  affected: "This change edits it. It already exists in the code or in an earlier change.",
+  protected: "Its behavior must not change. Checks confirm it stays exactly as it is.",
+  unchanged: "Not touched. Shown because a changed area depends on it, or it on one.",
 };
 
-function Block({ title, children }: { title: string; children: ReactNode }) {
+function Block({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
     <div className="grid gap-1">
-      <h4 className="type-label text-kumo-subtle">{title}</h4>
+      <h4 className="text-[12px] font-semibold text-kumo-subtle">{title}</h4>
       {children}
     </div>
   );
@@ -46,7 +45,7 @@ export function AreaInspector({
     return (
       <EmptyState
         what="No area selected."
-        how="Select a node in the Product Graph to see its resources, Tasks and dependencies."
+        how="Select an area on the map to see its tasks and dependencies."
       />
     );
   }
@@ -60,7 +59,7 @@ export function AreaInspector({
     <div className="grid gap-4">
       <div className="grid gap-1.5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-[11px] text-kumo-subtle">{node.id}</span>
+          <span className="font-mono text-[12px] text-kumo-subtle">{node.id}</span>
           <Tag variant={area.state === "new" ? "accent" : "neutral"}>{STATE_LABEL[area.state]}</Tag>
           {area.conflicts.length > 0 && <Tag variant="outline">Conflict</Tag>}
         </div>
@@ -72,7 +71,7 @@ export function AreaInspector({
         items={[
           { label: "Source file", value: node.baselineFile, mono: true },
           {
-            label: "Protected",
+            label: "Must not change",
             value: node.protectedResources.length > 0 ? node.protectedResources.join(", ") : null,
             mono: true,
           },
@@ -82,11 +81,11 @@ export function AreaInspector({
               ? truncate(goal.get(area.firstChangeId) ?? area.firstChangeId, 60)
               : null,
           },
-          { label: "Scope", value: zoom === "change" ? "This Change" : "All listed Changes" },
+          { label: "Shown for", value: zoom === "change" ? "This change" : "Whole product" },
         ]}
       />
 
-      <Block title="Semantic resources">
+      <Block title={<Term k="area">Parts of this area</Term>}>
         {area.resources.length === 0 ? (
           <p className="text-[13px] text-kumo-subtle">None in this scope.</p>
         ) : (
@@ -94,7 +93,7 @@ export function AreaInspector({
             {area.resources.map((r) => (
               <li
                 key={r}
-                className="border-b border-kumo-rule py-1.5 font-mono text-[11px] break-all"
+                className="border-b border-kumo-rule py-1.5 font-mono text-[12px] break-all"
               >
                 {r}
               </li>
@@ -105,7 +104,7 @@ export function AreaInspector({
 
       <Block title="Tasks">
         {area.tasks.length === 0 ? (
-          <p className="text-[13px] text-kumo-subtle">No Task in this scope touches this area.</p>
+          <p className="text-[13px] text-kumo-subtle">No task here touches this area.</p>
         ) : (
           <ul className="grid">
             {area.touches.flatMap((t) =>
@@ -114,7 +113,7 @@ export function AreaInspector({
                   key={`${t.changeId}:${task.id}`}
                   className="flex items-center gap-2 border-b border-kumo-rule py-1.5 text-[13px]"
                 >
-                  <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">
+                  <span className="shrink-0 font-mono text-[12px] text-kumo-subtle">
                     {task.key}
                   </span>
                   <Link
@@ -141,7 +140,7 @@ export function AreaInspector({
                 key={c.id}
                 className="flex items-center gap-2 border-b border-kumo-rule py-1.5 text-[13px]"
               >
-                <span className="min-w-0 truncate font-mono text-[11px]" title={c.resource}>
+                <span className="min-w-0 truncate font-mono text-[12px]" title={c.resource}>
                   {c.resource}
                 </span>
                 <StatusPill status={c.state} className="ml-auto" />
@@ -160,7 +159,7 @@ export function AreaInspector({
               <li key={edge.id} className="grid gap-0.5 border-b border-kumo-rule py-1.5">
                 <span className="text-[13px]">
                   <span className="font-semibold">{name(edge.target)}</span>
-                  <span className="font-mono text-[11px] text-kumo-subtle"> · {edge.label}</span>
+                  <span className="text-[12px] text-kumo-subtle"> · {edge.label}</span>
                 </span>
                 {edge.origins.map((o) => (
                   <span key={describeOrigin(o)} className="text-[12px] text-kumo-subtle">
@@ -184,7 +183,7 @@ export function AreaInspector({
             {incoming.map(({ edge }) => (
               <li key={edge.id} className="border-b border-kumo-rule py-1.5 text-[13px]">
                 <span className="font-semibold">{name(edge.source)}</span>
-                <span className="font-mono text-[11px] text-kumo-subtle"> · {edge.label}</span>
+                <span className="text-[12px] text-kumo-subtle"> · {edge.label}</span>
               </li>
             ))}
           </ul>

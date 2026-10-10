@@ -6,10 +6,10 @@ import { useMemo, useState } from "react";
 import { Banner } from "../components/candidate/banner";
 import { isActive } from "../components/candidate/model";
 import { CandidateSkeleton } from "../components/candidate/skeleton";
+import { TechnicalDetails } from "../components/candidate/technical-details";
 import { EmptyState } from "../components/ui/empty-state";
-import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
-import { StatusPill } from "../components/ui/status-pill";
+import { Term } from "../components/ui/term";
 import { CandidateTable } from "../components/verification-page/candidate-table";
 import { HeatGrid } from "../components/verification-page/heat-grid";
 import {
@@ -21,14 +21,14 @@ import {
   stats,
 } from "../components/verification-page/model";
 import { PipelineStrip, type StageCount } from "../components/verification-page/pipeline-strip";
-import { VerificationStats } from "../components/verification-page/verification-stats";
-import { getProject, getProjectVerification } from "../lib/api";
+import { getProjectVerification } from "../lib/api";
 import { formatNumber, timeAgo } from "../lib/format";
+import { useViewMode } from "../lib/view-mode";
 
 /**
- * Project-wide verification (AGENTS.md sections 34, 35, 38): how recent Candidates fared against
- * their required checks. Every verdict uses the Candidate model's gate rules, so a check without
- * `checked_supported` pass Evidence is a gap and never counts as met.
+ * All checks (Advanced; AGENTS.md sections 34, 35, 38): how recent versions fared against their
+ * required checks. Every verdict uses the version model's gate rules, so a check without a
+ * `checked_supported` pass is "Not run" and never counts as passed.
  */
 export const Route = createFileRoute("/projects_/$projectId/verification")({
   component: VerificationPage,
@@ -37,12 +37,15 @@ export const Route = createFileRoute("/projects_/$projectId/verification")({
 const POLL_MS = 10_000;
 
 const STAGE_NAMES: Record<Stage, string> = {
-  composing: "Composing",
-  verifying: "Verifying",
-  verified: "Verified",
-  rejected: "Rejected",
-  promoted: "Promoted",
+  composing: "Assembling",
+  verifying: "Checking",
+  verified: "Passed",
+  rejected: "Set aside",
+  promoted: "Shipped",
 };
+
+const TITLE = <Term k="checks">All checks</Term>;
+const INTRO = "Every version of every change, against its required checks.";
 
 function VerificationPage() {
   return (
@@ -51,23 +54,32 @@ function VerificationPage() {
         <VerificationView />
       </Show>
       <Show when="signed-out">
-        <PageTitle kicker="Verification" title="Verification" />
+        <PageTitle title={TITLE} meta={INTRO} />
         <EmptyState
-          what="Sign in to view verification."
-          how="Candidates and their Evidence are visible to members of the Project's organization."
+          what="Sign in to view checks."
+          how="Versions and their check results are visible to members of the project."
         />
       </Show>
     </Page>
   );
 }
 
+/** "12 recent versions: 9 passed, 2 set aside, 1 checking." */
+function summarySentence(s: ReturnType<typeof stats>) {
+  const parts = [
+    s.passed > 0 && `${formatNumber(s.passed)} passed`,
+    s.setAside > 0 && `${formatNumber(s.setAside)} set aside`,
+    s.outOfDate > 0 && `${formatNumber(s.outOfDate)} out of date`,
+    s.checking > 0 && `${formatNumber(s.checking)} checking`,
+  ].filter(Boolean);
+  const head = `${formatNumber(s.total)} recent ${s.total === 1 ? "version" : "versions"}`;
+  return parts.length > 0 ? `${head}: ${parts.join(", ")}.` : `${head}.`;
+}
+
 function VerificationView() {
   const { projectId } = Route.useParams();
+  const view = useViewMode();
   const [stage, setStage] = useState<Stage | null>(null);
-  const project = useQuery({
-    queryKey: ["project", projectId],
-    queryFn: () => getProject({ data: projectId }),
-  });
   const verification = useQuery({
     queryKey: ["project-verification", projectId],
     queryFn: () => getProjectVerification({ data: projectId }),
@@ -82,17 +94,11 @@ function VerificationView() {
 
   const title = (
     <PageTitle
-      kicker={project.data?.name ?? "Project"}
-      title="Verification"
+      title={TITLE}
       meta={
         <>
-          <Mono>{projectId}</Mono>
-          {data && (
-            <span>
-              {formatNumber(items.length)} recent Candidates · {formatNumber(data.changes.length)}{" "}
-              Changes
-            </span>
-          )}
+          <span>{INTRO}</span>
+          {items.length > 0 && <span>{summarySentence(summary)}</span>}
         </>
       }
       actions={
@@ -114,7 +120,7 @@ function VerificationView() {
           {title}
           <Banner
             family="danger"
-            title="Verification did not load"
+            title="Checks did not load"
             action={
               <Button
                 size="sm"
@@ -131,28 +137,26 @@ function VerificationView() {
         </>
       );
     }
-    return <CandidateSkeleton label="Loading verification" rows={8} />;
+    return <CandidateSkeleton label="Loading checks" rows={8} />;
   }
 
   if (items.length === 0) {
     return (
       <>
         {title}
-        <Section label="Candidates">
-          <EmptyState
-            what="No Candidate has been verified in this Project yet."
-            how="A Candidate appears when a Change composes its ChangeSets; its checks run here."
-            action={
-              <Link
-                to="/projects/$projectId"
-                params={{ projectId }}
-                className={buttonVariants({ variant: "secondary" })}
-              >
-                Open the project
-              </Link>
-            }
-          />
-        </Section>
+        <EmptyState
+          what="No version has been checked in this project yet."
+          how="A version appears when a change finishes its tasks and its checks start."
+          action={
+            <Link
+              to="/projects/$projectId"
+              params={{ projectId }}
+              className={buttonVariants({ variant: "secondary" })}
+            >
+              Open the project
+            </Link>
+          }
+        />
       </>
     );
   }
@@ -164,13 +168,13 @@ function VerificationView() {
       stage: "composing",
       name: STAGE_NAMES.composing,
       count: reached("composing"),
-      description: `${formatNumber(now(["composing", "composed"]))} composing now`,
+      description: `${formatNumber(now(["composing", "composed"]))} assembling now`,
     },
     {
       stage: "verifying",
       name: STAGE_NAMES.verifying,
       count: reached("verifying"),
-      description: `${formatNumber(now(["verifying"]))} verifying now`,
+      description: `${formatNumber(now(["verifying"]))} being checked now`,
     },
     {
       stage: "verified",
@@ -182,108 +186,56 @@ function VerificationView() {
       stage: "rejected",
       name: STAGE_NAMES.rejected,
       count: reached("rejected"),
-      description: "failed a check or a decision",
+      description: "failed a check or was rejected",
     },
     {
       stage: "promoted",
       name: STAGE_NAMES.promoted,
       count: reached("promoted"),
-      description: "advanced the canonical state",
+      description: "became a release",
     },
   ];
 
   const filtered = stage ? items.filter((i) => stagesOf(i.candidate).has(stage)) : items;
-  const inFlight = summary.inFlight;
   const stale = verification.isError;
 
   return (
     <>
       {title}
-      {inFlight > 0 && (
-        <Banner
-          family="progress"
-          title={`${formatNumber(inFlight)} of ${formatNumber(items.length)} Candidates still verifying`}
-        >
-          Cells fill in as Evidence lands. A check without Evidence is never shown as a pass.
-        </Banner>
-      )}
       {data.evidenceTruncated && (
-        <Banner family="attention" title="Some Evidence is not shown">
-          This page reads at most 1,000 Evidence records. Checks without a loaded record show as
-          gaps here; open a Candidate for its full Evidence.
+        <Banner family="attention" title="Some check results are not shown">
+          This page reads at most 1,000 check results. Checks without a loaded result show as "Not
+          run" here; open a version to see all of its results.
         </Banner>
       )}
 
-      <VerificationStats stats={summary} />
-
       <Section
-        label="Pipeline"
-        meta={
-          stale ? (
-            <>
-              <StatusPill status="stale" />
-              <span>updated {timeAgo(new Date(verification.dataUpdatedAt).toISOString())}</span>
-            </>
-          ) : (
-            <span>Candidates that reached each stage</span>
-          )
-        }
-      >
-        <PipelineStrip stages={stages} selected={stage} onSelect={setStage} />
-        {summary.stale > 0 && (
-          <p className="text-[12px] text-kumo-subtle">
-            {formatNumber(summary.stale)} stale{" "}
-            {summary.stale === 1 ? "Candidate stops" : "Candidates stop"} at verifying: the
-            canonical state moved after composition, so they cannot be promoted as composed.
-          </p>
-        )}
-      </Section>
-
-      <Section
-        label="Checks by Candidate"
-        meta={
-          <Mono subtle>
-            {formatNumber(kinds.length)} kinds ×{" "}
-            {formatNumber(Math.min(items.length, GRID_COLUMNS))} Candidates
-          </Mono>
-        }
-      >
-        {kinds.length === 0 ? (
-          <EmptyState
-            what="No verification plan has been built yet."
-            how="Rows appear once a Candidate finishes composition and its checks are planned."
-          />
-        ) : (
-          <HeatGrid items={items} kinds={kinds} />
-        )}
-        <p className="text-[12px] text-kumo-subtle">
-          Columns are the {formatNumber(GRID_COLUMNS)} most recent Candidates, oldest on the left;
-          the number matches the # column below. A pass needs supported Evidence; a missing,
-          skipped, timed-out or no-signal check is a gap.
-        </p>
-      </Section>
-
-      <Section
-        label="Recent Candidates"
+        label="Recent versions"
         meta={
           <>
+            {stale && (
+              <span>
+                Couldn't refresh · updated{" "}
+                {timeAgo(new Date(verification.dataUpdatedAt).toISOString())}
+              </span>
+            )}
             {stage && (
               <Button size="sm" variant="ghost" onClick={() => setStage(null)}>
                 Show all
               </Button>
             )}
-            <Mono subtle>
+            <span>
               {stage
                 ? `${formatNumber(filtered.length)} of ${formatNumber(items.length)} · ${STAGE_NAMES[stage].toLowerCase()}`
-                : `1–${formatNumber(items.length)} of ${formatNumber(items.length)} · last ${formatNumber(data.limit)}`}
-            </Mono>
+                : `Last ${formatNumber(items.length)}`}
+            </span>
           </>
         }
       >
         {filtered.length === 0 ? (
           <EmptyState
-            what={`No recent Candidate reached ${STAGE_NAMES[stage ?? "composing"].toLowerCase()}.`}
-            how="Choose another stage in the pipeline, or show all Candidates."
+            what={`No recent version reached "${STAGE_NAMES[stage ?? "composing"]}".`}
+            how="Choose another stage, or show all versions."
             action={
               <Button size="sm" variant="secondary" onClick={() => setStage(null)}>
                 Show all
@@ -294,6 +246,51 @@ function VerificationView() {
           <CandidateTable items={filtered} />
         )}
       </Section>
+
+      {/* The stage strip and heat grid are developer views: closed unless Systems view is on. */}
+      <TechnicalDetails
+        key={view}
+        open={view === "systems"}
+        label="Technical details: stages and check grid"
+        className="text-[13px]"
+      >
+        <div className="grid gap-7">
+          <Section label="Stages" as="h3" meta={<span>Versions that reached each stage</span>}>
+            <PipelineStrip stages={stages} selected={stage} onSelect={setStage} />
+            {summary.outOfDate > 0 && (
+              <p className="text-[12px] text-kumo-subtle">
+                {formatNumber(summary.outOfDate)} out-of-date{" "}
+                {summary.outOfDate === 1 ? "version stops" : "versions stop"} at checking: another
+                change shipped first, so they must be rebuilt.
+              </p>
+            )}
+          </Section>
+          <Section
+            label="Check results by version"
+            as="h3"
+            meta={
+              <span>
+                {formatNumber(kinds.length)} checks ×{" "}
+                {formatNumber(Math.min(items.length, GRID_COLUMNS))} versions
+              </span>
+            }
+          >
+            {kinds.length === 0 ? (
+              <EmptyState
+                what="No checks have been planned yet."
+                how="Rows appear once a version is assembled and its checks are planned."
+              />
+            ) : (
+              <HeatGrid items={items} kinds={kinds} />
+            )}
+            <p className="text-[12px] text-kumo-subtle">
+              Columns are the {formatNumber(GRID_COLUMNS)} most recent versions, oldest on the left.
+              A pass needs a recorded result; a check that did not run, was skipped or timed out is
+              "Not run".
+            </p>
+          </Section>
+        </div>
+      </TechnicalDetails>
     </>
   );
 }

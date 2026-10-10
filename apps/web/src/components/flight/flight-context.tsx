@@ -3,7 +3,7 @@ import type { LiveStatus } from "../../lib/live";
 import type { FlightModel, FlightState } from "./flight-model";
 
 /**
- * Flight Control data context. The route (flight-page.tsx, Worker 1) derives the model from
+ * Debug view data context. The route (flight-page.tsx, Worker 1) derives the model from
  * API records (use-flight-data.ts), folds it at the time-machine instant, and provides both here.
  * Panels and inspectors call `useFlight()` and read the folded `state`; they never fetch.
  *
@@ -14,13 +14,9 @@ export type FlightContextValue = {
   model: FlightModel;
   /** The fold at the current time-machine instant (live: every fact). */
   state: FlightState;
-  /** Every source has answered once (or failed). Until then, panels show skeletons, not motion. */
+  /** Every source has answered once (or failed). Until then, panels show skeletons. */
   ready: boolean;
   socket: LiveStatus;
-  /** Facts newly played by the pacing queue since the page settled (animate these only). */
-  animated: ReadonlySet<string>;
-  /** Facts still in flight (packet travelling, lane flashing). */
-  inFlight: ReadonlySet<string>;
   projectId: string;
   changeId: string;
 };

@@ -141,11 +141,11 @@ function WaitingList({ items }: { items: { candidate: CandidateState; check: Che
               className="flex w-full items-baseline gap-2 px-1 py-1 text-[12px]"
             >
               <span className="font-semibold">{candidate.name}</span>
-              <span className="font-mono text-[11px] text-kumo-subtle">{check.checkId}</span>
+              <span className="font-mono text-[12px] text-kumo-subtle">{check.checkId}</span>
               <span className={cn("ml-auto font-semibold", FAMILY_TEXT[view.family])}>
                 {view.word}
               </span>
-              <span className="text-[11px] text-kumo-subtle">{view.coverage}</span>
+              <span className="text-[12px] text-kumo-subtle">{view.coverage}</span>
             </RefButton>
           </li>
         );
@@ -183,7 +183,7 @@ function StripRow({
     <section
       aria-label={`${candidate.name}, ${check.checkId} screenshots`}
       className={cn(
-        "grid gap-2 border-b-2 border-kumo-divider px-3 py-2 transition-opacity duration-(--rh-dur-ui)",
+        "grid gap-2 border-b border-kumo-rule px-3 py-2 transition-opacity duration-(--rh-dur-ui)",
         dim && "opacity-45",
       )}
     >
@@ -193,14 +193,14 @@ function StripRow({
         </RefButton>
         <RefButton
           entity={{ kind: "check", id: `${candidate.id}:${check.checkId}` }}
-          className="px-1 font-mono text-[11px]"
+          className="px-1 font-mono text-[12px]"
         >
           {check.checkId}
         </RefButton>
         <span className={cn("font-semibold", FAMILY_TEXT[view.family])}>{view.word}</span>
-        <span className="text-[11px] text-kumo-subtle">{view.coverage}</span>
+        <span className="text-[12px] text-kumo-subtle">{view.coverage}</span>
         {m?.stepsTotal !== undefined && (
-          <span className="ml-auto font-mono text-[11px] tabular-nums">
+          <span className="ml-auto font-mono text-[12px] tabular-nums">
             {formatNumber(m.stepsPassed ?? 0)} / {formatNumber(m.stepsTotal)} steps passed
           </span>
         )}
@@ -222,14 +222,14 @@ function StripRow({
         {lines.length > 0 ? (
           lines.map((line, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: summary lines are positional
-            <p key={i} className="font-mono text-[11px] text-kumo-default">
+            <p key={i} className="font-mono text-[12px] text-kumo-default">
               {line}
             </p>
           ))
         ) : (
           <p className="text-kumo-subtle">No summary recorded.</p>
         )}
-        <p className="text-[11px] text-kumo-subtle">
+        <p className="text-[12px] text-kumo-subtle">
           Steps not recorded in the Evidence summary; select the check for its output.
         </p>
       </div>
@@ -265,7 +265,7 @@ function Shot({
       )}
     >
       {failed ? (
-        <span className="absolute inset-0 grid place-items-center px-2 text-center text-[11px] text-kumo-subtle">
+        <span className="absolute inset-0 grid place-items-center px-2 text-center text-[12px] text-kumo-subtle">
           Screenshot not available
         </span>
       ) : (
@@ -306,7 +306,7 @@ function Tile({
       className="grid w-full gap-1 text-left hover:bg-kumo-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500"
     >
       <Shot src={src} alt={alt} fit="cover" />
-      <span className="font-mono text-[10px] text-kumo-subtle tabular-nums">{caption}</span>
+      <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">{caption}</span>
     </button>
   );
 }
@@ -342,7 +342,7 @@ function Lightbox({ box, onChange }: { box: Box | null; onChange: (box: Box | nu
           <div className="grid gap-3">
             <div className="flex items-start justify-between gap-3">
               <div className="grid gap-1">
-                <p className="type-kicker text-kumo-accent">Browser Run Evidence</p>
+                <p className="text-[12px] text-kumo-accent">Browser Run Evidence</p>
                 <Dialog.Title className="type-h4">
                   {strip.candidate.name} · {strip.check.checkId}
                 </Dialog.Title>

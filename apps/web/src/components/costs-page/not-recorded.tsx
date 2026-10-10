@@ -19,7 +19,7 @@ const NOT_RECORDED = [
 
 export function NotRecorded({ vertexSpendLimitUsd }: { vertexSpendLimitUsd: number }) {
   return (
-    <footer className="grid max-w-[760px] gap-1 border-t border-kumo-rule pt-3 text-[11px] text-kumo-subtle">
+    <footer className="grid max-w-[760px] gap-1 border-t border-kumo-rule pt-3 text-[12px] text-kumo-subtle">
       <p>
         <span className="font-semibold">Not recorded:</span> {NOT_RECORDED.join(" · ")}.
       </p>

@@ -12,14 +12,7 @@ import {
 import { useFlightFilters, useSelection } from "../flight-store";
 import { PanelSkeleton } from "../panel-frame";
 import type { PanelProps } from "../panel-types";
-import {
-  checkEventIds,
-  checkView,
-  gateGaps,
-  isSettled,
-  metricBits,
-  standing,
-} from "./arena/check-view";
+import { checkView, gateGaps, isSettled, metricBits, standing } from "./arena/check-view";
 import { RefButton } from "./arena/ref-button";
 import { CheckDetail, parseCheckRef } from "./evidence/check-detail";
 
@@ -27,8 +20,7 @@ import { CheckDetail, parseCheckRef } from "./evidence/check-detail";
  * Evidence explorer (AGENTS.md 34.3, 34.4.1; DESIGN.md 9.11 tree list, 9.7 log viewer). Left: each
  * Candidate's checks in plan order, required first, with status and coverage in words. Right: the
  * selected check's Evidence record, plan and stored stdout (fetched for that one check only).
- * A check without a supported pass is a gap, never green; a check fact that newly played flashes
- * its row once.
+ * A check without a supported pass is a gap, never green.
  */
 
 type Bucket = "pass" | "fail" | "gap" | "pending";
@@ -95,7 +87,7 @@ function ChipButton({
       )}
     >
       {children}
-      <span className="font-mono text-[11px] tabular-nums opacity-70">{formatNumber(count)}</span>
+      <span className="font-mono text-[12px] tabular-nums opacity-70">{formatNumber(count)}</span>
     </button>
   );
 }
@@ -105,7 +97,7 @@ function CandidateHeader({ state, candidate }: { state: FlightState; candidate: 
   const line = standing(state, candidate);
   const gaps = gateGaps(state, candidate);
   return (
-    <div className="grid gap-0.5 border-b-2 border-kumo-divider px-3 pt-2 pb-1.5">
+    <div className="grid gap-0.5 border-b border-kumo-rule px-3 pt-2 pb-1.5">
       <div className="flex items-center justify-between gap-2">
         <RefButton
           entity={{ kind: "candidate", id: candidate.id }}
@@ -136,14 +128,12 @@ function CheckRow({
   check,
   last,
   dim,
-  flash,
 }: {
   state: FlightState;
   candidate: CandidateState;
   check: CheckState;
   last: boolean;
   dim: boolean;
-  flash: boolean;
 }) {
   const view = checkView(check, isSettled(candidate));
   const bits = metricBits(state, candidate, check);
@@ -153,7 +143,6 @@ function CheckRow({
       className={cn(
         "border-b border-kumo-rule transition-opacity duration-(--rh-dur-ui)",
         dim && "opacity-45",
-        flash && "rh-arrive",
       )}
     >
       <RefButton
@@ -167,7 +156,7 @@ function CheckRow({
         </span>
         <span className="flex min-w-0 items-baseline gap-2">
           <span className="truncate font-mono text-[12px]">{check.checkId}</span>
-          <span className="shrink-0 text-[11px] text-kumo-subtle">
+          <span className="shrink-0 text-[12px] text-kumo-subtle">
             {check.kind !== check.checkId ? check.kind : ""}
             {check.required ? "" : " optional"}
           </span>
@@ -176,7 +165,7 @@ function CheckRow({
           {view.word}
         </span>
         <span />
-        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-[11px]">
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-[12px]">
           <span className={gap ? "text-kumo-warning" : "text-kumo-subtle"}>{view.coverage}</span>
           {bits.map((b) => (
             <span key={b} className="font-mono text-kumo-subtle tabular-nums">
@@ -192,7 +181,7 @@ function CheckRow({
 CheckRow.displayName = "CheckRow";
 
 export function EvidencePanel({ focused }: PanelProps) {
-  const { state, ready, animated } = useFlight();
+  const { state, ready } = useFlight();
   const selection = useSelection();
   const { query } = useFlightFilters();
   const [chip, setChip] = useState<Chip>("all");
@@ -225,7 +214,6 @@ export function EvidencePanel({ focused }: PanelProps) {
     return out;
   }, [groups]);
   const related = useMemo(() => relatedRefs(state, selection), [state, selection]);
-  const eventIds = useMemo(() => checkEventIds(state), [state]);
 
   if (!ready) return <PanelSkeleton />;
 
@@ -301,7 +289,6 @@ export function EvidencePanel({ focused }: PanelProps) {
                     <ul>
                       {g.checks.map(({ check }, i) => {
                         const key = `${g.candidate.id}:${check.checkId}`;
-                        const eventId = eventIds.get(key);
                         return (
                           <CheckRow
                             key={check.checkId}
@@ -314,7 +301,6 @@ export function EvidencePanel({ focused }: PanelProps) {
                               !related.has(`check:${key}`) &&
                               !related.has(`candidate:${g.candidate.id}`)
                             }
-                            flash={eventId !== undefined && animated.has(eventId)}
                           />
                         );
                       })}
@@ -325,11 +311,11 @@ export function EvidencePanel({ focused }: PanelProps) {
             })
           )}
         </div>
-        <div className="border-t-2 border-kumo-divider px-3 py-2 @min-[640px]:overflow-auto @min-[640px]:border-t-0">
+        <div className="border-t border-kumo-rule px-3 py-2 @min-[640px]:overflow-auto @min-[640px]:border-t-0">
           {selected ? (
             <div className="grid gap-3">
               <div className="grid gap-0.5">
-                <p className="type-kicker text-kumo-subtle">
+                <p className="text-[12px] text-kumo-subtle">
                   {state.candidates[selected.candidateId]?.name ?? selected.candidateId}
                 </p>
                 <h3 className="font-mono text-[13px] font-semibold">{selected.checkId}</h3>

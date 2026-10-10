@@ -101,7 +101,7 @@ export function FileInspector({ entity }: { entity: EntityRef }) {
               >
                 <span className="font-mono font-semibold">{task?.key ?? id}</span>
                 <span className="min-w-0 flex-1 truncate">{task?.title ?? ""}</span>
-                <span className="shrink-0 text-[11px] text-kumo-subtle">
+                <span className="shrink-0 text-[12px] text-kumo-subtle">
                   {[expected && "expected", changed && "changed"].filter(Boolean).join(", ")}
                 </span>
                 {task && <StatusPill status={task.status} />}
@@ -128,10 +128,10 @@ export function FileInspector({ entity }: { entity: EntityRef }) {
                     className="flex w-full items-center gap-2 px-1 py-1 text-[12px]"
                   >
                     <span className="min-w-0 flex-1 truncate font-mono">{id}</span>
-                    <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">
+                    <span className="shrink-0 font-mono text-[12px] text-kumo-subtle">
                       {keyOf(state, owner)} · {cs ? shortHash(cs.commit, 8) : "commit not recorded"}
                     </span>
-                    <span className="shrink-0 font-mono text-[11px]">
+                    <span className="shrink-0 font-mono text-[12px]">
                       <AddsDels adds={stat?.adds ?? null} dels={stat?.dels ?? null} />
                     </span>
                   </RefButton>
@@ -145,7 +145,7 @@ export function FileInspector({ entity }: { entity: EntityRef }) {
       <DetailBlock label="Touch timeline">
         <table className="w-full border-collapse text-left text-[12px]">
           <thead>
-            <tr className="border-b border-kumo-divider text-[11px] text-kumo-subtle">
+            <tr className="border-b border-kumo-divider text-[12px] text-kumo-subtle">
               <th scope="col" className="py-1 pr-2 font-normal">
                 Time
               </th>
@@ -274,10 +274,10 @@ export function ResourceInspector({ entity }: { entity: EntityRef }) {
                 className="flex items-center gap-2 border-b border-kumo-rule px-1 py-1 text-[12px]"
               >
                 <span className="font-mono">{keyOf(state, c.taskId)}</span>
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-kumo-subtle">
+                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-kumo-subtle">
                   {c.agentId || "agent not recorded"}
                 </span>
-                <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
+                <span className="shrink-0 font-mono text-[12px] text-kumo-subtle tabular-nums">
                   {c.status === "active" ? "since" : "at"} {clock(c.since)}
                 </span>
                 <StatusPill
@@ -306,7 +306,7 @@ export function ResourceInspector({ entity }: { entity: EntityRef }) {
                   mode="select"
                   className="flex w-full items-baseline gap-2 px-1 py-1 text-[12px]"
                 >
-                  <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
+                  <span className="shrink-0 font-mono text-[12px] text-kumo-subtle tabular-nums">
                     {clock(e.at)}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{e.detail}</span>
@@ -330,19 +330,19 @@ export function ResourceInspector({ entity }: { entity: EntityRef }) {
                   className="grid w-full gap-1 px-1 py-1.5 text-[12px]"
                 >
                   <span className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-[11px]">
+                    <span className="font-mono text-[12px]">
                       {keyOf(state, c.taskIds[0])} vs {keyOf(state, c.taskIds[1])}
                     </span>
                     <StatusPill status={c.state} />
                   </span>
                   <span>
-                    <span className="font-mono text-[11px] text-kumo-subtle">
+                    <span className="font-mono text-[12px] text-kumo-subtle">
                       {keyOf(state, c.taskIds[0])}:
                     </span>{" "}
                     {c.statements[0]}
                   </span>
                   <span>
-                    <span className="font-mono text-[11px] text-kumo-subtle">
+                    <span className="font-mono text-[12px] text-kumo-subtle">
                       {keyOf(state, c.taskIds[1])}:
                     </span>{" "}
                     {c.statements[1]}
@@ -364,11 +364,11 @@ export function ResourceInspector({ entity }: { entity: EntityRef }) {
                   mode="select"
                   className="flex w-full items-baseline gap-2 px-1 py-1 text-[12px]"
                 >
-                  <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
+                  <span className="shrink-0 font-mono text-[12px] text-kumo-subtle tabular-nums">
                     {clock(d.at)}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{d.title}</span>
-                  <span className="shrink-0 text-[11px] text-kumo-subtle">by {d.by}</span>
+                  <span className="shrink-0 text-[12px] text-kumo-subtle">by {d.by}</span>
                 </RefButton>
               </li>
             ))}

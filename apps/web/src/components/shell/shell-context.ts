@@ -1,22 +1,25 @@
 import { useAuth } from "@clerk/tanstack-react-start";
 import { useQuery } from "@tanstack/react-query";
 import { type LinkOptions, useParams, useRouterState } from "@tanstack/react-router";
-import { getCandidate, getChange, getProject } from "../../lib/api";
+import { getCandidate, getChange, getProject, listCandidates } from "../../lib/api";
 import { truncate } from "../../lib/format";
+import { candidateLabels } from "../candidate/model";
 import type { Crumb } from "./page-meta";
 
 /**
  * Project-scoped pages at `/projects/$projectId/<slug>`. The shell adds their name to the
  * breadcrumb (Projects / <project> / <page name>) and marks them in the sidebar, so the pages
- * themselves do not set a page name.
+ * themselves do not set a page name. Labels follow the plain glossary (research 7.1, 7.6): the
+ * slugs keep the internal names so every URL stays the same.
  */
 export const PROJECT_PAGES = {
-  graph: "Product Graph",
-  agents: "Agents",
-  events: "Events",
-  verification: "Verification",
-  workspace: "Workspace",
+  activity: "Activity",
   costs: "Costs",
+  agents: "Agents",
+  verification: "All checks",
+  workspace: "Code",
+  graph: "Product map",
+  events: "Event log",
 } as const;
 
 export type ProjectPage = keyof typeof PROJECT_PAGES;
@@ -92,6 +95,11 @@ export function useShellContext(): ShellContext {
     queryFn: () => getChange({ data: changeId ?? "" }),
     enabled: signedIn && !!changeId,
   });
+  const siblings = useQuery({
+    queryKey: ["candidates", changeId],
+    queryFn: () => listCandidates({ data: changeId ?? "" }),
+    enabled: false,
+  });
   const projectId = params.projectId ?? change.data?.projectId ?? candidate.data?.projectId;
   const project = useQuery({
     queryKey: ["project", projectId],
@@ -115,7 +123,20 @@ export function useShellContext(): ShellContext {
     });
   }
   if (params.candidateId) {
-    trail.push({ label: params.candidateId, mono: true });
+    // "Version A" when the candidate page has the Change's versions in the cache; the mono id
+    // until then. This query never fetches on its own (`enabled: false`).
+    const label = siblings.data
+      ? candidateLabels(siblings.data)
+          .get(params.candidateId)
+          ?.replace(/^Candidate\b/, "Version")
+      : undefined;
+    trail.push(
+      label
+        ? { label }
+        : candidate.data
+          ? { label: "Version" }
+          : { label: params.candidateId, mono: true },
+    );
   }
   if (projectId && isProjectPage(section)) {
     trail.push({ label: PROJECT_PAGES[section], link: projectPageLink(projectId, section) });

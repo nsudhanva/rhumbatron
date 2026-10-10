@@ -5,17 +5,16 @@ import type { Stage } from "./model";
 export type StageCount = {
   stage: Stage;
   name: string;
-  /** Candidates that reached this stage. */
+  /** Versions that reached this stage. */
   count: number;
   /** One line of description, for example "2 composing now". */
   description: string;
 };
 
 /**
- * Pipeline / stage strip (DESIGN.md 9.4): equal columns under a 2px ink rule with 1px rules
- * between them. Each column shows `01 · Name`, a display number, one line of description and a
- * 6px bar whose width is the share of the first stage. The whole column is a toggle that filters
- * the Candidate table to that stage. No column uses accent: on this page red means a failure.
+ * Stage strip (Advanced, spec B.2): equal columns separated by 1px rules. Each column shows the
+ * stage name, a count, one line of description and a bar whose width is the share of the first
+ * stage. The whole column is a toggle that filters the versions table to that stage.
  */
 export function PipelineStrip({
   stages,
@@ -30,11 +29,11 @@ export function PipelineStrip({
   return (
     <div className="min-w-0 overflow-x-auto">
       <ol
-        aria-label="Verification pipeline"
-        className="grid min-w-[640px] border-t-2 border-kumo-ink"
+        aria-label="Stages"
+        className="grid min-w-[640px] overflow-hidden rounded-lg border border-kumo-rule bg-kumo-elevated"
         style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}
       >
-        {stages.map((s, index) => {
+        {stages.map((s) => {
           const share = first > 0 ? Math.min(1, s.count / first) : 0;
           const isSelected = selected === s.stage;
           return (
@@ -42,8 +41,8 @@ export function PipelineStrip({
               <button
                 type="button"
                 aria-pressed={isSelected}
-                title={`${s.name}: ${formatNumber(s.count)} of ${formatNumber(first)} Candidates. ${
-                  isSelected ? "Show all Candidates." : "Show only these Candidates."
+                title={`${s.name}: ${formatNumber(s.count)} of ${formatNumber(first)} versions. ${
+                  isSelected ? "Show all versions." : "Show only these versions."
                 }`}
                 onClick={() => onSelect(isSelected ? null : s.stage)}
                 className={cn(
@@ -53,19 +52,19 @@ export function PipelineStrip({
                   isSelected && "bg-kumo-faint shadow-[inset_2px_0_0_var(--color-accent-500)]",
                 )}
               >
-                <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
-                  {String(index + 1).padStart(2, "0")} · {s.name}
+                <span className="text-[13px] font-semibold">{s.name}</span>
+                <span className="text-[24px] leading-none font-semibold tabular-nums">
+                  {formatNumber(s.count)}
                 </span>
-                <span className="type-display">{formatNumber(s.count)}</span>
                 <span className="truncate text-[12px] text-kumo-subtle">{s.description}</span>
-                <span aria-hidden className="block h-1.5 bg-kumo-recessed">
+                <span aria-hidden className="block h-1 rounded-full bg-kumo-recessed">
                   <span
-                    className="block h-full bg-kumo-ink transition-[width] duration-(--rh-dur-bar)"
+                    className="block h-full rounded-full bg-kumo-info"
                     style={{ width: `${Math.round(share * 100)}%` }}
                   />
                 </span>
                 <span className="sr-only">
-                  {formatNumber(Math.round(share * 100))} percent of all Candidates
+                  {formatNumber(Math.round(share * 100))} percent of all versions
                 </span>
               </button>
             </li>

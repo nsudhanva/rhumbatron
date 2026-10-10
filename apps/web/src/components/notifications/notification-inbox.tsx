@@ -6,6 +6,7 @@ import {
   GitMerge,
   type Icon,
   Prohibit,
+  RocketLaunch,
   UserCheck,
   WarningOctagon,
   X,
@@ -43,6 +44,8 @@ const ICONS: Record<NotificationKind, Icon> = {
   conflict_open: ArrowsSplit,
   change_completed: CheckSquare,
   promoted: GitMerge,
+  release_failed: WarningOctagon,
+  release_deployed: RocketLaunch,
 };
 
 /** Inline action for items whose next step is a decision on another page. */
@@ -53,7 +56,7 @@ const ACTIONS: Partial<Record<NotificationKind, string>> = {
 
 /** The icon is the status here (DESIGN.md 7), paired with the title's words. */
 const ICON_TONE = {
-  action: "text-accent-500",
+  action: "text-kumo-warning",
   attention: "text-kumo-warning",
   info: "text-kumo-subtle",
 } as const;
@@ -108,7 +111,7 @@ export default function NotificationInbox({ onClose }: { onClose: () => void }) 
 
   return (
     <div className="grid">
-      <div className="flex h-11 items-center gap-2 border-b-2 border-kumo-divider pr-1.5 pl-3">
+      <div className="flex h-11 items-center gap-2 border-b border-kumo-rule pr-1.5 pl-3">
         <Popover.Title className="type-h6 m-0 grow">Notifications</Popover.Title>
         <Button
           size="xs"
@@ -141,7 +144,7 @@ export default function NotificationInbox({ onClose }: { onClose: () => void }) 
           <EmptyState
             className="px-3"
             what="Nothing needs you."
-            how="Approvals, promotions, failed commands, and finished Changes appear here."
+            how="Approvals, releases, stuck jobs and finished changes appear here."
           />
         ) : (
           <>
@@ -167,9 +170,9 @@ function Group({
   if (items.length === 0) return null;
   return (
     <section aria-label={label}>
-      <h3 className="flex items-baseline justify-between border-b-2 border-kumo-divider px-3 pt-3 pb-1.5">
+      <h3 className="flex items-baseline justify-between border-b border-kumo-rule px-3 pt-3 pb-1.5">
         <span className="type-h6">{label}</span>
-        <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">{items.length}</span>
+        <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">{items.length}</span>
       </h3>
       <ul>
         {items.map((item) => (
@@ -206,18 +209,18 @@ function Row({ item, onOpen }: { item: AppNotification; onOpen: (item: AppNotifi
             <time
               dateTime={item.createdAt}
               title={new Date(item.createdAt).toLocaleString("en-GB", { hour12: false })}
-              className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums"
+              className="shrink-0 font-mono text-[12px] text-kumo-subtle tabular-nums"
             >
               {formatAge(item.createdAt)}
             </time>
           </span>
           <span className="line-clamp-2 text-[12px] text-kumo-subtle">{item.body}</span>
-          <span className="truncate text-[11px] text-kumo-subtle">{item.projectName}</span>
+          <span className="truncate text-[12px] text-kumo-subtle">{item.projectName}</span>
         </span>
-        {/* New / unread: 6px square accent dot (DESIGN.md 10). The slot is always reserved. */}
+        {/* New / unread: 6px accent dot (DESIGN.md 10). The slot is always reserved. */}
         <span
           aria-hidden
-          className={cn("mt-1.5 size-1.5 shrink-0", !item.read && "bg-accent-500")}
+          className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", !item.read && "bg-accent-500")}
         />
         {!item.read && <span className="sr-only">, unread</span>}
       </Link>

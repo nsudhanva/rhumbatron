@@ -24,7 +24,7 @@ import { ROVING_CONTAINER, ROVING_ITEM, type Roving, useRovingFocus } from "../.
 import { DETAIL_ROW, type DetailRow, NODE_H, shownRun } from "./layout";
 
 /**
- * Execution DAG node and edge renderers (DESIGN.md 9.13 in Flight Control dress): square nodes
+ * Execution DAG node and edge renderers (DESIGN.md 9.13 in Debug view dress): square nodes
  * on `base`, the border encodes the Task state, the selected node carries the overlay shadow and
  * the 2px accent bar the inspector repeats. Motion only replays recorded facts (11.1).
  *
@@ -48,9 +48,9 @@ const BORDER_OF: Record<string, Border> = {
 };
 
 export const BORDER_CLASS: Record<Border, string> = {
-  active: "border-2 border-kumo-ink",
-  ready: "border-2 border-dashed border-kumo-ink",
-  attention: "border-2 border-accent-500",
+  active: "border border-kumo-info",
+  ready: "border border-dashed border-kumo-ink",
+  attention: "border border-kumo-danger",
   done: "border border-kumo-divider",
   idle: "border border-dashed border-kumo-divider",
 };
@@ -70,14 +70,12 @@ type TaskNodeData = {
   dimmed: boolean;
   /** The latest played fact is about this Task (live fold only). */
   current: boolean;
-  /** Event id of the newest animated fact about this Task: restarts the one-shot flash. */
-  arrival: string | null;
   onToggleExpand: (taskId: string) => void;
 };
 export type TaskFlowNode = Node<TaskNodeData, "task">;
 
 function TaskNode({ data }: NodeProps<TaskFlowNode>) {
-  const { task, rows, selected, hovered, dimmed, current, arrival, onToggleExpand } = data;
+  const { task, rows, selected, hovered, dimmed, current, onToggleExpand } = data;
   const view = statusView(task.status);
   const run = shownRun(task);
   const provider = run ? providerName(run.provider) : null;
@@ -118,13 +116,6 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
         className="opacity-0!"
         style={{ top: NODE_H / 2 }}
       />
-      {arrival && (
-        <span
-          key={arrival}
-          aria-hidden
-          className="rh-arrive pointer-events-none absolute inset-0"
-        />
-      )}
       <div className="relative flex shrink-0 items-stretch" style={{ height: NODE_H - 4 }}>
         <EntityHover entity={ref}>
           <button
@@ -133,13 +124,13 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
             aria-expanded={expanded}
             title={expanded ? "Hide details" : "Select and show details"}
             onClick={onHeader}
-            className="nopan nodrag grid min-w-0 flex-1 cursor-pointer grid-rows-[14px_17px_16px_16px] content-start gap-[3px] py-2 pr-2 pl-2.5 text-left hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500"
+            className="nopan nodrag grid min-w-0 flex-1 cursor-pointer grid-rows-[16px_17px_16px_16px] content-start gap-[2px] py-2 pr-2 pl-2.5 text-left hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500"
           >
             <span className="flex items-center justify-between gap-2">
-              <span className="truncate font-mono text-[10px] tracking-[0.08em] text-kumo-subtle uppercase">
+              <span className="truncate font-mono text-[12px] text-kumo-subtle">
                 {task.key} · {task.kind}
               </span>
-              <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold">
+              <span className="flex shrink-0 items-center gap-1.5 text-[12px] font-semibold">
                 <span
                   aria-hidden
                   className={cn(
@@ -156,7 +147,7 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
             <span className="truncate text-[13px] leading-tight font-bold" title={task.title}>
               {task.title}
             </span>
-            <span className="flex items-center justify-between gap-2 font-mono text-[11px] text-kumo-subtle">
+            <span className="flex items-center justify-between gap-2 font-mono text-[12px] text-kumo-subtle">
               <span className="truncate">
                 {run ? `${run.tier}${provider ? ` · ${provider}` : ""}` : "no run yet"}
               </span>
@@ -164,19 +155,19 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
             </span>
             <span className="flex h-[16px] min-w-0 items-center gap-1 overflow-hidden">
               {run?.escalatedFrom && (
-                <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">
+                <span className="shrink-0 font-mono text-[12px] text-kumo-subtle">
                   ↑ from {run.escalatedFrom}
                 </span>
               )}
-              {task.source === "fixture" && <Tag className="px-1 py-0 text-[10px]">fixture</Tag>}
+              {task.source === "fixture" && <Tag className="px-1 py-0 text-[12px]">fixture</Tag>}
               {risky && (
-                <Tag variant="outline" className="px-1 py-0 text-[10px]">
+                <Tag variant="outline" className="px-1 py-0 text-[12px]">
                   Risk {task.riskTier}
                 </Tag>
               )}
               {conflicted && (
-                <span className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-kumo-danger">
-                  <span aria-hidden className="size-1.5 bg-accent-500" />
+                <span className="flex shrink-0 items-center gap-1 text-[12px] font-semibold text-kumo-danger">
+                  <span aria-hidden className="size-1.5 bg-kumo-danger" />
                   Conflict
                 </span>
               )}
@@ -187,7 +178,7 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
         {progress !== null && (
           <span
             aria-hidden
-            className="rh-lane-progress absolute bottom-0 left-0"
+            className="absolute bottom-0 left-0 h-0.5 bg-kumo-ink"
             style={{ width: `${Math.max(2, progress * 100)}%` }}
           />
         )}
@@ -209,7 +200,7 @@ const rowKey = (row: DetailRow) =>
 
 const ROW_LABEL = "w-[60px] shrink-0 text-kumo-subtle";
 const CHIP = cn(
-  "nopan nodrag min-h-5 cursor-pointer px-1 font-mono text-[11px] data-[hot]:bg-kumo-tint data-[hot]:outline-0!",
+  "nopan nodrag min-h-5 cursor-pointer px-1 font-mono text-[12px] data-[hot]:bg-kumo-tint data-[hot]:outline-0!",
   ROVING_ITEM,
 );
 
@@ -256,7 +247,7 @@ function DetailGrid({ rows, task }: { rows: DetailRow[]; task: TaskState }) {
       aria-label={`Details of ${task.key}`}
       {...(hasChips ? roving.containerProps : {})}
       className={cn(
-        "nopan nodrag grid border-t border-kumo-rule px-2.5 pt-1 text-[11px]",
+        "nopan nodrag grid border-t border-kumo-rule px-2.5 pt-1 text-[12px]",
         hasChips && ROVING_CONTAINER,
       )}
     >
@@ -468,8 +459,8 @@ function ResourceGroupNode({ data }: NodeProps<ResourceFlowNode>) {
           onClick={() => select(ref)}
           className="nopan nodrag pointer-events-auto flex h-7 max-w-full cursor-pointer items-center gap-2 px-3 text-left hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-500"
         >
-          <span className="truncate font-mono text-[11px]">{data.resource}</span>
-          <span className="shrink-0 text-[11px] text-kumo-subtle">
+          <span className="truncate font-mono text-[12px]">{data.resource}</span>
+          <span className="shrink-0 text-[12px] text-kumo-subtle">
             {formatNumber(data.count)} Task{data.count === 1 ? "" : "s"}
             {data.protectedResource ? " · protected" : ""}
           </span>

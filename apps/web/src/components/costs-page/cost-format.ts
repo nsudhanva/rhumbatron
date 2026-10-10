@@ -5,7 +5,14 @@ export type Tier = "haiku" | "sonnet" | "opus";
 export type ChangeCost = ProjectCost["changes"][number];
 export type SelectedCost = NonNullable<ProjectCost["selected"]>;
 
-export const TIER_LABEL: Record<Tier, string> = { haiku: "Haiku", sonnet: "Sonnet", opus: "Opus" };
+/** Product names (spec 7.6): the tier keys stay internal. */
+export const TIER_LABEL: Record<Tier, string> = {
+  haiku: "Claude Haiku",
+  sonnet: "Claude Sonnet",
+  opus: "Claude Opus",
+};
+
+const SHORT: Record<Tier, string> = { haiku: "Haiku", sonnet: "Sonnet", opus: "Opus" };
 
 /**
  * Recorded model cost. `$0.00` is a real recorded zero (free models, ADR 0007); a positive amount
@@ -17,7 +24,7 @@ export function formatCost(usd: number | null | undefined) {
   return formatUsd(usd);
 }
 
-/** Tier path of a Task's attempts: `haiku → sonnet`. Repeats collapse to `sonnet ×2`. */
+/** Models of a Task's attempts: `Haiku → Sonnet`. Repeats collapse to `Sonnet ×2`. */
 export function tierPath(tiers: Tier[]) {
   if (tiers.length === 0) return EMPTY;
   const parts: { tier: Tier; n: number }[] = [];
@@ -26,5 +33,5 @@ export function tierPath(tiers: Tier[]) {
     if (last?.tier === tier) last.n += 1;
     else parts.push({ tier, n: 1 });
   }
-  return parts.map((p) => (p.n > 1 ? `${p.tier} ×${p.n}` : p.tier)).join(" → ");
+  return parts.map((p) => (p.n > 1 ? `${SHORT[p.tier]} ×${p.n}` : SHORT[p.tier])).join(" → ");
 }

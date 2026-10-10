@@ -97,7 +97,7 @@ export function forkRows(view: WorkspaceView, changeId: string | null): ForkRow[
     const complete = found.length === fork.changeSetIds.length;
     const sum = (pick: (s: WorkspaceChangeSet) => number) =>
       found.reduce((total, o) => total + (o.changeSet ? pick(o.changeSet) : 0), 0);
-    const label = labels.get(fork.id) ?? "Candidate";
+    const label = labels.get(fork.id) ?? "Version";
     rows.push({
       kind: "candidate",
       key: candidateKey(fork),
@@ -128,6 +128,26 @@ function labelsByChange(candidates: CandidateFork[]) {
     }
   }
   return labels;
+}
+
+/**
+ * Files a row changed: the ChangeSet's files for a task fork, the union across the composed
+ * ChangeSets for a Candidate fork. Null when nothing is published yet.
+ */
+export function filesChanged(row: ForkRow, rowsByKey: Map<string, ForkRow>): number | null {
+  const setFiles = (set: WorkspaceChangeSet) =>
+    set.fileStats.length > 0 ? set.fileStats.map((f) => f.path) : set.files;
+  if (row.kind === "workspace")
+    return row.fork.changeSet ? setFiles(row.fork.changeSet).length : null;
+  const paths = new Set<string>();
+  let found = false;
+  for (const key of row.composes) {
+    const owner = rowsByKey.get(key);
+    if (owner?.kind !== "workspace" || !owner.fork.changeSet) continue;
+    found = true;
+    for (const path of setFiles(owner.fork.changeSet)) paths.add(path);
+  }
+  return found ? paths.size : null;
 }
 
 /** Changes that own at least one fork, with their fork counts, newest first. */

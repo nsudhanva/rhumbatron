@@ -10,7 +10,6 @@ import {
   useState,
 } from "react";
 import { create } from "zustand";
-import { usePrefersReducedMotion } from "../../../../lib/motion";
 import { useFlight } from "../../flight-context";
 import { type EntityRef, useFlightStore, useSelection } from "../../flight-store";
 import { EntityHover } from "../../hover-preview";
@@ -226,7 +225,7 @@ export function TimelineToolbar({
               title={z.title}
               onClick={() => setZoom(z.id)}
               className={cn(
-                "min-h-6 px-2 text-[11px] leading-none transition-colors duration-(--rh-dur-ui) pointer-coarse:min-h-11",
+                "min-h-6 px-2 text-[12px] leading-none transition-colors duration-(--rh-dur-ui) pointer-coarse:min-h-11",
                 zoom === z.id ? "bg-kumo-ink text-kumo-inverse" : "hover:bg-kumo-tint",
               )}
             >
@@ -241,7 +240,7 @@ export function TimelineToolbar({
           title={live ? "Keep the right edge at now" : "Following applies to the live view"}
           onClick={onFollow}
           className={cn(
-            "inline-flex min-h-6 items-center gap-1.5 border px-2 text-[11px] leading-none transition-colors duration-(--rh-dur-ui) pointer-coarse:min-h-11 disabled:cursor-not-allowed disabled:opacity-45",
+            "inline-flex min-h-6 items-center gap-1.5 border px-2 text-[12px] leading-none transition-colors duration-(--rh-dur-ui) pointer-coarse:min-h-11 disabled:cursor-not-allowed disabled:opacity-45",
             live && follow
               ? "border-kumo-ink bg-kumo-ink text-kumo-inverse"
               : "border-kumo-rule hover:bg-kumo-tint",
@@ -331,11 +330,11 @@ export function TimeAxis({
   const cursorX = scale.x(scale.cursor);
   return (
     <div
-      className="sticky top-0 z-20 flex border-b-2 border-kumo-divider bg-kumo-elevated"
+      className="sticky top-0 z-20 flex border-b border-kumo-rule bg-kumo-elevated"
       style={{ height: AXIS_H }}
     >
       <div
-        className="sticky left-0 z-30 flex shrink-0 items-end border-r border-kumo-rule bg-kumo-elevated px-3 pb-1.5 text-[11px] text-kumo-subtle"
+        className="sticky left-0 z-30 flex shrink-0 items-end border-r border-kumo-rule bg-kumo-elevated px-3 pb-1.5 text-[12px] text-kumo-subtle"
         style={{ width: LEFT }}
       >
         {corner}
@@ -345,7 +344,7 @@ export function TimeAxis({
           <div
             key={tick.t}
             aria-hidden
-            className="absolute border-l border-kumo-rule pb-1 pl-1 font-mono text-[10px] leading-[12px] whitespace-nowrap text-kumo-subtle tabular-nums"
+            className="absolute border-l border-kumo-rule pb-1 pl-1 font-mono text-[12px] leading-[12px] whitespace-nowrap text-kumo-subtle tabular-nums"
             style={{ left: tick.x, top: 18 }}
           >
             <div>{relTime(tick.t - scale.start)}</div>
@@ -370,7 +369,7 @@ export function TimeAxis({
                   {...roving.itemProps(m.key)}
                   title={`${m.label} · ${clockOf(m.t)} · ${relTime(m.t - scale.start)}`}
                   className={cn(
-                    "absolute block truncate px-0.5 font-mono text-[10px] leading-[14px] font-semibold whitespace-nowrap data-[hot]:bg-kumo-tint",
+                    "absolute block truncate px-0.5 font-mono text-[12px] leading-[14px] font-semibold whitespace-nowrap data-[hot]:bg-kumo-tint",
                     ROVING_ITEM,
                     MARK_TEXT[m.tone],
                   )}
@@ -401,7 +400,7 @@ export function TimeAxis({
           style={{ left: cursorX - 1 }}
         />
         <span
-          className="pointer-events-none absolute bottom-3 bg-kumo-ink px-1 font-mono text-[10px] leading-[12px] whitespace-nowrap text-kumo-inverse tabular-nums"
+          className="pointer-events-none absolute bottom-3 bg-kumo-ink px-1 font-mono text-[12px] leading-[12px] whitespace-nowrap text-kumo-inverse tabular-nums"
           style={{ left: Math.max(0, Math.min(cursorX - 1, scale.width - 64)) }}
         >
           {live ? "now" : clockOf(scale.cursor)}
@@ -443,28 +442,3 @@ export function PlotRules({
   );
 }
 PlotRules.displayName = "PlotRules";
-
-/**
- * Plays a 180ms ease-out scale and fade once when an element mounts for a fact that newly
- * played (`animated`). Settled facts mount without motion. Reduced motion: no animation.
- */
-export function useEnter<T extends HTMLElement | SVGElement>(play: boolean) {
-  const ref = useRef<T>(null);
-  const reduce = usePrefersReducedMotion();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: plays once, on mount
-  useEffect(() => {
-    const el = ref.current;
-    if (!play || reduce || !el || typeof el.animate !== "function") return;
-    const token = Number.parseFloat(
-      getComputedStyle(el).getPropertyValue("--rh-dur-ui-slow") || "180",
-    );
-    el.animate(
-      [
-        { opacity: 0, transform: "scale(0.4)" },
-        { opacity: 1, transform: "scale(1)" },
-      ],
-      { duration: Number.isNaN(token) ? 180 : token, easing: "cubic-bezier(0.2, 0, 0, 1)" },
-    );
-  }, []);
-  return ref;
-}

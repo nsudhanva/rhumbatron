@@ -85,9 +85,7 @@ function Related({ state, selection }: { state: FlightState; selection: EntityRe
         if (shown.length === 0) return null;
         return (
           <div key={g.kind} className="flex flex-wrap items-center gap-1">
-            <span className="w-[88px] shrink-0 text-[11px] tracking-[0.08em] text-kumo-subtle uppercase">
-              {g.label}
-            </span>
+            <span className="w-[88px] shrink-0 text-[12px] text-kumo-subtle">{g.label}</span>
             {shown.map((ref) => {
               const full = entityLabel(state, ref);
               return (
@@ -98,7 +96,7 @@ function Related({ state, selection }: { state: FlightState; selection: EntityRe
                   onClick={() => select(ref)}
                   className={cn(
                     "min-h-6 max-w-[180px] truncate border border-kumo-rule px-2 py-0.5 text-[12px] hover:bg-kumo-tint pointer-coarse:min-h-11",
-                    (ref.kind === "task" || ref.kind === "file") && "font-mono text-[11px]",
+                    (ref.kind === "task" || ref.kind === "file") && "font-mono text-[12px]",
                   )}
                 >
                   {chipLabel(state, ref)}
@@ -109,7 +107,7 @@ function Related({ state, selection }: { state: FlightState; selection: EntityRe
         );
       })}
       {total > MAX_CHIPS && (
-        <p className="text-[11px] text-kumo-subtle">+{total - MAX_CHIPS} more</p>
+        <p className="text-[12px] text-kumo-subtle">+{total - MAX_CHIPS} more</p>
       )}
     </nav>
   );
@@ -137,9 +135,9 @@ export function InspectorDrawer({ className }: { className?: string }) {
         className,
       )}
     >
-      <header className="flex items-start justify-between gap-3 border-b-2 border-kumo-divider py-2 pr-1.5 pl-4">
+      <header className="flex items-start justify-between gap-3 border-b border-kumo-rule py-2 pr-1.5 pl-4">
         <div className="grid min-w-0 gap-1">
-          <p className="type-kicker text-kumo-accent">{label.kicker}</p>
+          <p className="text-[12px] text-kumo-accent">{label.kicker}</p>
           <h2 id={headingId} className="type-h5 break-words">
             {label.title}
           </h2>

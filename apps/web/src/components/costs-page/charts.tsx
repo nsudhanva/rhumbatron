@@ -79,9 +79,9 @@ export function BarList({
           className="grid grid-cols-[90px_minmax(0,1fr)_minmax(54px,auto)] items-center gap-3 text-[13px]"
         >
           <span className="truncate">{item.label}</span>
-          <span aria-hidden className="h-2 bg-kumo-recessed">
+          <span aria-hidden className="h-2 overflow-hidden rounded-full bg-kumo-recessed">
             <span
-              className="block h-full bg-kumo-ink transition-[width] duration-(--rh-dur-bar)"
+              className="block h-full rounded-full bg-kumo-ink transition-[width] duration-(--rh-dur-bar)"
               style={{ width: `${top > 0 ? Math.min(100, (item.value / top) * 100) : 0}%` }}
             />
           </span>
@@ -120,16 +120,16 @@ export function CapMeter({
         <span className="text-kumo-subtle">{label}</span>
         <span className="font-mono tabular-nums">
           {format(value)} / {format(cap)}
-          {reached && <span className="ml-2 font-semibold text-accent-700">Cap reached</span>}
+          {reached && <span className="ml-2 font-semibold text-kumo-danger">Cap reached</span>}
         </span>
       </div>
       <meter className="sr-only" min={0} max={cap} value={value}>
         {format(value)}
       </meter>
-      <div aria-hidden className="h-1 bg-kumo-recessed">
+      <div aria-hidden className="h-1 overflow-hidden rounded-full bg-kumo-recessed">
         <div
           className={cn(
-            "h-full transition-[width] duration-(--rh-dur-bar)",
+            "h-full rounded-full transition-[width] duration-(--rh-dur-bar)",
             reached ? "bg-kumo-danger" : "bg-kumo-ink",
           )}
           style={{ width: `${pct}%` }}

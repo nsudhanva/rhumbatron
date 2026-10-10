@@ -2,25 +2,26 @@ import { Show, SignInButton } from "@clerk/tanstack-react-start";
 import { Button, buttonVariants, cn } from "@cloudflare/kumo";
 import { SignIn, X } from "@phosphor-icons/react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect } from "react";
 import { EventPlane } from "../components/events-page/event-plane";
 import { EventStream } from "../components/events-page/event-stream";
-import { type FeedEvent, typeTone } from "../components/events-page/feed-model";
+import type { FeedEvent } from "../components/events-page/feed-model";
 import { type FetchFeedPage, useEventFeed } from "../components/events-page/use-event-feed";
 import { SectionError } from "../components/project/feedback";
 import { usePageMeta } from "../components/shell/page-meta";
 import { EmptyState } from "../components/ui/empty-state";
 import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
-import { StatCell, StatStrip } from "../components/ui/stat-strip";
+import { Term } from "../components/ui/term";
 import { listChangeEvents, listProjectEvents } from "../lib/api";
-import { EMPTY, formatAge, formatClock, formatNumber } from "../lib/format";
+import { formatAge, formatNumber } from "../lib/format";
 import { type LiveStatus, useProjectLive } from "../lib/live";
 import { SystemsOnly, useViewMode } from "../lib/view-mode";
 
 /**
- * Project events (AGENTS.md 16.1, 17, 38, 39; DESIGN.md 9.9): the causal facts of one Project,
- * newest first, live. The rows come from the feed projection; the live socket only says that
+ * Event log (Advanced; AGENTS.md 16.1, 17, 38, 39): the raw causal facts of one Project, newest
+ * first, live. The Activity page is the plain summary; this page keeps type, sequence, actor and
+ * resource for debugging. The rows come from the feed projection; the live socket only says that
  * something changed, and each signal pulls the events after the newest sequence shown.
  * `?change=<id>` narrows the stream to one Change.
  */
@@ -44,10 +45,10 @@ function EventsPage() {
       </Show>
       <Show when="signed-out">
         <Page>
-          <PageTitle kicker="Project" title="Events" />
+          <PageTitle title="Event log" />
           <EmptyState
-            what="Sign in to view this Project's events."
-            how="Events are visible to members of the Project's organization."
+            what="Sign in to view this project's event log."
+            how="Projects are visible to members of their organization."
             action={
               <SignInButton>
                 <Button variant="primary" icon={SignIn}>
@@ -98,29 +99,19 @@ function EventsView() {
   return (
     <Page>
       <PageTitle
-        kicker={changeId ? "Change events" : "Project events"}
-        title="Events"
+        title={<Term k="eventLog" />}
         meta={
-          <>
-            <span>Causal facts, newest first</span>
-            <span aria-hidden>·</span>
-            <LiveWord status={live} />
-            {changeId && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="inline-flex items-center gap-2">
-                  <span>Change</span>
-                  <Link
-                    to="/changes/$changeId"
-                    params={{ changeId }}
-                    className="font-mono text-[12px] text-kumo-accent underline-offset-2 hover:underline"
-                  >
-                    {changeId}
-                  </Link>
-                </span>
-              </>
-            )}
-          </>
+          <span className="text-[14px]">
+            The raw recorded events, for debugging. For a plain summary, open{" "}
+            <Link
+              to="/projects/$projectId/activity"
+              params={{ projectId }}
+              className="text-kumo-link underline-offset-2 hover:underline"
+            >
+              Activity
+            </Link>
+            .
+          </span>
         }
         actions={
           changeId && (
@@ -130,7 +121,7 @@ function EventsView() {
               search={{}}
               className={cn(buttonVariants({ variant: "secondary", size: "sm" }), "gap-1.5")}
             >
-              <X size={14} aria-hidden />
+              <X size={16} aria-hidden />
               All project events
             </Link>
           )
@@ -144,24 +135,30 @@ function EventsView() {
         />
       )}
 
-      <EventStats events={feed.events} loading={loading} />
-
-      <SystemsOnly>
-        <EventPlane projectId={projectId} events={feed.events} live={live} />
-      </SystemsOnly>
-
       <Section
-        label="Stream"
+        label="Events"
         meta={
           feed.pullError ? (
             <span className="text-kumo-warning" role="status">
               Live update failed. Retrying.
             </span>
           ) : (
-            <Mono subtle>{loading ? "loading" : `${formatNumber(feed.events.length)} loaded`}</Mono>
+            <Summary events={feed.events} loading={loading} live={live} />
           )
         }
       >
+        {changeId && (
+          <p className="text-[13px]">
+            Showing one change:{" "}
+            <Link
+              to="/changes/$changeId"
+              params={{ changeId }}
+              className="font-mono text-[12px] text-kumo-link underline-offset-2 hover:underline"
+            >
+              {changeId}
+            </Link>
+          </p>
+        )}
         <EventStream
           projectId={projectId}
           events={feed.events}
@@ -183,7 +180,7 @@ function EventsView() {
                 ) : (
                   feed.events.length > 0 && (
                     <span className="text-[12px] text-kumo-subtle">
-                      Start of the recorded stream. Older events are in the R2 audit archive.
+                      Start of the recorded log. Older events are in the audit archive.
                     </span>
                   )
                 )}
@@ -202,51 +199,52 @@ function EventsView() {
           }
         />
       </Section>
+
+      <SystemsOnly
+        fallback={
+          <p className="text-[12px] text-kumo-subtle">
+            Technical details are hidden. Turn on &lsquo;Show technical details&rsquo; in the
+            Advanced menu to see stream lag and retention.
+          </p>
+        }
+      >
+        <EventPlane projectId={projectId} events={feed.events} live={live} />
+      </SystemsOnly>
     </Page>
   );
 }
 
-/** Connection word for the title meta. The status bar carries the square dot. */
-function LiveWord({ status }: { status: LiveStatus }) {
-  const text = status === "open" ? "Live" : status === "connecting" ? "Connecting" : "Polling";
-  return <span className={status === "open" ? "text-kumo-success" : undefined}>{text}</span>;
-}
+const LIVE_WORD: Record<LiveStatus, string> = {
+  open: "live",
+  connecting: "connecting",
+  closed: "checking every 15s",
+};
 
-function EventStats({ events, loading }: { events: FeedEvent[]; loading: boolean }) {
-  const summary = useMemo(() => {
-    let failures = 0;
-    let commits = 0;
-    for (const event of events) {
-      const tone = typeTone(event);
-      if (tone === "danger") failures += 1;
-      else if (tone === "brand") commits += 1;
-    }
-    return { failures, commits, latest: events[0] };
-  }, [events]);
-  const show = (value: string) => (loading ? EMPTY : value);
+/** One sentence in place of the old stat strip: count, newest age, connection. */
+function Summary({
+  events,
+  loading,
+  live,
+}: {
+  events: FeedEvent[];
+  loading: boolean;
+  live: LiveStatus;
+}) {
+  if (loading) return <span>Loading</span>;
+  const newest = events[0];
   return (
-    <StatStrip>
-      <StatCell
-        label="Latest sequence"
-        value={show(summary.latest ? String(summary.latest.seq) : EMPTY)}
-        mono
-        footnote={summary.latest ? summary.latest.eventType : "no events yet"}
-      />
-      <StatCell
-        label="Last event"
-        value={show(summary.latest ? formatAge(summary.latest.occurredAt) : EMPTY)}
-        footnote={summary.latest ? formatClock(summary.latest.occurredAt) : EMPTY}
-      />
-      <StatCell
-        label="Failures"
-        value={show(formatNumber(summary.failures))}
-        footnote="failed, rejected, expired or stale"
-      />
-      <StatCell
-        label="Canonical commits"
-        value={show(formatNumber(summary.commits))}
-        footnote={`in ${formatNumber(events.length)} loaded events`}
-      />
-    </StatStrip>
+    <span>
+      {formatNumber(events.length)} {events.length === 1 ? "event" : "events"}
+      {newest && (
+        <>
+          {" "}
+          · newest{" "}
+          <time dateTime={newest.occurredAt} title={newest.occurredAt}>
+            {formatAge(newest.occurredAt)}
+          </time>
+        </>
+      )}{" "}
+      · <span className={live === "open" ? "text-kumo-success" : undefined}>{LIVE_WORD[live]}</span>
+    </span>
   );
 }

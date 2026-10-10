@@ -33,7 +33,6 @@ import {
   TimelineToolbar,
   type TimeScale,
   useClock,
-  useEnter,
   useFollowLive,
   useLiveInstant,
   useMeasuredScroller,
@@ -82,8 +81,6 @@ type Mark = {
   kind: MarkKind;
   label: string;
   ref: EntityRef;
-  /** The fact id, for "newly played" motion and the lane flash. */
-  eventId: string | null;
   title: string;
 };
 
@@ -95,13 +92,13 @@ const MARK_STYLE: Record<MarkKind, string> = {
   release: "border border-tone-500 bg-tone-200",
   expired: "bg-kumo-warning",
   changeset: "bg-tone-600",
-  challenge: "bg-accent-500",
+  challenge: "bg-kumo-danger",
   done: "bg-kumo-success",
-  fail: "bg-accent-500 border border-kumo-ink",
+  fail: "bg-kumo-danger border border-kumo-ink",
 };
 
 const MARK_TEXT: Partial<Record<MarkKind, string>> = {
-  challenge: "text-kumo-accent font-semibold",
+  challenge: "text-kumo-danger font-semibold",
   fail: "text-kumo-danger",
   expired: "text-kumo-warning",
   done: "text-kumo-success",
@@ -119,9 +116,8 @@ function laneMarks(state: FlightState, clockOf: (ms: number) => string): Map<str
     list.push(mark);
     out.set(laneId, list);
   };
-  const proposedFact = new Map<string, string>();
   for (const e of state.events) {
-    const base = { t: e.at, eventId: e.id, title: `${e.detail} · ${clockOf(e.at)}` };
+    const base = { t: e.at, title: `${e.detail} · ${clockOf(e.at)}` };
     switch (e.kind) {
       case "intent":
         push(e.laneId, {
@@ -201,7 +197,6 @@ function laneMarks(state: FlightState, clockOf: (ms: number) => string): Map<str
           const published = csId
             ? state.tasks[e.laneId]?.changeSets.some((cs) => cs.id === csId)
             : false;
-          if (csId) proposedFact.set(csId, e.id);
           // A ChangeSet the Workspace lists is drawn from its record below, not twice.
           if (!published) {
             push(e.laneId, {
@@ -229,7 +224,6 @@ function laneMarks(state: FlightState, clockOf: (ms: number) => string): Map<str
         kind: "changeset",
         label: "ChangeSet",
         ref: { kind: "changeset", id: cs.id },
-        eventId: proposedFact.get(cs.id) ?? null,
         title: `ChangeSet ${cs.id} · ${cs.commit.slice(0, 7)} · +${cs.insertions} −${cs.deletions} · ${clockOf(at)}`,
       });
     }
@@ -366,7 +360,7 @@ export function SwimlanesPanel({ focused }: PanelProps) {
             patternUnits="userSpaceOnUse"
             patternTransform="rotate(45)"
           >
-            <line x1="0" y1="0" x2="0" y2="5" strokeWidth="2" className="stroke-accent-500" />
+            <line x1="0" y1="0" x2="0" y2="5" strokeWidth="2" className="stroke-kumo-danger" />
           </pattern>
         </defs>
       </svg>
@@ -423,7 +417,7 @@ function LanesSkeleton({ focused }: { focused: boolean }) {
   return (
     <div aria-hidden className="grid content-start">
       <div className="h-9 border-b border-kumo-rule" />
-      <div className="border-b-2 border-kumo-divider" style={{ height: AXIS_H }} />
+      <div className="border-b border-kumo-rule" style={{ height: AXIS_H }} />
       {Array.from({ length: focused ? 12 : 6 }, (_, i) => (
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder rows
@@ -460,15 +454,6 @@ function Lane({
   dim: boolean;
   live: boolean;
 }) {
-  const { inFlight } = useFlight();
-  const flash = useMemo(() => {
-    for (let i = marks.length - 1; i >= 0; i -= 1) {
-      const id = marks[i]?.eventId;
-      if (id && inFlight.has(id)) return id;
-    }
-    return null;
-  }, [marks, inFlight]);
-
   // Marker placement: same-instant facts sit side by side (2px apart). A label shows only when
   // it ends before the next marker starts, so labels never run under another square.
   const placed = useMemo(() => {
@@ -515,9 +500,6 @@ function Lane({
 
   const content = (
     <>
-      {flash && (
-        <div key={flash} aria-hidden className="rh-arrive pointer-events-none absolute inset-0" />
-      )}
       {task.runs.map((run, i) => (
         <AttemptBar
           key={run.attempt}
@@ -604,7 +586,7 @@ function LaneHeader({ task, note, live }: { task: TaskState; note: string[]; liv
         title={title}
         onClick={() => useFlightStore.getState().toggle(ref)}
         className={cn(
-          "sticky left-0 z-10 grid shrink-0 content-center gap-px self-start border-r border-b border-kumo-rule bg-kumo-elevated px-3 text-left text-[11px] leading-[13px] transition-colors duration-(--rh-dur-ui)",
+          "sticky left-0 z-10 grid shrink-0 content-center gap-px self-start border-r border-b border-kumo-rule bg-kumo-elevated px-3 text-left text-[12px] leading-[13px] transition-colors duration-(--rh-dur-ui)",
           "hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-500",
           selected && "shadow-[inset_2px_0_0_var(--color-accent-500)]",
           (selected || hovered) && "bg-kumo-faint",
@@ -616,24 +598,24 @@ function LaneHeader({ task, note, live }: { task: TaskState; note: string[]; liv
           <span className="font-mono text-[12px] font-semibold">{task.key}</span>
           <span className={cn(view.family === "danger" && "text-kumo-danger")}>{view.label}</span>
           <span className="ml-auto flex shrink-0 items-center gap-1">
-            {tier && <span className="font-mono text-[10px] text-kumo-subtle">{tier}</span>}
+            {tier && <span className="font-mono text-[12px] text-kumo-subtle">{tier}</span>}
             {provider && (
-              <span className="bg-tone-200 px-1 text-[10px] text-tone-800">{provider}</span>
+              <span className="bg-tone-200 px-1 text-[12px] text-tone-800">{provider}</span>
             )}
             {task.source === "fixture" && (
-              <span className="border border-tone-500 px-1 text-[10px] text-kumo-subtle">
+              <span className="border border-tone-500 px-1 text-[12px] text-kumo-subtle">
                 fixture
               </span>
             )}
             {note.length > 0 && (
-              <span className="font-mono text-[10px] text-kumo-subtle" aria-hidden>
+              <span className="font-mono text-[12px] text-kumo-subtle" aria-hidden>
                 ⇄
               </span>
             )}
           </span>
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-kumo-subtle">
-          <span className="min-w-0 truncate font-mono text-[11px]">
+          <span className="min-w-0 truncate font-mono text-[12px]">
             {task.agentId ?? "no agent"}
           </span>
           <span className="shrink-0">· {task.kind}</span>
@@ -671,7 +653,6 @@ function AttemptBar({
   item: ItemProps;
   show: RovingShow;
 }) {
-  const { animated } = useFlight();
   const clockOf = useClock();
   const x0 = scale.x(run.startedAt);
   const x1 = scale.x(run.endedAt ?? scale.cursor);
@@ -679,9 +660,6 @@ function AttemptBar({
   const failed = run.status === "failed";
   const running = run.status === "running";
   const progress = running ? Math.min(1, run.modelCalls / CALLS_PER_RUN[run.tier]) : 0;
-  const enterRef = useEnter<HTMLDivElement>(
-    animated.has(run.attempt === 1 ? `${task.id}:fork` : `${task.id}:run${run.attempt}:start`),
-  );
   const label = `${task.key} attempt ${run.attempt} on ${run.tier}, ${statusView(run.status).label}${
     run.failureKind ? ` (${run.failureKind})` : ""
   }, ${formatNumber(run.modelCalls)} calls`;
@@ -700,7 +678,6 @@ function AttemptBar({
     <>
       <EntityHover entity={ref} show={show}>
         <div
-          ref={enterRef}
           role="option"
           aria-selected={selected}
           {...item}
@@ -708,10 +685,10 @@ function AttemptBar({
             run.failureReason ? `\n${run.failureReason}` : ""
           }`}
           className={cn(
-            "absolute flex origin-left items-center overflow-hidden px-1 font-mono text-[10px] leading-none font-semibold whitespace-nowrap",
+            "absolute flex origin-left items-center overflow-hidden px-1 font-mono text-[12px] leading-none font-semibold whitespace-nowrap",
             ROVING_ITEM,
             TIER_FILL[run.tier],
-            failed && "border border-accent-500",
+            failed && "border border-kumo-danger",
           )}
           style={{ left: x0, top: BAR_Y, width, height: BAR_H, scrollMarginLeft: LEFT + 8 }}
         >
@@ -730,7 +707,7 @@ function AttemptBar({
       {running && (
         <div
           aria-hidden
-          className="rh-lane-progress pointer-events-none absolute"
+          className="pointer-events-none absolute h-0.5 bg-kumo-ink"
           style={{ left: x0, top: BAR_Y + BAR_H + 1, width: width * progress }}
         />
       )}
@@ -738,7 +715,7 @@ function AttemptBar({
         <span
           aria-hidden
           title={`Escalated ${run.escalatedFrom} → ${run.tier}`}
-          className="pointer-events-none absolute flex items-center gap-0.5 font-mono text-[9px] leading-none text-kumo-default"
+          className="pointer-events-none absolute flex items-center gap-0.5 font-mono text-[12px] leading-none text-kumo-default"
           style={{ left: x0 - 1, top: UNDER_Y + 2 }}
         >
           <svg
@@ -757,7 +734,7 @@ function AttemptBar({
       {under && room > 24 && (
         <span
           aria-hidden
-          className="pointer-events-none absolute truncate font-mono text-[10px] leading-none text-kumo-danger"
+          className="pointer-events-none absolute truncate font-mono text-[12px] leading-none text-kumo-danger"
           style={{
             left: x0 + (run.escalatedFrom ? 34 : 0),
             top: UNDER_Y + 3,
@@ -785,9 +762,7 @@ function Marker({
   item: ItemProps;
   show: RovingShow;
 }) {
-  const { animated } = useFlight();
   const { selected } = useIsHighlighted(mark.ref);
-  const enterRef = useEnter<HTMLSpanElement>(mark.eventId !== null && animated.has(mark.eventId));
   const style: CSSProperties = {
     left: x,
     top: 0,
@@ -805,7 +780,6 @@ function Marker({
         style={style}
       >
         <span
-          ref={enterRef}
           aria-hidden
           className={cn(
             "block shrink-0",
@@ -817,7 +791,7 @@ function Marker({
         {showLabel && (
           <span
             className={cn(
-              "font-mono text-[10px] leading-none whitespace-nowrap text-kumo-default",
+              "font-mono text-[12px] leading-none whitespace-nowrap text-kumo-default",
               MARK_TEXT[mark.kind],
             )}
           >
@@ -840,7 +814,7 @@ Marker.displayName = "Marker";
  * rule. The label names the disputed resource and selects the conflict.
  */
 function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number> }) {
-  const { state, animated } = useFlight();
+  const { state } = useFlight();
   const items = useMemo(
     () =>
       state.conflicts.flatMap((c) => {
@@ -866,10 +840,7 @@ function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number>
             key={c.id}
             d={`M ${x} ${y1} L ${x} ${y2}`}
             pathLength={1}
-            className={cn(
-              c.open ? "stroke-accent-500" : "stroke-kumo-divider",
-              c.open && animated.has(c.eventId) && "rh-fork",
-            )}
+            className={c.open ? "stroke-kumo-danger" : "stroke-kumo-divider"}
             strokeWidth={c.open ? 2 : 1}
             strokeDasharray={c.open ? undefined : "0.02 0.02"}
             fill="none"
@@ -886,14 +857,14 @@ function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number>
               onClick={() => useFlightStore.getState().toggle(ref)}
               title={`Conflict on ${c.resource}\n“${c.statements[0]}”\nvs “${c.statements[1]}”`}
               // 24px tall target around the 16px chip (DESIGN.md 5.2).
-              className="pointer-events-auto absolute flex h-6 items-center font-mono text-[10px] leading-[14px] whitespace-nowrap focus-visible:outline-2 focus-visible:outline-accent-500"
+              className="pointer-events-auto absolute flex h-6 items-center font-mono text-[12px] leading-[14px] whitespace-nowrap focus-visible:outline-2 focus-visible:outline-accent-500"
               style={{ left: x + 4, top: (y1 + y2) / 2 - 12 }}
             >
               <span
                 className={cn(
                   "border bg-kumo-elevated px-1",
                   c.open
-                    ? "border-accent-500 text-kumo-accent"
+                    ? "border-kumo-danger text-kumo-danger"
                     : "border-kumo-rule text-kumo-subtle",
                 )}
               >

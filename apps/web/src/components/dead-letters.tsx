@@ -8,20 +8,27 @@ import {
   type LimitBlock,
   retryDeadLetter,
 } from "../lib/api";
-import { timeAgo } from "../lib/format";
+import { timeAgo, truncate } from "../lib/format";
 import { Banner } from "./candidate/banner";
-import { Mono } from "./ui/mono";
 
 /** Dead letters are rare and change slowly: a minute is fresh enough and costs one D1 read. */
 const POLL_MS = 60_000;
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+/** The shared read (also used by the Overview to decide whether "Needs you" has rows). */
+export function deadLettersQuery(projectId: string | undefined, changeId?: string | undefined) {
+  return {
+    queryKey: ["dead-letters", projectId, changeId ?? null],
+    queryFn: () => getDeadLetters({ data: { projectId: projectId ?? "", changeId } }),
+    enabled: !!projectId,
+    refetchInterval: POLL_MS,
+  };
+}
 
 /**
- * Operator banners (DESIGN.md 8.5; AGENTS.md sections 42.7 and 44). Danger: commands that failed
- * after their Queue retries, each with Retry and Dismiss. Attention: Tasks and Changes a section 44
- * limit stopped or delays, with the exact limit. Renders nothing when there is nothing to act on.
- * On a Change page, pass `changeId` to show only that Change.
+ * Stuck jobs and paused work (research 7.6 "Stuck job", "Paused: budget reached"). A stuck job is
+ * a background command that failed after its retries; Retry sends it again, Dismiss accepts the
+ * failure. Paused rows name the limit that stopped a change or task. Renders nothing when there
+ * is nothing to act on. On a Change page, pass `changeId` to show only that Change.
  */
 export function DeadLetters({
   projectId,
@@ -31,12 +38,7 @@ export function DeadLetters({
   changeId?: string | undefined;
 }) {
   const queryClient = useQueryClient();
-  const state = useQuery({
-    queryKey: ["dead-letters", projectId, changeId ?? null],
-    queryFn: () => getDeadLetters({ data: { projectId: projectId ?? "", changeId } }),
-    enabled: !!projectId,
-    refetchInterval: POLL_MS,
-  });
+  const state = useQuery(deadLettersQuery(projectId, changeId));
   const settle = () => {
     void queryClient.invalidateQueries({ queryKey: ["dead-letters", projectId] });
     if (changeId) {
@@ -59,15 +61,22 @@ export function DeadLetters({
   const limits = state.data?.limits ?? [];
   if (letters.length === 0 && limits.length === 0) return null;
   const actionError = retry.error ?? dismiss.error;
+  const only = letters.length === 1 ? letters[0] : undefined;
 
   return (
     <div className="grid gap-2">
       {letters.length > 0 && (
-        <Banner family="danger" title={`${plural(letters.length, "command")} failed after retries`}>
+        <Banner
+          family="attention"
+          className="rounded-lg"
+          title={
+            only
+              ? `Stuck job: ${only.taskTitle ?? "a background job"}`
+              : `${letters.length} stuck jobs`
+          }
+        >
           <p>
-            Each was retried by its Queue, then moved to the dead-letter Queue, and its Task is
-            blocked. Retry sends the same command (same command ID) back to its Queue; work that
-            already happened is not repeated. Dismiss accepts the failure.
+            A background job failed repeatedly. Retry sends it again; Dismiss accepts the failure.
           </p>
           {actionError && <p className="mt-1 font-semibold">{actionError.message}</p>}
           <ul className="mt-2 grid">
@@ -89,13 +98,23 @@ export function DeadLetters({
       {limits.length > 0 && (
         <Banner
           family="attention"
-          title={`${plural(limits.length, "item")} stopped or waiting on a limit`}
+          className="rounded-lg"
+          title={
+            limits.length === 1
+              ? limitSentence(limits[0] as LimitBlock)
+              : `${limits.length} items paused`
+          }
         >
-          <ul className="grid gap-1">
-            {limits.map((block) => (
-              <LimitRow key={`${block.scope}:${block.id}`} block={block} showChange={!changeId} />
-            ))}
-          </ul>
+          {limits.length > 1 && (
+            <ul className="grid gap-1">
+              {limits.map((block) => (
+                <LimitRow key={`${block.scope}:${block.id}`} block={block} showChange={!changeId} />
+              ))}
+            </ul>
+          )}
+          {limits.length === 1 && !changeId && (
+            <ChangeLink changeId={(limits[0] as LimitBlock).changeId} />
+          )}
         </Banner>
       )}
     </div>
@@ -103,14 +122,24 @@ export function DeadLetters({
 }
 DeadLetters.displayName = "DeadLetters";
 
+const isBudget = (block: LimitBlock) =>
+  block.status === "budget_blocked" || /cost|budget|usd/i.test(block.limit);
+
+/** "'Add shared wishlists' paused: budget reached", or the limit's own sentence. */
+function limitSentence(block: LimitBlock) {
+  const name = block.title ? `'${truncate(block.title, 60)}'` : null;
+  if (isBudget(block)) return `${name ?? "This change"} paused: budget reached`;
+  return name ? `${name}: ${block.reason}` : block.reason;
+}
+
 function ChangeLink({ changeId }: { changeId: string }) {
   return (
     <Link
       to="/changes/$changeId"
       params={{ changeId }}
-      className="underline decoration-current/40 underline-offset-2 hover:decoration-current"
+      className="w-fit underline decoration-current/40 underline-offset-2 hover:decoration-current"
     >
-      <Mono>{changeId}</Mono>
+      Open change
     </Link>
   );
 }
@@ -135,16 +164,16 @@ function DeadLetterRow({
   return (
     <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-current/20 py-1.5">
       <span className="flex min-w-0 flex-wrap items-center gap-x-2 font-normal">
-        <Mono>{letter.commandType}</Mono>
-        {letter.taskTitle && <span className="truncate">{letter.taskTitle}</span>}
-        {showChange && letter.changeId && <ChangeLink changeId={letter.changeId} />}
-        {!letter.changeId && <span>Project command</span>}
+        <span className="truncate" title={letter.commandType}>
+          {letter.taskTitle ?? (letter.changeId ? "Background job" : "Project job")}
+        </span>
         <time dateTime={letter.lastSeenAt} title={letter.lastSeenAt} className="opacity-80">
           {timeAgo(letter.lastSeenAt)}
         </time>
         {letter.deadCount > 1 && (
           <span className="opacity-80">failed {letter.deadCount} times</span>
         )}
+        {showChange && letter.changeId && <ChangeLink changeId={letter.changeId} />}
       </span>
       <span className="flex shrink-0 gap-2">
         <Button
@@ -174,16 +203,9 @@ function DeadLetterRow({
 
 function LimitRow({ block, showChange }: { block: LimitBlock; showChange: boolean }) {
   return (
-    <li className="grid gap-0.5 font-normal">
-      <span className="flex flex-wrap items-center gap-x-2">
-        <span className="font-semibold">
-          {block.scope === "change" ? "Change" : "Task"}
-          {block.scope === "task" && block.title ? ` · ${block.title}` : ""}
-        </span>
-        {showChange && <ChangeLink changeId={block.changeId} />}
-        <Mono subtle>{block.limit}</Mono>
-      </span>
-      <span>{block.reason}</span>
+    <li className="flex flex-wrap items-center gap-x-2 font-normal">
+      <span>{limitSentence(block)}</span>
+      {showChange && <ChangeLink changeId={block.changeId} />}
     </li>
   );
 }

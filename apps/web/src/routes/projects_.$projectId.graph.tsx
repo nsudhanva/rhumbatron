@@ -12,14 +12,15 @@ import { usePageMeta } from "../components/shell/page-meta";
 import { EmptyState } from "../components/ui/empty-state";
 import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
-import { StatCell, StatStrip } from "../components/ui/stat-strip";
-import { getProductGraph, getProject, listChanges, type ProductGraph } from "../lib/api";
-import { formatNumber, generation, truncate } from "../lib/format";
+import { Term } from "../components/ui/term";
+import { getProductGraph, listChanges, type ProductGraph } from "../lib/api";
+import { formatNumber, generation, generationCode, truncate } from "../lib/format";
 
 /**
- * Product Graph (AGENTS.md 28, 38.3; DESIGN.md 9.13). Semantic areas of the Project and how
- * they depend on each other. By default it shows only the subgraph one Change affects; the
- * zoom switches between Project and Change. Protected invariants always show.
+ * Product map (AGENTS.md 28, 38.3; internal name Product Graph). An Advanced page: the areas of
+ * the Project and how they depend on each other. By default it shows only the areas one Change
+ * touches; the scope switches between "This change" and "Whole product". The layout is static
+ * and the map fits once per scope, with no edge animation.
  */
 
 type Search = { zoom?: Zoom; changeId?: string; area?: string };
@@ -40,6 +41,9 @@ export const Route = createFileRoute("/projects_/$projectId/graph")({
 /** Re-derive while a Change in scope is still working; idle graphs do not poll (D1 reads). */
 const POLL_MS = 15_000;
 
+const INTRO =
+  "How the parts of the product depend on each other. The map shows only the areas one change touches unless you zoom out.";
+
 function ProductGraphPage() {
   return (
     <Page>
@@ -47,9 +51,9 @@ function ProductGraphPage() {
         <GraphScreen />
       </Show>
       <Show when="signed-out">
-        <PageTitle kicker="Project" title="Product Graph" />
+        <PageTitle title="Product map" />
         <EmptyState
-          what="Sign in to view the Product Graph."
+          what="Sign in to view the product map."
           how="Projects are visible to members of their organization."
         />
       </Show>
@@ -62,10 +66,6 @@ function GraphScreen() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
 
-  const project = useQuery({
-    queryKey: ["project", projectId],
-    queryFn: () => getProject({ data: projectId }),
-  });
   const changes = useQuery({
     queryKey: ["changes", projectId],
     queryFn: () => listChanges({ data: projectId }),
@@ -111,30 +111,14 @@ function GraphScreen() {
     trail:
       zoom === "change" && selectedChange
         ? [{ label: truncate(selectedChange.goal, 44) }]
-        : [{ label: "All Changes" }],
+        : [{ label: "Whole product" }],
   });
 
   return (
     <>
       <PageTitle
-        kicker={project.data?.name ?? "Project"}
-        title="Product Graph"
-        meta={
-          <>
-            {graph.data?.canonicalGeneration !== null &&
-              graph.data?.canonicalGeneration !== undefined && (
-                <>
-                  <Mono subtle>{generation(graph.data.canonicalGeneration)}</Mono>
-                  <span aria-hidden>·</span>
-                </>
-              )}
-            <span>
-              {zoom === "change"
-                ? "Areas one Change affects, protected invariants, and their direct dependencies"
-                : "Every area the listed Changes touch, plus the seeded source"}
-            </span>
-          </>
-        }
+        title={<Term k="productMap" />}
+        meta={<span className="text-[14px]">{INTRO}</span>}
       />
 
       <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
@@ -163,60 +147,53 @@ function GraphScreen() {
         {zoom === "change" && selectedChange && (
           <div className="flex items-center gap-2 pb-1.5">
             <ChangeStatusPill status={selectedChange.status} />
-            <Mono subtle>{selectedChange.id}</Mono>
           </div>
         )}
       </div>
 
       {graph.isError && (
         <SectionError
-          message={`The Product Graph could not load. ${graph.error.message}`}
+          message={`The product map could not load. ${graph.error.message}`}
           onRetry={() => graph.refetch()}
           retrying={graph.isFetching}
         />
       )}
 
-      {view && graph.data && <GraphStats view={view} graph={graph.data} />}
-
       <div className="grid gap-7 min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
         <Section
-          label={zoom === "change" ? "Affected subgraph" : "Project graph"}
-          meta={
-            view && (
-              <Mono subtle>
-                {formatNumber(view.areas.length)} areas · {formatNumber(view.edges.length)} edges
-              </Mono>
-            )
-          }
+          label={zoom === "change" ? "This change" : "Whole product"}
+          meta={view && graph.data && <Summary view={view} graph={graph.data} />}
         >
           {graph.isPending || changes.isPending ? (
-            <span aria-hidden className="skeleton block h-[clamp(340px,48vw,520px)] w-full" />
+            <span
+              aria-hidden
+              className="skeleton block h-[clamp(340px,48vw,520px)] w-full rounded-lg"
+            />
           ) : !view || view.areas.length === 0 ? (
             <EmptyState
               what="No product areas yet."
               how={
                 graph.data?.fixture.applied || graph.data?.source?.kind === "index"
-                  ? "Submit a Change; its Tasks declare the semantic resources this graph shows."
-                  : "Seed the Acme Shop source on the project overview, or submit a Change."
+                  ? "Start a change; the areas its tasks touch show here."
+                  : "Load the demo code from the Overview, or start a change."
               }
             />
           ) : (
-            <ProductGraphCanvas
-              view={view}
-              selectedId={selected?.node.id}
-              onSelect={onSelect}
-              caption={graph.data && <Footnote graph={graph.data} view={view} zoom={zoom} />}
-            />
+            <ProductGraphCanvas view={view} selectedId={selected?.node.id} onSelect={onSelect} />
+          )}
+          {view && graph.data && view.areas.length > 0 && (
+            <details className="rounded-lg border border-kumo-rule bg-kumo-elevated">
+              <summary className="cursor-pointer px-4 py-2.5 text-[13px] font-semibold">
+                Technical details
+              </summary>
+              <p className="max-w-[760px] px-4 pb-3 text-[12px] text-kumo-subtle">
+                <Footnote graph={graph.data} view={view} zoom={zoom} />
+              </p>
+            </details>
           )}
         </Section>
         <Section label="Area details">
-          <div
-            className={cn(
-              "bg-kumo-elevated p-4",
-              // The accent bar pairs the inspector with the selected node; none when empty.
-              selected && "shadow-[inset_2px_0_0_var(--color-accent-500)]",
-            )}
-          >
+          <div className="rounded-lg border border-kumo-rule bg-kumo-elevated p-4">
             {view && graph.data ? (
               <AreaInspector area={selected} view={view} graph={graph.data} zoom={zoom} />
             ) : (
@@ -234,11 +211,11 @@ function GraphScreen() {
 }
 
 const ZOOMS: { value: Zoom; label: string; title: string }[] = [
-  { value: "project", label: "Project", title: "Every area the listed Changes touch" },
-  { value: "change", label: "Change", title: "Only the areas one Change affects" },
+  { value: "change", label: "This change", title: "Only the areas one change touches" },
+  { value: "project", label: "Whole product", title: "Every area the listed changes touch" },
 ];
 
-/** Semantic zoom (AGENTS.md 38.3): segmented control, selected in ink (DESIGN.md 8.2). */
+/** Scope switch (AGENTS.md 38.3 semantic zoom) as a two-button segmented control. */
 function ZoomControl({
   zoom,
   changeAvailable,
@@ -251,10 +228,10 @@ function ZoomControl({
   return (
     <div className="grid gap-1.5">
       <span className="text-[12px] text-kumo-subtle" aria-hidden>
-        Zoom
+        Show
       </span>
-      <fieldset className="flex w-fit border border-kumo-divider">
-        <legend className="sr-only">Zoom</legend>
+      <fieldset className="flex w-fit overflow-hidden rounded-md border border-kumo-rule">
+        <legend className="sr-only">Show</legend>
         {ZOOMS.map(({ value, label, title }, index) => {
           const selected = zoom === value;
           const disabled = value === "change" && !changeAvailable;
@@ -262,14 +239,14 @@ function ZoomControl({
             <button
               key={value}
               type="button"
-              title={disabled ? "This Project has no Change yet" : title}
+              title={disabled ? "This project has no change yet" : title}
               aria-pressed={selected}
               disabled={disabled}
               onClick={() => onChange(value)}
               className={cn(
-                "flex h-9 items-center px-3.5 text-[13px] transition-colors duration-(--rh-dur-ui) focus-visible:outline-offset-[-2px] disabled:cursor-not-allowed disabled:opacity-45 pointer-coarse:h-11",
-                index > 0 && "border-l border-kumo-divider",
-                selected ? "bg-kumo-ink text-kumo-inverse" : "enabled:hover:bg-kumo-tint",
+                "flex h-9 items-center px-3.5 text-[13px] transition-colors duration-150 focus-visible:outline-offset-[-2px] disabled:cursor-not-allowed disabled:opacity-45 pointer-coarse:h-11",
+                index > 0 && "border-l border-kumo-rule",
+                selected ? "bg-kumo-tint font-semibold" : "enabled:hover:bg-kumo-tint",
               )}
             >
               {label}
@@ -281,34 +258,26 @@ function ZoomControl({
   );
 }
 
-function GraphStats({ view, graph }: { view: GraphView; graph: ProductGraph }) {
-  const touched = view.areas.filter((a) => a.touched).length;
-  const fresh = view.areas.filter((a) => a.state === "new").length;
-  const guarded = view.areas.filter((a) => a.state === "protected");
+/** One sentence in place of the old stat strip. */
+function Summary({ view, graph }: { view: GraphView; graph: ProductGraph }) {
+  const count = (state: string) => view.areas.filter((a) => a.state === state).length;
   const conflicts = view.areas.reduce((n, a) => n + a.conflicts.length, 0);
+  const parts = [
+    `${formatNumber(view.areas.length)} of ${formatNumber(graph.nodes.length)} areas`,
+    `${formatNumber(count("affected"))} changed`,
+    `${formatNumber(count("new"))} new`,
+    `${formatNumber(count("protected"))} must not change`,
+  ];
+  if (conflicts > 0) parts.push(`${formatNumber(conflicts)} conflict${conflicts > 1 ? "s" : ""}`);
   return (
-    <StatStrip>
-      <StatCell
-        label="Areas shown"
-        value={formatNumber(view.areas.length)}
-        footnote={`of ${formatNumber(graph.nodes.length)} · ${formatNumber(view.hiddenAreas.length)} hidden`}
-      />
-      <StatCell
-        label="Touched"
-        value={formatNumber(touched)}
-        footnote={`${formatNumber(fresh)} new`}
-      />
-      <StatCell
-        label="Protected"
-        value={formatNumber(guarded.length)}
-        footnote={graph.protectedResources.join(" · ")}
-      />
-      <StatCell label="Conflicts" value={formatNumber(conflicts)} footnote="on visible areas" />
-    </StatStrip>
+    <span>
+      {parts.join(" · ")}
+      {graph.canonicalGeneration !== null && ` · ${generation(graph.canonicalGeneration)}`}
+    </span>
   );
 }
 
-/** What the graph is derived from and what it hides (DESIGN.md 9.13). */
+/** What the map is derived from and what it hides. Internal names are fine here. */
 function Footnote({
   graph,
   view,
@@ -322,12 +291,12 @@ function Footnote({
   const hidden = view.hiddenAreas.map((n) => n.name);
   return (
     <>
-      Derived on each read from stored and live data: semantic resources of{" "}
-      {formatNumber(counts.tasks)} Tasks and {formatNumber(counts.intents)} Intents across{" "}
-      {formatNumber(graph.changes.length)} Changes, {formatNumber(counts.dependencies)} Task
-      dependencies, {formatNumber(counts.changeSets)} ChangeSets, {formatNumber(counts.conflicts)}{" "}
-      conflicts, policy <Mono subtle>{graph.policyVersion}</Mono> protected resources (
-      {graph.protectedResources.join(", ")})
+      Derived on each read from stored and live data: the semantic resources of{" "}
+      {formatNumber(counts.tasks)} tasks and {formatNumber(counts.intents)} approaches (Intents)
+      across {formatNumber(graph.changes.length)} changes, {formatNumber(counts.dependencies)} task
+      dependencies, {formatNumber(counts.changeSets)} code changes (ChangeSets),{" "}
+      {formatNumber(counts.conflicts)} conflicts, policy <Mono subtle>{graph.policyVersion}</Mono>{" "}
+      protected resources ({graph.protectedResources.join(", ")})
       {graph.source?.kind === "index" ? (
         <>
           , and the imports of the indexed canonical tree{" "}
@@ -342,15 +311,21 @@ function Footnote({
       ) : (
         ", with no seeded source"
       )}
-      . Edge labels follow the area depended on: Identity is authorization, Catalog is product
-      reference, Cart and Checkout are state. Hidden:{" "}
+      .{" "}
+      {graph.canonicalGeneration !== null && (
+        <>
+          Canonical generation <Mono subtle>{generationCode(graph.canonicalGeneration)}</Mono>.{" "}
+        </>
+      )}
+      Edges point left to right, from an area to the area it depends on. Edge labels follow the area
+      depended on: Identity is authorization, Catalog is product reference, Cart and Checkout are
+      state. Hidden:{" "}
       {zoom === "change" && hidden.length > 0
-        ? `${hidden.length} areas this Change does not touch or border (${hidden.join(", ")}), `
+        ? `${hidden.length} areas this change does not touch or border (${hidden.join(", ")}), `
         : ""}
       {view.hiddenEdges > 0 ? `${formatNumber(view.hiddenEdges)} edges to hidden areas, ` : ""}
       file and symbol dependencies, and runtime wiring ({graph.fixture.hiddenFiles.join(", ")}).
-      {graph.truncated ? " Only the newest 20 Changes and capped rows are read." : ""} Select an
-      area to inspect it.
+      {graph.truncated ? " Only the newest 20 changes and capped rows are read." : ""}
     </>
   );
 }

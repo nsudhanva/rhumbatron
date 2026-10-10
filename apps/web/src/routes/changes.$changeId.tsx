@@ -1,55 +1,56 @@
 import { Show } from "@clerk/tanstack-react-start";
-import { buttonVariants, cn } from "@cloudflare/kumo";
-import { Airplane } from "@phosphor-icons/react";
+import { Button, buttonVariants, Tabs } from "@cloudflare/kumo";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { deriveActivity } from "../components/agents/activity-model";
-import { AgentActivity } from "../components/agents/agent-activity";
-import { CandidateList } from "../components/candidate-list";
+import { useEffect, useMemo, useState } from "react";
+import { ApprovalDialog } from "../components/candidate/approval-dialog";
+import { candidateLabels, checkRows, gateRule } from "../components/candidate/model";
+import { ChangeHeader, OpenAppLink } from "../components/change/change-header";
+import { changeSpend } from "../components/change/change-overview";
+import { ChecksTab } from "../components/change/checks-tab";
+import { FilesTab } from "../components/change/files-tab";
 import {
-  ChangeStats,
-  CriteriaList,
-  changeSpend,
-  InvariantList,
-} from "../components/change/change-overview";
-import { ConflictCard } from "../components/conflict-card";
+  changeHeadline,
+  pickVersion,
+  type StepId,
+  type VersionView,
+} from "../components/change/headline";
+import { changeFileView } from "../components/change/model";
+import { ProgressTab } from "../components/change/progress-tab";
+import { useChangeActions } from "../components/change/use-change-actions";
 import { DeadLetters } from "../components/dead-letters";
+import { ActivityFeed } from "../components/project/event-stream";
 import { useEventFeed } from "../components/project/use-event-feed";
-import { TaskPanel } from "../components/task-detail";
 import { EmptyState } from "../components/ui/empty-state";
 import { Loader } from "../components/ui/loader";
-import { Mono } from "../components/ui/mono";
-import { Page, PageTitle, Section, TwoUp } from "../components/ui/page";
-import { StatusPill } from "../components/ui/status-pill";
-import { Tag } from "../components/ui/tag";
-import { WorkGraph } from "../components/work-graph";
+import { Page } from "../components/ui/page";
 import {
   type CandidateDetail,
   type ChangeDetail,
   type ChangeMeta,
   type EvidenceRecord,
   getChange,
-  getChangeClaims,
   getChangeProgress,
   getConflicts,
+  getWorkspace,
   listCandidateEvidence,
   listCandidates,
   listTasks,
 } from "../lib/api";
-import {
-  formatFraction,
-  formatNumber,
-  formatUsd,
-  generation,
-  isCompiling,
-  isLive,
-  lastActiveTask,
-  timeAgo,
-} from "../lib/format";
+import { isLive } from "../lib/format";
 import { deltaTouchesChange, type LiveStatus, useProjectLive } from "../lib/live";
 
-export const Route = createFileRoute("/changes/$changeId")({ component: ChangePage });
+type Tab = "progress" | "files" | "checks" | "activity";
+const TABS = new Set<Tab>(["progress", "files", "checks", "activity"]);
+
+export const Route = createFileRoute("/changes/$changeId")({
+  // `?tab=` deep-links a tab; Progress is the default and needs no parameter.
+  validateSearch: (search: Record<string, unknown>): { tab?: Exclude<Tab, "progress"> } =>
+    typeof search.tab === "string" && TABS.has(search.tab as Tab) && search.tab !== "progress"
+      ? { tab: search.tab as Exclude<Tab, "progress"> }
+      : {},
+  component: ChangePage,
+});
 
 /** Safety net while the live socket is down (AGENTS.md section 39). */
 const FALLBACK_POLL_MS = 30_000;
@@ -73,7 +74,7 @@ function ChangePage() {
       </Show>
       <Show when="signed-out">
         <Page>
-          <EmptyState what="Sign in to view this Change." />
+          <EmptyState what="Sign in to view this change." />
         </Page>
       </Show>
     </>
@@ -82,9 +83,11 @@ function ChangePage() {
 
 function ChangeView() {
   const { changeId } = Route.useParams();
-  const [selected, setSelected] = useState<string>();
+  const { tab = "progress" } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const queryClient = useQueryClient();
   const [socket, setSocket] = useState<LiveStatus>("closed");
+  const [focusStep, setFocusStep] = useState<{ id: StepId; n: number } | null>(null);
   // Push replaces polling. The slow poll runs only while the live socket is not open.
   const fallback = socket === "open" ? false : FALLBACK_POLL_MS;
   const change = useQuery({
@@ -110,12 +113,19 @@ function ChangeView() {
   const candidates = useQuery({
     queryKey: ["candidates", changeId],
     queryFn: () => listCandidates({ data: changeId }),
-    // Verification runs after the Change settles, so this polls while any Candidate is in flight.
+    // Verification and release run after the Change settles: poll while a version is in flight.
     refetchInterval: (query) =>
-      query.state.data?.some((c) => IN_FLIGHT.has(c.status)) ? FALLBACK_POLL_MS : false,
+      query.state.data?.some(
+        (c) =>
+          IN_FLIGHT.has(c.status) ||
+          c.release?.status === "queued" ||
+          c.release?.status === "building",
+      )
+        ? FALLBACK_POLL_MS
+        : false,
     refetchIntervalInBackground: true,
   });
-  // Evidence drives the check segments in the activity view. Same key as the Candidate page.
+  // Same key as the version page, so both pages share one read per version.
   const evidence = useQueries({
     queries: (candidates.data ?? []).map((c) => ({
       queryKey: ["candidate-evidence", c.id],
@@ -132,26 +142,18 @@ function ChangeView() {
     enabled: running,
     refetchInterval: running ? PROGRESS_POLL_MS : false,
   });
-  const claims = useQuery({
-    queryKey: ["change-claims", changeId],
-    queryFn: () => getChangeClaims({ data: changeId }),
+  const projectId = change.data?.projectId;
+  // File counts per task and per version come from the project's recorded code changes.
+  const workspace = useQuery({
+    queryKey: ["workspace", projectId],
+    queryFn: () => getWorkspace({ data: projectId ?? "" }),
+    enabled: !!projectId,
   });
   // Recorded events of this Change: read once, then only newer rows on each push.
   const feed = useEventFeed({ kind: "change", changeId }, { initial: 100, keep: 500 });
-  // A new claim event in the feed refreshes the Claims read (it holds the full Claim history).
-  const lastClaimSeq = useRef(0);
-  useEffect(() => {
-    const newest = feed.events.find((e) => e.eventType.startsWith("claim."));
-    if (!newest || newest.seq <= lastClaimSeq.current) return;
-    const first = lastClaimSeq.current === 0;
-    lastClaimSeq.current = newest.seq;
-    if (!first) void queryClient.invalidateQueries({ queryKey: ["change-claims", changeId] });
-  }, [feed.events, changeId, queryClient]);
 
-  const projectId = change.data?.projectId;
   const live = isLive(change.data, tasks.data);
   const status = useProjectLive(projectId, live, (signal) => {
-    // Any push can carry events of this Change (claims, routes), so the feed always reads on.
     feed.refresh();
     const taskIds = new Set((tasks.data ?? []).map((t) => t.id));
     if (signal.kind === "delta" && !deltaTouchesChange(signal.delta, changeId, taskIds)) return;
@@ -172,63 +174,47 @@ function ChangeView() {
     const timer = setInterval(refreshFeed, FALLBACK_POLL_MS);
     return () => clearInterval(timer);
   }, [live, status, refreshFeed]);
+  // A finished task or a new version can add code changes: re-read file counts only then.
+  const doneCount = (tasks.data ?? []).filter((t) => t.status === "completed").length;
+  const versionCount = candidates.data?.length ?? 0;
+  useEffect(() => {
+    if (!projectId || doneCount + versionCount === 0) return;
+    void queryClient.invalidateQueries({ queryKey: ["workspace", projectId] });
+  }, [doneCount, versionCount, projectId, queryClient]);
 
-  const evidenceById = useMemo(() => {
-    const map: Record<string, EvidenceRecord[] | undefined> = {};
-    (candidates.data ?? []).forEach((c, i) => {
-      map[c.id] = evidence.data[i];
-    });
-    return map;
+  const actions = useChangeActions({
+    changeId,
+    projectId,
+    goal: change.data?.goal,
+    budgetUsd: change.data?.budgetUsd,
+  });
+
+  const versions = useMemo<VersionView[]>(() => {
+    const list = candidates.data ?? [];
+    const labels = candidateLabels(list);
+    return [...list]
+      .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+      .map((candidate, i) => ({
+        candidate,
+        rows: checkRows(candidate, evidence.data[list.indexOf(candidate)] ?? []),
+        label: labels.get(candidate.id) ?? `Version ${String.fromCharCode(65 + i)}`,
+      }));
   }, [candidates.data, evidence.data]);
-
-  const model = useMemo(
-    () =>
-      change.data
-        ? deriveActivity({
-            change: change.data,
-            tasks: tasks.data ?? [],
-            conflicts: conflicts.data ?? [],
-            candidates: candidates.data ?? [],
-            evidence: evidenceById,
-            progress: progress.data ?? [],
-            claims: claims.data?.facts ?? [],
-            feed: feed.events,
-          })
-        : null,
-    [
-      change.data,
-      tasks.data,
-      conflicts.data,
-      candidates.data,
-      evidenceById,
-      progress.data,
-      claims.data,
-      feed.events,
-    ],
-  );
-  // Every source has answered once (or failed): later facts are new and animate.
-  const ready =
-    !tasks.isPending &&
-    !conflicts.isPending &&
-    !candidates.isPending &&
-    !evidence.pending &&
-    !claims.isPending &&
-    !feed.loading;
 
   if (change.isError) {
     return (
       <Page>
-        <p className="bg-accent-100 px-3 py-2 text-[13px] font-semibold text-kumo-danger">
+        <p className="rounded-md bg-kumo-danger-tint px-3 py-2 text-[14px] text-kumo-danger">
           {change.error.message}
         </p>
       </Page>
     );
   }
-  if (!change.data || !model) {
+  if (!change.data) {
     return (
       <Page>
-        <p className="flex items-center gap-2 text-[13px]">
-          <Loader /> Loading Change
+        <p className="flex items-center gap-2 text-[14px]">
+          <Loader /> Loading the change
         </p>
       </Page>
     );
@@ -236,144 +222,195 @@ function ChangeView() {
 
   const data = change.data;
   const taskList = tasks.data ?? [];
-  const conflictList = conflicts.data ?? [];
-  const candidateList = candidates.data ?? [];
-  const liveOpen = live && socket === "open";
-  const selectedTask = taskList.find((t) => t.id === selected) ?? lastActiveTask(taskList);
   const spend = changeSpend(taskList);
-  const compiling = isCompiling(data.status) && taskList.length === 0;
+  const now = Date.now();
+  const files = changeFileView(workspace.data, taskList, pickVersion(versions)?.candidate ?? null);
+  const headline = changeHeadline({
+    status: data.status,
+    riskTier: data.riskTier,
+    baseGeneration: data.baseGeneration,
+    budgetUsd: data.budgetUsd,
+    spentUsd: spend?.costUsd ?? 0,
+    updatedAt: data.updatedAt,
+    tasks: taskList,
+    conflicts: conflicts.data ?? [],
+    versions,
+    filesChanged: files.summary ? files.summary.files.length : null,
+    now,
+  });
+  const version = headline.version;
+
+  const shipVersion = () => {
+    if (version) actions.ship.mutate(version.candidate.id);
+  };
+  const seeFailed = () => {
+    if (!headline.failedStep) return;
+    void navigate({ search: {}, replace: true });
+    setFocusStep((f) => ({ id: headline.failedStep ?? "agents", n: (f?.n ?? 0) + 1 }));
+  };
+  const primaryKind = headline.primary?.kind;
+  const primary = (() => {
+    if (!headline.primary) return null;
+    const label = headline.primary.label;
+    switch (primaryKind) {
+      case "run-checks":
+        return (
+          <Button
+            variant="primary"
+            loading={actions.runChecks.isPending}
+            onClick={() => actions.runChecks.mutate()}
+          >
+            {label}
+          </Button>
+        );
+      case "review-approve":
+        return (
+          <Button
+            variant="primary"
+            loading={actions.ship.isPending}
+            onClick={() => actions.setApprovalOpen(true)}
+          >
+            {label}
+          </Button>
+        );
+      case "ship":
+        return (
+          <Button variant="primary" loading={actions.ship.isPending} onClick={shipVersion}>
+            {label}
+          </Button>
+        );
+      case "open-app":
+        return version?.candidate.release?.url ? (
+          <OpenAppLink url={version.candidate.release.url} />
+        ) : null;
+      case "view-release":
+        return version ? (
+          <Link
+            to="/candidates/$candidateId"
+            params={{ candidateId: version.candidate.id }}
+            className={buttonVariants({ variant: "primary" })}
+          >
+            {label}
+          </Link>
+        ) : null;
+      case "see-failed":
+        return (
+          <Button variant="primary" onClick={seeFailed}>
+            {label}
+          </Button>
+        );
+      default:
+        return (
+          <Button
+            variant="primary"
+            loading={actions.restart.isPending}
+            onClick={() => actions.restart.mutate(primaryKind === "restart-larger" ? 2 : 1)}
+          >
+            {label}
+          </Button>
+        );
+    }
+  })();
+
+  const checkCount = version?.rows.length ?? 0;
+  const tabs = [
+    { value: "progress", label: "Progress" },
+    { value: "files", label: files.count > 0 ? `Files changed (${files.count})` : "Files changed" },
+    { value: "checks", label: checkCount > 0 ? `Checks (${checkCount})` : "Checks" },
+    { value: "activity", label: "Activity" },
+  ];
 
   return (
-    <Page>
-      <PageTitle
-        size="detail"
-        kicker={
-          <span className="inline-flex flex-wrap items-center gap-2">
-            <span>Change</span>
-            <StatusPill status={data.status} className="tracking-normal normal-case" />
-            {data.riskTier && (
-              <Tag variant="outline" className="tracking-normal normal-case">
-                Risk {data.riskTier}
-              </Tag>
-            )}
-          </span>
-        }
-        title={data.goal}
-        meta={
-          <>
-            <span>
-              Base <Mono>{generation(data.baseGeneration)}</Mono>
-            </span>
-            <span aria-hidden>·</span>
-            <span>
-              Budget{" "}
-              <Mono>
-                {spend
-                  ? formatFraction(formatUsd(spend.costUsd), formatUsd(data.budgetUsd))
-                  : formatUsd(data.budgetUsd)}
-              </Mono>
-            </span>
-            {data.createdAt && (
-              <>
-                <span aria-hidden>·</span>
-                <time dateTime={data.createdAt} title={data.createdAt}>
-                  created {timeAgo(data.createdAt)}
-                </time>
-              </>
-            )}
-            <span aria-hidden>·</span>
-            <Mono subtle>{data.id}</Mono>
-            {liveOpen && <StatusPill status="live" />}
-          </>
-        }
-        actions={
-          <Link
-            to="/changes/$changeId/flight"
-            params={{ changeId }}
-            className={cn(buttonVariants({ variant: "primary" }), "gap-1.5")}
-          >
-            <Airplane size={16} aria-hidden />
-            Open Flight Control
-          </Link>
-        }
-      />
-
+    <Page gap="tight">
       <DeadLetters projectId={data.projectId} changeId={data.id} />
 
-      <ChangeStats
-        tasks={taskList}
-        conflicts={conflictList}
-        candidates={candidateList}
+      <ChangeHeader
+        changeId={changeId}
+        goal={data.goal}
+        headline={headline}
+        createdAt={data.createdAt}
+        spentUsd={spend?.costUsd ?? null}
         budgetUsd={data.budgetUsd}
+        baseGeneration={data.baseGeneration}
+        riskTier={data.riskTier}
+        live={live && socket === "open"}
+        versionCount={versions.length}
+        primary={primary}
       />
-
-      <AgentActivity model={model} ready={ready} compiling={compiling} />
-
-      <TwoUp>
-        <Section
-          label="Acceptance criteria"
-          meta={<Mono subtle>{formatNumber(data.acceptanceCriteria.length)}</Mono>}
-        >
-          <CriteriaList items={data.acceptanceCriteria} />
-        </Section>
-        <Section
-          label="Protected invariants"
-          meta={<Mono subtle>{formatNumber(data.invariants.length)}</Mono>}
-        >
-          <InvariantList items={data.invariants} />
-        </Section>
-      </TwoUp>
-
-      {conflictList.length > 0 && (
-        <Section
-          label="Conflicts"
-          meta={
-            <Mono subtle>
-              {formatNumber(conflictList.filter((c) => c.state !== "resolved").length)} open
-            </Mono>
-          }
-        >
-          <div className="grid gap-4">
-            {conflictList.map((conflict) => (
-              <ConflictCard key={conflict.id} conflict={conflict} />
-            ))}
-          </div>
-        </Section>
+      {actions.restart.isError && (
+        <p role="alert" className="text-[13px] text-kumo-danger">
+          Could not start again: {actions.restart.error.message}
+        </p>
       )}
 
-      <CandidateList
-        changeId={changeId}
-        candidates={candidateList}
-        canCompose={!["cancelled", "failed", "completed"].includes(data.status)}
-      />
-
-      <div className="grid gap-7 min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
-        <Section
-          label="Work graph"
-          meta={<Mono subtle>{formatNumber(taskList.length)} Tasks</Mono>}
-        >
-          {compiling ? (
-            <p className="flex items-center gap-2 text-[13px]">
-              <Loader /> Root Planner is compiling the Work Graph.
-            </p>
-          ) : taskList.length === 0 ? (
-            <EmptyState what="No Tasks." how="This Change has no Work Graph." />
-          ) : (
-            <WorkGraph tasks={taskList} selectedId={selectedTask?.id} onSelect={setSelected} />
-          )}
-        </Section>
-        <Section label="Task details">
-          <div
-            className={cn(
-              "bg-kumo-elevated p-4",
-              // The accent bar pairs the inspector with the selected node; none when empty.
-              selectedTask && "shadow-[inset_2px_0_0_var(--color-accent-500)]",
-            )}
-          >
-            <TaskPanel task={selectedTask} />
-          </div>
-        </Section>
+      <div className="grid gap-5">
+        <Tabs
+          variant="underline"
+          tabs={tabs}
+          value={tab}
+          onValueChange={(next) =>
+            void navigate({
+              search: next === "progress" ? {} : { tab: next as Exclude<Tab, "progress"> },
+              replace: true,
+            })
+          }
+        />
+        {tab === "progress" && (
+          <ProgressTab
+            change={data}
+            riskTier={data.riskTier}
+            headline={headline}
+            tasks={taskList}
+            conflicts={conflicts.data ?? []}
+            versions={versions}
+            progress={progress.data ?? []}
+            workspace={workspace.data}
+            feed={feed.events}
+            files={files}
+            spentUsd={spend?.costUsd ?? null}
+            run={{
+              start: () => actions.runChecks.mutate(),
+              pending: actions.runChecks.isPending,
+              error: actions.runChecks.error?.message ?? null,
+            }}
+            ship={{
+              pending: actions.ship.isPending,
+              error: actions.ship.error?.message ?? null,
+              outcome: actions.ship.data,
+              retry: shipVersion,
+            }}
+            onReview={() => actions.setApprovalOpen(true)}
+            focusStep={focusStep}
+            now={now}
+          />
+        )}
+        {tab === "files" && <FilesTab files={files} versionLabel={version?.label ?? null} />}
+        {tab === "checks" && <ChecksTab versions={versions} />}
+        {tab === "activity" && (
+          <ActivityFeed
+            events={feed.events}
+            loading={feed.loading}
+            error={feed.error}
+            onRetry={feed.refresh}
+          />
+        )}
       </div>
+
+      {version?.candidate.approvalRequired && !version.candidate.approval && (
+        <ApprovalDialog
+          open={actions.approvalOpen}
+          onOpenChange={actions.setApprovalOpen}
+          candidate={version.candidate}
+          label={version.label}
+          rows={version.rows}
+          rule={gateRule(version.candidate, data.riskTier)}
+          onDecided={(decision) => {
+            void actions.refresh();
+            // "Approve and ship" is one action for the user: approval, then promotion.
+            if (decision === "approve") actions.ship.mutate(version.candidate.id);
+          }}
+        />
+      )}
     </Page>
   );
 }

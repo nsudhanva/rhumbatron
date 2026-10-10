@@ -25,7 +25,6 @@ import {
   TimelineToolbar,
   type TimeScale,
   useClock,
-  useEnter,
   useFollowLive,
   useMeasuredScroller,
   useTimeScale,
@@ -126,17 +125,6 @@ export function WorkspacePanel({ focused }: PanelProps) {
         .map((c) => candidateRow(state, c, scale.cursor)),
     [state, scale.cursor],
   );
-  const proposed = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const e of state.events) {
-      if (e.kind === "fact" && e.eventType === "changeset.proposed") {
-        const id = e.data.changeSetId;
-        if (typeof id === "string") map.set(id, e.id);
-      }
-    }
-    return map;
-  }, [state.events]);
-
   if (!ready) return <WorkspaceSkeleton focused={focused} />;
 
   const workspace = model.input.workspace;
@@ -192,7 +180,6 @@ export function WorkspacePanel({ focused }: PanelProps) {
                 key={f.task.id}
                 row={f}
                 scale={scale}
-                proposed={proposed}
                 dim={dimmed({ kind: "task", id: f.task.id })}
                 dimmed={dimmed}
               />
@@ -227,7 +214,7 @@ function WorkspaceSkeleton({ focused }: { focused: boolean }) {
   return (
     <div aria-hidden className="grid content-start">
       <div className="h-9 border-b border-kumo-rule" />
-      <div className="border-b-2 border-kumo-divider" style={{ height: AXIS_H }} />
+      <div className="border-b border-kumo-rule" style={{ height: AXIS_H }} />
       {Array.from({ length: focused ? 14 : 7 }, (_, i) => (
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder rows
@@ -248,7 +235,7 @@ function WorkspaceSkeleton({ focused }: { focused: boolean }) {
 WorkspaceSkeleton.displayName = "WorkspaceSkeleton";
 
 const leftCell =
-  "sticky left-0 z-10 grid shrink-0 content-center gap-px self-start border-r border-b border-kumo-rule bg-kumo-elevated px-3 text-left text-[11px] leading-[13px]";
+  "sticky left-0 z-10 grid shrink-0 content-center gap-px self-start border-r border-b border-kumo-rule bg-kumo-elevated px-3 text-left text-[12px] leading-[13px]";
 
 function TrunkRow({ scale, baseGeneration }: { scale: TimeScale; baseGeneration: number }) {
   const { state, model } = useFlight();
@@ -271,7 +258,7 @@ function TrunkRow({ scale, baseGeneration }: { scale: TimeScale; baseGeneration:
       </div>
       <div className="relative shrink-0 overflow-hidden" style={{ width: scale.width }}>
         <span
-          className="absolute bg-kumo-ink px-1 font-mono text-[10px] leading-[14px] text-kumo-inverse"
+          className="absolute bg-kumo-ink px-1 font-mono text-[12px] leading-[14px] text-kumo-inverse"
           style={{ left: Math.max(0, scale.x(scale.start) - 2), top: 2 }}
         >
           {generation(baseGeneration)}
@@ -285,13 +272,11 @@ TrunkRow.displayName = "TrunkRow";
 function ForkLane({
   row,
   scale,
-  proposed,
   dim,
   dimmed,
 }: {
   row: ForkRow;
   scale: TimeScale;
-  proposed: Map<string, string>;
   dim: boolean;
   dimmed: (ref: EntityRef) => boolean;
 }) {
@@ -324,7 +309,6 @@ function ForkLane({
       cs={c.cs}
       x={c.x}
       showLabel={c.show}
-      eventId={proposed.get(c.cs.id) ?? null}
       dim={!dim && dimmed({ kind: "changeset", id: c.cs.id })}
       item={roving.itemProps(c.cs.id)}
       show={roving.show(c.cs.id)}
@@ -352,7 +336,7 @@ function ForkLane({
           )}
           style={{ width: LEFT, height: ROW_H }}
         >
-          <span className={cn("truncate font-mono text-[11px]", !forkName && "text-kumo-subtle")}>
+          <span className={cn("truncate font-mono text-[12px]", !forkName && "text-kumo-subtle")}>
             {forkName ?? "fork not listed"}
           </span>
           <span className="flex min-w-0 items-center gap-1.5 text-kumo-subtle">
@@ -388,7 +372,6 @@ function Commit({
   cs,
   x,
   showLabel,
-  eventId,
   dim,
   item,
   show,
@@ -396,16 +379,13 @@ function Commit({
   cs: WorkspaceChangeSet;
   x: number;
   showLabel: boolean;
-  eventId: string | null;
   dim: boolean;
   item: ReturnType<ReturnType<typeof useRovingFocus>["itemProps"]>;
   show: RovingShow;
 }) {
-  const { animated } = useFlight();
   const clockOf = useClock();
   const ref: EntityRef = { kind: "changeset", id: cs.id };
   const { selected } = useIsHighlighted(ref);
-  const enterRef = useEnter<HTMLSpanElement>(eventId !== null && animated.has(eventId));
   const title = `ChangeSet ${cs.id}\ncommit ${cs.commit} · ${cs.files.length} files · +${cs.insertions} −${cs.deletions}\n${clockOf(Date.parse(cs.createdAt))}`;
   return (
     <EntityHover entity={ref} show={show}>
@@ -422,7 +402,6 @@ function Commit({
         style={{ left: x - SQ / 2, top: ROW_H / 2 - 12, scrollMarginLeft: LEFT + 8 }}
       >
         <span
-          ref={enterRef}
           aria-hidden
           className={cn(
             "block shrink-0 bg-kumo-ink",
@@ -431,7 +410,7 @@ function Commit({
           style={{ width: SQ, height: SQ }}
         />
         {showLabel && (
-          <span className="bg-kumo-elevated font-mono text-[10px] leading-none whitespace-nowrap tabular-nums">
+          <span className="bg-kumo-elevated font-mono text-[12px] leading-none whitespace-nowrap tabular-nums">
             {cs.commit.slice(0, 7)} <span className="text-kumo-success">+{cs.insertions}</span>{" "}
             <span className="text-kumo-danger">−{cs.deletions}</span>
           </span>
@@ -461,7 +440,13 @@ function CandidateLane({ row, scale, dim }: { row: CandidateRow; scale: TimeScal
   return (
     <div
       data-state={rejected ? "rejected" : undefined}
-      className={cn("rh-greyout relative flex border-b border-kumo-rule", dim && "opacity-45")}
+      className={cn(
+        "relative flex border-b border-kumo-rule",
+        // A losing version is grey, but its reason still reads (subtle text, not a fade).
+        rejected &&
+          "grayscale text-kumo-subtle [--text-color-kumo-default:var(--rh-subtle)] [--text-color-kumo-strong:var(--rh-subtle)]",
+        dim && "opacity-45",
+      )}
       style={{ height: ROW_H }}
     >
       <EntityHover entity={ref}>
@@ -482,7 +467,7 @@ function CandidateLane({ row, scale, dim }: { row: CandidateRow; scale: TimeScal
             <span
               aria-hidden
               className={cn(
-                "grid size-3.5 shrink-0 place-items-center font-mono text-[9px] font-bold",
+                "grid size-3.5 shrink-0 place-items-center font-mono text-[12px] font-bold",
                 promoted ? "bg-accent-500 text-kumo-inverse" : "bg-kumo-ink text-kumo-inverse",
               )}
             >
@@ -508,7 +493,7 @@ function CandidateLane({ row, scale, dim }: { row: CandidateRow; scale: TimeScal
         {row.start !== null && (
           <span
             className={cn(
-              "absolute truncate font-mono text-[10px] leading-none whitespace-nowrap",
+              "absolute truncate font-mono text-[12px] leading-none whitespace-nowrap",
               reason ? "text-kumo-danger" : "text-kumo-subtle",
             )}
             style={{
@@ -553,7 +538,6 @@ function Graph({
   candIndex: (i: number) => number;
   mid: (i: number) => number;
 }) {
-  const { animated } = useFlight();
   const trunkY = mid(0);
   const merge = (x1: number, y1: number, x2: number, y2: number) => {
     const cx = x1 + Math.max(12, (x2 - x1) / 2);
@@ -585,7 +569,7 @@ function Graph({
             pathLength={1}
             fill="none"
             strokeWidth={1}
-            className={cn("stroke-kumo-ink", animated.has(`${f.task.id}:fork`) && "rh-fork")}
+            className="stroke-kumo-ink"
           />
         );
       })}
@@ -596,7 +580,6 @@ function Graph({
         const xe = Math.max(xf, scale.x(c.end));
         const rejected = c.cand.status === "rejected" || c.cand.status === "stale";
         const promoted = c.promotedAt !== null;
-        const newly = animated.has(`${c.cand.id}:fork`);
         const feeders = c.cand.changeSetIds.flatMap((csId) => {
           const f = forks.find((fr) => fr.commits.some((cm) => cm.cs.id === csId));
           if (!f) return [];
@@ -618,7 +601,7 @@ function Graph({
                 pathLength={1}
                 fill="none"
                 strokeWidth={1}
-                className={cn(stroke, newly && "rh-merge")}
+                className={stroke}
               />
             ))}
             <line x1={xf} y1={y} x2={xe} y2={y} strokeWidth={promoted ? 2 : 1} className={stroke} />
@@ -637,10 +620,7 @@ function Graph({
                 pathLength={1}
                 fill="none"
                 strokeWidth={2}
-                className={cn(
-                  "stroke-accent-500",
-                  animated.has(`${c.cand.id}:promoted`) && "rh-merge",
-                )}
+                className="stroke-accent-500"
               />
             )}
           </g>
@@ -654,7 +634,7 @@ function Graph({
         return (
           <g key={`${c.cand.id}:gen`}>
             <rect x={x} y={trunkY - 7} width={w} height={14} className="fill-accent-500" />
-            <text x={x + 4} y={trunkY + 3.5} className="fill-kumo-inverse font-mono text-[10px]">
+            <text x={x + 4} y={trunkY + 3.5} className="fill-kumo-inverse font-mono text-[12px]">
               {text}
             </text>
           </g>

@@ -1,12 +1,16 @@
 /* biome-ignore-all lint/complexity/noImportantStyles: this layer must beat Kumo inline variables and !important utilities (see "How the override works") */
 /*
- * Modernist theme layer for Kumo (DESIGN.md "Kumo x Modernist").
+ * Rhumbatron theme layer for Kumo (design v2, docs/ux/research-2026-10-09.md section 8).
  *
- * This is the ONLY file that holds raw color values (DESIGN.md section 15.1 and 15.9).
- * Components use semantic tokens only: Kumo's own (`bg-kumo-base`, `text-kumo-subtle`, ...)
- * plus the Modernist roles registered below (`border-kumo-divider`, `bg-accent-100`,
- * `bg-tone-200`, `bg-kumo-ink`, ...). Never write `dark:` in a component: every token
- * resolves through `light-dark()`, driven by `color-scheme`, which `data-mode` sets.
+ * Direction: calm, neutral, legible. Light by default, dark kept. One brand color (blue) for the
+ * primary action, links, focus and "in progress". Red means danger only. Cards have a 1px border
+ * and 8px radius. No 2px rules, no uppercase labels, no text below 12px.
+ *
+ * This is the ONLY file that holds raw color values. Components use semantic tokens only:
+ * Kumo's own (`bg-kumo-base`, `text-kumo-subtle`, `bg-kumo-danger-tint`, `text-kumo-info`, ...)
+ * plus the roles registered below (`border-kumo-rule`, `bg-accent-100`, `bg-tone-200`, ...).
+ * Never write `dark:` in a component: every token resolves through `light-dark()`, driven by
+ * `color-scheme`, which `data-mode` sets.
  *
  * Import order (styles.css): Kumo styles -> tailwindcss -> this file.
  *
@@ -22,8 +26,8 @@
  *   3. Component adapters: scoped token rebinding where Kumo hard-codes a value
  *   4. Base elements (body, focus, selection, caret, scrollbars)
  *   5. Type and structure utilities (`type-*`, `rule-*`)
- *   6. Feedback: Loader, skeleton
- *   7. Motion tokens and the agent-activity motion patterns (DESIGN.md section 11, 11.1)
+ *   6. Feedback: spinner, skeleton
+ *   7. Motion tokens
  */
 
 /* --------------------------------------------------------------------------------------------
@@ -34,45 +38,44 @@
 @custom-variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
 
 @theme {
-  --font-sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  /* The system UI font (section 8.3): no download, familiar on every platform. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* Archivo loads at 400, 600 and 800 only. Map every Tailwind weight onto those three so
-     Kumo's `font-medium` renders 600 instead of falling back to 400. */
+  /* Three weights only: 400 text, 500 labels and pills, 600 headings and emphasis. */
   --font-weight-thin: 400;
   --font-weight-extralight: 400;
   --font-weight-light: 400;
   --font-weight-normal: 400;
-  --font-weight-medium: 600;
+  --font-weight-medium: 500;
   --font-weight-semibold: 600;
-  --font-weight-bold: 800;
-  --font-weight-extrabold: 800;
-  --font-weight-black: 800;
+  --font-weight-bold: 600;
+  --font-weight-extrabold: 600;
+  --font-weight-black: 600;
 
-  /* Radius is zero everywhere (section 5.3). `rounded`, `rounded-full` and arbitrary radii are
-     hard-coded by Tailwind, so section 3 also carries a global rule. */
-  --radius-xs: 0;
-  --radius-sm: 0;
-  --radius-md: 0;
-  --radius-lg: 0;
-  --radius-xl: 0;
-  --radius-2xl: 0;
-  --radius-3xl: 0;
-  --radius-4xl: 0;
+  /* Radius (section 8.2): 6px controls and pills, 8px cards, 12px dialogs and popovers. */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-4xl: 24px;
 
-  /* Nothing floats except overlays (principle 10). Small shadows are inline-component shadows
-     and go away; md and above are only used by Kumo overlays and become the overlay shadow. */
+  /* Small shadows are a soft card lift in light mode only (the colors go transparent in dark,
+     where the 1px rule separates cards). md and above are Kumo overlays: the overlay shadow. */
   --shadow-2xs: 0 0 #0000;
-  --shadow-xs: 0 0 #0000;
-  --shadow-sm: 0 0 #0000;
+  --shadow-xs: 0 1px 2px var(--rh-card-shadow-1);
+  --shadow-sm: 0 1px 3px var(--rh-card-shadow-2), 0 1px 2px var(--rh-card-shadow-1);
   --shadow-md: var(--rh-shadow-overlay);
   --shadow-lg: var(--rh-shadow-overlay);
   --shadow-xl: var(--rh-shadow-overlay);
   --shadow-2xl: var(--rh-shadow-overlay);
 
-  /* Modernist line roles (section 2.3). `border-kumo-divider` is the 2px section rule color,
-     `border-kumo-rule` the 1px row separator, `bg-kumo-faint` the hover fill, `kumo-ink` the
-     solid ink used for ink rules, active fills and primary chart series. */
+  /* Line and fill roles. `border-kumo-rule` is the 1px card border and row separator,
+     `border-kumo-divider` the stronger 1px border (section separators, table header),
+     `bg-kumo-faint` the hover fill, `kumo-ink` the body ink (primary chart series). */
   --color-kumo-divider: var(--rh-divider);
   --color-kumo-rule: var(--rh-rule);
   --color-kumo-faint: var(--rh-faint);
@@ -80,8 +83,9 @@
   --color-kumo-ink: var(--rh-ink);
   --color-kumo-press: var(--rh-press);
 
-  /* Accent ramp (section 2.4). Steps flip in dark mode. Body-size accent text uses
-     `text-kumo-accent` (accent-700 light, accent-500 dark), never `text-accent-500`. */
+  /* Accent ramp (blue). Steps flip in dark mode. Body-size accent text uses
+     `text-kumo-accent`, never `text-accent-500`. The accent never means danger: use
+     `bg-kumo-danger-tint` / `bg-kumo-danger` / `text-kumo-danger` for that. */
   --color-accent-100: var(--rh-accent-100);
   --color-accent-200: var(--rh-accent-200);
   --color-accent-300: var(--rh-accent-300);
@@ -95,8 +99,8 @@
   --color-accent-wash-strong: var(--rh-accent-wash-strong);
   --text-color-kumo-accent: var(--rh-accent-text);
 
-  /* Neutral ramp (section 2.5) as `tone-*`: DESIGN.md "neutral-200" is `bg-tone-200` here.
-     Tailwind's own `neutral-*` stays as-is because Kumo internals pair it with `dark:`. */
+  /* Neutral ramp as `tone-*`. Tailwind's own `neutral-*` stays as-is because Kumo internals
+     pair it with `dark:`. */
   --color-tone-100: var(--rh-tone-100);
   --color-tone-200: var(--rh-tone-200);
   --color-tone-300: var(--rh-tone-300);
@@ -109,65 +113,74 @@
 }
 
 /* --------------------------------------------------------------------------------------------
- * 2. Palette and Kumo token overrides
+ * 2. Palette and Kumo token overrides (values from section 8.2, contrast checked in 8.5)
  * ------------------------------------------------------------------------------------------ */
 
 :root {
   color-scheme: light;
 
   /* Raw palette. These are the only hex values in the app. */
-  --rh-ink: light-dark(#201e1d, #ecebea);
-  --rh-ground: light-dark(#f3f2f2, #141312);
-  --rh-raised: light-dark(#eae9e9, #1d1b1a);
-  --rh-sunk: light-dark(#eae7e7, #3a3737);
+  --rh-ink: light-dark(#1f2328, #e6e8eb);
+  --rh-ground: light-dark(#f7f8fa, #0f1115);
+  --rh-raised: light-dark(#ffffff, #171a20);
+  --rh-sunk: light-dark(#eef0f3, #22262e);
+  --rh-subtle: light-dark(#59636e, #9aa3ad);
 
-  --rh-accent-100: light-dark(#fff2ef, #3d140c);
-  --rh-accent-200: light-dark(#ffe0d9, #7c1405);
-  --rh-accent-300: light-dark(#ffc4b8, #ae1800);
-  --rh-accent-400: light-dark(#ff9783, #dd2b0f);
-  --rh-accent-500: light-dark(#ec3013, #ff563c);
-  --rh-accent-600: light-dark(#dd2b0f, #ff9783);
-  --rh-accent-700: light-dark(#ae1800, #ffc4b8);
-  --rh-accent-800: light-dark(#7c1405, #ffe0d9);
-  --rh-accent-900: light-dark(#4d170e, #fff2ef);
-  /* Accent as readable text: #ec3013 is 3.7:1 on the light ground, #ff563c is 5.9:1 on dark. */
-  --rh-accent-text: light-dark(#ae1800, #ff563c);
-  /* Primary pressed: accent-700 in light, accent-400 in dark (section 8.1). */
-  --rh-accent-press: light-dark(#ae1800, #dd2b0f);
+  --rh-accent-100: light-dark(#eef3ff, #141d36);
+  --rh-accent-200: light-dark(#dce6ff, #18264a);
+  --rh-accent-300: light-dark(#bccdff, #1f3366);
+  --rh-accent-400: light-dark(#8eabf5, #2c4a93);
+  --rh-accent-500: light-dark(#2f5bd3, #3a66dd);
+  --rh-accent-600: light-dark(#2850bf, #3360d6);
+  --rh-accent-700: light-dark(#1f43a6, #2b55c4);
+  --rh-accent-800: light-dark(#1a3684, #b3c8ff);
+  --rh-accent-900: light-dark(#142a63, #dfe8ff);
+  /* Links and accent text: 6.5:1 on the light ground, 7.7:1 on dark. */
+  --rh-accent-text: light-dark(#2450c4, #7fa3ff);
+  /* Primary pressed (accent-700). White label stays above 4.5:1 in both modes. */
+  --rh-accent-press: light-dark(#1f43a6, #2b55c4);
   --rh-accent-wash: color-mix(in srgb, var(--rh-accent-500) 10%, transparent);
   --rh-accent-wash-strong: color-mix(in srgb, var(--rh-accent-500) 18%, transparent);
 
-  --rh-tone-100: light-dark(#f8f4f4, #2d2b2b);
-  --rh-tone-200: light-dark(#eae7e7, #3a3737);
-  --rh-tone-300: light-dark(#d7d3d3, #605d5d);
-  --rh-tone-400: light-dark(#bab6b6, #7d7979);
-  --rh-tone-500: light-dark(#9b9797, #9b9797);
-  --rh-tone-600: light-dark(#7d7979, #bab6b6);
-  --rh-tone-700: light-dark(#605d5d, #d7d3d3);
-  --rh-tone-800: light-dark(#444141, #eae7e7);
-  --rh-tone-900: light-dark(#2d2b2b, #f8f4f4);
+  --rh-tone-100: light-dark(#f6f7f9, #1b1e24);
+  --rh-tone-200: light-dark(#eef0f3, #22262e);
+  --rh-tone-300: light-dark(#e1e4e8, #2c313a);
+  --rh-tone-400: light-dark(#c7ccd2, #3d444d);
+  --rh-tone-500: light-dark(#9aa3ad, #5f6873);
+  --rh-tone-600: light-dark(#7d8590, #7d8590);
+  --rh-tone-700: light-dark(#59636e, #9aa3ad);
+  --rh-tone-800: light-dark(#3d444d, #c7ccd2);
+  --rh-tone-900: light-dark(#262b31, #e6e8eb);
 
-  --rh-divider: light-dark(rgb(32 30 29 / 0.4), rgb(236 235 234 / 0.32));
-  --rh-rule: color-mix(in srgb, var(--rh-ink) 16%, transparent);
-  --rh-faint: color-mix(in srgb, var(--rh-ink) 6%, transparent);
+  /* Lines. `rule` and `divider` are decorative (1.3-1.5:1); never the only sign of state.
+     `control-line` frames inputs and checkboxes and holds 3:1 against every surface. */
+  --rh-rule: light-dark(#e6e9ee, #232830);
+  --rh-divider: light-dark(#d5dae1, #2c313a);
+  --rh-control-line: light-dark(#7d8590, #5f6873);
+  --rh-faint: color-mix(in srgb, var(--rh-ink) 4%, transparent);
   --rh-row-hover: color-mix(in srgb, var(--rh-ink) 4%, transparent);
-  --rh-hover: color-mix(in srgb, var(--rh-ink) 7%, transparent);
-  --rh-press: color-mix(in srgb, var(--rh-ink) 14%, transparent);
-  /* DESIGN.md 2.2 sets 62% as the floor. 62% measures 4.49:1 on the light ground and 4.37:1
-     on elevated, under the 4.5:1 text rule (section 14); 66% holds >= 4.65:1 on ground,
-     elevated, recessed and the hover/selection fills in both modes. */
-  --rh-subtle: color-mix(in srgb, var(--rh-ink) 66%, transparent);
+  --rh-hover: color-mix(in srgb, var(--rh-ink) 6%, transparent);
+  --rh-press: color-mix(in srgb, var(--rh-ink) 10%, transparent);
 
-  --rh-ok: light-dark(oklch(0.5 0.11 152), oklch(0.78 0.12 152));
-  --rh-ok-fill: light-dark(oklch(0.93 0.04 152), oklch(0.3 0.05 152));
-  --rh-attention: light-dark(oklch(0.5 0.1 65), oklch(0.82 0.11 80));
-  --rh-attention-fill: light-dark(oklch(0.94 0.05 85), oklch(0.32 0.05 75));
+  /* Status families (section 8.4): text/icon color and pill tint. */
+  --rh-ok: light-dark(#177a35, #4cc26a);
+  --rh-ok-fill: light-dark(#e6f4ea, #15301e);
+  --rh-attention: light-dark(#8a5a00, #e0a93b);
+  --rh-attention-fill: light-dark(#fdf2d6, #33270f);
+  --rh-danger: light-dark(#c62a2f, #ff6b6b);
+  --rh-danger-fill: light-dark(#fdecec, #3a1719);
+  --rh-info: light-dark(#2450c4, #7fa3ff);
+  --rh-info-fill: light-dark(#e8efff, #18264a);
 
-  /* Overlay shadow (section 2.7). Light: a soft drop. Dark: a hairline edge plus a deep drop,
-     because shadows vanish on a dark ground. Lengths cannot use light-dark(), so the dark
-     lengths are set under [data-mode="dark"] below. */
-  --rh-overlay-edge: light-dark(transparent, rgb(236 235 234 / 0.13));
-  --rh-overlay-drop: light-dark(rgb(45 43 43 / 0.22), rgb(0 0 0 / 0.6));
+  /* Card lift (light only; dark cards rely on the 1px rule). */
+  --rh-card-shadow-1: light-dark(rgb(16 24 40 / 0.05), transparent);
+  --rh-card-shadow-2: light-dark(rgb(16 24 40 / 0.08), transparent);
+
+  /* Overlay shadow. Light: a soft drop. Dark: a hairline edge plus a deep drop, because
+     shadows vanish on a dark ground. Lengths cannot use light-dark(), so the dark lengths are
+     set under [data-mode="dark"] below. */
+  --rh-overlay-edge: light-dark(transparent, rgb(230 232 235 / 0.12));
+  --rh-overlay-drop: light-dark(rgb(16 24 40 / 0.16), rgb(0 0 0 / 0.6));
   --rh-overlay-y: 12px;
   --rh-overlay-blur: 32px;
   --rh-shadow-overlay:
@@ -175,18 +188,17 @@
     0 var(--rh-overlay-y) var(--rh-overlay-blur) var(--rh-overlay-drop);
   --rh-backdrop: color-mix(in srgb, var(--rh-tone-900) 50%, transparent);
 
-  /* No pure white or black in Modernist. Kumo writes `text-white`/`text-black` only for text
-     on a solid fill, which is the inverse role. */
-  --color-white: var(--rh-ground);
-  --color-black: var(--rh-ground);
+  /* Text on solid fills: white on the primary button, a near-black that matches the palette. */
+  --color-white: #ffffff;
+  --color-black: light-dark(#1f2328, #0f1115);
 
-  /* Kumo surfaces (section 2.1). */
+  /* Kumo surfaces. */
   --color-kumo-canvas: var(--rh-ground);
   --color-kumo-base: var(--rh-ground);
   --color-kumo-elevated: var(--rh-raised);
   --color-kumo-recessed: var(--rh-sunk);
   --color-kumo-overlay: var(--rh-raised);
-  /* Input fill: elevated on the ground; rebound to the ground inside elevated surfaces (3). */
+  /* Input fill: raised on the ground; rebound to the ground inside elevated surfaces (3). */
   --color-kumo-control: var(--rh-raised);
   --color-kumo-tint: var(--rh-hover);
   --color-kumo-contrast: var(--rh-ink);
@@ -194,8 +206,8 @@
   --color-kumo-fill-hover: var(--rh-tone-300);
   --color-kumo-interact: color-mix(in srgb, var(--rh-ink) 45%, transparent);
 
-  /* Kumo lines. `line` frames controls (divider), `hairline` separates flat surfaces (rule). */
-  --color-kumo-line: var(--rh-divider);
+  /* Kumo lines. `line` frames controls (3:1), `hairline` separates flat surfaces (rule). */
+  --color-kumo-line: var(--rh-control-line);
   --color-kumo-hairline: var(--rh-rule);
   --color-kumo-focus: var(--rh-accent-500);
   --color-kumo-shadow-edge: var(--rh-overlay-edge);
@@ -207,30 +219,30 @@
   --color-kumo-brand: var(--rh-accent-500);
   --color-kumo-brand-hover: var(--rh-accent-600);
 
-  /* Status families (section 2.6). Kumo `info` is the Modernist "active" family: solid ink. */
+  /* Status families. `info` is "in progress" (blue); `danger` is red and never the accent. */
   --color-kumo-success: var(--rh-ok);
   --color-kumo-success-tint: var(--rh-ok-fill);
   --color-kumo-warning: var(--rh-attention);
   --color-kumo-warning-tint: var(--rh-attention-fill);
-  --color-kumo-danger: var(--rh-accent-500);
-  --color-kumo-danger-tint: var(--rh-accent-100);
-  --color-kumo-info: var(--rh-ink);
-  --color-kumo-info-tint: var(--rh-ink);
-  --color-kumo-banner-info: var(--rh-raised);
+  --color-kumo-danger: var(--rh-danger);
+  --color-kumo-danger-tint: var(--rh-danger-fill);
+  --color-kumo-info: var(--rh-info);
+  --color-kumo-info-tint: var(--rh-info-fill);
+  --color-kumo-banner-info: var(--rh-info-fill);
   --color-kumo-banner-warning: var(--rh-attention-fill);
 
-  /* Kumo's decorative badge hues collapse onto the system: no blue, purple or teal. */
-  --color-kumo-badge-red: var(--rh-accent-500);
+  /* Kumo's decorative badge hues collapse onto the status families. */
+  --color-kumo-badge-red: var(--rh-danger);
   --color-kumo-badge-green: var(--rh-ok);
   --color-kumo-badge-orange: var(--rh-attention);
   --color-kumo-badge-purple: var(--rh-ink);
   --color-kumo-badge-teal: var(--rh-ink);
   --color-kumo-badge-teal-subtle: var(--rh-tone-100);
-  --color-kumo-badge-blue: var(--rh-ink);
+  --color-kumo-badge-blue: var(--rh-info);
   --color-kumo-badge-neutral: var(--rh-tone-600);
   --color-kumo-badge-inverted: var(--rh-ink);
 
-  /* Text roles (section 2.2). "Strong" is weight, not a darker color. */
+  /* Text roles. "Strong" is weight, not a darker color. */
   --text-color-kumo-default: var(--rh-ink);
   --text-color-kumo-strong: var(--rh-ink);
   --text-color-kumo-subtle: var(--rh-subtle);
@@ -240,10 +252,10 @@
   --text-color-kumo-inverse: var(--rh-ground);
   --text-color-kumo-brand: var(--rh-accent-500);
   --text-color-kumo-link: var(--rh-accent-text);
-  --text-color-kumo-info: var(--rh-ground);
+  --text-color-kumo-info: var(--rh-info);
   --text-color-kumo-success: var(--rh-ok);
   --text-color-kumo-warning: var(--rh-attention);
-  --text-color-kumo-danger: var(--rh-accent-700);
+  --text-color-kumo-danger: var(--rh-danger);
   --text-color-kumo-badge-orange-subtle: var(--rh-attention);
   --text-color-kumo-badge-teal-subtle: var(--rh-tone-800);
   --text-color-kumo-badge-neutral-subtle: var(--rh-tone-800);
@@ -269,13 +281,13 @@
  * `data-kumo-component` / `data-kumo-part` attributes or its stable `kumo-*` class names.
  * ------------------------------------------------------------------------------------------ */
 
-/* Inputs sit on `base` inside an elevated panel (section 8.2), and never elevated-on-elevated. */
+/* Inputs sit on the ground inside a raised panel, never raised-on-raised. */
 .bg-kumo-elevated,
 [data-surface="elevated"] {
   --color-kumo-control: var(--rh-ground);
 }
 
-/* Button: flat accent primary, no gradient; Archivo 800 label (section 8.1).
+/* Button: flat accent primary, no gradient, 600 label.
    Kumo writes these variables inline; `!important` custom properties beat inline values.
    Note: Kumo's `destructive` variant shares these variables and renders as primary. Do not use
    it: a destructive action is a secondary button labelled "Reject" or "Discard". */
@@ -284,7 +296,7 @@
   --kumo-button-emphasis-ring: var(--rh-accent-500) !important;
   --kumo-button-emphasis-gradient-start: var(--rh-accent-500) !important;
   --kumo-button-emphasis-gradient-end: var(--rh-accent-500) !important;
-  font-weight: 800;
+  font-weight: 600;
 }
 [data-kumo-component="Button"]:not(:disabled):hover {
   --kumo-button-emphasis-bg: var(--rh-accent-600) !important;
@@ -297,43 +309,37 @@
   --kumo-button-emphasis-gradient-end: var(--rh-accent-press) !important;
   --color-kumo-tint: var(--rh-press);
 }
-/* Disabled is 45% opacity (section 10); Kumo uses 50%. */
+/* Disabled is 45% opacity; Kumo uses 50%. */
 [data-kumo-component="Button"]:disabled {
   opacity: 0.45;
 }
-/* Kumo also disables a loading button. Loading is not disabled: keep full strength (8.1). */
+/* Kumo also disables a loading button. Loading is not disabled: keep full strength. */
 [data-kumo-component="Button"]:disabled:has(svg[role="status"]) {
   opacity: 1;
   cursor: progress;
 }
 
 /* Kumo shows a 1px focus-color ring after a mouse click. The focus ring is for the keyboard
-   only (section 10), so a mouse-focused control keeps its rest frame. Emphasis buttons keep
-   their own ring color. */
+   only, so a mouse-focused control keeps its rest frame. Emphasis buttons keep their own ring
+   color. */
 [data-kumo-component]:focus:not(:focus-visible):not([style*="--kumo-button-emphasis"]) {
-  --tw-ring-color: var(--rh-divider);
+  --tw-ring-color: var(--rh-control-line);
 }
 
-/* Checkbox and radio: accent fill when on (section 8.2). Kumo fills with `contrast`. */
+/* Checkbox and radio: accent fill when on. Kumo fills with `contrast`. */
 [data-kumo-component="Checkbox"],
 [data-kumo-component="Radio"] {
   --color-kumo-contrast: var(--rh-accent-500);
 }
 
-/* Switch: square track, ink when on, ground-colored thumb (section 8.2). Kumo hard-codes a
-   blue palette for the on state; rebind those steps inside the Switch only. */
+/* Switch: Kumo hard-codes Tailwind blue for the on state; rebind it to the brand blue. */
 [data-kumo-component="Switch"] {
-  --color-blue-300: var(--rh-ground);
-  --color-blue-500: var(--rh-ink);
-  --color-blue-600: var(--rh-ink);
+  --color-blue-300: var(--rh-accent-500);
+  --color-blue-500: var(--rh-accent-500);
+  --color-blue-600: var(--rh-accent-600);
 }
 
-/* Meter (Base UI renders role="meter"): ink fill on a recessed track (section 9.1). */
-[role="meter"] {
-  --color-kumo-brand: var(--rh-ink);
-}
-
-/* Tooltip: ink fill, inverse text, no frame, no arrow (section 8.4). */
+/* Tooltip: ink fill, inverse text, no frame, no arrow. 12px is the text floor. */
 .kumo-tooltip-popup {
   --color-kumo-base: var(--rh-ink);
   --text-color-kumo-default: var(--rh-ground);
@@ -344,30 +350,13 @@
   display: none;
 }
 
-/* Popover and dialog: elevated fill with the overlay shadow (section 8.4). */
+/* Popover and dialog: raised fill with the overlay shadow. */
 .kumo-popover-popup,
 [role="dialog"][data-open],
 [role="alertdialog"][data-open] {
   --color-kumo-base: var(--rh-raised);
   --color-kumo-control: var(--rh-ground);
   box-shadow: var(--rh-shadow-overlay);
-}
-
-@layer base {
-  /* Zero radius everywhere. `!important` in @layer base outranks every later layer and any
-     inline radius, including Clerk widgets and xyflow nodes. */
-  *,
-  *::before,
-  *::after {
-    border-radius: 0 !important;
-  }
-
-  /* The one round element: radio dots (section 5.3). */
-  input[type="radio"],
-  [data-kumo-component="Radio"][data-kumo-part="item"],
-  [data-kumo-component="Radio"][data-kumo-part="item"] span {
-    border-radius: 9999px !important;
-  }
 }
 
 /* --------------------------------------------------------------------------------------------
@@ -385,8 +374,9 @@
     background-color: var(--color-kumo-canvas);
     color: var(--text-color-kumo-default);
     font-family: var(--font-sans);
+    /* type-ui: 14px / 20px. Unitless, so larger text that sets no leading still scales. */
     font-size: 14px;
-    line-height: 1.5;
+    line-height: calc(20 / 14);
     font-synthesis-weight: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
@@ -423,139 +413,126 @@
 }
 
 /* --------------------------------------------------------------------------------------------
- * 5. Type and structure utilities (section 4.2). Each `type-*` class sets size, line height,
- *    weight, case and tracking together, so one class names one role.
+ * 5. Type and structure utilities (section 8.3). Each `type-*` class sets size, line height
+ *    and weight together, so one class names one role. Sentence case everywhere: no
+ *    uppercase, no letter-spacing on labels. 12px is the floor.
  * ------------------------------------------------------------------------------------------ */
 
 @utility type-display {
-  font-size: clamp(34px, 3vw, 40px);
-  line-height: 1;
-  font-weight: 800;
-  letter-spacing: -0.015em;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
 }
 @utility type-h1 {
-  font-size: clamp(30px, 5vw, 42px);
-  line-height: 1.12;
-  font-weight: 800;
-  letter-spacing: -0.015em;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   text-wrap: balance;
 }
 @utility type-h2 {
-  font-size: clamp(26px, 4vw, 32px);
-  line-height: 1.12;
-  font-weight: 800;
-  letter-spacing: -0.015em;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
   text-wrap: balance;
 }
 @utility type-h3 {
-  font-size: 25px;
-  line-height: 1.12;
-  font-weight: 800;
-  letter-spacing: -0.015em;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
 }
 @utility type-h4 {
-  font-size: 20px;
-  line-height: 1.12;
-  font-weight: 800;
-  letter-spacing: -0.015em;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
 }
 @utility type-h5 {
-  font-size: 16px;
-  line-height: 1.12;
-  font-weight: 800;
-  letter-spacing: -0.015em;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
 }
 @utility type-h6 {
-  font-size: 13px;
-  line-height: 1.12;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
 }
 @utility type-body {
   font-size: 15px;
-  line-height: 1.55;
+  line-height: 24px;
   font-weight: 400;
   text-wrap: pretty;
 }
 @utility type-ui {
   font-size: 14px;
-  line-height: 1.4;
+  line-height: 20px;
 }
 @utility type-ui-sm {
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 18px;
 }
 @utility type-meta {
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 16px;
 }
 @utility type-label {
-  font-size: 11px;
-  line-height: 1.3;
-  font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
 }
 @utility type-kicker {
-  font-size: 11px;
-  line-height: 1.3;
-  font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
 }
 @utility type-pill {
-  font-size: 11px;
-  line-height: 1.35;
-  font-weight: 600;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
 }
 @utility type-mono {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 20px;
   font-variant-numeric: tabular-nums;
 }
 @utility type-mono-log {
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.7;
+  font-size: 12.5px;
+  line-height: 20px;
   font-variant-numeric: tabular-nums;
 }
 
-/* 2px solid ink on top of the focal block of a page (log well, comparison matrix). */
+/* 1px rule on top of a focal block (log well, comparison matrix). */
 @utility rule-ink {
-  border-top: 2px solid var(--rh-ink);
+  border-top: 1px solid var(--rh-rule);
 }
-/* 2px section rule. */
+/* 1px section separator. */
 @utility rule-divider {
-  border-top: 2px solid var(--rh-divider);
+  border-top: 1px solid var(--rh-divider);
 }
 
-/* Photographs print in black and white (section 13). */
+/* Photographs print in black and white. */
 @utility photo-grayscale {
   filter: grayscale(1) contrast(1.08);
 }
 
 /* --------------------------------------------------------------------------------------------
- * 6. Feedback: Loader and skeleton (section 8.5)
+ * 6. Feedback: spinner and skeleton
+ *
+ * The spinner is the only looping motion in the default view: a 16px CircleNotch on running
+ * rows, in-progress pills and loading buttons (components/ui/loader.tsx, status-pill.tsx).
+ * Kumo's own button spinner keeps its default circular look.
  * ------------------------------------------------------------------------------------------ */
 
-/* A square that fills with ink in a loop. `.rh-loader` is our Loader; the second selector
-   restyles Kumo's spinning-circle Loader (rendered inside loading Buttons) to the same shape. */
-.rh-loader,
-svg[role="status"]:has(> circle > animateTransform) {
-  display: inline-block;
+.rh-spin {
   flex: none;
-  box-shadow: inset 0 0 0 1.5px currentColor;
-  background: linear-gradient(currentColor 0 0) bottom / 100% 0% no-repeat;
-  animation: rh-loader-fill 1.1s steps(8, end) infinite;
+  animation: rh-spin 1s linear infinite;
 }
-svg[role="status"]:has(> circle > animateTransform) > circle {
-  display: none;
-}
-@keyframes rh-loader-fill {
+@keyframes rh-spin {
   to {
-    background-size: 100% 100%;
+    transform: rotate(360deg);
   }
 }
 
@@ -569,31 +546,16 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
 }
 @keyframes rh-skeleton-pulse {
   50% {
-    opacity: 0.6;
+    opacity: 0.7;
   }
 }
 
 /* --------------------------------------------------------------------------------------------
- * 7. Motion (section 11) and agent activity (section 11.1)
+ * 7. Motion tokens
  *
- * UI motion is quiet: 120-180ms ease-out, nothing loops on its own. Agent activity is the one
- * place motion leads: forks draw, packets travel between lanes, lanes flash on arrival, losers
- * grey out, the winner merges. Real events drive every animation; JS paces bursts with
- * `--rh-agent-cadence` (mirrored in src/lib/motion.ts).
- *
- * Usage pattern for the agent-activity view (classes are composable; restart an animation by
- * changing the element's React `key`):
- *   <path pathLength={1} class="rh-fork" />                 2px ink branch draws from the trunk
- *   <div class="rh-settle">                                 a new lane settles into place
- *   <span class="rh-packet" style="--rh-packet-path: path('M0 0 L240 64')">  message packet
- *   <li class="rh-arrive">                                  receiving lane flashes once
- *   <div class="rh-lane-progress" style="width: 40%">       progress advances with tool calls
- *   <section data-state="rejected" class="rh-greyout">      loser greys out, text stays legible
- *   <path pathLength={1} class="rh-merge" />                winner merges back into the trunk
- *
- * Under `prefers-reduced-motion: reduce` every duration below collapses to 0-80ms and the
- * agent animations become instant state changes (section 11 and 11.1). Show the event list
- * beside the view so the sequence stays readable without motion.
+ * UI motion is quiet: 120-180ms ease-out for hover and overlays, 300ms for progress bars.
+ * Nothing replays events or loops except the spinner (section 6). `src/lib/motion.ts` mirrors
+ * the numbers JavaScript needs.
  * ------------------------------------------------------------------------------------------ */
 
 :root {
@@ -601,24 +563,14 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
   --rh-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --rh-ease-linear: linear;
 
-  /* Section 11: UI */
   --rh-dur-ui-fast: 120ms;
   --rh-dur-ui: 150ms;
   --rh-dur-ui-slow: 180ms;
   --rh-dur-overlay-in: 160ms;
   --rh-dur-overlay-out: 120ms;
   --rh-overlay-shift: 4px;
-  --rh-dur-bar: 0.8s;
+  --rh-dur-bar: 300ms;
   --rh-dur-heat: 0.4s;
-
-  /* Section 11.1: agent activity */
-  --rh-dur-fork: 280ms; /* 240-320ms, ease-out */
-  --rh-dur-settle: 240ms;
-  --rh-dur-packet: 560ms;
-  --rh-dur-arrive: 600ms; /* one faint flash */
-  --rh-dur-greyout: 320ms;
-  --rh-dur-merge: 320ms;
-  --rh-agent-cadence: 200ms; /* spacing between replayed events, 150-250ms */
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -631,95 +583,11 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
     --rh-overlay-shift: 0px;
     --rh-dur-bar: 0ms;
     --rh-dur-heat: 0ms;
-    --rh-dur-fork: 0ms;
-    --rh-dur-settle: 0ms;
-    --rh-dur-packet: 0ms;
-    --rh-dur-arrive: 0ms;
-    --rh-dur-greyout: 0ms;
-    --rh-dur-merge: 0ms;
-    /* Pacing is information, not decoration: replayed events keep their spacing. */
   }
 }
 
-/* Fork and merge: draw a path with pathLength="1". */
-.rh-fork,
-.rh-merge {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 0;
-  animation: rh-draw var(--rh-dur-fork) var(--rh-ease-out) both;
-}
-.rh-merge {
-  animation-duration: var(--rh-dur-merge);
-}
-@keyframes rh-draw {
-  from {
-    stroke-dashoffset: 1;
-  }
-}
-
-.rh-settle {
-  animation: rh-settle var(--rh-dur-settle) var(--rh-ease-out) both;
-}
-@keyframes rh-settle {
-  from {
-    opacity: 0;
-    transform: translateY(var(--rh-overlay-shift));
-  }
-}
-
-/* A square packet that travels once along `--rh-packet-path` (CSS `path()` in the parent's
-   coordinate space) and stays at the end. */
-.rh-packet {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 8px;
-  height: 8px;
-  background: var(--rh-ink);
-  offset-path: var(--rh-packet-path);
-  offset-rotate: 0deg;
-  offset-distance: 100%;
-  animation: rh-travel var(--rh-dur-packet) var(--rh-ease-in-out) both;
-}
-@keyframes rh-travel {
-  from {
-    offset-distance: 0%;
-  }
-}
-
-.rh-arrive {
-  animation: rh-arrive var(--rh-dur-arrive) var(--rh-ease-out);
-}
-@keyframes rh-arrive {
-  from {
-    background-color: var(--rh-press);
-  }
-}
-
-.rh-lane-progress {
-  height: 2px;
-  background: var(--rh-ink);
-  transition: width var(--rh-dur-bar) ease;
-}
-
-.rh-greyout {
-  transition:
-    opacity var(--rh-dur-greyout) var(--rh-ease-out),
-    filter var(--rh-dur-greyout) var(--rh-ease-out);
-}
-/* Greyed out, but the failing reason still reads (section 11, "in words"; section 14, 4.5:1).
-   An opacity fade multiplies into every nested text role (subtle inside a 62% fade measures
-   2.4:1), so the loser loses its hue and drops its ink to the subtle role instead. */
-.rh-greyout[data-state="rejected"],
-.rh-greyout[data-state="superseded"] {
-  filter: grayscale(1);
-  color: var(--rh-subtle);
-  --text-color-kumo-default: var(--rh-subtle);
-  --text-color-kumo-strong: var(--rh-subtle);
-}
-
-/* Section 11: remove translations and pulses, cut durations, keep live bars updating without a
-   transition. The Loader keeps a static half fill so it still reads as "working". */
+/* Remove translations and pulses, cut durations, keep live bars updating without a
+   transition. The spinner stops and stays visible as a static icon next to its word. */
 @media (prefers-reduced-motion: reduce) {
   @layer base {
     *,
@@ -731,11 +599,7 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
       scroll-behavior: auto !important;
     }
   }
-  .rh-loader,
-  svg[role="status"]:has(> circle > animateTransform) {
-    animation: none;
-    background-size: 100% 50%;
-  }
+  .rh-spin,
   .skeleton,
   .skeleton-line {
     animation: none;

@@ -13,7 +13,14 @@ import { EntityHover } from "../../hover-preview";
  * with one square node per recorded cause and the decision itself last, in ink (DESIGN.md 9.8).
  */
 
-export const DECISION_KINDS: DecisionKind[] = ["route", "fork", "gate", "approval", "promotion"];
+export const DECISION_KINDS: DecisionKind[] = [
+  "route",
+  "fork",
+  "gate",
+  "approval",
+  "promotion",
+  "release",
+];
 
 /** Plural nouns for counts: "14 routes · 1 fork". */
 export const KIND_NOUN: Record<DecisionKind, [string, string]> = {
@@ -22,6 +29,7 @@ export const KIND_NOUN: Record<DecisionKind, [string, string]> = {
   gate: ["gate", "gates"],
   approval: ["approval", "approvals"],
   promotion: ["promotion", "promotions"],
+  release: ["release", "releases"],
 };
 
 /** Distinct, token-only styles: neutral fill, accent outline (conflict), ink outline, dashed ink
@@ -32,13 +40,14 @@ const KIND_STYLE: Record<DecisionKind, string> = {
   gate: "border border-kumo-ink text-kumo-default",
   approval: "border border-dashed border-kumo-ink text-kumo-default",
   promotion: "bg-kumo-ink text-kumo-inverse",
+  release: "border border-kumo-ink bg-tone-100 text-kumo-default",
 };
 
 export function KindTag({ kind, className }: { kind: DecisionKind; className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex w-fit shrink-0 items-center px-1.5 py-px font-mono text-[11px] leading-tight whitespace-nowrap",
+        "inline-flex w-fit shrink-0 items-center px-1.5 py-px font-mono text-[12px] leading-tight whitespace-nowrap",
         KIND_STYLE[kind],
         className,
       )}
@@ -54,7 +63,7 @@ export function ByTag({ by }: { by: string }) {
   return (
     <span
       title={`Decided by ${by}`}
-      className="inline-flex w-fit shrink-0 items-center border border-kumo-rule px-1.5 py-px font-mono text-[11px] leading-tight whitespace-nowrap text-kumo-subtle"
+      className="inline-flex w-fit shrink-0 items-center border border-kumo-rule px-1.5 py-px font-mono text-[12px] leading-tight whitespace-nowrap text-kumo-subtle"
     >
       {by}
     </span>
@@ -117,7 +126,7 @@ function causeNow(state: FlightState, ref: EntityRef): ReactNode {
       return (
         <span className="inline-flex flex-wrap items-center gap-1.5">
           <StatusPill status={check.status} />
-          <span className="text-[11px] text-kumo-subtle">
+          <span className="text-[12px] text-kumo-subtle">
             {check.coverage ? check.coverage.replace(/_/g, " ") : "no Evidence yet"}
           </span>
         </span>
@@ -130,20 +139,20 @@ function causeNow(state: FlightState, ref: EntityRef): ReactNode {
     case "decision": {
       const d = state.decisions.find((x) => x.id === ref.id);
       return d ? (
-        <span className="text-[11px] text-kumo-subtle">{`${d.kind} by ${d.by}`}</span>
+        <span className="text-[12px] text-kumo-subtle">{`${d.kind} by ${d.by}`}</span>
       ) : (
-        <span className="text-[11px] text-kumo-subtle">Not recorded at this instant</span>
+        <span className="text-[12px] text-kumo-subtle">Not recorded at this instant</span>
       );
     }
     case "event":
       return state.events.some((e) => e.id === ref.id) ? null : (
-        <span className="text-[11px] text-kumo-subtle">Not in the fold at this instant</span>
+        <span className="text-[12px] text-kumo-subtle">Not in the fold at this instant</span>
       );
     case "resource": {
       const r = state.resources.find((x) => x.resource === ref.id);
       if (!r) return null;
       return (
-        <span className="text-[11px] text-kumo-subtle">
+        <span className="text-[12px] text-kumo-subtle">
           {r.claimedBy.length === 0
             ? "No active Claim"
             : `${formatNumber(r.claimedBy.length)} active Claim${r.claimedBy.length === 1 ? "" : "s"}`}
@@ -172,7 +181,7 @@ function CauseButton({
         aria-pressed={selected}
         onClick={() => useFlightStore.getState().select(entity)}
         className={cn(
-          "min-h-6 max-w-full cursor-pointer truncate border border-kumo-rule px-1.5 font-mono text-[11px] hover:bg-kumo-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500 pointer-coarse:min-h-11",
+          "min-h-6 max-w-full cursor-pointer truncate border border-kumo-rule px-1.5 font-mono text-[12px] hover:bg-kumo-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500 pointer-coarse:min-h-11",
           (selected || hovered) && "bg-kumo-faint",
           className,
         )}
@@ -231,7 +240,7 @@ export function CausalTrace({
                 : "grid-cols-[56px_minmax(0,1fr)_auto] items-center",
             )}
           >
-            <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+            <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">
               {clockOf(cause.at)}
             </span>
             <span className={cn("min-w-0 text-[12px]", !roomy && "truncate")} title={cause.label}>
@@ -260,7 +269,7 @@ export function CausalTrace({
             roomy ? "grid-cols-[64px_minmax(0,1fr)]" : "grid-cols-[56px_minmax(0,1fr)]",
           )}
         >
-          <span className="font-mono text-[11px] tabular-nums">{clockOf(decision.at)}</span>
+          <span className="font-mono text-[12px] tabular-nums">{clockOf(decision.at)}</span>
           <span className="min-w-0 text-[12px] font-semibold">
             {decision.kind === "route" ? "Routed" : "Decided"}: {decision.verdict}
           </span>

@@ -23,7 +23,8 @@ import {
 const TOP_SLACK = 8;
 
 /**
- * Event stream (DESIGN.md 9.9): sequence, time, type, actor, detail and version, newest on top.
+ * Raw event stream for the Event log: sequence, time, type, actor, detail and version, newest on
+ * top. New rows fade in over 150ms and nothing else animates.
  * New rows never move what the reader is looking at: below the top, the scroll position holds
  * and an "N new" control appears instead. Pause freezes the rows at the current sequence; new
  * events then only add to a "N new" count, and the announcements stop.
@@ -251,7 +252,7 @@ export function EventStream({
                     {events.length === 0 ? (
                       <EmptyState
                         what="No events recorded yet."
-                        how="Events appear here as soon as a Change starts and agents act on it."
+                        how="Events appear here as soon as a change starts and agents act on it."
                       />
                     ) : (
                       <EmptyState
@@ -263,7 +264,7 @@ export function EventStream({
                             variant="secondary"
                             onClick={() => changeFilter(new Set())}
                           >
-                            Show all families
+                            Show all types
                           </Button>
                         }
                       />
@@ -319,7 +320,11 @@ function EventRows({
   const Caret = open ? CaretDown : CaretRight;
   return (
     <Fragment>
-      <TRow selected={open} className="cursor-pointer">
+      {/* New rows fade in over 150ms (@starting-style); nothing else moves. */}
+      <TRow
+        selected={open}
+        className="cursor-pointer transition-[opacity,background-color] duration-(--rh-dur-ui) starting:opacity-0"
+      >
         <Td numeric>
           {/* The whole row is the target: this button stretches over it (DESIGN.md 10). */}
           <button
@@ -430,7 +435,7 @@ function EventDetail({
                     search={{ change: event.changeId }}
                     className={cn(link, "font-sans")}
                   >
-                    Only this Change
+                    Only this change
                   </Link>
                 )}
               </span>

@@ -3,12 +3,12 @@ import { Link, type LinkOptions } from "@tanstack/react-router";
 import type { ReactNode, TdHTMLAttributes, ThHTMLAttributes } from "react";
 
 /**
- * Data table (DESIGN.md 8.3). Headers 11px uppercase in `subtle` over a 2px divider; cells 8px
- * padding over a 1px rule; no vertical lines; numbers right-aligned mono; pills left-aligned.
+ * Data table. Headers 12px/500 sentence case in `subtle` over a 1px divider; 44px rows over a
+ * 1px rule; no vertical lines; numbers right-aligned mono; pills left-aligned.
  * The wrapper scrolls sideways and the table keeps `minWidth`, so columns never squeeze.
  *
- *   <DataTable minWidth={720} label="Candidates">
- *     <thead><tr><Th>Candidate</Th><Th>Status</Th><Th numeric>p95</Th></tr></thead>
+ *   <DataTable minWidth={720} label="Versions">
+ *     <thead><tr><Th>Version</Th><Th>Status</Th><Th numeric>p95</Th></tr></thead>
  *     <tbody>
  *       {rows.map((c) => (
  *         <TRow key={c.id} selected={c.id === currentId}>
@@ -37,7 +37,7 @@ export function DataTable({
 }) {
   return (
     <div className={cn("min-w-0 overflow-x-auto", className)}>
-      <table className="w-full border-collapse text-left text-[13px]" style={{ minWidth }}>
+      <table className="w-full border-collapse text-left text-[14px]" style={{ minWidth }}>
         {label && <caption className="sr-only">{label}</caption>}
         {children}
       </table>
@@ -55,7 +55,7 @@ export function Th({
     <th
       scope="col"
       className={cn(
-        "type-label border-b-2 border-kumo-divider p-2 align-bottom whitespace-nowrap text-kumo-subtle",
+        "type-label border-b border-kumo-divider px-3 py-2 align-bottom whitespace-nowrap text-kumo-subtle",
         numeric && "text-right",
         className,
       )}
@@ -73,8 +73,8 @@ export function Td({
   return (
     <td
       className={cn(
-        "border-b border-kumo-rule p-2 align-middle",
-        numeric && "text-right font-mono text-[12px] whitespace-nowrap tabular-nums",
+        "h-11 border-b border-kumo-rule px-3 py-2 align-middle",
+        numeric && "text-right font-mono text-[13px] whitespace-nowrap tabular-nums",
         className,
       )}
       {...props}
@@ -108,13 +108,13 @@ export function TRow({
 }
 TRow.displayName = "TRow";
 
-/** First-column cell content: a 600 title over an 11px mono meta line. */
+/** First-column cell content: a 600 title over a 12px mono meta line. */
 export function TitleCell({ title, meta }: { title: ReactNode; meta?: ReactNode }) {
   return (
     <div className="grid min-w-0">
       <span className="truncate font-semibold">{title}</span>
       {meta && (
-        <span className="truncate font-mono text-[11px] text-kumo-subtle tabular-nums">{meta}</span>
+        <span className="truncate font-mono text-[12px] text-kumo-subtle tabular-nums">{meta}</span>
       )}
     </div>
   );
