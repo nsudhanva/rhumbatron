@@ -17,18 +17,18 @@ const NOT_RECORDED = [
   "R2 storage and operations",
 ];
 
-export function NotRecorded({ vertexSpendLimitUsd }: { vertexSpendLimitUsd: number }) {
+export function NotRecorded({ monthlyBudgetUsd }: { monthlyBudgetUsd: number }) {
   return (
     <footer className="grid max-w-[760px] gap-1 border-t border-kumo-rule pt-3 text-[11px] text-kumo-subtle">
       <p>
         <span className="font-semibold">Not recorded:</span> {NOT_RECORDED.join(" · ")}.
       </p>
       <p>
-        Spend is the sum of recorded attempt cost. OpenRouter free models record $0.00 (ADR 0007);
-        Gemini overflow attempts record their token cost at Vertex prices (ADR 0016), capped at the
-        gateway at ${formatNumber(vertexSpendLimitUsd)} per 30 days in this environment. No routing
-        savings are claimed. Call, Clef-flash and Sandbox meters are account-wide, across every
-        Project.
+        Spend is the sum of recorded attempt cost: each Claude response priced from its usage
+        fields, cache reads and writes included (ADR 0021). Model work stops at $
+        {formatNumber(monthlyBudgetUsd)} per calendar month in this environment. Attempts before ADR
+        0021 kept their OpenRouter ($0.00) or Gemini cost. No routing savings are claimed. Call,
+        Clef-flash and Sandbox meters are account-wide, across every Project.
       </p>
     </footer>
   );

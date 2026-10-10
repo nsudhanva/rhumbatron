@@ -10,9 +10,8 @@ const formatHours = (h: number) => formatUnit(h, "h", 1);
 /**
  * Free-tier meters (AGENTS.md sections 7.3, 44) from `usage_counters`, plus the Project's
  * recorded spend over the Changes on this page. The call and Sandbox counters are account-wide.
- * OpenRouter is free up to its daily cap; then runs overflow to Gemini, whose spend the AI Gateway
- * caps per environment (`meters.vertexSpendLimitUsd` per 30 days; ADR 0016, 0017). Gemini spend
- * shows in "Project model spend".
+ * Anthropic spend is metered per environment and calendar month; at the budget, model work stops
+ * (`meters.anthropicMonthlyBudgetUsd`; ADR 0021).
  */
 export function UsageMeters({
   meters,
@@ -53,26 +52,20 @@ export function UsageMeters({
         </div>
       </StatCell>
       <StatCell
-        label="OpenRouter today"
-        value={formatNumber(meters.openrouterCallsToday)}
-        unit={`/ ${formatNumber(meters.openrouterDailyCallCap)}`}
+        label="Claude this month"
+        value={formatCost(meters.anthropicSpentUsdMonth)}
+        unit={`/ ${formatCost(meters.anthropicMonthlyBudgetUsd)}`}
         footnote={
-          meters.vertexSpendLimitedToday
-            ? `Gemini spend cap reached · $${formatNumber(meters.vertexSpendLimitUsd)} per 30 days`
-            : meters.openrouterUsedUpToday
-              ? "used up · new runs use Gemini (paid, capped)"
-              : "free models · then Gemini overflow"
+          meters.anthropicSpentUsdMonth >= meters.anthropicMonthlyBudgetUsd
+            ? `budget reached · model work stops until ${meters.month} ends`
+            : `this environment · ${meters.month} · stops at the budget`
         }
       >
         <CapMeter
-          label="free cap"
-          value={
-            meters.openrouterUsedUpToday
-              ? meters.openrouterDailyCallCap
-              : meters.openrouterCallsToday
-          }
-          cap={meters.openrouterDailyCallCap}
-          format={(n) => formatNumber(n)}
+          label="monthly budget"
+          value={meters.anthropicSpentUsdMonth}
+          cap={meters.anthropicMonthlyBudgetUsd}
+          format={formatCost}
         />
       </StatCell>
       <StatCell

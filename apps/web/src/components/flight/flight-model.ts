@@ -86,7 +86,8 @@ export type RunState = {
   /** Live progress for the running attempt (calls and the last tool step), live mode only. */
   lastStep: string | null;
   /**
-   * Model provider from the matching Decision Receipt (`google-vertex-ai` = Gemini, `openrouter`),
+   * Model provider from the matching Decision Receipt (`anthropic` = Claude; older receipts:
+   * `google-vertex-ai` = Gemini, `openrouter`),
    * null when no receipt names one. Shown as a tag so a viewer knows which model family ran.
    */
   provider: string | null;
@@ -963,9 +964,10 @@ function providerOf(receipts: DecisionReceiptView[], tier: TaskRun["tier"], star
   return typeof provider === "string" ? provider : null;
 }
 
-/** Short display name of a provider id: `google-vertex-ai` -> `Gemini`. */
+/** Short display name of a provider id: `anthropic` -> `Claude`, `google-vertex-ai` -> `Gemini`. */
 export function providerName(provider: string | null): string | null {
   if (!provider) return null;
+  if (provider === "anthropic") return "Claude";
   if (provider === "google-vertex-ai") return "Gemini";
   if (provider === "openrouter") return "OpenRouter";
   return provider;

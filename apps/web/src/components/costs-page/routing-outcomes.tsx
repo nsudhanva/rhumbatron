@@ -9,7 +9,7 @@ const TIERS: Tier[] = ["haiku", "sonnet", "opus"];
 const FAILURE_LABEL: Record<string, string> = {
   run_call_cap: "Run call cap",
   budget_exhausted: "Budget stop",
-  spend_limited: "Gemini spend cap",
+  spend_limited: "Spend stop",
   rate_limited: "Rate limited",
 };
 

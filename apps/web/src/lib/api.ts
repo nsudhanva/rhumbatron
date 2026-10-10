@@ -570,12 +570,10 @@ export type ProjectCost = {
     month: string;
     agentModelCallsToday: number;
     agentDailyCallCap: number;
-    openrouterCallsToday: number;
-    openrouterDailyCallCap: number;
-    openrouterUsedUpToday: boolean;
-    vertexSpendLimitedToday: boolean;
-    /** This environment's AI Gateway Vertex cap in USD per 30 days (ADR 0017). */
-    vertexSpendLimitUsd: number;
+    /** Anthropic spend this calendar month in this environment, open reservations included. */
+    anthropicSpentUsdMonth: number;
+    /** This environment's Anthropic budget in USD per calendar month (ADR 0021). */
+    anthropicMonthlyBudgetUsd: number;
     clefFlashCallsToday: number;
     clefDailyCap: number;
     sandboxSecondsMonth: number;
@@ -822,8 +820,8 @@ export type AgentRunView = {
   failureKind: string | null;
   failureReason: string | null;
   decidedBy: string | null;
-  /** Model provider from the Decision Receipt (ADR 0016); null on older receipts. */
-  provider: "openrouter" | "google-vertex-ai" | null;
+  /** Model provider from the Decision Receipt (ADR 0021: anthropic); null on older receipts. */
+  provider: "anthropic" | "openrouter" | "google-vertex-ai" | null;
   reasons: string[];
   /** The previous attempt's tier when this attempt moved up a tier. */
   escalatedFrom: TaskRun["tier"] | null;

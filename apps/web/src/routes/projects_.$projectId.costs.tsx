@@ -152,7 +152,7 @@ function CostsView() {
             </>
           )}
 
-          <NotRecorded vertexSpendLimitUsd={data.meters.vertexSpendLimitUsd} />
+          <NotRecorded monthlyBudgetUsd={data.meters.anthropicMonthlyBudgetUsd} />
         </>
       )}
     </>
