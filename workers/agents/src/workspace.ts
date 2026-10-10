@@ -1,5 +1,12 @@
 import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
-import { WorkspaceManifest, workspaceManifestKey } from "@rhumbatron/protocol";
+import {
+  boundPatch,
+  changeSetPatchKey,
+  patchCommand,
+  patchMetadata,
+  WorkspaceManifest,
+  workspaceManifestKey,
+} from "@rhumbatron/protocol";
 import {
   admitSandbox,
   type LimitKey,
@@ -110,6 +117,8 @@ export type Published = {
   /** Present when the workspace stacked dependencies: the agent's starting point and own files. */
   startCommit?: string;
   ownFiles?: string[];
+  /** R2 key of this ChangeSet's stored `git diff` (section 15.4). Absent when it was not stored. */
+  patchRef?: string;
 };
 
 type WorkspaceEnv = {
@@ -477,6 +486,39 @@ export async function readWorkspaceFile(
   return `${restored ? RESTORED_NOTE : ""}${clip(content)}`;
 }
 
+/**
+ * Stores the ChangeSet's own `git diff` for the Files changed view (P16-17): from the stacked
+ * start when dependencies were merged first, else from the canonical base, so each hunk is
+ * attributed to the agent that wrote it. Bounded by MAX_PATCH_BYTES. A read model only: a
+ * failure returns undefined and the publish continues.
+ */
+async function storePatch(
+  env: WorkspaceEnv,
+  sandbox: Sandbox,
+  ws: WorkspaceRef,
+  from: string,
+  head: string,
+): Promise<string | undefined> {
+  try {
+    const result = await sandbox.exec(patchCommand(from, head), {
+      cwd: ws.dir,
+      timeout: COMMAND_TIMEOUT_MS,
+    });
+    if (result.exitCode !== 0) return undefined;
+    const bounded = boundPatch(result.stdout);
+    const key = changeSetPatchKey(ws.projectId, `cs_${ws.runId.slice(4)}`);
+    await env.EVIDENCE.put(key, bounded.patch, {
+      httpMetadata: { contentType: "text/x-diff; charset=utf-8" },
+      customMetadata: patchMetadata({ base: from, head, ...bounded }),
+    });
+    return key;
+  } catch {
+    // Do not log exception text: storage errors can contain request headers or credentials.
+    console.warn(JSON.stringify({ event: "workspace.patch_write_failed", runId: ws.runId }));
+    return undefined;
+  }
+}
+
 /** Commits all changes and pushes them to the fork. Null when nothing changed. */
 export async function publishWorkspace(
   env: WorkspaceEnv,
@@ -518,6 +560,17 @@ export async function publishWorkspace(
   // canonical; `ownFiles` is what this Task changed on top of its stacked dependencies.
   const files = await names(ws.baseCommit);
   const stack = ws.stack ?? [];
+  const stacked = stack.length > 0 && !!ws.startCommit;
+  // Only Task runs have a ChangeSet; the Sandbox smoke check (no manifest) stores no patch.
+  const patchRef = ws.manifest
+    ? await storePatch(
+        env,
+        sandbox,
+        ws,
+        stacked && ws.startCommit ? ws.startCommit : ws.baseCommit,
+        commit,
+      )
+    : undefined;
   if (ws.manifest) {
     ws.manifest = { ...ws.manifest, files, status: "published" };
     await writeManifest(env, ws);
@@ -529,9 +582,10 @@ export async function publishWorkspace(
     diffStat,
     files,
     stackedOn: stackedOn(stack),
-    ...(stack.length > 0 && ws.startCommit
+    ...(stacked && ws.startCommit
       ? { startCommit: ws.startCommit, ownFiles: await names(ws.startCommit) }
       : {}),
+    ...(patchRef ? { patchRef } : {}),
   };
 }
 
