@@ -150,6 +150,8 @@ export function verificationHalt(
 /** Task stops that set the Change `budget_blocked` (agents limits.ts `limitStop`). */
 const BUDGET_STOP_LIMITS = [
   "daily_model_calls",
+  "monthly_model_spend",
+  // Rows blocked before ADR 0021 (Gemini on Vertex) keep their limit name.
   "vertex_spend_limit",
   "max_cost_usd_per_change",
   "max_attempts_per_tier",

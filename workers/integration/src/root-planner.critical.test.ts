@@ -26,25 +26,22 @@ const plan = (tasks: unknown[]) =>
   });
 
 function reply(args: string | null): CompletionResult {
+  const toolCalls: CompletionResult["toolCalls"] =
+    args === null
+      ? []
+      : [{ id: "c1", type: "function", function: { name: "submit_work_graph", arguments: args } }];
   return {
-    provider: "openrouter",
+    provider: "anthropic",
     model: "test",
+    tier: "sonnet",
     content: null,
-    toolCalls:
-      args === null
-        ? []
-        : [
-            {
-              id: "c1",
-              type: "function",
-              function: { name: "submit_work_graph", arguments: args },
-            },
-          ],
-    finishReason: "tool_calls",
+    toolCalls,
+    message: { role: "assistant", content: null, tool_calls: toolCalls },
+    finishReason: "tool_use",
     inputTokens: 1,
     outputTokens: 1,
-    reasoningTokens: 0,
-    cachedInputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     costUsd: 0,
     latencyMs: 1,
     gatewayLogId: null,

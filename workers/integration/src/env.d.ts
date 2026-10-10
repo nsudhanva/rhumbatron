@@ -1,11 +1,14 @@
 // Secrets and Terraform-only vars are not in wrangler.jsonc, so `wrangler types` cannot see them.
 // Local: workers/integration/.dev.vars. Remote: Terraform secret_text or plain_text binding.
 interface Env {
-  OPENROUTER_API_KEY: string;
-  /** Base64 service account JSON with `region`. Optional: without it there is no Vertex backup. */
-  VERTEX_SERVICE_ACCOUNT?: string;
-  /** `vertex` routes every model call to Gemini (ADR 0016); anything else keeps OpenRouter first. */
-  MODEL_PROVIDER?: string;
+  /** Anthropic API key (organization-level) for the Root Planner through the AI Gateway (ADR 0021). */
+  ANTHROPIC_API_KEY: string;
+  /** Sent as `anthropic-workspace-id` on every Anthropic request. Not a secret. */
+  ANTHROPIC_WORKSPACE_ID: string;
+  /** This environment's Anthropic budget in USD per calendar month (ADR 0021). Default 10. */
+  ANTHROPIC_MONTHLY_BUDGET_USD?: string;
+  /** "true" enables Opus; otherwise the opus tier runs on Sonnet (ADR 0021). */
+  ALLOW_OPUS?: string;
   /** Sandbox seconds per calendar month on this environment's meter (ADR 0017). Default 36000. */
   SANDBOX_MONTHLY_SECONDS?: string;
   /** Browser Run seconds per UTC day on this environment's meter (ADR 0017). Default 500. */

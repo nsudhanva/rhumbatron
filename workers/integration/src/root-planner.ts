@@ -1,4 +1,5 @@
 import {
+  applyOpusPolicy,
   type ChatMessage,
   type CompletionRequest,
   type CompletionResult,
@@ -38,7 +39,8 @@ export type PlannerResult = {
     CompletionResult,
     "provider" | "model" | "inputTokens" | "outputTokens" | "costUsd" | "latencyMs" | "gatewayLogId"
   >[];
-  route: { tier: string; reasons: string[] };
+  /** `requestedTier` is set when policy lowered the tier (ADR 0021: Opus off). */
+  route: { tier: string; reasons: string[]; requestedTier?: string };
 };
 
 export class PlannerError extends Error {
@@ -105,8 +107,12 @@ export function parsePlan(
 }
 
 /** At most two model calls: the plan, then one repair turn with the validation errors. */
-export async function planChange(input: PlannerInput, complete: Complete): Promise<PlannerResult> {
-  const route = routeByRules(PLANNER_ROUTE);
+export async function planChange(
+  input: PlannerInput,
+  complete: Complete,
+  options: { allowOpus?: boolean } = {},
+): Promise<PlannerResult> {
+  const route = applyOpusPolicy(routeByRules(PLANNER_ROUTE), options.allowOpus ?? true);
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: `Project: ${input.projectName}\nGoal:\n${input.goal}` },
@@ -140,21 +146,32 @@ export async function planChange(input: PlannerInput, complete: Complete): Promi
         order: outcome.order,
         attempts: attempt,
         calls,
-        route: { tier: route.selectedTier, reasons: route.reasons },
+        route: {
+          tier: route.selectedTier,
+          reasons: route.reasons,
+          ...(route.requestedTier ? { requestedTier: route.requestedTier } : {}),
+        },
       };
     }
     lastErrors = outcome.errors;
 
     // Repair turn: show the model its own call and the exact validation errors.
     if (call) {
-      messages.push({ role: "assistant", content: null, tool_calls: [call] });
-      messages.push({
-        role: "tool",
-        tool_call_id: call.id,
-        content: `Rejected. Fix these errors and call ${SUBMIT_TOOL} again:\n- ${outcome.errors.join("\n- ")}`,
-      });
+      // The whole assistant turn, thinking blocks included, as the API requires for a tool turn.
+      messages.push(result.message);
+      // Every tool call of the turn needs its result; only the first submit call is checked.
+      for (const other of result.toolCalls) {
+        messages.push({
+          role: "tool",
+          tool_call_id: other.id,
+          content:
+            other.id === call.id
+              ? `Rejected. Fix these errors and call ${SUBMIT_TOOL} again:\n- ${outcome.errors.join("\n- ")}`
+              : `Ignored. Call ${SUBMIT_TOOL} exactly once.`,
+        });
+      }
     } else {
-      messages.push({ role: "assistant", content: result.content ?? "" });
+      messages.push(result.message);
       messages.push({
         role: "user",
         content: `You must call ${SUBMIT_TOOL}. Errors:\n- ${outcome.errors.join("\n- ")}`,

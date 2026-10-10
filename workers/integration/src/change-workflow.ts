@@ -1,5 +1,5 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
-import { complete } from "@rhumbatron/model-router";
+import { anthropicMonthlyBudgetUsd, meteredComplete, opusAllowed } from "@rhumbatron/model-router";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent, qualify } from "./events.ts";
 import { PlannerError, type PlannerResult, planChange } from "./root-planner.ts";
@@ -86,19 +86,25 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         // One retry for transient model failures. Each attempt makes at most two model calls.
         { retries: { limit: 1, delay: "30 seconds", backoff: "constant" }, timeout: "5 minutes" },
         async () =>
-          planChange({ goal: loaded.goal, projectName: loaded.projectName }, (req) =>
-            complete(
-              {
-                accountId: this.env.AI_ACCOUNT_ID,
-                gatewayId: this.env.AI_GATEWAY_ID,
-                apiKey: this.env.OPENROUTER_API_KEY,
-                ...(this.env.VERTEX_SERVICE_ACCOUNT
-                  ? { vertexServiceAccount: this.env.VERTEX_SERVICE_ACCOUNT }
-                  : {}),
-                preferVertex: this.env.MODEL_PROVIDER === "vertex",
-              },
-              { ...req, metadata: { ...req.metadata, changeId } },
-            ),
+          planChange(
+            { goal: loaded.goal, projectName: loaded.projectName },
+            (req) =>
+              // Monthly Anthropic budget (ADR 0021): a refusal fails the step with spend_limited.
+              meteredComplete(
+                {
+                  db: this.env.DB,
+                  budgetUsd: anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD),
+                },
+                {
+                  accountId: this.env.AI_ACCOUNT_ID,
+                  gatewayId: this.env.AI_GATEWAY_ID,
+                  apiKey: this.env.ANTHROPIC_API_KEY,
+                  workspaceId: this.env.ANTHROPIC_WORKSPACE_ID,
+                  allowOpus: opusAllowed(this.env.ALLOW_OPUS),
+                },
+                { ...req, metadata: { ...req.metadata, changeId } },
+              ),
+            { allowOpus: opusAllowed(this.env.ALLOW_OPUS) },
           ),
       );
     } catch (error) {
