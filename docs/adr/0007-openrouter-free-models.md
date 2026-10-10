@@ -1,6 +1,7 @@
 # ADR 0007: OpenRouter free models through AI Gateway, Gemini as a capped backup
 
-- Status: Accepted. Amended by ADR 0016 (agents use Vertex as daily overflow) and ADR 0017
+- Status: Superseded by ADR 0021 (Anthropic for every tier; OpenRouter and Vertex removed) on
+  2026-10-09. Amended earlier by ADR 0016 (agents use Vertex as daily overflow) and ADR 0017
   (spend caps per environment). Updated 2026-10-10.
 - Date: 2026-10-08
 - Decider: Project owner

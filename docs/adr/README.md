@@ -24,3 +24,4 @@ Architecture Decision Records (ADRs) record each decision, its reason and its co
 | [0018](./0018-release-via-workers-builds.md) | Release through Workers Builds on Artifacts |
 | [0019](./0019-runaway-billing-guards.md) | Runaway-billing guards |
 | [0020](./0020-live-apps-dynamic-workers.md) | Live apps on Dynamic Workers |
+| [0021](./0021-anthropic-model-provider.md) | Anthropic as the model provider |

@@ -6,7 +6,7 @@ Main source files:
 
 - `workers/agents/src/agent-do.ts`: AgentDO, run start, run end, budgets.
 - `workers/agents/src/wake-consumer.ts`: the `agent-wakeups` consumer.
-- `workers/agents/src/limits.ts`: section 44 limits and provider choice.
+- `workers/agents/src/limits.ts`: section 44 limits and budget-stop text.
 - `packages/model-router/src`: routing rules, Clef, escalation, budgets, providers, gateway client.
 - `packages/context-compiler/src`: Context Packet assembly and retrieval order.
 
@@ -39,7 +39,7 @@ flowchart TB
   RT -->|"no"| ESC["nextStep + limitAttempts:<br/>retry, escalate, or stop"]
   ROUTE --> CMP["Compact prior failure logs<br/>(haiku tier, retries only)"]
   ESC --> CMP
-  CMP --> PROV["chooseProvider:<br/>OpenRouter or Vertex"]
+  CMP --> PROV["Monthly Anthropic budget:<br/>room for one call? Opus off:<br/>opus runs on Sonnet"]
   PROV --> STACK["Dependency stack:<br/>ChangeSets to merge"]
   STACK --> PKT["compilePacket<br/>store in R2 by hash"]
   PKT --> REC["D1 batch: Decision Receipt,<br/>task_runs row, status running"]
@@ -68,9 +68,9 @@ sequenceDiagram
 
   A->>Pi: submit(prompt from Context Packet)
   loop until complete_task or fail_task
-    Pi->>A: beforeModelCall(tier, provider)
-    A-->>Pi: allow, or throw at a cap
-    Pi->>GW: chat completion
+    Pi->>A: beforeModelCall(tier)
+    A-->>Pi: allow and reserve on the monthly meter, or throw at a cap
+    Pi->>GW: Messages API call (Anthropic)
     GW-->>Pi: tool call
     Pi->>T: list_files, read_file, write_file, or run_command
     T->>SBX: read source, write file, run allowlisted command
@@ -98,9 +98,8 @@ The command tool refuses shell metacharacters.
 ## Model routing
 
 The code keeps the tier names `haiku`, `sonnet`, and `opus` from `AGENTS.md`.
-The models behind them differ from `AGENTS.md`.
-The code does not call Claude.
-A tier maps to OpenRouter free models, with Gemini on Vertex AI as the paid overflow (ADR 0007, ADR 0016).
+Every tier calls Anthropic Claude through the AI Gateway on dev and prod (ADR 0021).
+Opus is off by default: the opus tier runs on Sonnet unless `ALLOW_OPUS` is `"true"`.
 
 ### Deterministic rules, then Clef-flash
 
@@ -133,7 +132,7 @@ Billing and non-trivial authorization raise the tier to at least `sonnet`.
 Every route writes a Decision Receipt (`decision_receipts` in D1) and a `model.route.decided` Event.
 A receipt has no private reasoning.
 
-### Tiers and providers
+### Tiers and the provider
 
 ```mermaid
 flowchart LR
@@ -142,34 +141,35 @@ flowchart LR
     S["sonnet"]
     O["opus"]
   end
-  CH{"chooseProvider<br/>once per run"}
-  H --> CH
-  S --> CH
-  O --> CH
-  CH -->|"openrouter_free"| OR["AI Gateway<br/>/openrouter/v1/chat/completions<br/>:free models, $0"]
-  CH -->|"vertex_preferred or<br/>OpenRouter used up"| VX["AI Gateway<br/>/compat/chat/completions<br/>google-vertex-ai Gemini"]
-  CH -->|"Vertex spend limit hit today"| STOP["No provider:<br/>Task blocked (vertex_spend_limit)"]
-  OR --> CAP["Gateway: 20 requests per minute,<br/>2 retries, 10,000 logs"]
-  VX --> SPEND["Gateway spend limit on Vertex:<br/>dev $40, prod $10 per 30 days"]
+  O --> OP{"ALLOW_OPUS<br/>= true?"}
+  OP -->|"no (default):<br/>receipt records opus_disabled"| S
+  OP -->|"yes"| OPUS["claude-opus-5-5"]
+  H --> HM["claude-haiku-5-5"]
+  S --> SM["claude-sonnet-5-5"]
+  HM --> RES{"Reserve on the<br/>monthly meter"}
+  SM --> RES
+  OPUS --> RES
+  RES -->|"over budget"| STOP["No call:<br/>Task blocked (monthly_model_spend)"]
+  RES -->|"reserved"| GW["AI Gateway /anthropic/v1/messages<br/>x-api-key + anthropic-workspace-id<br/>20 requests per minute"]
+  GW --> SETTLE["Settle the meter to the<br/>exact cost from usage"]
 ```
 
-| Tier | OpenRouter free models (in order) | Vertex overflow model |
-|---|---|---|
-| haiku | `poolside/laguna-xs-2.1:free`, `nvidia/nemotron-3.5-lightning:free`, `cohere/north-mini-code:free` | `google/gemini-3.5-flash-lite` |
-| sonnet | `poolside/laguna-s-2.1:free`, `cohere/north-mini-code:free`, `nvidia/nemotron-3-super-120b-a12b:free` | `google/gemini-3.8-flash` |
-| opus | `nvidia/nemotron-3-ultra-550b-a55b:free`, `poolside/laguna-s-2.1:free` | `google/gemini-3.8-flash` |
+| Tier | Model | Thinking | Output cap |
+|---|---|---|---|
+| haiku | `claude-haiku-5-5` | off in `complete()`; adaptive, low effort in Pi | 4,000 |
+| sonnet | `claude-sonnet-5-5` | adaptive, medium effort, text omitted | 8,000 |
+| opus | `claude-sonnet-5-5` while Opus is off; `claude-opus-5-5` with `ALLOW_OPUS = true` | adaptive, high effort, text omitted | 8,000 |
 
-Provider rules (`selectProvider` in `packages/model-router/src/provider.ts`):
+Two call paths use the same gateway, header, prices, and meter:
 
-1. `MODEL_PROVIDER = vertex` sends every agent call to Gemini. The dev default is `vertex`. The prod default is `openrouter`.
-2. Otherwise, OpenRouter goes first until it reaches 45 calls today or returns a quota error today.
-3. Then Gemini on Vertex, if a Vertex credential is bound.
-4. If the run needs Vertex and the gateway already rejected Vertex today for its spend limit, no call runs.
+- Pi agent runs (`workers/agents/src/models.ts`): Pi's Anthropic Messages API. Pi puts `cache_control` on the system prompt, the tool definitions, and the latest message, and prices each response from its usage fields.
+- `complete()` (`packages/model-router/src/gateway-client.ts`) for the Root Planner, conflict review, and context compaction, always through `meteredComplete()`. It maps function tools to Anthropic tools, caches the system prompt, and replays a whole assistant turn, thinking blocks included, on a follow-up call.
 
-D1 `usage_counters` holds the daily caps: 400 agent model calls per day on all providers, 45 OpenRouter calls, and 200 Clef-flash calls.
-The Root Planner and the conflict reviewer call `complete()` directly.
-That function goes to Vertex first when `MODEL_PROVIDER = vertex`.
-Otherwise it tries OpenRouter first and uses Vertex after a rate limit, an outage, or a timeout.
+Cost per call is exact: uncached input, output with thinking, cache reads, and cache writes at the ADR 0021 prices.
+The monthly budget per environment is `ANTHROPIC_MONTHLY_BUDGET_USD`: dev $15, prod $10.
+Each call reserves an estimate on the D1 meter (`usage_counters`, `anthropic-usd-micro` per `YYYY-MM`) with one conditional statement, then settles to its exact cost.
+A refused reservation, a gateway spend-limit 429, or an Anthropic billing error is `spend_limited`: a budget stop, never a retry, and never another provider.
+D1 `usage_counters` also holds the daily caps: 400 agent model calls per day and 200 Clef-flash calls.
 
 ## Escalation
 
@@ -185,7 +185,8 @@ stateDiagram-v2
   haiku --> haiku: 1st failure, retry
   haiku --> sonnet: 2nd failure at haiku
   sonnet --> sonnet: 1st failure, retry
-  sonnet --> opus: 2nd failure at sonnet
+  sonnet --> opus: 2nd failure at sonnet (ALLOW_OPUS only)
+  sonnet --> replan: 2nd failure at sonnet (Opus off)
   opus --> opus: 1st failure, retry
   opus --> replan: 2nd failure at opus
   haiku --> stopped: budget or spend limit

@@ -43,7 +43,7 @@ sequenceDiagram
 Cost and limits:
 - Sandbox: 5 hours per month per environment.
 - Browser Run: 250 seconds per day per environment.
-- Gemini on Vertex: AI Gateway caps it at 40 USD (dev) and 10 USD (prod) per 30 days.
+- Claude (Anthropic): code stops model work at 15 USD (dev) and 10 USD (prod) per calendar month (ADR 0021).
 - Check usage with `bun run cost:report` ([costs.md](../operations/costs.md)).
 
 ## UI routes
@@ -98,5 +98,5 @@ Cost and limits:
 - Advisory Claims: Agents use advisory Claims to signal intent on semantic resources without blocking.
 - Stale promotions: If another Candidate advanced the Canonical State first, compare-and-swap rejects the promotion.
 - Missing checks: Rhumbatron never treats an incomplete or timed-out check (`not_checked`) as a pass.
-- Spend cap: AI Gateway caps Gemini on Vertex at 40 USD per 30 days on dev. The Sandbox cap is 5 hours per month per environment.
+- Spend cap: code stops Claude spend at 15 USD per calendar month on dev (ADR 0021). The Sandbox cap is 5 hours per month per environment.
 - Leftover compute: Run `bun run cost:report` to check active resources and spend. Run `bun run cleanup:projects` to remove test Projects.

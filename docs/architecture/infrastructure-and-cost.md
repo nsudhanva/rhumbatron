@@ -135,8 +135,8 @@ flowchart TB
   L3["3. Causal caps<br/>1,000 commands per Change per day,<br/>Clef-flash 200 calls per day"]
   L4["4. Section 44 limits<br/>8 agents, 4 Sandboxes, 3 Candidates,<br/>2 attempts per tier, 2 browser runs"]
   L5["5. Queue and K2 bounds<br/>3 retries then dead-letter,<br/>K2 batch dead-lettered after 5 failures"]
-  L6["6. Metered caps in D1<br/>Sandbox 5 h per month, Browser 250 s per day,<br/>400 model calls per day, 45 OpenRouter"]
-  L7["7. AI Gateway<br/>20 requests per minute,<br/>Vertex spend $40 dev, $10 prod per 30 days"]
+  L6["6. Metered caps in D1<br/>Sandbox 5 h per month, Browser 250 s per day,<br/>400 model calls per day,<br/>Anthropic $15 dev, $10 prod per month"]
+  L7["7. AI Gateway<br/>20 requests per minute,<br/>Anthropic spend limit (best effort)"]
   L8["8. Account budget alerts<br/>email at $10, $25, $100"]
   L9["Pause switch<br/>locals.paused"]
   L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7 --> L8
@@ -153,13 +153,13 @@ flowchart TB
 | Coding Sandboxes | 4 open per Change, 1 container instance | `limits.ts`, Terraform `max_instances` |
 | Candidates | 3 per Change | `workers/integration/src/candidate-create.ts` |
 | Attempts | 2 per Task per tier | `limits.ts` |
-| Model calls | 16 or 32 per run, 400 per day, 45 OpenRouter per day | `packages/model-router/src/budget.ts` |
+| Model calls | 16 or 32 per run, 400 per day | `packages/model-router/src/budget.ts` |
 | Change budget | `budgetUsd`, default 3 USD, max 100 | `packages/protocol/src/project.ts` |
 | Sandbox time | 18,000 s per month per environment | `SANDBOX_MONTHLY_SECONDS` binding |
 | Browser Run | 250 s per day per environment, 55 s per session, 2 runs per Candidate | `BROWSER_DAILY_SECONDS` binding, `check-semantics.ts` |
 | Embeddings | 2,000 texts per day, 10,000 vectors per account | `workers/indexer/src/handler.ts` |
 | Vectorize queries | 1,000 per day | `workers/agents/src/retrieval.ts` |
-| Vertex spend | 40 USD dev, 10 USD prod per 30 days | `modules/ai` spend limit |
+| Anthropic spend | 15 USD dev, 10 USD prod per calendar month, reserve then settle on the D1 meter | `ANTHROPIC_MONTHLY_BUDGET_USD` binding, `packages/model-router/src/spend-meter.ts` |
 | Account | Alerts at 10, 25, 100 USD | `envs/global` |
 
 A guard that trips stops new expensive work and keeps all state.
@@ -168,13 +168,13 @@ A budget limit stops the work. The Task becomes `blocked`, and the Change become
 
 ### How the approved caps split between environments
 
-ADR 0017 split the approved budgets evenly between dev and prod, except Vertex.
+ADR 0017 split the approved budgets evenly between dev and prod. ADR 0021 split the $25 Anthropic budget unevenly.
 Each Worker reads its share from a binding and meters it in its own D1 database.
 
 ```mermaid
 pie showData
-  title Vertex AI spend cap per 30 days (USD)
-  "dev" : 40
+  title Anthropic budget per calendar month (USD)
+  "dev" : 15
   "prod" : 10
 ```
 

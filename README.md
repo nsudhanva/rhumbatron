@@ -138,7 +138,7 @@ scripts/                 Bundle, checks, smoke, demo, failure injection, cost re
 | `bun run smoke:dev` / `smoke:prod` | Remote smoke check. Dev runs the signed-in flow; prod runs public checks only. |
 | `bun run smoke:plan` | Dev smoke plus one real goal through the Root Planner (1 to 4 model calls). |
 | `bun run smoke:sandbox` | Dev smoke plus Sandbox verification and promotion of the Acme Shop baseline. |
-| `bun run smoke:models` | One model call per tier through AI Gateway, plus one Vertex fallback call. |
+| `bun run smoke:models [dev\|prod]` | Anthropic through AI Gateway: workspace header, one tool call per tier, one prompt cache hit (under 1 cent). |
 | `bun run smoke:release` | Read-only check of the latest Acme Shop Live release. |
 | `bun run demo:project` | Create or reuse the Acme Shop demo Project on dev. |
 | `bun run demo:wishlist` | Run the scripted Wishlist demo (Designs A vs B, conflict, verification). |
@@ -167,7 +167,7 @@ Cost controls ([docs/operations/costs.md](docs/operations/costs.md)):
 - Rhumbatron runs on a shared Workers Paid account within included allowances.
 - Sandbox: 5 hours per month per environment.
 - Browser Run: 250 seconds per day per environment.
-- Gemini on Vertex: AI Gateway caps it at 40 USD (dev) and 10 USD (prod) per 30 days.
+- Claude (Anthropic): code stops model work at 15 USD (dev) and 10 USD (prod) per calendar month (ADR 0021).
 - Account budget alerts at 10, 25, and 100 USD (ADR 0019, `envs/global`).
 - Pause switch: `locals.paused` in `infrastructure/terraform/envs/{dev,prod}/main.tf` ([pause-resume.md](docs/operations/pause-resume.md)).
 - Application release through Workers Builds works for Acme Shop Live on dev ([release.md](docs/operations/release.md)). Live apps on Dynamic Workers replace it on prod (ADR 0020).

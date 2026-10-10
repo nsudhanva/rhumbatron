@@ -1,6 +1,6 @@
 # ADR 0016: Gemini on Vertex AI as the agents' daily overflow
 
-- Status: Accepted
+- Status: Superseded by ADR 0021 (Anthropic for every tier; no Gemini overflow) on 2026-10-09.
 - Date: 2026-10-09
 - Decider: Project owner
 
