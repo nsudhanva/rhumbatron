@@ -198,7 +198,7 @@ function RequestSide({
         <Mono subtle>{side.changeId}</Mono>
         {isCurrent && <Tag variant="neutral">This change</Tag>}
         {isWinner && <Tag variant="accent">Winner</Tag>}
-        {isLoser && <Tag variant="outline">Not selected</Tag>}
+        {isLoser && side.status !== "not_selected" && <Tag variant="outline">Not selected</Tag>}
         <ChangeStatusPill status={side.status} />
       </div>
 
