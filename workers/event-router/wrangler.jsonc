@@ -60,5 +60,9 @@
     ]
   },
   // Clef-flash for ambiguous wakeups only (AGENTS.md section 31.2), capped per day.
-  "ai": { "binding": "AI" }
+  "ai": { "binding": "AI" },
+  // analytics-projector (AGENTS.md section 41.1): lifecycle Events as data points, own dataset.
+  "analytics_engine_datasets": [
+    { "binding": "EVENT_METRICS", "dataset": "rhumbatron_event_metrics_local" }
+  ]
 }

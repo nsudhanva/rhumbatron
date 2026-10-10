@@ -9,7 +9,12 @@ import { z } from "zod";
 export const SUBSCRIPTIONS = ["project-view-projector", "causal-router"] as const;
 /** Drained on the cron sweep only (the archive may lag). */
 export const ARCHIVE_SUBSCRIPTION = "audit-archiver";
-export type SubscriptionName = (typeof SUBSCRIPTIONS)[number] | typeof ARCHIVE_SUBSCRIPTION;
+/** Drained on the cron sweep only, one batch per tick (analytics may lag). */
+export const ANALYTICS_SUBSCRIPTION = "analytics-projector";
+export type SubscriptionName =
+  | (typeof SUBSCRIPTIONS)[number]
+  | typeof ARCHIVE_SUBSCRIPTION
+  | typeof ANALYTICS_SUBSCRIPTION;
 
 /** K2 error codes that can succeed on a later attempt. The cron sweep is the retry. */
 const RETRYABLE_CODES = new Set([10211, 10214, 10216, 10217]);

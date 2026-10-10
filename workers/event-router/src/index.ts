@@ -1,12 +1,14 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { ProjectViewDO } from "@rhumbatron/coordinator";
 import type { EventEnvelope } from "@rhumbatron/protocol";
+import { ANALYTICS_POINT_CAP, analyticsPoint } from "./analytics.ts";
 import { buildArchive, writeArchive } from "./archive.ts";
 import { routeCausalBatch } from "./causal.ts";
 import { consumeDeadLetters } from "./dead-letter.ts";
 import { claimEvents, releaseEvents } from "./dedupe.ts";
 import { feedStatements } from "./feed.ts";
 import {
+  ANALYTICS_SUBSCRIPTION,
   APPLY_DELTA_CAP,
   ARCHIVE_SUBSCRIPTION,
   type ConsumedBatch,
@@ -308,6 +310,66 @@ async function runArchive(run: Run): Promise<number> {
   }
 }
 
+/**
+ * Projects one batch from the analytics-projector subscription into Analytics Engine (section
+ * 41.1, analytics.ts). Dedupe as the other consumers: only events whose (consumer, event) claim is
+ * new write a point, so a redelivered batch writes nothing twice. Bounded: one batch of at most 100
+ * records per tick, at most ANALYTICS_POINT_CAP points. Budget: 1 resolve + 1 consume + 1 D1 claim
+ * batch + 1 ack or nack + 1 D1 release batch on failure = 5 subrequests. Data points are not
+ * subrequests.
+ */
+async function runAnalytics(run: Run): Promise<number> {
+  const workerId = `${ANALYTICS_SUBSCRIPTION}-s${run.streamIndex}`;
+  try {
+    const subscriptionId = await run.k2.resolveSubscription(ANALYTICS_SUBSCRIPTION);
+    const batch = await run.k2.consume(subscriptionId, workerId);
+    if (!batch) return 0;
+    // Claimed but not yet written: released on a failure, so redelivery projects them.
+    let unwritten = new Set<string>();
+    let written = 0;
+    let count = 0;
+    try {
+      const events = batch.records
+        .map((r) => decodeEnvelope(r.content))
+        .filter((e): e is EventEnvelope => e !== null);
+      count = events.length;
+      unwritten = await claimEvents(
+        run.env.DB,
+        ANALYTICS_SUBSCRIPTION,
+        events.map((e) => e.eventId),
+      );
+      for (const event of events) {
+        if (!unwritten.has(event.eventId)) continue;
+        const point = analyticsPoint(event);
+        if (point && written < ANALYTICS_POINT_CAP) {
+          run.env.EVENT_METRICS.writeDataPoint(point);
+          written += 1;
+        }
+        unwritten.delete(event.eventId);
+      }
+    } catch (error) {
+      await releaseEvents(run.env.DB, ANALYTICS_SUBSCRIPTION, [...unwritten]).catch(
+        () => undefined,
+      );
+      log({ event: "router.analytics_failed", stream: run.streamIndex, ...errorInfo(error) });
+      await run.k2.nack(subscriptionId, batch.batchId, workerId);
+      return 0;
+    }
+    // A failed ack redelivers the batch; its claims stay, so no point is written twice.
+    await run.k2.ack(subscriptionId, batch.batchId, workerId);
+    log({ event: "router.analytics", stream: run.streamIndex, count, written });
+    return written;
+  } catch (error) {
+    log({
+      event: "router.k2_failed",
+      stream: run.streamIndex,
+      sub: ANALYTICS_SUBSCRIPTION,
+      ...errorInfo(error),
+    });
+    return 0;
+  }
+}
+
 function newRun(env: Env, streamIndex: number): Run | null {
   const streamId = parseStreamIds(env.K2_STREAM_IDS)[streamIndex];
   if (!streamId || !env.K2_CONSUMER_TOKEN) return null;
@@ -343,6 +405,8 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
   /**
    * Safety-net sweep: one stream per tick. Once a day it also queues fork and Project cleanup;
    * every 5 minutes it queues recovery of Changes stuck in `releasing` (2 more subrequests).
+   * Ticks without either also project one analytics batch (5 more subrequests), so the worst case
+   * stays at 37 + 4 (archive) + 5 = 46, under the Workers Free limit of 50.
    */
   override async scheduled(controller: ScheduledController): Promise<void> {
     if (isMaintenanceTick(controller.scheduledTime)) {
@@ -368,7 +432,11 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
     if (index < 0) return;
     await processStream(this.env, index);
     const run = newRun(this.env, index);
-    if (run) await runArchive(run);
+    if (!run) return;
+    await runArchive(run);
+    const housekeeping =
+      isMaintenanceTick(controller.scheduledTime) || isReleaseSweepTick(controller.scheduledTime);
+    if (!housekeeping) await runAnalytics(run);
   }
 
   /**
