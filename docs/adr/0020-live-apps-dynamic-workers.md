@@ -108,9 +108,59 @@ rejected (401). The template's tests cover both cases.
   predate live apps, or a retry.
 - `GET /v1/projects/:projectId/app` returns `{ enabled, app }`. `enabled` is false without
   `APPS_DOMAIN` (dev, or prod while routing is off).
-- Archiving a Project marks its app `removed` (410 at once) and its cleanup deletes the
-  `apps/<project>/` and `app-previews/<project>/` prefixes. Deleting the `AppDataDO` store is
-  milestone D (P16-20).
+- Archiving a Project marks its app `removed` (410 at once). Its cleanup deletes the
+  `AppDataDO` stores, the `apps/<project>/` and `app-previews/<project>/` prefixes, and the rows.
+
+### Previews, releases, versions, rollback (milestone B)
+Built 2026-10-10 (P16-10 to P16-15). Runtime data only; no Terraform at release time.
+
+- **Preview (P16-10).** CandidateVerificationWorkflow builds the composed commit after the
+  checks, when the build check passed, and writes the row `preview:<candidate-id 8>` with its
+  Candidate and Change. A Change keeps at most 3 previews (the Candidate limit); when full, the
+  oldest preview of a stale, rejected, or promoted Candidate makes room, and a preview of a
+  Candidate that can still ship is never evicted. A failed preview build marks only the row.
+  `GET /v1/candidates/:id/preview` feeds "Open preview" on the Candidate page.
+- **Release (P16-11).** For a Project with an app, promotion starts the release as before, and
+  ReleaseWorkflow takes the app path: the bundle of the promoted commit (stored; another commit
+  with the same tree; the preview bundle copied from `app-previews/`, which expires after 7 days;
+  else a build), then the production pointer moves by compare-and-swap on the row it read, then
+  the `release-model.ts` smoke probes run through the router (`AppBuilder.probe`, fresh pointer
+  read, no public route needed). A late release never moves the pointer back to an older
+  generation. Live apps replace Workers Builds for these Projects (P16-15).
+- **Smoke failure (P16-12).** The pointer moves back to the version it replaced, as a new
+  recorded transition (`deployment.completed` with status `restored`), and the release is
+  `smoke_failed`. Canonical keeps the promoted generation (AGENTS.md section 42.10).
+- **Versions (P16-13).** Each deployed generation also gets a version row
+  `preview:v<generation, 7 digits>` that points at its production bundle, for example
+  `v0000003--acme.rhumbatron.com`. `v` is not a hex digit, so a version id never equals a
+  Candidate preview id. A version host has its own data store and its own Dynamic Worker ID
+  (`<project>@<commit>#<channel>`), so it never shares production's isolate or data.
+- **Rollback (P16-13).** `POST /v1/projects/:id/rollback` with `{ targetGeneration,
+  expectedGeneration }` creates a rollback Change and Candidate whose one commit sits on Sn's
+  commit with Sk's tree. Its required check reads that commit's tree from Artifacts and compares
+  it with Sk's tree. The human gate follows policy for the riskiest Change it undoes. It then
+  promotes by the normal compare-and-swap (Sn -> Sn+1) and releases with Sk's stored bundle.
+  Nothing in the history is deleted. The tree's file index is pointed at the new commit, so new
+  Candidates compose on it.
+- **Stale recomposition (P16-14).** A Candidate that goes stale because canonical advanced is
+  composed again on the new canonical state (same ChangeSets, real merge, full checks), at most
+  2 times per lineage, then it is marked blocked. Recompositions do not count against the
+  Candidate limit. Triggers: verification finds the base behind, canonical moved during the
+  checks, a refused compare-and-swap, or the sweep after each promotion.
+
+### Removal, cost, and retention (milestone D)
+- **Remove app (P16-20).** `DELETE /v1/projects/:id/app` marks every row `removed` (410 on every
+  host at once) and queues `app.remove`. Cleanup wipes the data stores (`AppBuilder.wipeData`),
+  deletes both R2 prefixes, then the rows. The Project and its history stay; "Deploy app" can
+  publish it again on a new pointer.
+- **Cost (P16-21).** At most 60 app builds per day (`usage_counters` `app-builds`), checked before
+  each build. `bun run cost:report` shows the apps router requests and CPU, builds against the cap,
+  ready bundles as an upper bound on Dynamic Workers per month, and bundle bytes in R2 (alert at
+  80 %).
+- **Retention (P16-22).** Production bundles under `apps/` have no lifecycle rule: every promoted
+  generation keeps its bundle, so a rollback never rebuilds. `app-previews/` expires after 7 days
+  (R2 lifecycle, `envs/prod`); the daily sweep deletes preview rows and their data stores after
+  the same 7 days. Version rows are never expired.
 
 ### Terraform (envs/prod only)
 - `terraform_data.apps_worker` runs `scripts/apps-deploy.ts`: one full script upload with the
@@ -154,6 +204,7 @@ bypass host in `local.apps.bypass_hosts`.
 | Artifacts | 1 read per source file per build (about 20 for Acme) | 10,000 operations per month, shared |
 | Durable Objects | only when an app calls `DATA` | included |
 | Sandbox | none | |
+| App builds | 1 per preview, 1 per release without a stored or preview bundle | 60 per day (code cap) |
 
 ## Consequences
 - Script that runs in an app's pages shares the registrable domain with rhumbatron.com. It cannot

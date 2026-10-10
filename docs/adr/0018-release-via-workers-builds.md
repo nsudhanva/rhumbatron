@@ -4,6 +4,10 @@
   The `cf` connection step did not work, so the ADR 0014 dashboard step still applies (Update
   2026-10-10).
 - Decider: Project owner
+- Legacy (2026-10-10): live apps ([ADR 0020](0020-live-apps-dynamic-workers.md)) replace this
+  path for every Project that has an app (prod). Workers Builds stays only for the dev release
+  target Acme Shop Live (`rhumbatron-acme-shop-dev`), which keeps working unchanged. Dev hosts no
+  live apps, so it has no other release path.
 
 ## Context
 

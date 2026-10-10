@@ -2,6 +2,8 @@
 
 This runbook covers application releases through Cloudflare Workers Builds, release smoke checks, and failure injection.
 
+> **Live apps replace this path (P16-15).** A Project with a live app (prod) releases by moving its app pointer to the promoted commit's bundle, then runs the same smoke probes through the apps router. A smoke failure moves the pointer back to the previous version. See [ADR 0020](../adr/0020-live-apps-dynamic-workers.md), "Previews, releases, versions, rollback". Workers Builds is **legacy**: it stays only for the dev release target Acme Shop Live below, which keeps working unchanged.
+
 ## Principles
 
 A Git push to Cloudflare Artifacts starts each application release. `ReleaseWorkflow` then verifies the release with executable Evidence (`AGENTS.md` sections 21.3 and 37, [ADR 0018](../adr/0018-release-via-workers-builds.md)).
