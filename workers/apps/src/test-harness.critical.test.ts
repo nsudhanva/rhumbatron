@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createTestHarness, testHarnessSource } from "./test-harness.ts";
+import { type TestHarness, testHarnessSource } from "./test-harness.ts";
+
+/** Execute the exact child source in Node; production loads it through LOADER, without eval. */
+function createTestHarness(): TestHarness {
+  return new Function(
+    `${testHarnessSource().replace("export const", "const")}\nreturn harness;`,
+  )() as TestHarness;
+}
 
 describe("check harness assertions", () => {
   it("accepts every supported assertion and rejects incorrect values", () => {
