@@ -153,3 +153,114 @@ export type AppBuildInput = {
 export type AppBuildResult =
   | { ok: true; bundleKey: string; reused: boolean; modules: number; assets: number; bytes: number }
   | { ok: false; reason: string };
+
+/* ------------------------------------------------------------------------------------------ */
+/* Milestone B: previews, releases, versions, rollback (P16-10..P16-13)                        */
+/* ------------------------------------------------------------------------------------------ */
+
+/** Previews per Change: the Candidate limit (policy `maxCandidates`, AGENTS.md section 44). */
+export const MAX_PREVIEWS_PER_CHANGE = 3;
+
+/** Largest generation a version host can name (`v` plus 7 digits). */
+const MAX_VERSION_GENERATION = 9_999_999;
+
+/**
+ * Host id of one promoted generation: `v` plus 7 digits, for example `v0000003--acme`. It fits the
+ * 8-character preview id rule, and `v` is not a hex digit, so it never equals a Candidate preview
+ * id (Candidate IDs are hex). The router serves it like a preview: its own data store, never
+ * production data. Null past the 7-digit range.
+ */
+export function versionPreviewId(generation: number): string | null {
+  if (!Number.isInteger(generation) || generation < 0 || generation > MAX_VERSION_GENERATION) {
+    return null;
+  }
+  return `v${String(generation).padStart(7, "0")}`;
+}
+
+/** True for a version host id (`versionPreviewId`), false for a Candidate preview id. */
+export const isVersionPreviewId = (previewId: string) => /^v\d{7}$/.test(previewId);
+
+/**
+ * RPC input of the apps Worker's `AppBuilder.probe`: one request through the router, as if it came
+ * to the app's host, with a fresh pointer read (no isolate cache). Release smoke checks use it, so
+ * they test the router, the pointer, and the Dynamic Worker without leaving Cloudflare.
+ */
+export type AppProbeInput = {
+  label: string;
+  /** Preview or version host id; absent for the production host. */
+  previewId?: string;
+  path: string;
+  headers?: Record<string, string>;
+};
+
+/** `status` null: no response (the router threw). The body is cut to 64 KiB. */
+export type AppProbeResult = { status: number; body: string } | { status: null; error: string };
+
+/** Live preview of one Candidate, as the API shows it. `enabled` is false where apps are off. */
+export const CandidatePreview = z.object({
+  enabled: z.boolean(),
+  preview: z
+    .object({
+      url: z.string().url(),
+      status: AppDeploymentStatus,
+      commit: z.string().nullable(),
+      failureReason: z.string().nullable(),
+      updatedAt: Timestamp,
+    })
+    .nullable(),
+});
+export type CandidatePreview = z.infer<typeof CandidatePreview>;
+
+/** An "Open" link to one promoted generation's bundle (Versions page). */
+export const AppVersionLink = z.object({
+  generation: z.number().int().nonnegative(),
+  url: z.string().url(),
+});
+export type AppVersionLink = z.infer<typeof AppVersionLink>;
+
+/** `app.remove` outcome of the API route. */
+export const AppRemoveOutcome = z.object({ status: z.enum(["removing", "not_found"]) });
+export type AppRemoveOutcome = z.infer<typeof AppRemoveOutcome>;
+
+/**
+ * P16-13: roll the Project back to the tree of an earlier generation Sk. The caller names the
+ * generation it saw as current (`expectedGeneration`), so a rollback requested on an old page is
+ * refused instead of undoing work the person never saw.
+ */
+export const RollbackRequest = z.object({
+  targetGeneration: z.number().int().nonnegative(),
+  expectedGeneration: z.number().int().nonnegative(),
+});
+export type RollbackRequest = z.infer<typeof RollbackRequest>;
+
+export const RollbackRefusal = z.enum([
+  "not_found",
+  "archived",
+  "no_source",
+  "stale",
+  "not_earlier",
+  "unknown_target",
+  "same_tree",
+  "in_progress",
+]);
+export type RollbackRefusal = z.infer<typeof RollbackRefusal>;
+
+export const RollbackOutcome = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("promoted"),
+    changeId: z.string(),
+    candidateId: z.string(),
+    targetGeneration: z.number().int().nonnegative(),
+    generation: z.number().int().nonnegative(),
+    alreadyPromoted: z.boolean(),
+  }),
+  /** Policy gates this rollback: approve the Candidate, then promote it (section 36 rule 4). */
+  z.object({
+    status: z.literal("awaiting_approval"),
+    changeId: z.string(),
+    candidateId: z.string(),
+    targetGeneration: z.number().int().nonnegative(),
+  }),
+  z.object({ status: z.literal("refused"), reason: RollbackRefusal, detail: z.string() }),
+]);
+export type RollbackOutcome = z.infer<typeof RollbackOutcome>;
