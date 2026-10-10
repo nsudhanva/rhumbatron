@@ -45,3 +45,32 @@ The $9 cap allows about 35 such runs per 30 days.
 
 - Agent spend is no longer always $0. Cost budgets per run and per Change now apply to real spend.
 - Prompts reach Google on overflow runs. Send only demo fixture code, as for free models.
+
+## Update (2026-10-10)
+
+- The `VERTEX_SERVICE_ACCOUNT` binding is on the agents and integration Workers in dev and prod.
+- `MODEL_PROVIDER` selects the mode. Dev uses `vertex`: every call goes to Gemini from the first
+  call. Prod uses `openrouter`: free models first, with Gemini as overflow (ADR 0017).
+- The gateway cap is per environment: dev $40 and prod $10 per 30 days (ADR 0017). Budget-stop
+  text reads the cap from `VERTEX_SPEND_LIMIT_USD`; $9 is only the code fallback.
+- Tier models (`TIER_VERTEX_MODEL`): haiku uses `google/gemini-3.5-flash-lite`; sonnet and opus use
+  `google/gemini-3.8-flash`.
+
+## Diagram
+
+Provider choice at run start (`selectProvider`, `packages/model-router/src/provider.ts`).
+
+```mermaid
+flowchart TD
+  S["Run starts"] --> V{"MODEL_PROVIDER = vertex<br/>and Vertex configured?"}
+  V -- yes --> L{"vertex-spend-limited<br/>row today?"}
+  V -- no --> O{"openrouter-exhausted today,<br/>or 45 OpenRouter calls?"}
+  O -- no --> OR["OpenRouter free model"]
+  O -- yes --> C{"Vertex configured?"}
+  C -- no --> OR
+  C -- yes --> L
+  L -- no --> G["Gemini on Vertex<br/>through the gateway"]
+  L -- yes --> B["Budget stop: Task blocked,<br/>Change budget_blocked"]
+```
+
+Every call also takes one of the 400 agent calls per UTC day on all providers.

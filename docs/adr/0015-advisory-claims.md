@@ -73,3 +73,30 @@ Claims are advisory leases for agent runs.
   source. Ownership stays strongly consistent: one active Claim per resource in one shard
   transaction. Source isolation already comes from per-run Artifact forks, and promotion safety
   comes from compare-and-swap with executable evidence (section 36), not from Claims.
+
+## Update (2026-10-10)
+
+- Migration 0014 adds `claim.contended` to the Claims feed query and its D1 partial index. The
+  Claims feed now shows contention too.
+- The one-minute run check is an interval schedule (`scheduleEvery(60)`, ADR 0019 update). It is
+  still the main renewal tick, and each fire counts against the AgentDO daily alarm cap.
+- An acquire by the agent that already holds the live Claim renews it (`claim.renewed`).
+
+## Diagram
+
+One Claim row in ResourceShardDO (`status` is `active`, `released`, or `expired`).
+
+```mermaid
+stateDiagram-v2
+  [*] --> active: acquire, no live holder (claim.acquired)
+  [*] --> held: acquire, another agent holds it
+  held --> [*]: claim.contended, ask again next tick
+  active --> active: renew at half-life (claim.renewed)
+  active --> released: finishRun releases (claim.released)
+  active --> expired: lease passes, shard alarm (claim.expired)
+  released --> [*]
+  expired --> [*]
+```
+
+`held` is not a stored status. It is the result that a contender gets; the run continues without
+the lease.

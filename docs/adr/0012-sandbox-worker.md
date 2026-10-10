@@ -32,3 +32,33 @@ A fresh environment has a coordinator <-> event router binding cycle. `local.boo
 omits the coordinator's `EVENT_ROUTER` nudge binding for the first apply; set it to false and
 apply again. Migrations start from `{ new_tag = "v1", new_sqlite_classes = [...] }` and then move
 to the steady `v1 -> v1`.
+
+## Update (2026-10-10)
+
+- Dev and prod both run this layout. The integration Worker also binds `SANDBOX` cross-script, for
+  Candidate composition and checks in the same Project Sandbox.
+- A teardown resource (`terraform_data.sandbox_worker_teardown`) runs the destroy mode. It is keyed
+  by the Worker and application names only, so a bundle or size change never deletes the live
+  Worker.
+- The adapter reads the live migration tag. A first upload creates `v1` with the `Sandbox` class;
+  later uploads keep the live tag. If the application points at an older namespace, the adapter
+  recreates it against the current one.
+- `local.paused = true` sets `max_instances = 0` on the application.
+
+## Diagram
+
+One `terraform apply` of an env root (`scripts/sandbox-deploy.ts`, deploy mode).
+
+```mermaid
+flowchart TD
+  T["terraform apply"] --> D["terraform_data.sandbox_worker<br/>runs sandbox-deploy.ts"]
+  D --> U["One full script upload: code,<br/>SANDBOX binding, migration,<br/>containers metadata"]
+  U --> N["Read the Durable Object<br/>namespace ID of Sandbox"]
+  N --> Q{"Container application<br/>bound to that namespace?"}
+  Q -- no --> C["Create rhumbatron-sandbox-env<br/>basic, max_instances 1"]
+  Q -- yes --> P["Patch only on drift<br/>image, size, max_instances"]
+  C --> W["rhumbatron-sandbox-env Worker<br/>exports Sandbox"]
+  P --> W
+  A["rhumbatron-agents-env"] -- "SANDBOX, script_name" --> W
+  I["rhumbatron-integration-env"] -- "SANDBOX, script_name" --> W
+```

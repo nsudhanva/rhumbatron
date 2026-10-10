@@ -1,7 +1,7 @@
 # ADR 0019: Runaway-billing guards
 
 ## Status
-Accepted, 2026-10-09.
+Accepted, 2026-10-09. Four alarm follow-ups are in Update (2026-10-10).
 
 ## Context
 Cloudflare has no hard spend cap. On Workers Paid, Durable Object requests, duration, and storage
@@ -46,3 +46,57 @@ Three layers.
   minutes. The code guards handle spikes.
 - `local.paused` stops cron sweeps and Sandbox starts. It does not stop Durable Object alarms.
   The guards bound those.
+
+## Update (2026-10-10)
+
+These follow-ups apply the same three layers. They need no new ADR.
+
+- `AlarmGuard.run()` is the whole body of each coordinator `alarm()`. It counts the fire first,
+  then defers RPC alarm writes while the handler is in flight, and sets the next alarm from the
+  pending work it reads after the handler ends. Before this, an RPC write during the handler
+  queued a second alarm that the handler then overrode (`clientDisconnected`, outcome `canceled`).
+- AgentDO runs its one-minute run check as an interval schedule (`scheduleEvery(60)`) instead of
+  a `schedule()` call from inside its own alarm. That removes one canceled alarm per minute per
+  running run. Each fire still goes through `admitSchedule` and the daily cap.
+- The outbox fails a row at once when its K2 stream has no producer binding (`EVENTS_NN`). The
+  `last_error` names the binding. A retry cannot add a binding, so the alarm stops instead of
+  firing with no progress.
+- The event router dead-letters a K2 batch after 5 failed deliveries (`MAX_BATCH_FAILURES`,
+  migration 0016 `k2_batch_failures`). It records the batch in `dead_letters` (queue
+  `k2-<consumer>`), marks its events processed, and acknowledges it. Before this, K2 redelivered a
+  failed batch forever.
+
+## Diagram
+
+The three layers.
+
+```mermaid
+flowchart LR
+  subgraph L1["1. Code guards"]
+    A["AlarmGuard: coordinator DOs<br/>and AgentDO, 2,000 fires/day"]
+    C["Causal router: 1,000<br/>commands per Change per day"]
+    Q["Queues, K2 batches, Workflows:<br/>bounded retries, dead letters"]
+  end
+  subgraph L2["2. Monitoring"]
+    M["cost:report --alerts-only<br/>every 15 min in work sessions"]
+  end
+  subgraph L3["3. Account backstop"]
+    B["Budget alert emails<br/>$10, $25, $100"]
+  end
+  L1 --> L2 --> L3
+```
+
+One alarm decision (`planAlarm` in `workers/coordinator/src/alarm-guard.ts`).
+
+```mermaid
+flowchart TD
+  S["Next-alarm request"] --> F{"RPC write while<br/>an alarm is in flight?"}
+  F -- yes --> DF["Defer: the handler<br/>reschedules at its end"]
+  F -- no --> P{"Pending work?"}
+  P -- no --> DEL["Delete the alarm"]
+  P -- yes --> CAP{"2,000 fires today?"}
+  CAP -- yes --> X["Delete the alarm,<br/>log alarm.daily_cap_reached"]
+  CAP -- no --> FA{"From inside alarm()?"}
+  FA -- no --> NOW["Set at the due time"]
+  FA -- yes --> FL["Set at max(due, now + floor)<br/>floor 1 s, doubles per idle fire, max 5 min"]
+```

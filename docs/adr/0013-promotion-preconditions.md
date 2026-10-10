@@ -83,3 +83,60 @@ compare-and-swap and its own write. It already wakes the agents of active Tasks 
 - New binding: `INTEGRATION` service binding on the API Worker (Terraform `api_worker`).
 - Not done: separation of duties (an approver may also be the Change author; one-person
   organizations need this for now), `autoPromoteRiskTiers`, and release after promotion (P11-08).
+
+## Update (2026-10-10)
+
+- Release after promotion is built (ADR 0018). After the canonical `main` sync succeeds, promotion
+  starts `ReleaseWorkflow` for a Project that has a release target. A release never fails or
+  reverses a promotion.
+- The rules in ProjectRootDO are the pure function `decidePromotion`
+  (`workers/coordinator/src/promotion-cas.ts`). The order is: already promoted, generation, tree,
+  then policy version.
+
+## Diagram
+
+Preconditions in the integration Worker (`checkPromotion`). It returns every block at once.
+
+```mermaid
+flowchart TD
+  S["POST /v1/candidates/:id/promote"] --> M["API: session and<br/>project membership"]
+  M --> R["integration.promoteCandidate"]
+  R --> C1{"1. status verified,<br/>base = canonical generation?"}
+  C1 -- no --> X["stale or blocked"]
+  C1 -- yes --> C2{"2-3. required checks pass<br/>from evidence_index rows?"}
+  C2 -- no --> X
+  C2 -- yes --> C4{"4. approval granted<br/>when required?"}
+  C4 -- no --> X
+  C4 -- yes --> C5{"5. plan policy version<br/>= active version?"}
+  C5 -- no --> X
+  C5 -- yes --> C8{"8. composed commit<br/>in Candidate fork?"}
+  C8 -- no --> X
+  C8 -- yes --> E["Emit canonical.promotion.requested,<br/>call ProjectRootDO.promote"]
+```
+
+Compare-and-swap and source sync.
+
+```mermaid
+sequenceDiagram
+  participant I as Integration Worker
+  participant P as ProjectRootDO
+  participant A as Artifacts
+  participant W as ReleaseWorkflow
+  I->>P: promote(expectedGeneration = base_generation, expectedTree, policyVersion)
+  alt already promoted (same Candidate, generation + 1)
+    P-->>I: ok, alreadyPromoted
+  else generation or tree mismatch
+    P-->>I: stale
+    I->>I: mark Candidate stale, emit candidate.stale
+  else policy mismatch
+    P-->>I: policy_mismatch (blocked)
+  else match
+    P->>P: one transaction, S(n) to S(n+1) plus canonical.advanced outbox row
+    P-->>I: ok, generation n+1
+  end
+  opt ok (advanced or alreadyPromoted)
+    I->>A: fast-forward canonical main to the composed commit
+    I->>I: write the source index, return sourceSynced
+    I->>W: start rel_project_generation (synced, release target exists)
+  end
+```

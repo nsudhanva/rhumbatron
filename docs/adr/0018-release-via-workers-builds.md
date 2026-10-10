@@ -1,6 +1,8 @@
 # ADR 0018: Release through Workers Builds on Artifacts
 
-- Status: Accepted 2026-10-09. Supersedes ADR 0014 in part (the connection step and the token).
+- Status: Accepted 2026-10-09. Applied on dev and prod. Supersedes ADR 0014 in part (the token).
+  The `cf` connection step did not work, so the ADR 0014 dashboard step still applies (Update
+  2026-10-10).
 - Decider: Project owner
 
 ## Context
@@ -90,3 +92,42 @@ superseded`. Final states do not change, except that failure injection (P13-12) 
   new migration.
 - Replace the `cf` step with a Terraform resource or adapter when one can own Artifacts
   connections.
+
+## Update (2026-10-10)
+
+- The release workflow, the `rhumbatron-release-<env>` Workflow, and the `BUILDS_API_TOKEN` binding
+  are applied on dev and prod.
+- `cf builds workers create` did not make the connection. The Builds API rejects request bodies
+  with provider type `cloudflare_artifacts` as invalid (error 12065). The one-time dashboard
+  connection of ADR 0014 is still needed, and no Workers Builds trigger exists yet. Until one
+  exists, a started release fails at once with "connection missing" (step 2).
+- Prod has no `release_targets` row, so promotion on prod starts no release (ADR 0017, open item 5).
+
+## Diagram
+
+Release of one promoted generation (`workers/integration/src/release-workflow.ts`).
+
+```mermaid
+sequenceDiagram
+  participant I as Integration (promotion)
+  participant A as Artifacts main
+  participant B as Workers Builds
+  participant W as ReleaseWorkflow
+  participant P as ProjectRootDO
+  I->>A: fast-forward canonical main
+  A-->>B: push triggers a build (dashboard connection)
+  I->>W: create rel_project_generation
+  W->>P: generation still canonical?
+  alt no
+    W->>W: superseded
+  else yes
+    W->>B: poll builds (15 s, 30 s, then 60 s, max 15 min)
+    alt no build and no trigger
+      W->>W: failed (connection missing)
+    else build of the promoted commit stopped
+      W->>B: confirm the active version came from this build
+      W->>W: smoke check, Evidence release-sN to R2 and D1
+      W->>W: deployed, failed, or smoke_failed
+    end
+  end
+```

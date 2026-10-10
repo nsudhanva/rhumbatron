@@ -1,6 +1,7 @@
 # ADR 0017: Prod environment
 
-- Status: Accepted 2026-10-09 (decisions below); not applied yet
+- Status: Accepted 2026-10-09 (decisions below). Applied, with the apex cutover done and the Clerk
+  production instance in use (Update 2026-10-10)
 - Date: 2026-10-09
 - Decider: Project owner
 
@@ -207,3 +208,42 @@ The owner decided to apply prod before the hackathon, with no new spend.
 - The first prod apply is the first fresh apply of this configuration (dev grew one change at a
   time). The `bootstrap` switch covers the one known cycle.
 - `bun run tf:drift` still covers global and dev. Run `tf:drift:prod` after each prod apply.
+
+## Update (2026-10-10)
+
+- Prod is applied. `envs/prod/main.tf` has `bootstrap = false` and `attach_apex = true`.
+  `https://rhumbatron.com` serves the prod web Worker.
+- Cutover: the legacy apex record was a CNAME to an old Pages project, not the proxied `A` record
+  that an earlier read reported. It was imported into `envs/global` and then removed. `envs/global`
+  now sets `ssl = "strict"`.
+- `www`: the zone redirect (placeholder `AAAA 100::` plus Single Redirect) was not kept.
+  `www.rhumbatron.com` is a second custom domain of the prod web Worker, and the Worker returns 301
+  to the apex (`apps/web/src/server.ts`). `envs/global` has no redirect ruleset.
+- Clerk: prod uses the Clerk production instance. `scripts/tf.ts` loads the Keychain items
+  `rhumbatron-clerk-secret-key-prod` and `rhumbatron-clerk-publishable-key-prod`. The five DNS-only
+  CNAMEs (`clerk`, `accounts`, `clkmail`, `clk._domainkey`, `clk2._domainkey`) are the default of
+  `var.clerk_dns_records` in `envs/prod/variables.tf`. Google sign-in is disabled: the instance
+  has email and password only. The "Temporary: prod uses the Clerk development instance" item and
+  the two Clerk rows of the Credentials table no longer apply.
+- Prod now has the indexer Worker and the Vectorize index `rhumbatron-memory-prod`, as dev does.
+- Prod also loads `TF_VAR_builds_api_token` from `rhumbatron-cloudflare-builds-token` (ADR 0018).
+- `bun run tf:drift` still covers global and dev only. Run `bun run tf:drift:prod` for prod.
+
+## Diagram
+
+Terraform roots, hostnames, and shared credentials.
+
+```mermaid
+flowchart TB
+  S[("R2 rhumbatron-terraform-state-global")]
+  G["envs/global<br/>zone settings, budget alerts"] --> S
+  D["envs/dev"] --> S
+  P["envs/prod"] --> S
+  K["Keychain, shared by dev and prod:<br/>OpenRouter key, Vertex SA, K2 consumer,<br/>Builds token"]
+  K --> D
+  K --> P
+  D --> DH["dev.rhumbatron.com<br/>api-dev.rhumbatron.com"]
+  P --> PH["rhumbatron.com, www (301 in Worker)<br/>api.rhumbatron.com"]
+  D --> DC["Clerk development instance<br/>gateway rhumbatron-models-dev, $40"]
+  P --> PC["Clerk production instance<br/>gateway rhumbatron-models-prod, $10"]
+```

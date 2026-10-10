@@ -1,6 +1,7 @@
 # ADR 0011: Sandbox workspaces with a prebuilt image and a Terraform-run adapter
 
-- Status: Accepted; the container attach mechanism is superseded by ADR 0012
+- Status: Accepted; the container attach mechanism is superseded by ADR 0012, and the cost caps
+  are updated by ADR 0017 (see Update below)
 - Date: 2026-10-08
 - Decider: Project owner (HOM-192 cap; option A of the Sandbox deploy question)
 
@@ -69,3 +70,36 @@ Provider 5.27 has no container application resource.
 Use the first-party resources when the provider adds a container application resource and a
 `containers` attribute on `cloudflare_workers_script` (or the agents Worker moves to
 `cloudflare_worker_version`, which has one). Then delete the adapter.
+
+## Update (2026-10-10)
+
+- The attach adapter (`scripts/containers-sync.ts`, `terraform_data.sandbox_container`) no longer
+  exists. The `Sandbox` class lives in the `rhumbatron-sandbox-<env>` Worker (ADR 0012). The agents
+  Worker binds it cross-script, and its own migrations hold only `AgentDO` (v1).
+- The monthly cap is per environment: `SANDBOX_MONTHLY_SECONDS = 18000` (5 hours) in dev and in
+  prod, which is the approved 10 hours in total (ADR 0017). The code fallback is still 36,000 s.
+- Agent workspaces now use `sleepAfter` 600 s and settle a 600 s idle tail, so the checkout
+  survives a slow model call. Candidate checks in the integration Worker keep `sleepAfter: "2m"`,
+  reserve 900 s, and settle a 120 s tail. Both use the same `sandbox-seconds` meter.
+- A Change can hold only a limited number of open coding Sandboxes (section 44). An open that
+  exceeds it is refused before any fork, like an open that exceeds the meter.
+- The workspace tools are now `list_files`, `read_file`, `write_file`, `run_command`,
+  `complete_task`, and `fail_task`. `run_command` also allows `bun install --frozen-lockfile`.
+
+## Diagram
+
+Task workspace lifecycle (`workers/agents/src/workspace.ts`).
+
+```mermaid
+flowchart TD
+  A["openWorkspace"] --> B{"Sandbox slot free<br/>for this Change?"}
+  B -- no --> R["Refused: declare Intent<br/>without code changes"]
+  B -- yes --> C{"Reserve 300 s on the<br/>monthly meter?"}
+  C -- no --> R
+  C -- yes --> D["Fork canonical repo<br/>to ws-runId"]
+  D --> E["Clone into a run directory<br/>token in env, not git config"]
+  E --> F["Agent tools: read_file,<br/>write_file, run_command"]
+  F --> G["complete_task: commit<br/>and push to the fork"]
+  G --> H["ChangeSet row and<br/>changeset.proposed"]
+  H --> I["closeWorkspace: settle wall time<br/>plus idle tail, free slot, rm -rf"]
+```

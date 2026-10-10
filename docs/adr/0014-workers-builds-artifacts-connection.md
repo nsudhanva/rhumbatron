@@ -1,7 +1,8 @@
 # ADR 0014: Workers Builds connection to an Artifacts repo is a one-time dashboard step
 
-Status: accepted (2026-10-09). Superseded in part by ADR 0018: the connection is made once with
-`cf builds workers create`, and the release workflow is implemented.
+Status: accepted (2026-10-09). ADR 0018 implements the release workflow. ADR 0018 planned to
+replace the dashboard step with `cf builds workers create`, but that did not work, so the
+dashboard step below still applies (Update 2026-10-10).
 
 ## Context
 
@@ -43,3 +44,27 @@ the provider lacks a resource. Here neither is possible:
   connections.
 - Cost: Workers Builds Free includes 3,000 build minutes per month and one concurrent build.
   Builds run only on promotion.
+
+## Update (2026-10-10)
+
+- The Builds API rejects a connection request body with provider type `cloudflare_artifacts` as
+  invalid (error 12065). So neither the `cf` CLI (ADR 0018) nor a Terraform adapter can make the
+  connection. The one-time dashboard step in this ADR is still the only path.
+- No Workers Builds trigger exists yet for `rhumbatron-acme-shop-dev` or
+  `rhumbatron-acme-shop-prod`. Until a person makes the connection, a release fails at once with
+  "connection missing" (ADR 0018, step 2).
+- The runtime token that ADR 0018 uses has Workers Builds Configuration Edit and Workers Scripts
+  Read. Artifacts Read is not used.
+
+## Diagram
+
+Who owns what on the release path.
+
+```mermaid
+flowchart LR
+  TF["Terraform"] -- creates --> W["cloudflare_worker.acme_shop<br/>rhumbatron-acme-shop-env"]
+  P["Person, once,<br/>in the dashboard"] -- connects --> B["Workers Builds trigger<br/>repo in rhumbatron-projects-env, main"]
+  R["Promotion push<br/>to canonical main"] --> B
+  B -- "build and deploy<br/>(runtime release data)" --> W
+  O["ReleaseWorkflow<br/>GET requests only"] -. observes .-> B
+```
