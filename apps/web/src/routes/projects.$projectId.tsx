@@ -2,19 +2,20 @@ import { Show, SignInButton } from "@clerk/tanstack-react-start";
 import { Button, Input, InputArea } from "@cloudflare/kumo";
 import { SignIn } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { DeadLetters } from "../components/dead-letters";
 import { EventStream } from "../components/project/event-stream";
 import { SectionError, SkeletonBar, SkeletonRows } from "../components/project/feedback";
 import { LiveAppLine } from "../components/project/live-app";
+import { ProjectShare } from "../components/project/share-dialog";
 import {
   ACTIVE_CHANGE_STATUSES,
   ChangeStatusPill,
   TaskProgress,
 } from "../components/project/status";
 import { useEventFeed } from "../components/project/use-event-feed";
-import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../components/ui/data-table";
+import { DataTable, RowLink, Td, Th, TRow } from "../components/ui/data-table";
 import { EmptyState } from "../components/ui/empty-state";
 import { KeyValue } from "../components/ui/key-value";
 import { Mono } from "../components/ui/mono";
@@ -22,12 +23,14 @@ import { Page, PageTitle, Section, TwoUp } from "../components/ui/page";
 import { StatCell, StatStrip } from "../components/ui/stat-strip";
 import { Tag } from "../components/ui/tag";
 import {
+  type ChangeRequester,
   type ChangeSummary,
   createChange,
   getGoalSuggestions,
   getProject,
   getProjectStats,
   listChanges,
+  overrideChange,
   type ProjectStats as ProjectStatsData,
   provisionProject,
 } from "../lib/api";
@@ -105,6 +108,7 @@ function Overview() {
   const socket = useProjectLive(projectId, true, () => {
     feed.refresh();
     void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    void queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
     if (Date.now() - statsAt.current >= STATS_MIN_INTERVAL_MS) {
       statsAt.current = Date.now();
       void queryClient.invalidateQueries({ queryKey: ["project-stats", projectId] });
@@ -155,6 +159,11 @@ function Overview() {
             </>
           )
         }
+        actions={
+          project.data?.role ? (
+            <ProjectShare projectId={projectId} role={project.data.role} />
+          ) : undefined
+        }
       />
 
       <DeadLetters projectId={projectId} />
@@ -201,7 +210,11 @@ function Overview() {
             how="Describe a goal under New change to start the first one."
           />
         ) : (
-          <ChangesTable changes={changes.data} />
+          <ChangesTable
+            changes={changes.data}
+            isOwner={project.data?.role === "owner"}
+            projectId={projectId}
+          />
         )}
       </Section>
 
@@ -353,58 +366,178 @@ const RISK_LABEL: Record<string, string> = {
   critical: "Critical",
 };
 
-function ChangesTable({ changes }: { changes: ChangeSummary[] | undefined }) {
+function ChangesTable({
+  changes,
+  isOwner,
+  projectId,
+}: {
+  changes: ChangeSummary[] | undefined;
+  isOwner?: boolean;
+  projectId: string;
+}) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [overridingId, setOverridingId] = useState<string | null>(null);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
+
+  const override = useMutation({
+    mutationFn: (changeId: string) => overrideChange({ data: changeId }),
+    onMutate: (changeId) => {
+      setOverridingId(changeId);
+      setOverrideError(null);
+    },
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
+      if (result?.changeId) {
+        await navigate({ to: "/changes/$changeId", params: { changeId: result.changeId } });
+      }
+    },
+    onError: (err) => {
+      setOverrideError(err.message);
+    },
+    onSettled: () => {
+      setOverridingId(null);
+    },
+  });
+
   return (
-    <DataTable label="Changes" minWidth={820}>
-      <thead>
-        <tr>
-          <Th>Change</Th>
-          <Th>Status</Th>
-          <Th>Risk</Th>
-          <Th numeric className="w-44">
-            Tasks
-          </Th>
-          <Th numeric>Budget</Th>
-          <Th numeric>Age</Th>
-        </tr>
-      </thead>
-      <tbody aria-busy={!changes || undefined}>
-        {!changes ? (
-          <SkeletonRows cells={["title", 64, 48, "numeric", "numeric", "numeric"]} />
-        ) : (
-          changes.map((change) => (
-            <TRow key={change.id}>
-              <Td className="max-w-0 w-[50%]">
-                <TitleCell
-                  title={
-                    <RowLink to="/changes/$changeId" params={{ changeId: change.id }}>
-                      <span title={change.goal}>{change.goal}</span>
-                    </RowLink>
-                  }
-                  meta={change.id}
-                />
-              </Td>
-              <Td>
-                <ChangeStatusPill status={change.status} />
-              </Td>
-              <Td>
-                <RiskCell risk={change.riskTier} />
-              </Td>
-              <Td numeric>
-                <TaskProgress done={change.completedCount} total={change.taskCount} />
-              </Td>
-              <Td numeric>{formatUsd(change.budgetUsd)}</Td>
-              <Td numeric className="text-kumo-subtle">
-                <time dateTime={change.createdAt} title={change.createdAt}>
-                  {formatAge(change.createdAt)}
-                </time>
-              </Td>
-            </TRow>
-          ))
-        )}
-      </tbody>
-    </DataTable>
+    <div className="grid gap-2">
+      {overrideError && <p className="text-[12px] text-kumo-danger font-medium">{overrideError}</p>}
+      <DataTable label="Changes" minWidth={880}>
+        <thead>
+          <tr>
+            <Th>Change</Th>
+            <Th>Requested by</Th>
+            <Th>Status</Th>
+            <Th>Risk</Th>
+            <Th numeric className="w-44">
+              Tasks
+            </Th>
+            <Th numeric>Budget</Th>
+            <Th numeric>Age</Th>
+          </tr>
+        </thead>
+        <tbody aria-busy={!changes || undefined}>
+          {!changes ? (
+            <SkeletonRows cells={["title", 80, 64, 48, "numeric", "numeric", "numeric"]} />
+          ) : (
+            changes.map((change) => {
+              const canOverride =
+                isOwner && (change.status === "not_selected" || change.status === "awaiting_owner");
+              return (
+                <TRow key={change.id}>
+                  <Td className="max-w-0 w-[45%]">
+                    <div className="grid min-w-0 gap-0.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="truncate font-semibold">
+                          <RowLink to="/changes/$changeId" params={{ changeId: change.id }}>
+                            <span title={change.goal}>{change.goal}</span>
+                          </RowLink>
+                        </span>
+                        {canOverride && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="relative z-10 shrink-0 text-[11px] px-2 py-0.5 h-6 leading-tight whitespace-nowrap"
+                            loading={override.isPending && overridingId === change.id}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              override.mutate(change.id);
+                            }}
+                          >
+                            Use this instead
+                          </Button>
+                        )}
+                      </div>
+                      <ChangeOutcomeLine change={change} />
+                      <span className="truncate font-mono text-[11px] text-kumo-subtle tabular-nums">
+                        {change.id}
+                      </span>
+                    </div>
+                  </Td>
+                  <Td className="whitespace-nowrap">
+                    {change.requester ? (
+                      <RequestedByCell requester={change.requester} />
+                    ) : (
+                      <span className="text-kumo-subtle">{EMPTY}</span>
+                    )}
+                  </Td>
+                  <Td>
+                    <ChangeStatusPill status={change.status} />
+                  </Td>
+                  <Td>
+                    <RiskCell risk={change.riskTier} />
+                  </Td>
+                  <Td numeric>
+                    <TaskProgress done={change.completedCount} total={change.taskCount} />
+                  </Td>
+                  <Td numeric>{formatUsd(change.budgetUsd)}</Td>
+                  <Td numeric className="text-kumo-subtle">
+                    <time dateTime={change.createdAt} title={change.createdAt}>
+                      {formatAge(change.createdAt)}
+                    </time>
+                  </Td>
+                </TRow>
+              );
+            })
+          )}
+        </tbody>
+      </DataTable>
+    </div>
   );
+}
+
+function RequestedByCell({ requester }: { requester: ChangeRequester }) {
+  const name = requester.isYou ? "You" : (requester.name ?? "Collaborator");
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[13px]">
+      <span>{name}</span>
+      {requester.rank === 0 && <Tag variant="outline">Owner</Tag>}
+    </span>
+  );
+}
+
+function ChangeOutcomeLine({ change }: { change: ChangeSummary }) {
+  if (change.status === "awaiting_owner") {
+    return (
+      <span className="text-[12px] font-medium text-accent-700">
+        Waiting for the owner to choose
+      </span>
+    );
+  }
+  const outcome = change.outcome;
+  if (!outcome) return null;
+
+  if (outcome.kind === "not_selected") {
+    return (
+      <span className="text-[12px] text-kumo-subtle inline-flex flex-wrap items-center gap-1">
+        <span>Not selected{outcome.reason ? `: ${outcome.reason}` : ""}</span>
+        {outcome.winnerChangeId && (
+          <Link
+            to="/changes/$changeId"
+            params={{ changeId: outcome.winnerChangeId }}
+            className="relative z-10 font-semibold text-kumo-link hover:underline"
+          >
+            (view winner)
+          </Link>
+        )}
+      </span>
+    );
+  }
+  if (outcome.kind === "selected") {
+    return <span className="text-[12px] text-kumo-subtle">Selected</span>;
+  }
+  if (outcome.kind === "partially_selected") {
+    return <span className="text-[12px] text-kumo-subtle">Partially selected</span>;
+  }
+  if (outcome.kind === "replaces") {
+    return <span className="text-[12px] text-kumo-subtle">Replaces earlier request</span>;
+  }
+  if (outcome.kind === "overridden") {
+    return <span className="text-[12px] text-kumo-subtle">Replaced by owner</span>;
+  }
+  return <span className="text-[12px] text-kumo-subtle">{outcome.kind}</span>;
 }
 
 function RiskCell({ risk }: { risk: string | null }) {

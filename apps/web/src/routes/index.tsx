@@ -10,7 +10,7 @@ import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../components/ui/da
 import { EmptyState } from "../components/ui/empty-state";
 import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
-import { createProject, listProjects } from "../lib/api";
+import { acceptInvitation, createProject, listProjects, listUserInvitations } from "../lib/api";
 import { formatAge, formatNumber, generation } from "../lib/format";
 
 export const Route = createFileRoute("/")({
@@ -35,10 +35,82 @@ function Home() {
         <SignedOut />
       </Show>
       <Show when="signed-in">
+        <SharedWithYou />
         <Projects />
         <NewProject />
       </Show>
     </Page>
+  );
+}
+
+function SharedWithYou() {
+  const queryClient = useQueryClient();
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const invitations = useQuery({
+    queryKey: ["user-invitations"],
+    queryFn: () => listUserInvitations(),
+  });
+
+  const accept = useMutation({
+    mutationFn: (invitationId: string) => acceptInvitation({ data: invitationId }),
+    onMutate: (invitationId) => {
+      setAcceptingId(invitationId);
+      setError(null);
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["user-invitations"] }),
+        queryClient.invalidateQueries({ queryKey: ["projects"] }),
+      ]);
+    },
+    onError: (err) => {
+      setError(err.message);
+    },
+    onSettled: () => {
+      setAcceptingId(null);
+    },
+  });
+
+  const items = invitations.data;
+  if (!items || items.length === 0) return null;
+
+  return (
+    <Section label="Shared with you" meta={<Mono subtle>{formatNumber(items.length)}</Mono>}>
+      {error && <p className="text-[12px] text-kumo-danger font-medium mb-2">{error}</p>}
+      <DataTable label="Shared with you" minWidth={560}>
+        <thead>
+          <tr>
+            <Th>Project</Th>
+            <Th>Invited by</Th>
+            <Th numeric>Action</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((inv) => (
+            <TRow key={inv.id}>
+              <Td>
+                <TitleCell title={inv.projectName} meta={inv.projectId} />
+              </Td>
+              <Td className="text-kumo-subtle">
+                {inv.invitedBy ? `Invited by ${inv.invitedBy}` : "Invited by owner"}
+              </Td>
+              <Td numeric>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  loading={accept.isPending && acceptingId === inv.id}
+                  onClick={() => accept.mutate(inv.id)}
+                >
+                  Accept
+                </Button>
+              </Td>
+            </TRow>
+          ))}
+        </tbody>
+      </DataTable>
+    </Section>
   );
 }
 

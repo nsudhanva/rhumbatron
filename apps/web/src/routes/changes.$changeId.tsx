@@ -14,6 +14,7 @@ import {
   changeSpend,
   InvariantList,
 } from "../components/change/change-overview";
+import { RequestConflictCard } from "../components/change/request-conflict-card";
 import { ChangeFilesChanged } from "../components/code/files-changed";
 import { ConflictCard } from "../components/conflict-card";
 import { DeadLetters } from "../components/dead-letters";
@@ -36,6 +37,8 @@ import {
   getChangeClaims,
   getChangeProgress,
   getConflicts,
+  getProject,
+  getRequestConflicts,
   listCandidateEvidence,
   listCandidates,
   listTasks,
@@ -110,6 +113,12 @@ function ChangeView() {
     refetchInterval: () => (isLive(change.data, tasks.data) ? fallback : false),
     refetchIntervalInBackground: true,
   });
+  const requestConflicts = useQuery({
+    queryKey: ["request-conflicts", changeId],
+    queryFn: () => getRequestConflicts({ data: changeId }),
+    refetchInterval: () => (isLive(change.data, tasks.data) ? fallback : false),
+    refetchIntervalInBackground: true,
+  });
   const candidates = useQuery({
     queryKey: ["candidates", changeId],
     queryFn: () => listCandidates({ data: changeId }),
@@ -152,6 +161,12 @@ function ChangeView() {
   }, [feed.events, changeId, queryClient]);
 
   const projectId = change.data?.projectId;
+  const project = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => getProject({ data: projectId ?? "" }),
+    enabled: !!projectId,
+  });
+  const isOwner = project.data?.role === "owner";
   const live = isLive(change.data, tasks.data);
   const status = useProjectLive(projectId, live, (signal) => {
     // Any push can carry events of this Change (claims, routes), so the feed always reads on.
@@ -161,6 +176,7 @@ function ChangeView() {
     void queryClient.invalidateQueries({ queryKey: ["change", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["tasks", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["conflicts", changeId] });
+    void queryClient.invalidateQueries({ queryKey: ["request-conflicts", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["candidates", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["change-progress", changeId] });
     for (const c of candidates.data ?? []) {
@@ -213,6 +229,7 @@ function ChangeView() {
   const ready =
     !tasks.isPending &&
     !conflicts.isPending &&
+    !requestConflicts.isPending &&
     !candidates.isPending &&
     !evidence.pending &&
     !claims.isPending &&
@@ -240,6 +257,7 @@ function ChangeView() {
   const data = change.data;
   const taskList = tasks.data ?? [];
   const conflictList = conflicts.data ?? [];
+  const requestConflictList = requestConflicts.data ?? [];
   const candidateList = candidates.data ?? [];
   const liveOpen = live && socket === "open";
   const selectedTask = taskList.find((t) => t.id === selected) ?? lastActiveTask(taskList);
@@ -350,6 +368,25 @@ function ChangeView() {
           <div className="grid gap-4">
             {conflictList.map((conflict) => (
               <ConflictCard key={conflict.id} conflict={conflict} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {requestConflictList.length > 0 && (
+        <Section
+          label="Conflicting requests"
+          meta={<Mono subtle>{formatNumber(requestConflictList.length)}</Mono>}
+        >
+          <div className="grid gap-4">
+            {requestConflictList.map((rc) => (
+              <RequestConflictCard
+                key={rc.id}
+                conflict={rc}
+                currentChangeId={changeId}
+                projectId={projectId ?? data.projectId}
+                isOwner={isOwner}
+              />
             ))}
           </div>
         </Section>

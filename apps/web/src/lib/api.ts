@@ -14,6 +14,22 @@ export type ProjectSummary = {
   status: string;
   canonicalGeneration: number;
   createdAt: string;
+  role?: "owner" | "collaborator" | string;
+};
+
+export type ChangeRequester = {
+  userId: string;
+  name: string | null;
+  rank: number | null;
+  isYou: boolean;
+};
+
+export type ChangeOutcome = {
+  kind: "selected" | "partially_selected" | "not_selected" | "replaces" | "overridden" | string;
+  reason?: string | null;
+  winnerChangeId?: string | null;
+  decidedBy?: string | null;
+  policy?: string | null;
 };
 
 export type ChangeSummary = {
@@ -25,6 +41,9 @@ export type ChangeSummary = {
   createdAt: string;
   taskCount: number;
   completedCount: number;
+  requester?: ChangeRequester | null;
+  outcome?: ChangeOutcome | null;
+  supersedesChangeId?: string | null;
 };
 
 export type ChangeDetail = {
@@ -38,6 +57,9 @@ export type ChangeDetail = {
   budgetUsd: number;
   workGraphRef?: string;
   blockedReason?: string | null;
+  requester?: ChangeRequester | null;
+  outcome?: ChangeOutcome | null;
+  supersedesChangeId?: string | null;
 };
 
 export type Intent = {
@@ -187,16 +209,17 @@ export const listChanges = createServerFn()
   .inputValidator((projectId: string) => projectId)
   .handler(({ data }) => call<ChangeSummary[]>(`/v1/projects/${data}/changes`));
 
+export type ProjectDetail = {
+  id: string;
+  name: string;
+  slug: string;
+  canonical: { generation: number; artifactRef: string; treeSha: string };
+  role?: "owner" | "collaborator" | string;
+};
+
 export const getProject = createServerFn()
   .inputValidator((projectId: string) => projectId)
-  .handler(({ data }) =>
-    call<{
-      id: string;
-      name: string;
-      slug: string;
-      canonical: { generation: number; artifactRef: string; treeSha: string };
-    }>(`/v1/projects/${data}`),
-  );
+  .handler(({ data }) => call<ProjectDetail>(`/v1/projects/${data}`));
 
 /** Live app of a Project (ADR 0020). `enabled` is false where apps are not served (dev). */
 export type ProjectAppView = {
@@ -1276,3 +1299,130 @@ export const getCandidateDiff = createServerFn()
       diff: CodeDiff;
     }>(`/v1/candidates/${data}/diff`),
   );
+
+/* --------------------------------------------------------------------------------------------
+ * Shared Projects (docs/plans/phase-17a-shared-projects.md section 5).
+ * ------------------------------------------------------------------------------------------ */
+
+export type ProjectMember = {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  role: "owner" | "collaborator" | string;
+  rank: number;
+  isYou: boolean;
+  addedAt?: string;
+};
+
+export type ProjectInvitation = {
+  id: string;
+  email: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export type ProjectMembersView = {
+  role: "owner" | "collaborator" | string;
+  members: ProjectMember[];
+  invitations: ProjectInvitation[];
+};
+
+export type UserInvitation = {
+  id: string;
+  projectId: string;
+  projectName: string;
+  invitedBy: string | null;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export type RequestConflictSide = {
+  changeId: string;
+  goal: string;
+  status: string;
+  requester: {
+    userId: string;
+    name: string | null;
+    isYou: boolean;
+  };
+};
+
+export type RequestConflictCriterion = {
+  a: string;
+  b: string;
+  why: string;
+  aText: string | null;
+  bText: string | null;
+};
+
+export type RequestConflictDetail = {
+  id: string;
+  verdict: string;
+  criteria: RequestConflictCriterion[];
+  policy: string | null;
+  winnerChangeId: string | null;
+  loserChangeId: string | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  a: RequestConflictSide;
+  b: RequestConflictSide;
+};
+
+export type OverrideOutcome = {
+  status?: string;
+  changeId: string;
+  repeated?: boolean;
+  reason?: string;
+  detail?: string;
+};
+
+export const getProjectMembers = createServerFn()
+  .inputValidator((projectId: string) => projectId)
+  .handler(({ data }) => call<ProjectMembersView>(`/v1/projects/${data}/members`));
+
+export const inviteProjectMember = createServerFn({ method: "POST" })
+  .inputValidator((input: { projectId: string; email: string }) => input)
+  .handler(({ data }) =>
+    call<ProjectInvitation>(`/v1/projects/${data.projectId}/invitations`, {
+      method: "POST",
+      body: { email: data.email },
+    }),
+  );
+
+export const revokeProjectInvitation = createServerFn({ method: "POST" })
+  .inputValidator((input: { projectId: string; invitationId: string }) => input)
+  .handler(({ data }) =>
+    call<{ id: string; status: "revoked" }>(
+      `/v1/projects/${data.projectId}/invitations/${data.invitationId}`,
+      { method: "DELETE" },
+    ),
+  );
+
+export const removeProjectMember = createServerFn({ method: "POST" })
+  .inputValidator((input: { projectId: string; userId: string }) => input)
+  .handler(({ data }) =>
+    call<{ userId: string; removed: boolean }>(
+      `/v1/projects/${data.projectId}/members/${data.userId}`,
+      { method: "DELETE" },
+    ),
+  );
+
+export const listUserInvitations = createServerFn().handler(() =>
+  call<UserInvitation[]>("/v1/invitations"),
+);
+
+export const acceptInvitation = createServerFn({ method: "POST" })
+  .inputValidator((invitationId: string) => invitationId)
+  .handler(({ data }) =>
+    call<{ projectId: string; role: string }>(`/v1/invitations/${data}/accept`, {
+      method: "POST",
+    }),
+  );
+
+export const getRequestConflicts = createServerFn()
+  .inputValidator((changeId: string) => changeId)
+  .handler(({ data }) => call<RequestConflictDetail[]>(`/v1/changes/${data}/request-conflicts`));
+
+export const overrideChange = createServerFn({ method: "POST" })
+  .inputValidator((changeId: string) => changeId)
+  .handler(({ data }) => call<OverrideOutcome>(`/v1/changes/${data}/override`, { method: "POST" }));
