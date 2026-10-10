@@ -10,8 +10,8 @@ AGENTS.md section 36 lists eight preconditions before one atomic `S<n> -> S<n+1>
 Most of them read data that ProjectRootDO does not own: Candidate status, the Verification Plan,
 and Evidence live in D1; approvals are D1 rows; the Candidate commit lives in an Artifacts fork.
 ProjectRootDO owns only canonical generation, tree, ref, and the active policy version. A Durable
-Object that reads D1 inside its transaction cannot make those reads atomic with its own state
-anyway, and D1 reads would make the hottest correctness boundary depend on a second database.
+Object that reads D1 inside its transaction cannot make those reads atomic with its own state.
+D1 reads would also make the hottest correctness boundary depend on a second database.
 
 ## Decision
 
@@ -22,16 +22,16 @@ Two steps, in this order, for `POST /v1/candidates/:candidateId/promote`:
    integration Worker has no public route. It reads authoritative rows and checks, with the pure
    function `checkPromotion` (`packages/evidence/src/promotion.ts`):
    - rule 1: Candidate status is `verified`;
-   - rules 2 and 3: the required checks are gated again from `evidence_index` rows with
-     `gateRequiredChecks`. The cached `score_json` gate is never trusted. Only `checked_supported`
-     plus `pass` satisfies a check (section 34.4.1);
+   - rules 2 and 3: `gateRequiredChecks` gates the required checks again from `evidence_index`
+     rows. It never trusts the cached `score_json` gate. Only `checked_supported` plus `pass`
+     satisfies a check (section 34.4.1);
    - rule 4: when the plan or the policy risk tiers require it, a `granted` approval exists for the
      exact composed tree; a `rejected` approval always blocks;
    - rule 5 (early): the plan's policy version equals the active version;
    - rule 8: the composed commit still exists in the Candidate fork with the recorded tree.
    It then builds and Zod-validates a section 36 `PromotionRequest` and emits
    `canonical.promotion.requested`.
-2. **ProjectRootDO (`promote`).** Decides on its own state, in one SQLite transaction:
+2. **ProjectRootDO (`promote`).** It decides on its own state, in one SQLite transaction:
    rule 5 (authoritative policy version), rule 6 (expected generation = current), rule 7 (expected
    tree = current, when the Candidate recorded its `base_tree`). It writes the new generation and
    the `canonical.advanced` outbox row together. The event records `requiredEvidenceIds` and
@@ -49,8 +49,8 @@ it. The idempotency key is Candidate ID plus expected generation (section 60): a
 request body. Only a verified, gated Candidate can be decided; the first decision is final, and an
 identical repeat returns the stored row. A rejection also sets the Candidate to `rejected`. The
 policy is deterministic (`approvalRequired`, `checkApprovalDecision`); no model takes part.
-`approval.requested` is emitted when a gated Candidate is verified; `approval.granted` or
-`approval.rejected` when a decision is recorded.
+`approval.requested` is emitted when a gated Candidate is verified. `approval.granted` or
+`approval.rejected` is emitted when a decision is recorded.
 
 ### Canonical source after promotion
 
@@ -58,8 +58,9 @@ ProjectRootDO is the authority, so the canonical Artifacts repo moves after the 
 not before. The integration Worker fetches the Candidate fork with isomorphic-git into memory and
 pushes the composed commit to the canonical repo's `main` as a fast-forward only (no force push;
 receive-pack also checks the old value). It then writes `source/<project>/<tree>/index.json`.
-That index is how agents and the verification workflow resolve the canonical commit, so it is
-written only after `main` has moved. The new canonical ref is `artifacts://<project>@<commit>`.
+Agents and the verification workflow use that index to resolve the canonical commit, so the
+integration Worker writes it only after `main` moves. The new canonical ref is
+`artifacts://<project>@<commit>`.
 
 If the sync fails, the generation has still advanced. The response says `sourceSynced: false`;
 promoting again repairs it, because the retry is `alreadyPromoted` and re-runs the sync. Until
@@ -69,9 +70,10 @@ composing on a commit that `main` does not hold yet. No Sandbox time is used for
 ### Re-wake after promotion (P11-06)
 
 On `canonical.advanced`, the Causal Router marks every other in-flight Candidate of the Project
-with an older base as `stale` (one D1 batch, deterministic), and marks the promoted Candidate
-`promoted`, which repairs the D1 mirror if the integration Worker stopped between the
-compare-and-swap and its own write. It already wakes the agents of active Tasks on that event.
+with an older base as `stale` (one D1 batch, deterministic). It also marks the promoted Candidate
+`promoted`. This repairs the D1 mirror if the integration Worker stopped between the
+compare-and-swap and its own write. The Causal Router already wakes the agents of active Tasks on
+that event.
 
 ## Consequences
 

@@ -10,7 +10,7 @@ ResourceShardDO implements Claims as renewable leases (AGENTS.md section 13.2): 
 per Project and semantic resource, `claim.*` events in the same transaction as the lease change
 (section 18), and expiry through the shard alarm (section 42.3). Until now only tests called
 `acquireClaim`. Agent runs never took a Claim, so the Claims feed and the Claim packets in the
-agent activity view were always empty, and conflict detection had no signal that two agents
+agent activity view were always empty. Conflict detection also had no signal that two agents
 worked on one resource at the same time.
 
 A blocking lock does not fit the product. Parallel agents on one resource, and two Candidate
@@ -31,13 +31,13 @@ Claims are advisory leases for agent runs.
    half-life (60 s, with 10 s slack for a check that fires a little early). There is no new timer
    and no loop.
 3. **Release at run end.** `finishRun` releases every Claim of the run for success, failure,
-   cancel, and timeout. Release is idempotent on both sides. A failed release is only logged: the
-   lease expires on its own.
+   cancel, and timeout. Release is idempotent on both sides. The run only logs a failed release.
+   The lease expires on its own.
 4. **Contention never blocks.** When another agent holds a live Claim, the shard returns `held`
    and writes `claim.contended` to its outbox in the same transaction as the decision. The event ID
    is stable per holder Claim, contender, and Change, so a contender that asks again on each tick
    does not repeat it. The run continues without the lease, keeps the holder as a signal, and asks
-   again at its next tick, so it gets the lease when the holder releases or expires.
+   again at its next tick. It gets the lease after the holder releases it or the lease expires.
 5. **Contention feeds conflict detection.** The run sends its contentions with its Intent to the
    Change shard (`declareIntent(input, contentions)`, same transaction). `detectionInputs` returns
    the Change's Intents and contentions in one request. The detector adds a soft
@@ -71,8 +71,8 @@ Claims are advisory leases for agent runs.
   loses a signal for that time.
 - Section 59 asks for strong consistency of Claim ownership, not for exclusive write access to
   source. Ownership stays strongly consistent: one active Claim per resource in one shard
-  transaction. Source isolation already comes from per-run Artifact forks, and promotion safety
-  comes from compare-and-swap with executable evidence (section 36), not from Claims.
+  transaction. Per-run Artifact forks already isolate source. Promotion safety comes from
+  compare-and-swap with executable evidence (section 36), not from Claims.
 
 ## Update (2026-10-10)
 

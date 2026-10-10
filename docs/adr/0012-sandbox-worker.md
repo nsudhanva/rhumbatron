@@ -10,8 +10,8 @@ ADR 0011 added the `Sandbox` class to the agents Worker by migration, then re-up
 agents script with `containers` metadata and created the container application. Every API read
 looked right (version metadata, namespace `use_containers: true`, healthy application), yet at
 runtime `ctx.container` stayed undefined in the class. A Durable Object class gets a container
-only when it is created by the same upload that carries the container metadata, which is what
-Wrangler does on a first deploy. Version uploads (cloudflare_worker_version) cannot carry
+only when the upload that creates the class also carries the container metadata. Wrangler does
+this on a first deploy. Version uploads (cloudflare_worker_version) cannot carry
 migrations (ADR 0005), so the agents Worker cannot do both.
 
 ## Decision
@@ -20,7 +20,7 @@ migrations (ADR 0005), so the agents Worker cannot do both.
   SDK's `Sandbox` class. A temporary adapter (`scripts/sandbox-deploy.ts`,
   `terraform_data.sandbox_worker`) deploys it with one full upload: code, the `SANDBOX` binding,
   the class migration, and `containers: [{ name, class_name }]`. It then creates the container
-  application bound by Durable Object namespace ID, and on destroy deletes both.
+  application, bound by Durable Object namespace ID. On destroy, it deletes both.
 - The agents Worker binds `SANDBOX` cross-script (`script_name`). Agents deploys never touch the
   container, so the re-attach step and its detach window are gone.
 - Verified on dev: `bun run smoke:sandbox` forks the Acme Shop repo, clones it, and runs
@@ -29,8 +29,8 @@ migrations (ADR 0005), so the agents Worker cannot do both.
 ## Bootstrap note
 
 A fresh environment has a coordinator <-> event router binding cycle. `local.bootstrap = true`
-omits the coordinator's `EVENT_ROUTER` nudge binding for the first apply; set it to false and
-apply again. Migrations start from `{ new_tag = "v1", new_sqlite_classes = [...] }` and then move
+omits the coordinator's `EVENT_ROUTER` nudge binding for the first apply. Then set it to `false`
+and apply again. Migrations start from `{ new_tag = "v1", new_sqlite_classes = [...] }` and then move
 to the steady `v1 -> v1`.
 
 ## Update (2026-10-10)

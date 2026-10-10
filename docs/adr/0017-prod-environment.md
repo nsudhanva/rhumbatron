@@ -66,10 +66,11 @@ zone-wide singleton.
   publishable key that the web build inlines (`VITE_CLERK_PUBLISHABLE_KEY` in `apps/web/.env.local`;
   public). The variable accepts `pk_test_` and `pk_live_`; the Terraform check
   `clerk_production_instance` prints a warning on every prod plan while the key is `pk_test_`.
-  Development instances show a "Development mode" badge and have lower limits; acceptable for the
-  hackathon. To switch: create the production instance for `rhumbatron.com`, store its keys as
-  `rhumbatron-clerk-secret-key-prod` and `rhumbatron-clerk-publishable-key-prod`, point the prod
-  Clerk entries in `scripts/tf.ts` at them (Keychain for both), and set `clerk_dns_records`.
+  Development instances show a "Development mode" badge and have lower limits. This is
+  acceptable for the hackathon. To switch, create the production instance for `rhumbatron.com`.
+  Store its keys as `rhumbatron-clerk-secret-key-prod` and `rhumbatron-clerk-publishable-key-prod`.
+  Point the prod Clerk entries in `scripts/tf.ts` at them (Keychain for both), and set
+  `clerk_dns_records`.
 - Clerk DNS records: `var.clerk_dns_records` (label -> CNAME target, DNS only). Empty until the
   production instance exists; Clerk shows the five records when the domain is added.
 
@@ -77,13 +78,14 @@ zone-wide singleton.
 
 Prod gets `rhumbatron-models-prod`. Reasons:
 
-- Destroying or pausing dev must never change prod.
+- A destroy or pause of dev must never change prod.
 - Logs, the request rate limit, and the spend cap stay per environment.
 - The account has one gateway today (`rhumbatron-models-dev`); two is far below the account limit.
   Each stores at most 10,000 logs.
 
-Sharing dev's gateway would give one real Vertex cap, but prod would then depend on a resource in
-dev state. Moving the gateway to `envs/global` would move a dev address. Both were rejected.
+A shared dev gateway would give one real Vertex cap, but prod would then depend on a resource in
+dev state. A move of the gateway to `envs/global` would move a dev address. This ADR rejects
+both options.
 
 Caps (decided 2026-10-09): dev $40 and prod $10 per 30 days (`vertex_spend_limit_usd` in each
 root), about $50 in total. Both gateways bill the same GCP project through the same service
@@ -113,7 +115,7 @@ Decided 2026-10-09: no new tokens. Prod reuses dev's items.
 | `TF_VAR_openrouter_api_key` | Keychain `rhumbatron-openrouter-api-key` | Shared with dev |
 | `TF_VAR_vertex_service_account` | Keychain `rhumbatron-vertex-sa-dev` | One GCP project; caps per gateway |
 
-Rotating one of these dev items now also changes prod: apply both roots after a rotation.
+A rotation of one of these dev items now also changes prod. Apply both roots after a rotation.
 
 ## Cost: what prod adds
 
@@ -154,24 +156,24 @@ Observed on 2026-10-09 (read-only):
 
 Steps. Each step is a Terraform plan, read, then apply of the saved plan.
 
-1. Later, not a gate (prod starts on the Clerk dev instance): create the Clerk production instance
-   for `rhumbatron.com`, store its keys in the Keychain, and put its CNAMEs in the
-   `clerk_dns_records` default in `envs/prod/variables.tf` (the targets are not secret, and Git
+1. Later, not a gate (prod starts on the Clerk dev instance). Create the Clerk production instance
+   for `rhumbatron.com` and store its keys in the Keychain. Put its CNAMEs in the
+   `clerk_dns_records` default in `envs/prod/variables.tf`. The targets are not secret, and Git
    ignores `terraform.tfvars` and `*.auto.tfvars`, so a committed default keeps the plan
-   reproducible).
+   reproducible.
 2. Decided 2026-10-09 (below). No Keychain items to create.
-3. `bun run cf:bundle`, `bun run tf:plan:prod`, read, `bun run tf:apply:prod` (bootstrap = true,
-   attach_apex = false). Set `bootstrap = false`, plan, apply again. `tf:drift:prod` must be
-   clean. Check `https://api.rhumbatron.com/health`.
+3. Run `bun run cf:bundle` and `bun run tf:plan:prod`. Read the plan, then run
+   `bun run tf:apply:prod` (bootstrap = true, attach_apex = false). Set `bootstrap = false`, plan,
+   and apply again. `tf:drift:prod` must be clean. Check `https://api.rhumbatron.com/health`.
 4. Apply `envs/global` for the `www` redirect (independent of the cutover).
 5. Find the legacy apex record IDs (read-only: dashboard DNS page or `cf` CLI). Also confirm that
    no zone Worker route or Pages custom domain holds `rhumbatron.com`. If one does, handle it the
    same way with its resource type.
 6. In `envs/global`, add a `cloudflare_dns_record.legacy_apex` resource that matches the record,
-   with an `import` block (`<zone_id>/<record_id>`). Plan must show import only; apply.
-7. Remove that resource and its import block from `envs/global`. Plan must show one destroy;
-   apply. The apex now has no record: the old site is offline from here to step 8. Keep the
-   Google verification `TXT` record.
+   with an `import` block (`<zone_id>/<record_id>`). The plan must show import only. Apply.
+7. Remove that resource and its import block from `envs/global`. The plan must show one destroy.
+   Apply. The apex now has no record, so the old site is offline until step 8. Keep the Google
+   verification `TXT` record.
 8. Set `attach_apex = true` in `envs/prod`. Plan, apply. The custom domain creates the apex record
    and its certificate. Prepare this plan before step 7 to keep the gap to minutes.
 9. In `envs/global`, add `ssl = "strict"` to `zone_settings` (Workers are the only origins now).
@@ -197,8 +199,8 @@ The owner decided to apply prod before the hackathon, with no new spend.
    (integration Worker). Code fallback without the binding: 500.
 5. **Demo code paths.** `FIXTURES_ENABLED = "true"` in dev and prod enables the Wishlist fixture
    routes. Open item: the Acme Shop fixture's `wrangler.jsonc` still names
-   `rhumbatron-acme-shop-dev`, so a prod release of the demo app needs that made
-   environment-aware (or the release step of the demo runs on dev).
+   `rhumbatron-acme-shop-dev`. A prod release of the demo app needs that name to become
+   environment-aware, or the release step of the demo runs on dev.
 6. **Credentials.** Prod reuses dev's Keychain items and the Clerk dev instance (Credentials above).
 
 ## Consequences

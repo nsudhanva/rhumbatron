@@ -49,8 +49,8 @@ per month, 10 M requests and 30 M CPU-ms shared with Workers.
   (esbuild-wasm). It runs in the Worker, not in the Sandbox, so builds use no container time
   (the Sandbox cap is 5 h per month per environment). npm dependencies come from the public
   registry at build time. The integration Worker reads the build inputs of one commit through
-  its Artifacts binding (one read per file; tests, benchmarks, lockfiles, and docs are skipped)
-  and calls `APPS.build(...)` over a service binding with `entrypoint = "AppBuilder"`.
+  its Artifacts binding (one read per file; it skips tests, benchmarks, lockfiles, and docs).
+  It then calls `APPS.build(...)` over a service binding with `entrypoint = "AppBuilder"`.
 - The canonical source in R2 is only a file index (`source/<project>/<tree>/index.json`), so
   file contents come from Artifacts.
 - Limits: 400 files, 8 MB of source, 10 MB of modules, 500 assets of at most 5 MB each.
@@ -116,9 +116,9 @@ rejected (401). The template's tests cover both cases.
 - `terraform_data.apps_worker` runs `scripts/apps-deploy.ts`: one full script upload with the
   bindings from Terraform, including `{ "type": "worker_loader", "name": "LOADER" }` (the shape
   Wrangler 4.149 uploads; provider 5.27 has no such binding type), and the `AppDataDO` migration
-  (`v1` first, then the live tag). It turns the workers.dev subdomain off if it is on. Read before
-  write; it re-runs only when the bundle or config hash changes. `apps_worker_teardown` deletes
-  the Worker on a real destroy only. Replace both with `cloudflare_worker_version` when the
+  (`v1` first, then the live tag). It turns the workers.dev subdomain off if it is on. It reads
+  before it writes and re-runs only when the bundle or config hash changes.
+  `apps_worker_teardown` deletes the Worker on a real destroy only. Replace both with `cloudflare_worker_version` when the
   provider supports the binding (AGENTS.md section 11.4).
 - The integration Worker binds `APPS` (service, entrypoint `AppBuilder`).
 - R2 lifecycle: `app-previews/` expires after 7 days.
@@ -156,7 +156,7 @@ bypass host in `local.apps.bypass_hosts`.
 | Sandbox | none | |
 
 ## Consequences
-- Script running in an app's pages shares the registrable domain with rhumbatron.com. It cannot
+- Script that runs in an app's pages shares the registrable domain with rhumbatron.com. It cannot
   read the host-only `__session`, but it can write a cookie for `Domain=rhumbatron.com` with
   `document.cookie` (cookie tossing), which the router cannot see. Impact: a forced sign-out or a
   login as the attacker's own account on rhumbatron.com. A separate zone for apps removes this;
@@ -166,8 +166,8 @@ bypass host in `local.apps.bypass_hosts`.
   the builder into its own Worker.
 - `@cloudflare/worker-bundler` is experimental (0.x). It is pinned and only the builder imports
   its bundling API.
-- Builds depend on the npm registry being reachable from the Worker. A failed build leaves the
-  last good version live.
+- Builds need the npm registry to be reachable from the Worker. A failed build leaves the last
+  good version live.
 
 ## Diagram
 

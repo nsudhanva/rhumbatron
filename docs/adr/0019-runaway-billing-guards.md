@@ -6,8 +6,9 @@ Accepted, 2026-10-09. Four alarm follow-ups are in Update (2026-10-10).
 ## Context
 Cloudflare has no hard spend cap. On Workers Paid, Durable Object requests, duration, and storage
 rows above the included amounts bill rather than fail. A public incident (serverlesshorrors.com,
-"cloudflare-108k") was one Durable Object alarm that rescheduled itself with no stop condition:
-trillions of storage operations and a five-figure bill, found only on the invoice.
+"cloudflare-108k") was one Durable Object alarm that rescheduled itself with no stop condition.
+It made trillions of storage operations and a five-figure bill, which showed up only on the
+invoice.
 
 An audit on 2026-10-09 found no live loop. Two paths had no bound: the ProjectRootDO and
 ResourceShardDO outbox alarms. When a due outbox row could not publish (for example, no K2
@@ -51,9 +52,9 @@ Three layers.
 
 These follow-ups apply the same three layers. They need no new ADR.
 
-- `AlarmGuard.run()` is the whole body of each coordinator `alarm()`. It counts the fire first,
-  then defers RPC alarm writes while the handler is in flight, and sets the next alarm from the
-  pending work it reads after the handler ends. Before this, an RPC write during the handler
+- `AlarmGuard.run()` is the whole body of each coordinator `alarm()`. It counts the fire first.
+  While the handler is in flight, it defers RPC alarm writes. After the handler ends, it reads the
+  pending work and sets the next alarm from it. Before this, an RPC write during the handler
   queued a second alarm that the handler then overrode (`clientDisconnected`, outcome `canceled`).
 - AgentDO runs its one-minute run check as an interval schedule (`scheduleEvery(60)`) instead of
   a `schedule()` call from inside its own alarm. That removes one canceled alarm per minute per

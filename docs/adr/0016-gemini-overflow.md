@@ -7,9 +7,9 @@
 ## Context
 
 Agents (ADR 0009) used only OpenRouter free models. OpenRouter allows about 50 free requests per
-day, and our agent cap was 40 calls per day, so one demo Change could not finish in a day. The
-owner approved Gemini on Vertex AI, billed to GCP credits, as overflow. ADR 0007 already set up
-Vertex as a capped backup for the Root Planner, with an AI Gateway spend limit of $9 per 30 days
+day, and the agent cap was 40 calls per day. One demo Change could not finish in a day. The
+owner approved Gemini on Vertex AI, billed to GCP credits, as overflow. ADR 0007 already made
+Vertex a capped backup for the Root Planner, with an AI Gateway spend limit of $9 per 30 days
 on the `google-vertex-ai` provider.
 
 ## Decision
@@ -17,18 +17,19 @@ on the `google-vertex-ai` provider.
 - The agents Worker gets the `VERTEX_SERVICE_ACCOUNT` `secret_text` binding (Terraform, dev).
 - Each tier has two Pi models: `tier-<t>` (OpenRouter, $0) and `tier-<t>-vertex` (Gemini through
   the gateway compat endpoint, `google-vertex-ai/<TIER_VERTEX_MODEL>`). Vertex models carry
-  VERTEX_PRICES, so Pi records real cost. Run cost, the Change budget, and the Costs page see it.
-- The AgentDO picks the provider once, when a run starts. OpenRouter is used unless today's
-  OpenRouter is used up: a D1 `usage_counters` row `openrouter-exhausted` for the UTC day (set
-  on an OpenRouter 429 or quota error), or our own `openrouter-calls` counter at 45.
+  VERTEX_PRICES, so Pi records real cost. Run cost, the Change budget, and the Costs page use it.
+- The AgentDO picks the provider once, when a run starts. It uses OpenRouter unless today's
+  OpenRouter quota is spent. Either of two signals marks it spent: a D1 `usage_counters` row
+  `openrouter-exhausted` for the UTC day (set on an OpenRouter 429 or quota error), or
+  Rhumbatron's own `openrouter-calls` counter at 45.
 - An OpenRouter rate limit during a run fails the run as `rate_limited`. The same-tier retry
   (section 42.8) then starts on Vertex. No provider switch happens inside a run.
 - Caps: 45 OpenRouter calls per day; 400 agent calls per day on all providers. The gateway spend
   limit is the hard money ceiling.
 - A Vertex 429 from the gateway spend limit is `spend_limited`. The gateway documents only the
   status, so a Vertex 429 that is not Google's `RESOURCE_EXHAUSTED` or the gateway request rate
-  limit counts as the spend limit. It is a budget stop: no retry, the Task is `blocked`, and the
-  Change is `budget_blocked` with a reason that names the $9 per 30 days Gemini cap. A
+  limit counts as the spend limit. It is a budget stop. There is no retry, the Task is `blocked`,
+  and the Change is `budget_blocked` with a reason that names the $9 per 30 days Gemini cap. A
   `vertex-spend-limited` row for the day stops later runs before they call a model.
 - Gemini 3 rejects a replayed tool call without its thought signature. pi-ai does not round-trip
   `extra_content`, so the provider keeps signatures per tool call id and sends Google's documented

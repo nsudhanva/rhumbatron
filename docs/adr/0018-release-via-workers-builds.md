@@ -17,8 +17,8 @@ provider 5.27 still has no Workers Builds resource.
 
 ### Connection: one-time `cf` command, not the dashboard
 
-- Terraform keeps owning the release target Worker (`cloudflare_worker.acme_shop`,
-  `rhumbatron-acme-shop-<env>`, workers.dev on) and nothing of its versions.
+- Terraform still owns the release target Worker (`cloudflare_worker.acme_shop`,
+  `rhumbatron-acme-shop-<env>`, workers.dev on), but none of its versions.
 - A person connects the Worker once with `cf builds workers create`: Artifacts repo of the demo
   Project in `rhumbatron-projects-<env>`, branch `main`, deploy command
   `npx wrangler@4.149.0 deploy`. This replaces the dashboard step of ADR 0014. It stays one
@@ -39,22 +39,24 @@ provider 5.27 still has no Workers Builds resource.
 
 ### Observation: ReleaseWorkflow (integration Worker)
 
-1. Confirm the generation is still canonical (ProjectRootDO). Else `superseded`. `build.started`.
+1. Confirm that the generation is still canonical (ProjectRootDO). If not, the release is
+   `superseded`. Else emit `build.started`.
 2. Poll `GET /builds/workers/{tag}/builds` with backoff (15 s, 30 s, then 60 s) for at most
-   15 minutes. Only a build whose trigger commit is the promoted commit counts. No build and no
-   trigger means the connection is missing: the release fails at once.
-3. `build.completed`. A failed build is `failed` plus `deployment.failed`.
+   15 minutes. Only a build whose trigger commit is the promoted commit counts. If there is no
+   build and no trigger, the connection is missing, and the release fails at once.
+3. Emit `build.completed`. A failed build makes the release `failed`, with `deployment.failed`.
 4. Confirm the deployment: the Worker's newest deployment version maps back to this build
-   (`GET /workers/scripts/{name}/deployments`, `GET /builds/builds?version_ids=`).
-   `deployment.completed` with the version ID. Not confirmed after retries: `failed`.
+   (`GET /workers/scripts/{name}/deployments`, `GET /builds/builds?version_ids=`). Emit
+   `deployment.completed` with the version ID. If retries do not confirm it, the release is
+   `failed`.
 5. Smoke check the release URL: `/` returns 200; `/api/products` returns 200 JSON; up to two static
-   GET routes the Change added (from its contract Evidence) answer 2xx, 401, or 403, not 404. One
-   retry after 20 s, because a fresh deployment can take seconds to serve.
+   GET routes the Change added (from its contract Evidence) answer 2xx, 401, or 403, not 404. The
+   check retries once after 20 s, because a fresh deployment can take seconds to serve.
 6. Evidence goes to R2 and `evidence_index` in the Candidate Evidence model, check ID
    `release-s<generation>`. The API keeps `release-*` rows out of Candidate verification views; they
    never feed a promotion gate.
-7. Pass: `deployed`. Else `smoke_failed` plus `release.smoke_failed`. A probe without a response
-   is a gap, never a pass (section 34.4.1).
+7. If the smoke check passes, the release is `deployed`. Else it is `smoke_failed`, with
+   `release.smoke_failed`. A probe without a response is a gap, never a pass (section 34.4.1).
 
 Statuses: `queued -> building -> deployed | failed | smoke_failed`, and `queued | building ->
 superseded`. Final states do not change, except that failure injection (P13-12) may move
@@ -134,4 +136,4 @@ sequenceDiagram
 
 ## Update (2026-10-10, later)
 
-The dashboard connection now exists for `rhumbatron-acme-shop-dev`. It has trigger `4fb2e3cf-ac43-4cd3-8107-855a94059a7b`, branch `main`, deploy command `npx wrangler@4.149.0 deploy`, and a dedicated build token. The default token offered by the dashboard belonged to another project and lacked Artifacts permissions, which caused a 401. A new token fixed it. See docs/operations/release.md.
+The dashboard connection now exists for `rhumbatron-acme-shop-dev`. It has trigger `4fb2e3cf-ac43-4cd3-8107-855a94059a7b`, branch `main`, deploy command `npx wrangler@4.149.0 deploy`, and a dedicated build token. The default token that the dashboard offered belonged to another project and lacked Artifacts permissions. That caused a 401, and a new token fixed it. See docs/operations/release.md.

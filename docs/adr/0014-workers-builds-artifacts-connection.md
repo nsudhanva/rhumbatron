@@ -1,15 +1,15 @@
 # ADR 0014: Workers Builds connection to an Artifacts repo is a one-time dashboard step
 
 Status: accepted (2026-10-09). ADR 0018 implements the release workflow. ADR 0018 planned to
-replace the dashboard step with `cf builds workers create`, but that did not work, so the
-dashboard step below still applies (Update 2026-10-10).
+replace the dashboard step with `cf builds workers create`. That did not work, so the dashboard
+step below still applies (Update 2026-10-10).
 
 ## Context
 
-The release path (AGENTS.md sections 21.3 and 37, P11-07/08) is: promotion fast-forwards the
+On the release path (AGENTS.md sections 21.3 and 37, P11-07/08), promotion fast-forwards the
 canonical Artifacts repo's `main`, and Workers Builds builds and deploys it. The user chose this
-path over a direct script upload, which would need an account-wide Workers Scripts Edit secret at
-runtime.
+path over a direct script upload. A direct upload would need an account-wide Workers Scripts Edit
+secret at runtime.
 
 Section 11.4 says to manage control-plane objects with Terraform, and through an API adapter when
 the provider lacks a resource. Here neither is possible:
