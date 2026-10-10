@@ -147,8 +147,11 @@ export function versionFromBuild(body: unknown, buildUuid: string): boolean {
 export type Probe = {
   name: string;
   path: string;
-  /** `json`: 200 and a JSON body. `exists`: 2xx, 401, or 403; a 404 means the route is absent. */
-  expect: "ok" | "json" | "exists";
+  /**
+   * `page`: 2xx or 3xx, and not an apps router status page. `json`: 200 and a JSON body.
+   * `exists`: 2xx, 401, or 403; a 404 means the route is absent.
+   */
+  expect: "page" | "json" | "exists";
   headers?: Record<string, string>;
 };
 
@@ -160,24 +163,40 @@ export type ProbeResult = {
   detail: string;
 };
 
-/** The Acme fixture names the caller in `x-user-id` (fixtures/acme-shop/src/identity.ts). */
-const FIXTURE_USER = { "x-user-id": "alice" };
+/** Route probes taken from the app's own route table, at most. */
+const MAX_ROUTE_PROBES = 3;
 
 /** Placeholder segments (`:id`) cannot be probed without fixture data; static GET routes only. */
 const probeable = (route: string) => /^GET \/\S*$/.test(route) && !route.includes(":");
 
 /**
- * Release smoke probes: the app shell, the existing products API, and up to two GET routes the
- * Change added (from its contract Evidence), which must exist after the deployment.
+ * Release smoke probes for any app: the home page, then up to `MAX_ROUTE_PROBES` static GET routes
+ * from the app's own route table (the contract Evidence of the released Candidate), the routes the
+ * Change added first. Without a route table, only the home page. `fixed` adds a target's own
+ * probes (the dev Acme Shop Live Workers Builds target: `ACME_SHOP_LIVE_PROBES`).
  */
-export function smokeProbes(addedRoutes: readonly string[], injectedPath?: string): Probe[] {
+export function smokeProbes(
+  table: {
+    routes?: readonly string[] | null;
+    added?: readonly string[];
+    fixed?: readonly Probe[];
+  } = {},
+  injectedPath?: string,
+): Probe[] {
   const probes: Probe[] = [
-    { name: "app shell", path: "/", expect: "ok" },
-    { name: "products API", path: "/api/products", expect: "json", headers: FIXTURE_USER },
+    { name: "home page", path: "/", expect: "page" },
+    ...(table.fixed ?? []),
   ];
-  for (const route of addedRoutes.filter(probeable).slice(0, 2)) {
+  const seen = new Set(probes.map((p) => p.path));
+  let routeProbes = 0;
+  for (const route of [...(table.added ?? []), ...(table.routes ?? [])]) {
+    if (routeProbes >= MAX_ROUTE_PROBES) break;
+    if (!probeable(route)) continue;
     const path = route.slice("GET ".length);
-    probes.push({ name: `feature ${route}`, path, expect: "exists", headers: FIXTURE_USER });
+    if (seen.has(path)) continue;
+    seen.add(path);
+    routeProbes++;
+    probes.push({ name: `route ${route}`, path, expect: "exists" });
   }
   if (injectedPath) {
     probes.push({
@@ -189,8 +208,47 @@ export function smokeProbes(addedRoutes: readonly string[], injectedPath?: strin
   return probes;
 }
 
+/**
+ * The Acme Shop Live release target on dev (Workers Builds, migration 0015): its products API
+ * must answer JSON. The Acme fixture resolves a caller with no identity to the demo user.
+ */
+export const ACME_SHOP_LIVE_PROBES: readonly Probe[] = [
+  { name: "products API", path: "/api/products", expect: "json" },
+];
+
+/**
+ * Titles of the apps router's own status pages (workers/apps/src/pages.ts). A home page that is
+ * one of them means the app is not serving: "Nothing built yet" answers 200, so the status code
+ * alone cannot tell.
+ */
+const ROUTER_PAGE_TITLES = [
+  "No app here",
+  "App removed",
+  "Building",
+  "Nothing built yet",
+  "Build failed",
+  "App limit reached",
+  "App error",
+];
+const ROUTER_PAGE_FOOTER = '<a href="https://rhumbatron.com">Rhumbatron</a>';
+
+/** The router's status page title when `body` is one, else null. */
+function routerPageTitle(body: string): string | null {
+  if (!body.includes(ROUTER_PAGE_FOOTER)) return null;
+  return ROUTER_PAGE_TITLES.find((title) => body.includes(`<title>${title}</title>`)) ?? null;
+}
+
 /** Judges one response against its probe. */
 export function judgeProbe(probe: Probe, status: number, body: string): ProbeResult {
+  if (probe.expect === "page") {
+    if (status < 200 || status >= 400) {
+      return { probe, status, ok: false, detail: `${status}, expected 2xx or 3xx` };
+    }
+    const title = routerPageTitle(body);
+    return title
+      ? { probe, status, ok: false, detail: `${status}, but the router answered "${title}"` }
+      : { probe, status, ok: true, detail: `${status}` };
+  }
   if (probe.expect === "exists") {
     const ok = (status >= 200 && status < 300) || status === 401 || status === 403;
     return {
@@ -272,14 +330,11 @@ export async function runProbes(url: string, probes: readonly Probe[]): Promise<
 export const smokePassed = (outcome: SmokeOutcome) =>
   outcome.status === "pass" && outcome.coverage === "checked_supported";
 
-/**
- * Routes the Change added, from the contract Evidence output (`bun run contract` on the base,
- * then on the Candidate; verification-workflow.ts runContract). Empty when either table is absent.
- */
-export function addedRoutesFromContract(output: string): string[] {
+/** The base and Candidate route tables in contract Evidence output; null when one is absent. */
+function contractTables(output: string) {
   const marker = "\n$ bun run contract\n";
   const at = output.lastIndexOf(marker);
-  if (at < 0) return [];
+  if (at < 0) return { base: null, candidate: null };
   const table = (text: string) => {
     for (const raw of text.split(/\r?\n/).reverse()) {
       const line = raw.trim();
@@ -295,9 +350,25 @@ export function addedRoutesFromContract(output: string): string[] {
     }
     return null;
   };
-  const base = table(output.slice(0, at));
-  const candidate = table(output.slice(at + marker.length));
+  return { base: table(output.slice(0, at)), candidate: table(output.slice(at + marker.length)) };
+}
+
+/**
+ * Routes the Change added, from the contract Evidence output (`bun run contract` on the base,
+ * then on the Candidate; verification-workflow.ts runContract). Empty when either table is absent.
+ */
+export function addedRoutesFromContract(output: string): string[] {
+  const { base, candidate } = contractTables(output);
   if (!base || !candidate) return [];
   const before = new Set(base);
   return candidate.filter((r) => !before.has(r)).sort();
+}
+
+/**
+ * The Candidate's whole route table from the same output, sorted. Null when it is absent; a first
+ * Change on an empty repository has no base table but still has this one.
+ */
+export function routesFromContract(output: string): string[] | null {
+  const { candidate } = contractTables(output);
+  return candidate ? [...candidate].sort() : null;
 }

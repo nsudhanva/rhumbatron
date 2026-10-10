@@ -10,6 +10,8 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { type LoadedRelease, loadRelease, startRelease, transitionRelease } from "./release.ts";
 import {
+  ACME_SHOP_LIVE_PROBES,
+  addedRoutesFromContract,
   buildPhase,
   canTransition,
   classifySmoke,
@@ -19,6 +21,7 @@ import {
   POLL_DEADLINE_MS,
   pollDelaySeconds,
   releaseIdFor,
+  routesFromContract,
   smokePassed,
   smokeProbes,
   supersededBy,
@@ -195,27 +198,80 @@ describe("supersession when a newer generation is promoted mid-build", () => {
 });
 
 describe("a smoke failure never marks a release deployed (sections 34.4.1, 42.10)", () => {
-  const probes = smokeProbes(["GET /api/wishlists", "GET /api/wishlists/:id", "POST /api/x"]);
+  const routes = [
+    "GET /api/health",
+    "GET /api/wishlists",
+    "GET /api/wishlists/:id",
+    "GET /api/zebras",
+    "POST /api/x",
+  ];
+  const probes = smokeProbes({ routes, added: ["GET /api/wishlists/:id", "GET /api/wishlists"] });
+  const routerPage = (title: string) =>
+    `<html><head><title>${title}</title></head><body><h1>${title}</h1>
+<p><a href="https://rhumbatron.com">Rhumbatron</a></p></body></html>`;
 
-  it("probes the shell, the products API, and only static GET routes the Change added", () => {
-    expect(probes.map((p) => p.path)).toEqual(["/", "/api/products", "/api/wishlists"]);
+  it("probes the home page and up to 3 static GET routes of the app, added routes first", () => {
+    expect(probes.map((p) => p.path)).toEqual([
+      "/",
+      "/api/wishlists",
+      "/api/health",
+      "/api/zebras",
+    ]);
+    expect(probes.every((p) => !p.headers)).toBe(true);
   });
 
-  it("a missing feature route (404) fails the smoke check", () => {
+  it("without a route table only the home page is probed", () => {
+    expect(smokeProbes().map((p) => p.path)).toEqual(["/"]);
+    expect(smokeProbes({ routes: null, added: [] }).map((p) => p.path)).toEqual(["/"]);
+  });
+
+  it("the dev Acme Shop target keeps its products API probe, never probed twice", () => {
+    const acme = smokeProbes({ routes: ["GET /api/products"], fixed: ACME_SHOP_LIVE_PROBES });
+    expect(acme.map((p) => `${p.path} ${p.expect}`)).toEqual(["/ page", "/api/products json"]);
+    expect(judgeProbe(acme[1] as never, 200, "<html>").ok).toBe(false);
+    expect(judgeProbe(acme[1] as never, 200, '{"products":[]}').ok).toBe(true);
+  });
+
+  it("the home page passes on 2xx or 3xx, never on a router status page", () => {
+    const home = probes[0] as never;
+    expect(judgeProbe(home, 200, "<html><title>Wishlists</title>").ok).toBe(true);
+    expect(judgeProbe(home, 302, "").ok).toBe(true);
+    expect(judgeProbe(home, 404, "Not Found").ok).toBe(false);
+    expect(judgeProbe(home, 200, routerPage("Nothing built yet")).ok).toBe(false);
+    expect(judgeProbe(home, 503, routerPage("Building")).ok).toBe(false);
+    // An app page that only shares a title with the router is still the app.
+    expect(judgeProbe(home, 200, "<title>Building</title>").ok).toBe(true);
+  });
+
+  it("a missing app route (404) fails the smoke check", () => {
     const results = [
       judgeProbe(probes[0] as never, 200, "<html>"),
-      judgeProbe(probes[1] as never, 200, '{"products":[]}'),
-      judgeProbe(probes[2] as never, 404, "Not Found"),
+      judgeProbe(probes[1] as never, 404, "Not Found"),
     ];
     const outcome = classifySmoke(results);
     expect(outcome.status).toBe("fail");
     expect(smokePassed(outcome)).toBe(false);
   });
 
-  it("401 and 403 prove a feature route exists; a non-JSON products body fails", () => {
-    expect(judgeProbe(probes[2] as never, 401, "").ok).toBe(true);
-    expect(judgeProbe(probes[2] as never, 403, "").ok).toBe(true);
-    expect(judgeProbe(probes[1] as never, 200, "<html>").ok).toBe(false);
+  it("401 and 403 prove an app route exists", () => {
+    expect(judgeProbe(probes[1] as never, 401, "").ok).toBe(true);
+    expect(judgeProbe(probes[1] as never, 403, "").ok).toBe(true);
+  });
+
+  it("reads the route table from contract Evidence, with or without a base table", () => {
+    const output = [
+      "$ CONTRACT_ROOT=<base 0123456789ab> bun run contract",
+      '{"routes":["GET /api/health"]}',
+      "$ bun run contract",
+      '{"routes":["GET /api/wishlists","GET /api/health"]}',
+      'declared: ["GET /api/wishlists"]',
+    ].join("\n");
+    expect(routesFromContract(output)).toEqual(["GET /api/health", "GET /api/wishlists"]);
+    expect(addedRoutesFromContract(output)).toEqual(["GET /api/wishlists"]);
+    const firstChange = output.replace('{"routes":["GET /api/health"]}', "error: no src/app.ts");
+    expect(routesFromContract(firstChange)).toEqual(["GET /api/health", "GET /api/wishlists"]);
+    expect(addedRoutesFromContract(firstChange)).toEqual([]);
+    expect(routesFromContract("no contract ran")).toBeNull();
   });
 
   it("a probe with no response is a gap, never a pass", () => {
@@ -229,7 +285,7 @@ describe("a smoke failure never marks a release deployed (sections 34.4.1, 42.10
   });
 
   it("the injected probe of a missing route fails against a healthy app", () => {
-    const withInjected = smokeProbes([], "/__rhumbatron/injected-missing-route");
+    const withInjected = smokeProbes({}, "/__rhumbatron/injected-missing-route");
     const results = withInjected.map((p) =>
       p.path === "/__rhumbatron/injected-missing-route"
         ? judgeProbe(p, 404, "Not Found")

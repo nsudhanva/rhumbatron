@@ -5,12 +5,17 @@
  * Reads the release Project's latest release row through the API (as the Clerk smoke user of that
  * environment's Clerk instance: Keychain `rhumbatron-clerk-secret-key-<env>` and
  * `rhumbatron-clerk-smoke-user-id-<env>`; prod uses the Clerk production instance) and probes its release URL with the same probes the
- * ReleaseWorkflow runs: the app shell and the products API. Read-only: no row is written, no build
+ * ReleaseWorkflow runs for this target: the home page and the products API. Read-only: no row is written, no build
  * starts. The Project defaults to the smoke user's `acme-shop-live` (created by `bun run demo:live`).
  */
 
 import { $ } from "bun";
-import { classifySmoke, runProbes, smokeProbes } from "../workers/integration/src/release-model.ts";
+import {
+  ACME_SHOP_LIVE_PROBES,
+  classifySmoke,
+  runProbes,
+  smokeProbes,
+} from "../workers/integration/src/release-model.ts";
 import { connect } from "./inject/client.ts";
 
 const apis: Record<string, string> = {
@@ -78,7 +83,7 @@ try {
     report("release smoke Evidence recorded", !!latest?.evidenceId, latest?.evidenceId ?? "");
 
     if (target) {
-      const results = await runProbes(target.url, smokeProbes([]));
+      const results = await runProbes(target.url, smokeProbes({ fixed: ACME_SHOP_LIVE_PROBES }));
       for (const r of results)
         report(`release ${r.probe.name}`, r.ok, `GET ${r.probe.path} -> ${r.detail}`);
       const outcome = classifySmoke(results);

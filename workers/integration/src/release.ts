@@ -9,12 +9,14 @@ import { hasLiveApp, probeApp, productionRow } from "./app-release.ts";
 import { changeAfterRelease, releaseRecovery } from "./change-status.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import {
+  ACME_SHOP_LIVE_PROBES,
   addedRoutesFromContract,
   classifySmoke,
   fromStatuses,
   type ProbeResult,
   releaseCheckId,
   releaseIdFor,
+  routesFromContract,
   runProbes,
   type SmokeOutcome,
   smokePassed,
@@ -547,17 +549,25 @@ export async function cloudflareGet(env: Env, path: string): Promise<unknown> {
 /* Smoke check and release Evidence                                                            */
 /* ------------------------------------------------------------------------------------------ */
 
-/** Routes the promoted Candidate added, from its contract Evidence. Empty when there is none. */
-async function addedRoutes(env: Env, candidateId: string): Promise<string[]> {
+/**
+ * The promoted Candidate's route table and the routes its Change added, from its contract
+ * Evidence. Null routes when there is no contract Evidence (for example a rollback Candidate).
+ */
+async function routeTable(
+  env: Env,
+  candidateId: string,
+): Promise<{ routes: string[] | null; added: string[] }> {
   const row = await env.DB.prepare(
     `SELECT r2_key FROM evidence_index WHERE candidate_id = ? AND kind = 'contract'
      ORDER BY created_at DESC LIMIT 1`,
   )
     .bind(candidateId)
     .first<{ r2_key: string | null }>();
-  if (!row?.r2_key) return [];
+  if (!row?.r2_key) return { routes: null, added: [] };
   const stdout = await env.EVIDENCE.get(row.r2_key.replace(/report\.json$/, "stdout.txt"));
-  return stdout ? addedRoutesFromContract(await stdout.text()) : [];
+  if (!stdout) return { routes: null, added: [] };
+  const output = await stdout.text();
+  return { routes: routesFromContract(output), added: addedRoutesFromContract(output) };
 }
 
 async function sha256(text: string) {
@@ -689,8 +699,13 @@ export async function smokeRelease(
 ) {
   const startedAt = new Date().toISOString();
   const url = loaded.target?.url;
+  // Live apps get generic probes from their own route table; the dev Workers Builds target is
+  // the Acme Shop, which also keeps its products API probe.
   const probes = smokeProbes(
-    await addedRoutes(env, loaded.release.candidate_id),
+    {
+      ...(await routeTable(env, loaded.release.candidate_id)),
+      fixed: loaded.app ? [] : ACME_SHOP_LIVE_PROBES,
+    },
     options.injectedPath,
   );
   // A live app is probed through the apps router (no public route needed); else the release URL.
