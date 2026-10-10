@@ -17,12 +17,12 @@ import {
   RiskTier,
   VerificationPlan,
 } from "@rhumbatron/protocol";
-import { DEFAULT_POLICY } from "./candidate-composer.ts";
 import { candidateFork } from "./candidate-sandbox.ts";
 import { syncCanonicalSource } from "./canonical-source.ts";
 import { changeAfterPromotion, PROMOTABLE_FROM } from "./change-status.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
+import { loadProjectPolicy } from "./policy.ts";
 import { changeEndedEvent, hasReleaseTarget, startRelease } from "./release.ts";
 
 /**
@@ -321,13 +321,15 @@ export async function promoteCandidate(
   }
 
   const root = projectRoot(env, row.project_id);
-  const [canonical, evidence, approval, present] = await Promise.all([
+  const [canonical, evidence, approval, present, policy] = await Promise.all([
     root.getCanonical(),
     env.DB.prepare("SELECT * FROM evidence_index WHERE candidate_id = ?")
       .bind(row.id)
       .all<EvidenceRow>(),
     loadApproval(env, row.id),
     artifactPresent(env, row),
+    // Stored policy through the KV snapshot; DEFAULT_POLICY without a row. It can only add a gate.
+    loadProjectPolicy(env, row.project_id),
   ]);
   if (!canonical || canonical.artifactRef === "unassigned") {
     throw new Error(`Project ${row.project_id} has no canonical source`);
@@ -347,7 +349,7 @@ export async function promoteCandidate(
       plan,
     },
     riskTier: riskOf(row),
-    policy: DEFAULT_POLICY,
+    policy,
     evidence: (evidence.results ?? []).map(toRecord),
     approval: approval ? toApprovalRecord(approval) : null,
     canonical: { generation: canonical.generation, policyVersion: canonical.policyVersion },
@@ -488,7 +490,9 @@ export async function decideApproval(
   const plan = planOf(row);
   const check = checkApprovalDecision({
     candidateStatus: row.status,
-    required: plan ? approvalRequired(plan, riskOf(row), DEFAULT_POLICY) : false,
+    required: plan
+      ? approvalRequired(plan, riskOf(row), await loadProjectPolicy(env, row.project_id))
+      : false,
     existing: existing ? toApprovalRecord(existing) : null,
     decision: input.decision,
     approverId: input.approverUserId,
