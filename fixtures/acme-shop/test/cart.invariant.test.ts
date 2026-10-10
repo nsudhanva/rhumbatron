@@ -68,10 +68,10 @@ describe("cart routes", () => {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
-  test("requires a known user", async () => {
+  test("rejects an unknown user; no identity is the demo user", async () => {
     const app = createApp(createStore());
-    expect((await app.request("/api/cart")).status).toBe(401);
     expect((await send(app, "mallory", "GET", "/api/cart")).status).toBe(401);
+    expect((await app.request("/api/cart")).status).toBe(200);
   });
 
   test("add, update, remove, and totals over HTTP", async () => {

@@ -20,9 +20,15 @@ test("product detail and unknown product", async () => {
   expect((await app.request("/api/products/nope", { headers })).status).toBe(404);
 });
 
-test("missing or unknown user is rejected", async () => {
-  expect((await app.request("/api/products")).status).toBe(401);
+test("no identity means the demo user; an unknown user is rejected", async () => {
+  expect((await app.request("/api/products")).status).toBe(200);
+  expect((await app.request("/api/cart", { headers: { cookie: "acme_user=bob" } })).status).toBe(
+    200,
+  );
   expect((await app.request("/api/products", { headers: { "x-user-id": "mallory" } })).status).toBe(
     401,
   );
+  expect(
+    (await app.request("/api/products", { headers: { cookie: "acme_user=mallory" } })).status,
+  ).toBe(401);
 });

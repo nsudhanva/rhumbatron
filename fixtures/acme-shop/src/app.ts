@@ -16,7 +16,7 @@ export function createApp(store: Store) {
   const lookup = (id: string) => store.products.get(id);
 
   app.use("/api/*", async (c, next) => {
-    const user = resolveUser(c.req.header("x-user-id"));
+    const user = resolveUser(c.req.header("x-user-id"), c.req.header("cookie"));
     if (!user) return c.json({ error: "unauthorized" }, 401);
     c.set("user", user);
     await next();

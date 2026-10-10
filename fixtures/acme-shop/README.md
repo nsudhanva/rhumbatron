@@ -4,7 +4,7 @@ Demo codebase that Rhumbatron agents change (AGENTS.md section 54). Bun + Hono, 
 
 - Catalog: `GET /api/products`, `GET /api/products/:id`
 - Cart: `GET /api/cart`, `POST /api/cart/items`, `PATCH /api/cart/items/:productId`, `DELETE /api/cart/items/:productId`
-- Identity fixture: header `x-user-id` with `alice`, `bob`, or `carol`
+- Identity fixture: fake, no real login. Header `x-user-id` or cookie `acme_user` with `alice`, `bob`, or `carol`; with neither, the demo user `alice`
 
 ```sh
 bun install
