@@ -1,6 +1,8 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { resolveDeadLetter } from "@rhumbatron/integration/dead-letters";
+import type { GoalSuggestions } from "@rhumbatron/protocol";
 import { type SandboxSmokeResult, sandboxSmoke } from "./sandbox-smoke.ts";
+import { suggestGoals } from "./suggestions.ts";
 import { handleWake } from "./wake-consumer.ts";
 
 export { AgentDO } from "./agent-do.ts";
@@ -21,6 +23,11 @@ export default class Agents extends WorkerEntrypoint<Env> {
   /** Service-binding RPC for the API's Sandbox smoke check (no model calls). */
   async sandboxSmoke(projectId: string): Promise<SandboxSmokeResult> {
     return sandboxSmoke(this.env, projectId);
+  }
+
+  /** Goal suggestion pills for the API (cached per Canonical Generation, daily-capped Clef). */
+  async goalSuggestions(projectId: string): Promise<GoalSuggestions> {
+    return suggestGoals(this.env, projectId);
   }
 
   override async queue(batch: MessageBatch): Promise<void> {

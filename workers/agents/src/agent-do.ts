@@ -154,6 +154,14 @@ const PI_RESERVE_PROMPT_TOKENS = 40_000;
 const piCallReserveUsd = (tier: ModelTier) =>
   reserveEstimateUsd(TIER_MODELS[tier], tierLimits(tier).maxTokens, PI_RESERVE_PROMPT_TOKENS);
 
+/**
+ * Tool answer when the Project has no canonical source. Every Project gets an empty repository at
+ * creation, so this means provisioning has not finished, or the Project predates empty
+ * repositories (its owner can create one from the Project page).
+ */
+const NO_SOURCE =
+  'No source repository for this Project yet, so no file can be read or written. Stop and report that the Project needs its repository: "Create repository" on the Project page creates it.';
+
 export class AgentDO extends Agent<Env> implements AgentRuntime {
   private readonly registry = createRegistry();
   private prompt = "";
@@ -1473,7 +1481,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   /** Opens the run's workspace on first use. A string explains why there is none (no source, Task kind, or a Sandbox limit). */
   private async workspace(): Promise<WorkspaceRef | string> {
     const source = this.runSource();
-    if (!source) return "No source repository for this Project yet.";
+    if (!source) return NO_SOURCE;
     const input = JSON.parse(source.run.input_json) as {
       taskKind?: string;
       taskId: string;
@@ -1601,7 +1609,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   /** Canonical files plus files the stacked dependency ChangeSets added or changed. */
   private async listFiles(prefix?: string): Promise<string> {
     const source = this.runSource();
-    if (!source) return "No source repository for this Project yet.";
+    if (!source) return NO_SOURCE;
     const all = [...new Set([...source.files, ...source.stack.flatMap((s) => s.files)])].sort();
     const files = all.filter((f) => !prefix || f.startsWith(prefix.replace(/^\.?\//, "")));
     return files.join("\n") || "No files match.";
@@ -1610,7 +1618,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   /** Reads one file at the run's canonical commit. Capped per run to protect Artifacts operations. */
   private async readSourceFile(path: string): Promise<string> {
     const source = this.runSource();
-    if (!source) return "No source repository for this Project yet.";
+    if (!source) return NO_SOURCE;
     let ws = this.workspaceRef(source.run.run_id);
     // A stacked coding Task reads the merged workspace, which holds its dependencies' changes.
     if (!ws && source.stack.length > 0 && WORKSPACE_KINDS.has(source.taskKind)) {

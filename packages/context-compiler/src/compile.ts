@@ -1,4 +1,4 @@
-import type { ContextItem, ContextPacket } from "@rhumbatron/protocol";
+import { APP_CONVENTIONS, type ContextItem, type ContextPacket } from "@rhumbatron/protocol";
 import type { Retrieval, RetrievedFile } from "./retrieval.ts";
 
 /**
@@ -84,8 +84,9 @@ export type CompileInput = {
    */
   retrieval?: Retrieval | null;
   /**
-   * The Project is a live app (ADR 0020): generated apps never get a real login. Adds the fake
-   * identity rule to the packet as a required policy item.
+   * The Project is a live app (ADR 0020): adds the app conventions (Worker shape, scripts, fake
+   * identity only) to the packet as a required policy item. Projects start from an empty
+   * repository, so the conventions are instructions, not template files.
    */
   appRules?: boolean;
   allowedTools: string[];
@@ -93,10 +94,6 @@ export type CompileInput = {
   /** Hard ceiling for the rendered items. Lower-priority items are dropped first. */
   maxTokens: number;
 };
-
-/** The live app identity rule (ADR 0020, docs/plans/phase-16-live-apps.md section 4.3). */
-const FAKE_IDENTITY_RULE =
-  "Use the fake identity module for any auth need. Never add real authentication or collect credentials.";
 
 /** Files listed per inherited ChangeSet; the rest are counted. */
 const MAX_INHERITED_FILES = 40;
@@ -137,14 +134,15 @@ export function compilePacket(input: CompileInput): ContextPacket {
       body: `Objective: ${task.objective}\n\nSemantic resources:\n${bullets(task.semanticResources)}\n\nAcceptance criteria:\n${bullets(task.acceptanceCriteria)}`,
     },
   ];
+  const emptyRepository = !!input.repository && !input.repository.files.includes("package.json");
   if (input.appRules) {
     required.push({
-      itemId: "policy:fake-identity",
+      itemId: "policy:app-conventions",
       source: "policy",
       sourceVersion: "adr-0020",
       capturedAt: now,
-      title: "Live app rule: fake identity only",
-      body: `${FAKE_IDENTITY_RULE} The app runs on a public host with no real login: accounts, sign-in, and roles are a demo user picker stored in a cookie on the app's own host (src/identity.ts in the template). No passwords, no email, no third-party auth SDKs; the build rejects them.`,
+      title: "Live app conventions (Rhumbatron builds, verifies and hosts this app)",
+      body: `${bullets(APP_CONVENTIONS)}\n\nVerification runs bun run typecheck, bun test and bun run contract on the result, so keep all three passing.${emptyRepository ? "\n\nThe repository is empty: create the app from nothing in this shape. Do not wait for files that do not exist." : ""}`,
     });
   }
   if (input.repository) {
