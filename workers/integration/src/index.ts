@@ -21,6 +21,7 @@ import { cleanupProject, forkRetentionDays, sweepForks } from "./project-cleanup
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
 import { injectReleaseFailure, recoverStuckRelease } from "./release.ts";
+import { startWorkflow, workflowStartFor } from "./workflow-commands.ts";
 
 export { ChangeWorkflow } from "./change-workflow.ts";
 export { ReleaseWorkflow } from "./release-workflow.ts";
@@ -62,6 +63,21 @@ async function handleCommand(
 ): Promise<"continue" | "wait" | undefined> {
   const command = AnyCommandEnvelope.safeParse(body);
   if (!command.success) return;
+  // Section 20: `verification.start` and `release.start` from their own Queues (HOM-202). The
+  // instance ID is the command's idempotency key, so a redelivery finds the running instance.
+  const start = workflowStartFor(command.data);
+  if (start) {
+    const result = await startWorkflow(env, start);
+    console.warn(
+      JSON.stringify({
+        event: "workflow.start",
+        workflow: start.workflow,
+        id: start.instanceId,
+        result,
+      }),
+    );
+    return;
+  }
   if (command.data.commandType === "project.cleanup") {
     const result = await cleanupProject(env, command.data.projectId);
     console.warn(

@@ -26,13 +26,33 @@
     }
   ],
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
+  // Read-through Project policy snapshot (AGENTS.md section 53); D1 project_policies is the truth.
+  "kv_namespaces": [{ "binding": "CONFIG", "id": "local" }],
   "queues": {
-    "producers": [{ "binding": "AGENT_WAKEUPS", "queue": "rhumbatron-agent-wakeups-local" }],
+    "producers": [
+      { "binding": "AGENT_WAKEUPS", "queue": "rhumbatron-agent-wakeups-local" },
+      // AGENTS.md section 20: Workflow start commands. This Worker produces and consumes them.
+      { "binding": "VERIFICATION_COMMANDS", "queue": "rhumbatron-verification-local" },
+      { "binding": "RELEASE_COMMANDS", "queue": "rhumbatron-release-local" }
+    ],
     // `change.dispatch` and `candidate.create` from the Causal Router, `project.provision` from the API.
     "consumers": [
       {
         "queue": "rhumbatron-integration-local",
         "max_batch_size": 10,
+        "max_retries": 3,
+        "dead_letter_queue": "rhumbatron-dead-letter-local"
+      },
+      // `verification.start` and `release.start`: instance ID = the command's idempotency key.
+      {
+        "queue": "rhumbatron-verification-local",
+        "max_batch_size": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "rhumbatron-dead-letter-local"
+      },
+      {
+        "queue": "rhumbatron-release-local",
+        "max_batch_size": 5,
         "max_retries": 3,
         "dead_letter_queue": "rhumbatron-dead-letter-local"
       }

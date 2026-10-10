@@ -19,6 +19,7 @@ import {
   smokePassed,
   smokeProbes,
 } from "./release-model.ts";
+import { releaseCommand, requestWorkflowStart } from "./workflow-commands.ts";
 
 /**
  * Release registry and its side effects (AGENTS.md sections 21.3, 37, 42.10, 60; ADR 0018).
@@ -196,13 +197,12 @@ export async function startRelease(
          RETURNING id, base_generation`,
       ).bind(now, input.projectId, input.generation),
     ]);
-    try {
-      await env.RELEASE_WORKFLOW.create({ id: releaseId, params: { releaseId } });
-    } catch (error) {
-      // Already started by an earlier promotion attempt: nothing to do.
-      const existing = await env.RELEASE_WORKFLOW.get(releaseId).catch(() => null);
-      if (!existing) throw error;
-    }
+    // Section 20: the start travels on the release Queue; the instance ID stays the release ID, so
+    // an earlier promotion attempt's instance is found, not duplicated. Direct start on send failure.
+    await requestWorkflowStart(
+      env,
+      releaseCommand(releaseId, { projectId: input.projectId, changeId: input.changeId }),
+    );
     await recordSupersededChanges(
       env,
       input,

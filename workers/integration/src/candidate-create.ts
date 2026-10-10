@@ -3,6 +3,11 @@ import { COMPOSITION_RULES_VERSION } from "@rhumbatron/evidence";
 import { ChangeSetIntent, MAX_TASKS_PER_CHANGE } from "@rhumbatron/protocol";
 import type { TaskEdge } from "./candidate-composer.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
+import {
+  requestWorkflowStart,
+  startWorkflowOnce,
+  verificationCommand,
+} from "./workflow-commands.ts";
 
 /**
  * Candidate creation (AGENTS.md sections 21.1 step 7, 32.4, 33, 44, 60). The one implementation
@@ -298,13 +303,7 @@ async function loadTaskDependencies(env: Env, changeId: string): Promise<TaskEdg
  * repeat finds the existing instance; the workflow itself ignores a Candidate in a final state.
  */
 export async function startCandidateVerification(env: Env, candidateId: string) {
-  try {
-    await env.CANDIDATE_WORKFLOW.create({ id: candidateId, params: { candidateId } });
-  } catch (error) {
-    // Already started by an earlier request or delivery: nothing to do. Anything else throws.
-    const existing = await env.CANDIDATE_WORKFLOW.get(candidateId).catch(() => null);
-    if (!existing) throw error;
-  }
+  await startWorkflowOnce(env.CANDIDATE_WORKFLOW, candidateId, { candidateId });
 }
 
 /**
@@ -381,7 +380,11 @@ async function insertCandidate(
       { key: candidateId, actor: ACTOR },
     ),
   ]);
-  await startCandidateVerification(env, candidateId);
+  // Section 20: the start travels on the verification Queue (same instance ID; direct on failure).
+  await requestWorkflowStart(
+    env,
+    verificationCommand(candidateId, { projectId: change.project_id, changeId: change.id }),
+  );
   return { status: created ? "created" : "existing", candidateId, changeSetIds: sorted };
 }
 
