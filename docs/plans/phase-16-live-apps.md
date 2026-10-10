@@ -71,7 +71,7 @@ Answer to "is the Workers plan enough for one extra demo app": yes. It is enough
 
 ```mermaid
 flowchart LR
-  user[User browser] -->|acme.APPS_DOMAIN| router[rhumbatron-apps Worker]
+  user[User browser] -->|acme.rhumbatron.com| router[rhumbatron-apps Worker]
   router -->|host to project, version| d1[(D1 app_deployments)]
   router -->|LOADER.get project@commit| dyn[Dynamic Worker: the app]
   dyn -->|env.ASSETS| assets[Asset binding: R2 or KV]
@@ -90,7 +90,7 @@ sequenceDiagram
   V->>S: build bundle (worker-bundler) for Candidate commit
   S->>R2: put apps/project/commit/ (modules, manifest, assets)
   V->>D: preview row: cand-id -> commit
-  Note over A: preview live at cand-id--slug.APPS_DOMAIN
+  Note over A: preview live at cand-id--slug.rhumbatron.com
   P->>P: promotion CAS S(n) -> S(n+1)
   P->>D: production row: slug -> commit of S(n+1)
   Note over A: next request loads the new version
@@ -107,23 +107,35 @@ sequenceDiagram
 | Code service (API) | Routes in `workers/api` | File tree, file content, ChangeSet diff, Candidate diff, version history. |
 | Code viewer (web) | Pages in `apps/web` | File browser, file view, diffs, history. Built in the existing design. |
 
-### 4.2 Domain
+### 4.2 Domain (decided 2026-10-10)
 
-Apps run code that agents wrote, so they must not share cookies with rhumbatron.com. The Clerk production session lives on rhumbatron.com.
+Apps run on subdomains of rhumbatron.com. No new zone.
 
-| Option | Cookie isolation | Cost | Notes |
-|---|---|---|---|
-| **A. Separate zone**, for example `rhumbatron.app` | Full | About $10 to $15 per year for registration | Recommended. Universal SSL covers `*.rhumbatron.app`. Terraform owns the zone, DNS and Worker route. |
-| B. `<slug>.rhumbatron.com` | Weak: Clerk cookies on the parent domain are readable by app pages | None | Not recommended. |
-| C. `apps.<workers.dev>/<slug>/` (path based) | Good | None | The app must handle a path prefix. Absolute paths like `/api/...` break. Good only as a stopgap. |
+| Environment | Production | Preview |
+|---|---|---|
+| prod | `<slug>.rhumbatron.com` | `<candidate-short-id>--<slug>.rhumbatron.com` |
+| dev | `<slug>-dev.rhumbatron.com` | `<candidate-short-id>--<slug>-dev.rhumbatron.com` |
 
-**Decision needed (D1):** register a separate zone (A), or use the stopgap (C) for the demo.
+- All hosts are one level deep, so Universal SSL (`*.rhumbatron.com`) covers them. A two-level host such as `x.apps.rhumbatron.com` would need a paid certificate.
+- Terraform adds a proxied wildcard DNS record `*` and a Worker route per environment. Explicit records keep priority: Workers custom domains (`dev`, `api`, `api-dev`, `www`, the apex) win over routes, and the Clerk CNAMEs (`clerk`, `accounts`, `clkmail`, DKIM) are DNS-only, so no route touches them.
+- P16-02 must verify that a route pattern such as `*-dev.rhumbatron.com/*` can send dev hosts to the dev router while `*.rhumbatron.com/*` goes to prod. If it cannot, dev uses a path-based host on its workers.dev URL.
+- Slugs that clash with Rhumbatron hosts are reserved: `www`, `api`, `dev`, `api-dev`, `clerk`, `accounts`, `clkmail`, and anything ending in `-dev` for prod.
 
-Host format with option A:
+Cookie safety without a separate zone. The router is the only path in and out of an app:
 
-- Production: `<slug>.rhumbatron.app`
-- Preview: `<candidate-short-id>--<slug>.rhumbatron.app`
-- Dev environment: `<slug>.dev.rhumbatron.app`, or a second zone.
+1. It removes the `Cookie` header from every request before the app sees it, except for cookies that the app set for its own host.
+2. It drops any `Set-Cookie` from the app that names a `Domain` attribute, so an app cannot set cookies for rhumbatron.com or other apps.
+3. P16-05 checks that the Clerk session cookie (`__session`) on rhumbatron.com is host-only. It must not be readable from app subdomains. The `__client` cookie lives on `clerk.rhumbatron.com` and is HttpOnly.
+
+### 4.3 Apps have no real login
+
+Generated apps do not use Clerk or any real identity provider.
+
+- The app is open: anyone with the URL can use it.
+- If an instruction asks for accounts, sign-in or roles, agents build a **fake identity**: a demo user picker, or a "Sign in as Alice / Bob" switch, stored in a cookie on the app's own host. No passwords, no email, no third-party auth.
+- The Acme template already has a fixture identity (`src/identity.ts`). P16-08 makes it default to a demo user, so the shop works in a browser without a header. Today `/api/products` returns 401 without the test identity.
+- The context compiler adds this rule to every Task for an app Project: "Use the fake identity module for any auth need. Never add real authentication or collect credentials."
+- A verification check flags an app bundle that references real auth SDKs or password fields (a static check, P16-05).
 
 ## 5. User flows
 
@@ -132,7 +144,7 @@ Host format with option A:
 1. User creates a Project from a template (Acme Shop today; "empty Worker app" later).
 2. Rhumbatron provisions the Artifacts repo (exists today).
 3. A new `app.provision` command builds the S0 bundle and writes the production row.
-4. The Project overview shows "Live at acme.rhumbatron.app" with an **Open app** link.
+4. The Project overview shows "Live at acme.rhumbatron.com" with an **Open app** link.
 
 ### 5.2 Instruction to live feature
 
@@ -177,14 +189,14 @@ Each task is small and verifiable. The model column follows AGENTS.md section 22
 
 | ID | Task | Model | Acceptance |
 |---|---|---|---|
-| P16-01 | ADR 0020: live apps on Dynamic Workers, domain choice, data model, security | Opus | ADR merged; decision D1 recorded |
-| P16-02 | Terraform: apps zone or route, wildcard DNS, R2 prefix lifecycle, D1 migration `app_deployments` | Sonnet | Plan shows only these; no drift after apply |
+| P16-01 | ADR 0020: live apps on Dynamic Workers, rhumbatron.com subdomains, cookie isolation, fake identity, data model | Opus | ADR merged |
+| P16-02 | Terraform: wildcard DNS record, Worker routes per environment (verify `*-dev` pattern), R2 prefix lifecycle, D1 migration `app_deployments` | Sonnet | Plan shows only these; no drift after apply; existing hosts unaffected |
 | P16-03 | Terraform adapter for the `workers/apps` deploy: provider 5.27 has no `worker_loader` binding type; same pattern as `sandbox-deploy.ts` | Sonnet | `terraform apply` deploys it; re-run is a no-op |
 | P16-04 | `workers/apps` router: host parse, pointer lookup (cached), `LOADER.get(project@commit)`, 404, 410 and "building" pages | Sonnet | Unit tests for host parsing; live request serves S0 |
-| P16-05 | Security defaults: `globalOutbound: null`, CPU and subrequest limits, no Rhumbatron bindings, response header hardening | Opus review | Test app cannot fetch the Internet; limit hit returns 503 |
+| P16-05 | Security defaults: `globalOutbound: null`, CPU and subrequest limits, no Rhumbatron bindings, Cookie strip and `Set-Cookie` Domain drop, Clerk cookie host-only check, real-auth static check | Opus review | Test app cannot fetch the Internet, cannot read or set rhumbatron.com cookies; limit hit returns 503 |
 | P16-06 | Bundle builder: Sandbox step with `@cloudflare/worker-bundler`, upload modules, manifest and assets to R2, content-addressed | Sonnet | Bundle for Acme S0 is stored and loads |
 | P16-07 | Static assets: asset binding passed to the app (per the Dynamic Workers static assets guide) | Sonnet | Acme `public/` files serve from the app host |
-| P16-08 | `app.provision` command on Project create; Project overview shows "Live at …" and **Open app** | Sonnet | New Project is live in under 2 minutes |
+| P16-08 | `app.provision` command on Project create; Acme fake identity defaults to a demo user; Project overview shows "Live at …" and **Open app** | Sonnet | New Project is live in under 2 minutes and works in a browser with no login |
 | P16-09 | Per-app storage through Durable Object facets (`AppHostDO`). Acme keeps its in-memory store for the demo. | Opus design, Sonnet | Facet data survives an isolate restart |
 
 ### Milestone P16-B: Previews, promotion and rollback
@@ -233,7 +245,7 @@ Streams A/B and C can run in parallel with separate file ownership. C touches `w
 
 ## 7. Demo script (target)
 
-1. Create Project "Acme Shop". It is live at `acme.rhumbatron.app` in under 2 minutes.
+1. Create Project "Acme Shop". It is live at `acme.rhumbatron.com` in under 2 minutes.
 2. Open the Code tab. Show `src/catalog.ts`.
 3. Give 5 instructions at once. Two collide on purpose (wishlist and cart sharing).
 4. Show agents working, the conflict card, and two Candidates with two live previews.
@@ -252,23 +264,30 @@ Streams A/B and C can run in parallel with separate file ownership. C touches `w
 | Requests and CPU | Small | Per-app CPU limit; existing Workers meters |
 | Sandbox build time | About 30 to 60 seconds per bundle | Reuse the verification Sandbox session; existing 5 h per month cap |
 | R2 bundle storage | Under 100 MB | Lifecycle rule for previews |
-| Domain | About $10 to $15 per year if option A | Needs your approval |
+| Domain | None (rhumbatron.com subdomains, Universal SSL) | — |
 | Model spend | Unchanged per Change | Existing caps |
 
 ## 9. Risks
 
 | Risk | Mitigation |
 |---|---|
-| Agent-written app reads Rhumbatron cookies | Separate zone (decision D1) |
+| Agent-written app reads or sets Rhumbatron cookies | Router strips `Cookie` and drops `Set-Cookie` with a `Domain`; Clerk session host-only check (P16-05) |
+| An instruction asks for real login | Fake identity rule in every Task; static check fails real auth SDKs |
 | App code runs too long or loops | Dynamic Worker CPU limits; `globalOutbound: null` |
 | Terraform provider lacks the `worker_loader` binding | Adapter (P16-03) under section 11.4, with an ADR; replace when the provider adds it |
 | Bundling fails for an app that is not Worker-shaped | Templates are Worker-shaped; the check fails with a clear message, never a silent pass |
 | Dynamic Worker eviction adds cold-start latency | Stable ids per commit; bundle in R2 near the router |
 | Rollback to a version whose data schema differs | Facet data is per app, not per version; rollback warns when a migration ran in between (follow-up) |
 
-## 10. Decisions needed before building
+## 10. Decisions
 
-- **D1, domain:** separate zone such as `rhumbatron.app` (recommended; about $10 to $15 per year), or the path-based stopgap on workers.dev.
-- **D2, edit in v1:** yes (P16-19 in this phase), or view only first.
-- **D3, Workers Builds path:** retire it (one deploy path), or keep it for Acme Shop Live.
+Decided 2026-10-10:
+
+- **Domain:** subdomains of rhumbatron.com (section 4.2).
+- **Login:** generated apps have no real login; a fake identity when asked (section 4.3).
+
+Still open:
+
+- **D2, edit in v1:** yes (P16-19 in this phase), or view only first. Default in this plan: yes.
+- **D3, Workers Builds path:** retire it (one deploy path), or keep it for Acme Shop Live. Default: retire after P16-11 works.
 - **D4, tracking:** load this plan into Linear as milestone "P16 Live Apps" with one issue per task.
