@@ -1,0 +1,109 @@
+{
+  "entries": [
+    {
+      "worker": "apps/web",
+      "side": "terraform-only",
+      "names": ["CLERK_SECRET_KEY", "VITE_CLERK_PUBLISHABLE_KEY"],
+      "reason": "Secret: Terraform uploads it as secret_text; never in a committed wrangler.jsonc (supply via .dev.vars locally). The publishable key is a build-time value."
+    },
+    {
+      "worker": "apps/web",
+      "side": "terraform-only",
+      "names": ["CLERK_SIGN_IN_URL", "CLERK_SIGN_UP_URL"],
+      "reason": "Runtime variable set only by Terraform (environment config travels in bindings); local code uses its default."
+    },
+    {
+      "worker": "workers/coordinator",
+      "side": "terraform-only",
+      "names": ["EVENT_ROUTER"],
+      "reason": "Optional service binding that nudges the event router; code treats it as undefined locally (outbox.ts)."
+    },
+    {
+      "worker": "workers/integration",
+      "side": "terraform-only",
+      "names": ["ANTHROPIC_API_KEY", "BUILDS_API_TOKEN"],
+      "reason": "Secret: Terraform uploads it as secret_text; never in a committed wrangler.jsonc (supply via .dev.vars locally)."
+    },
+    {
+      "worker": "workers/integration",
+      "side": "terraform-only",
+      "names": ["ANTHROPIC_MONTHLY_BUDGET_USD", "BROWSER_DAILY_SECONDS", "SANDBOX_MONTHLY_SECONDS"],
+      "reason": "Per-environment cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
+    },
+    {
+      "worker": "workers/integration",
+      "side": "terraform-only",
+      "names": ["ALLOW_OPUS", "ANTHROPIC_WORKSPACE_ID", "BUILDS_ACCOUNT_ID", "MODEL_PROVIDER"],
+      "reason": "Runtime variable set only by Terraform (environment config travels in bindings); local code uses its default."
+    },
+    {
+      "worker": "workers/integration",
+      "envs": ["prod"],
+      "side": "terraform-only",
+      "names": ["APPS"],
+      "reason": "Service binding to the prod-only apps Worker (AppBuilder entrypoint); absent in dev and not emulated locally."
+    },
+    {
+      "worker": "workers/event-router",
+      "side": "terraform-only",
+      "names": ["K2_CONSUMER_TOKEN"],
+      "reason": "Secret: Terraform uploads it as secret_text; never in a committed wrangler.jsonc (supply via .dev.vars locally)."
+    },
+    {
+      "worker": "workers/agents",
+      "side": "terraform-only",
+      "names": ["ANTHROPIC_API_KEY"],
+      "reason": "Secret: Terraform uploads it as secret_text; never in a committed wrangler.jsonc (supply via .dev.vars locally)."
+    },
+    {
+      "worker": "workers/agents",
+      "side": "terraform-only",
+      "names": ["ANTHROPIC_MONTHLY_BUDGET_USD", "SANDBOX_MONTHLY_SECONDS"],
+      "reason": "Per-environment cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
+    },
+    {
+      "worker": "workers/agents",
+      "side": "terraform-only",
+      "names": ["ALLOW_OPUS", "ANTHROPIC_WORKSPACE_ID", "MODEL_PROVIDER"],
+      "reason": "Runtime variable set only by Terraform (environment config travels in bindings); local code uses its default."
+    },
+    {
+      "worker": "workers/agents",
+      "side": "wrangler-only",
+      "names": ["AGENT_FILES_IN_WORKER"],
+      "reason": "Opt-in test switch, off by default; remote Workers leave it unset, which means off (workspace.ts)."
+    },
+    {
+      "worker": "workers/api",
+      "side": "terraform-only",
+      "names": ["CLERK_SECRET_KEY"],
+      "reason": "Secret: Terraform uploads it as secret_text; never in a committed wrangler.jsonc (supply via .dev.vars locally)."
+    },
+    {
+      "worker": "workers/api",
+      "side": "terraform-only",
+      "names": ["ANTHROPIC_MONTHLY_BUDGET_USD", "SANDBOX_MONTHLY_SECONDS"],
+      "reason": "Per-environment cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
+    },
+    {
+      "worker": "workers/api",
+      "side": "terraform-only",
+      "names": ["FIXTURES_ENABLED"],
+      "reason": "Gate for demo fixture routes; Terraform sets it per environment, local environments enable fixtures by name (fixtures.ts)."
+    },
+    {
+      "worker": "workers/api",
+      "envs": ["prod"],
+      "side": "terraform-only",
+      "names": ["APPS_DOMAIN"],
+      "reason": "Prod-only wildcard apps routing: the API prints the 'Live at' line only when it is set (ADR 0020)."
+    }
+  ],
+  "notDeployed": [
+    {
+      "worker": "workers/apps",
+      "env": "dev",
+      "reason": "Prod-only apps router Worker (ADR 0020); dev has no apps Worker, route, or wildcard record."
+    }
+  ]
+}

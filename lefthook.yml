@@ -28,3 +28,5 @@ pre-push:
       run: bun run check:deps
     - name: terraform
       run: bun run tf:check
+    - name: bindings
+      run: bun run check:bindings

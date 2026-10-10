@@ -47,6 +47,9 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: Binding drift
+        run: bun run check:bindings
+
       - name: Typecheck
         run: bun run typecheck
 

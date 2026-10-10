@@ -23,6 +23,7 @@
     "cf:bundle": "bun scripts/build-workers.ts",
     "check": "bun run lint && bun run typecheck && bun run check:guardrails && bun run check:fixtures && bun run check:deps && bun run check:secrets && bun run tf:check",
     "check:guardrails": "bun scripts/check-guardrails.ts",
+    "check:bindings": "bun scripts/check-binding-drift.ts",
     "check:fixtures": "bun scripts/build-fixtures.ts --check",
     "check:deps": "knip && sherif",
     "check:secrets": "gitleaks git --redact --no-banner && gitleaks git --staged --redact --no-banner",
