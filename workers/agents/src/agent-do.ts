@@ -638,6 +638,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         files: s.files,
       })),
       retrieval,
+      // Every Project with source is a Worker app that prod serves live (ADR 0020).
+      appRules: !!source,
       allowedTools: !source
         ? ["complete_task", "fail_task"]
         : WORKSPACE_KINDS.has(task.kind)

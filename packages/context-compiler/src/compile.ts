@@ -83,11 +83,20 @@ export type CompileInput = {
    * resource owners, and Vectorize matches. Absent when the tree has no index yet.
    */
   retrieval?: Retrieval | null;
+  /**
+   * The Project is a live app (ADR 0020): generated apps never get a real login. Adds the fake
+   * identity rule to the packet as a required policy item.
+   */
+  appRules?: boolean;
   allowedTools: string[];
   budget: { maxModelCalls: number; budgetUsd: number };
   /** Hard ceiling for the rendered items. Lower-priority items are dropped first. */
   maxTokens: number;
 };
+
+/** The live app identity rule (ADR 0020, docs/plans/phase-16-live-apps.md section 4.3). */
+const FAKE_IDENTITY_RULE =
+  "Use the fake identity module for any auth need. Never add real authentication or collect credentials.";
 
 /** Files listed per inherited ChangeSet; the rest are counted. */
 const MAX_INHERITED_FILES = 40;
@@ -128,6 +137,16 @@ export function compilePacket(input: CompileInput): ContextPacket {
       body: `Objective: ${task.objective}\n\nSemantic resources:\n${bullets(task.semanticResources)}\n\nAcceptance criteria:\n${bullets(task.acceptanceCriteria)}`,
     },
   ];
+  if (input.appRules) {
+    required.push({
+      itemId: "policy:fake-identity",
+      source: "policy",
+      sourceVersion: "adr-0020",
+      capturedAt: now,
+      title: "Live app rule: fake identity only",
+      body: `${FAKE_IDENTITY_RULE} The app runs on a public host with no real login: accounts, sign-in, and roles are a demo user picker stored in a cookie on the app's own host (src/identity.ts in the template). No passwords, no email, no third-party auth SDKs; the build rejects them.`,
+    });
+  }
   if (input.repository) {
     const shown = input.repository.files.slice(0, 300);
     required.push({
