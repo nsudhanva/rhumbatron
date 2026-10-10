@@ -29,7 +29,7 @@ const CHANGE_LIMIT = 10;
 const RUN_LIMIT = 200;
 const CHANGESET_LIMIT = 200;
 const CANDIDATE_LIMIT = 60;
-/** Must match MAX_INDEXED_FILES in workers/integration/src/provision.ts. */
+/** Must match MAX_FILES in workers/integration/src/code-store.ts. */
 const MAX_INDEXED_FILES = 2000;
 /** Task kinds that open a Workspace fork (workers/integration/src/project-cleanup.ts). */
 const WORKSPACE_TASK_KINDS = ["implement", "migrate", "test"];
