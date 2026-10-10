@@ -8,7 +8,10 @@ import {
   gateRequiredChecks,
 } from "@rhumbatron/evidence";
 import {
+  type AppCheckResult,
   ChangeSetIntent,
+  CodeManifest,
+  codeManifestKey,
   type EventEnvelope,
   type EvidenceRecord,
   RiskTier,
@@ -43,10 +46,17 @@ import {
 } from "./candidate-sandbox.ts";
 import { CHANGE_CANCELLED_REASON, verificationHalt } from "./change-status.ts";
 import { classifyBrowser, classifySecurity } from "./check-semantics.ts";
+import { storeTreeCode } from "./code-store.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
 import { markCandidateStale, promoteCandidate } from "./promotion.ts";
 import { recomposeQuietly } from "./recompose.ts";
+import {
+  type CheckRunner,
+  evaluateAppCheckOutcome,
+  evaluateContractAppCheck,
+  isAppCheckerEligible,
+} from "./runner-selection.ts";
 
 /**
  * CandidateVerificationWorkflow (AGENTS.md sections 21.2, 33, 34). One instance per Candidate
@@ -467,6 +477,23 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
               { key: candidateId, actor: ACTOR },
             ),
           ]);
+          if (this.env.APPS) {
+            using candidateRepo = await this.env.ARTIFACTS.get(fork);
+            await storeTreeCode(this.env, candidateRepo, {
+              projectId: ctx.projectId,
+              commit,
+              treeSha: tree,
+              previousTreeSha: loaded.canonical?.treeSha,
+            });
+            if (loaded.canonical?.commit && loaded.canonical.treeSha) {
+              using baseRepo = await this.env.ARTIFACTS.get(ctx.projectId);
+              await storeTreeCode(this.env, baseRepo, {
+                projectId: ctx.projectId,
+                commit: loaded.canonical.commit,
+                treeSha: loaded.canonical.treeSha,
+              });
+            }
+          }
           return built;
         }),
       );
@@ -490,13 +517,29 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
               timeout: check.timeoutMs + 6 * 60_000,
             },
             () =>
-              this.guard(candidateId, () =>
-                check.kind === "contract"
+              this.guard(candidateId, async () => {
+                if (isAppCheckerEligible(check, Boolean(this.env.APPS))) {
+                  const tried = await this.tryAppChecker(
+                    ctx,
+                    candidateId,
+                    {
+                      fork,
+                      commit,
+                      tree,
+                      baseCommit,
+                      baseTreeSha: loaded.canonical?.treeSha ?? null,
+                    },
+                    declared,
+                    check,
+                  );
+                  if (tried.handled) return null;
+                }
+                return check.kind === "contract"
                   ? this.runContract(ctx, candidateId, { commit, baseCommit }, declared, check)
                   : check.kind === "browser"
                     ? this.runBrowser(ctx, candidateId, commit, check)
-                    : this.runCheck(ctx, candidateId, commit, check),
-              ),
+                    : this.runCheck(ctx, candidateId, commit, check);
+              }),
           );
           if (isHalt(at)) {
             halt = at;
@@ -517,6 +560,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
               startedAt: new Date().toISOString(),
               output: String(error),
               sourceRefs: [`artifacts://${fork}@${commit}`],
+              runner: "sandbox",
             });
             return null;
           });
@@ -711,6 +755,128 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     return halted ? { halted } : work();
   }
 
+  /**
+   * Attempts to run a build, unit, or contract check with AppChecker over the APPS service binding.
+   * Returns handled: true if the check ran and Evidence was recorded (no Sandbox started).
+   * Returns handled: false if AppChecker returned supported: false (falling back to Sandbox).
+   */
+  private async tryAppChecker(
+    ctx: ChangeContext,
+    candidateId: string,
+    source: {
+      fork: string;
+      commit: string;
+      tree: string;
+      baseCommit: string;
+      baseTreeSha: string | null;
+    },
+    declared: string[],
+    check: VerificationCheck,
+  ): Promise<{ handled: boolean }> {
+    if (!this.env.APPS?.check) return { handled: false };
+    const ref = `artifacts://${source.fork}@${source.commit}`;
+    const startedAt = new Date().toISOString();
+    const timeoutMs = Math.min(check.timeoutMs, 30_000);
+
+    if (check.kind === "contract") {
+      let candidateResult: AppCheckResult;
+      try {
+        candidateResult = await this.env.APPS.check({
+          projectId: ctx.projectId,
+          treeSha: source.tree,
+          kind: "contract",
+          timeoutMs,
+        });
+      } catch {
+        return { handled: false };
+      }
+      if (!candidateResult.supported) return { handled: false };
+
+      let baseResult: AppCheckResult | null = null;
+      if (source.baseTreeSha) {
+        let baseHasApp = false;
+        try {
+          const baseManifestKey = codeManifestKey(ctx.projectId, source.baseTreeSha);
+          const baseManifestObj = await this.env.EVIDENCE.get(baseManifestKey);
+          if (baseManifestObj) {
+            const parsed = CodeManifest.safeParse(await baseManifestObj.json().catch(() => null));
+            if (parsed.success) {
+              baseHasApp = parsed.data.entries.some((e) => e.path === "package.json");
+            }
+          }
+        } catch {
+          baseHasApp = false;
+        }
+
+        if (baseHasApp) {
+          try {
+            baseResult = await this.env.APPS.check({
+              projectId: ctx.projectId,
+              treeSha: source.baseTreeSha,
+              kind: "contract",
+              timeoutMs,
+            });
+          } catch {
+            return { handled: false };
+          }
+          if (!baseResult.supported) return { handled: false };
+        }
+      }
+
+      const disposition = evaluateContractAppCheck(candidateResult, baseResult, declared);
+      if (!disposition.handled) return { handled: false };
+
+      await this.recordEvidence(ctx, candidateId, {
+        checkId: check.checkId,
+        kind: check.kind,
+        outcome: disposition.outcome,
+        startedAt,
+        completedAt: candidateResult.completedAt || new Date().toISOString(),
+        output: [
+          `$ CONTRACT_ROOT=<base ${source.baseCommit.slice(0, 12)}> [dynamic-worker] contract`,
+          baseResult?.output ?? "(not run: the base is an empty repository with no app)",
+          `$ [dynamic-worker] contract`,
+          candidateResult.output,
+          `declared: ${JSON.stringify(declared)}`,
+        ].join("\n"),
+        sourceRefs: [ref],
+        exitCode: candidateResult.exitCode,
+        command: "contract",
+        runner: "dynamic-worker",
+      });
+      return { handled: true };
+    }
+
+    let result: AppCheckResult;
+    try {
+      result = await this.env.APPS.check({
+        projectId: ctx.projectId,
+        treeSha: source.tree,
+        kind: check.kind as "build" | "unit",
+        timeoutMs,
+      });
+    } catch {
+      return { handled: false };
+    }
+
+    const disposition = evaluateAppCheckOutcome(check.kind, result);
+    if (!disposition.handled) return { handled: false };
+
+    await this.recordEvidence(ctx, candidateId, {
+      checkId: check.checkId,
+      kind: check.kind,
+      outcome: disposition.outcome,
+      startedAt,
+      completedAt: result.completedAt || new Date().toISOString(),
+      output: result.output || result.summary,
+      sourceRefs: [ref],
+      exitCode: result.exitCode,
+      command: check.kind === "build" ? "worker-bundler & loader.load" : "bun:test",
+      runner: "dynamic-worker",
+    });
+    return { handled: true };
+  }
+
   /** Diffs the route table against the base and records contract Evidence (section 34.1). */
   private async runContract(
     ctx: ChangeContext,
@@ -741,6 +907,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       sourceRefs: [`artifacts://${candidateFork(candidateId)}@${commits.commit}`],
       exitCode: run.candidate.exitCode,
       command: "bun run contract",
+      runner: "sandbox",
     });
     return Date.now();
   }
@@ -775,6 +942,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         browser: result.run,
         screenshotKeys: result.screenshotKeys,
       },
+      runner: "sandbox",
     });
     return result.run.kind === "refused" ? null : Date.now();
   }
@@ -796,6 +964,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         startedAt,
         output: check.procedure ?? "",
         sourceRefs: [ref],
+        runner: "sandbox",
       });
       return null;
     }
@@ -811,6 +980,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         startedAt,
         output: "",
         sourceRefs: [ref],
+        runner: "sandbox",
       });
       return null;
     }
@@ -832,6 +1002,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       sourceRefs: [ref],
       exitCode: run.exitCode,
       command: check.command,
+      runner: "sandbox",
     });
     return Date.now();
   }
@@ -855,11 +1026,15 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       /** Extra report fields, for example browser steps and screenshot keys. */
       report?: Record<string, unknown>;
       command?: string;
+      runner?: CheckRunner;
     },
   ) {
     const completedAt = input.completedAt ?? new Date().toISOString();
     const prefix = `evidence/${ctx.projectId}/${ctx.changeId}/${candidateId}/${input.checkId}`;
     const contentHash = await sha256(input.output);
+    const summary = input.runner
+      ? `${input.outcome.summary} (runner: ${input.runner})`
+      : input.outcome.summary;
     const record: EvidenceRecord = {
       evidenceId: evidenceIdFor(candidateId, input.checkId),
       candidateId,
@@ -869,7 +1044,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       coverage: input.outcome.coverage,
       startedAt: input.startedAt,
       completedAt,
-      summary: input.outcome.summary,
+      summary,
       contentHash,
       r2Key: `${prefix}/report.json`,
       ...(input.outcome.metrics ? { metrics: input.outcome.metrics } : {}),
@@ -877,13 +1052,14 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     };
     await this.env.EVIDENCE.put(`${prefix}/stdout.txt`, input.output, {
       httpMetadata: { contentType: "text/plain; charset=utf-8" },
-      customMetadata: { contentHash },
+      customMetadata: { contentHash, ...(input.runner ? { runner: input.runner } : {}) },
     });
     await this.env.EVIDENCE.put(
       `${prefix}/report.json`,
       JSON.stringify(
         {
           record,
+          runner: input.runner ?? null,
           command: input.command ?? null,
           exitCode: input.exitCode ?? null,
           stdoutKey: `${prefix}/stdout.txt`,

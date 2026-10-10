@@ -3,6 +3,8 @@ import { buildAssetManifest, createWorker } from "@cloudflare/worker-bundler";
 import {
   type AppBuildInput,
   type AppBuildResult,
+  type AppCheckInput,
+  type AppCheckResult,
   type AppProbeInput,
   type AppProbeResult,
   isAppBuildInput,
@@ -22,6 +24,7 @@ import {
   modulesSize,
   readAppSettings,
 } from "./bundle.ts";
+import { AppChecker } from "./checker.ts";
 import type { AppDataDO } from "./data.ts";
 import { routeAppRequest } from "./router.ts";
 
@@ -200,5 +203,16 @@ export class AppBuilder extends WorkerEntrypoint<Env> {
       .slice(0, MAX_WIPES);
     for (const name of names) await ns.get(ns.idFromName(name)).wipe();
     return { wiped: names.length };
+  }
+
+  /**
+   * Dynamic Workers checker (docs/plans/checker-integration.md).
+   * Runs build, unit, or contract checks in dynamic workers without starting a Sandbox.
+   */
+  async check(input: AppCheckInput): Promise<AppCheckResult> {
+    const checker = this.ctx.exports?.AppChecker
+      ? this.ctx.exports.AppChecker({})
+      : new AppChecker(this.ctx, this.env);
+    return checker.check(input);
   }
 }

@@ -21,7 +21,7 @@ const Input = z.object({
   kind: z.enum(["build", "unit", "contract"]),
   timeoutMs: z.number().int().min(1).max(30_000).optional(),
 });
-type AppCheckInput = z.infer<typeof Input>;
+export type AppCheckInput = z.infer<typeof Input>;
 const LIMITS = { cpuMs: 50, subRequests: 1 } as const;
 const MAX_REPORT_BYTES = 2 * 1024 * 1024;
 

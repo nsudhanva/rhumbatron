@@ -34,5 +34,9 @@ interface Env {
     ): Promise<import("@rhumbatron/protocol").AppProbeResult>;
     /** Deletes app data stores (app removal, expired previews). */
     wipeData(storeNames: string[]): Promise<{ wiped: number }>;
+    /** Dynamic Workers checker (docs/plans/checker-integration.md). */
+    check(
+      input: import("@rhumbatron/protocol").AppCheckInput,
+    ): Promise<import("@rhumbatron/protocol").AppCheckResult>;
   };
 }

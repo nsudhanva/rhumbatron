@@ -154,6 +154,35 @@ export type AppBuildResult =
   | { ok: true; bundleKey: string; reused: boolean; modules: number; assets: number; bytes: number }
   | { ok: false; reason: string };
 
+/** Kinds of checks AppChecker can run in Dynamic Workers. */
+export type AppCheckKind = "build" | "unit" | "contract";
+
+/** RPC input of the apps Worker's AppChecker.check (ADR 0020, docs/plans/checker-integration.md). */
+export type AppCheckInput = {
+  projectId: string;
+  treeSha: string;
+  kind: AppCheckKind;
+  timeoutMs?: number;
+};
+
+/** Reply from AppChecker.check. */
+export type AppCheckResult = {
+  kind: AppCheckKind;
+  status: "pass" | "fail" | "error" | "skipped";
+  coverage: "checked_supported" | "not_checked";
+  /** False permits Sandbox fallback. A completed assertion failure must not be retried as a pass. */
+  supported: boolean;
+  summary: string;
+  exitCode: number | null;
+  output: string;
+  timedOut: boolean;
+  passed: number;
+  failed: number;
+  failures: { name: string; message: string }[];
+  startedAt: string;
+  completedAt: string;
+};
+
 /* ------------------------------------------------------------------------------------------ */
 /* Milestone B: previews, releases, versions, rollback (P16-10..P16-13)                        */
 /* ------------------------------------------------------------------------------------------ */
