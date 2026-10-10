@@ -1,7 +1,14 @@
 # Module: dns
 
-Status: implemented for Phase 1. Items marked "when supported" or "later" are not built yet.
+Reads the `rhumbatron.com` zone with a `cloudflare_zone` data source. Terraform never manages the
+zone lifecycle, so no plan can delete the domain.
 
-Owns:
+| Input | Meaning |
+|---|---|
+| `account_id` | Cloudflare account ID. |
+| `zone_name` | Zone name (`rhumbatron.com`). |
 
-- DNS records for `rhumbatron.com` (Phase 1, P1-05).
+Outputs: `zone_id`, `zone_name`.
+
+This module manages no DNS records. Worker custom domains create their own records. The Clerk
+CNAMEs are `cloudflare_dns_record.clerk` in `envs/prod` (ADR 0017).

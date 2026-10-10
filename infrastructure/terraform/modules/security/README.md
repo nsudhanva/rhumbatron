@@ -1,12 +1,15 @@
 # Module: security
 
-Status: implemented for Phase 1. Items marked "when supported" or "later" are not built yet.
+Owns zone settings only: one `cloudflare_zone_setting` per entry of `zone_settings`. Used by
+`envs/global`, which sets `always_use_https`, `automatic_https_rewrites`, `min_tls_version`,
+`tls_1_3`, and `ssl = "strict"`.
 
-Owns:
+| Input | Meaning |
+|---|---|
+| `zone_id` | Zone ID (from `modules/dns`). |
+| `zone_settings` | Map from setting ID to value. |
 
-- WAF and rate-limit policy.
-- Access policy.
-- Turnstile resources.
-- DNS security settings.
+Output: `zone_settings`.
 
-Add these controls only after the protected endpoint exists (section 40.4).
+WAF, rate limits, Access, and Turnstile are not built. Add them only after the protected endpoint
+exists (AGENTS.md section 40.4).

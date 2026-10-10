@@ -1,9 +1,19 @@
 # Module: async
 
-Status: implemented for Phase 1. Items marked "when supported" or "later" are not built yet.
+Owns the six Queues `rhumbatron-<purpose>-<env>` (AGENTS.md section 20): `agent-wakeups`,
+`integration`, `verification`, `indexing`, `release`, `dead-letter`.
 
-Owns:
+| Input | Default | Meaning |
+|---|---|---|
+| `account_id` | - | Cloudflare account ID. |
+| `environment` | - | `dev` or `prod`. |
+| `message_retention_seconds` | `86400` | Retention of an unconsumed message. |
 
-- Queues and queue consumers (P1-09).
-- Workflows control-plane resources when supported.
-- K2 streams and subscriptions when supported (P4-03, P4-04). Provider 5.27 has no K2 resource. Follow section 11.4.
+Output: `queues`, a map from purpose to `{ name, id }`.
+
+Not in this module:
+
+- Queue consumers (`cloudflare_queue_consumer`) are in each env root, next to their Workers.
+- Workflows (`cloudflare_workflow`) are in each env root.
+- K2 streams and subscriptions use a temporary adapter in each env root (ADR 0006). Provider 5.27
+  has no K2 resource.
