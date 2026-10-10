@@ -23,7 +23,7 @@ import { type StackSource, stackedOn } from "./stack.ts";
 /**
  * Task Workspace (AGENTS.md sections 29.2 and 30):
  *
- * When AGENT_FILES_IN_WORKER is "true" (default):
+ * When AGENT_FILES_IN_WORKER is "true" (opt-in; off by default):
  * - Keeps the agent's working tree in the AgentDO (DO SQLite or memory storage), plus a dirty set.
  * - list_files, read_file, write_file, and delete_file work with NO Sandbox container time.
  * - On publish, commits dirty files to the Artifacts fork with isomorphic-git in the Worker.
@@ -32,7 +32,7 @@ import { type StackSource, stackedOn } from "./stack.ts";
  *   execution and reading back changed files afterwards. If run_command is never called, no
  *   container starts.
  *
- * When AGENT_FILES_IN_WORKER is "false":
+ * Otherwise (the default):
  * - Falls back to the original Sandbox container checkout for all file tools and commands.
  */
 
@@ -65,7 +65,7 @@ const OPEN_RESERVATION_SECONDS = 300;
 /** Idle time billed after the last command, until the Sandbox sleeps. Below the open reservation. */
 const SLEEP_TAIL_SECONDS = 120;
 /** Increment when ALLOWED or FORBIDDEN_CHARS changes. */
-const COMMAND_ALLOWLIST_VERSION = 1;
+const COMMAND_ALLOWLIST_VERSION = 2;
 const WORKSPACE_TOOLS = [
   "list_files",
   "read_file",
@@ -83,7 +83,7 @@ const MAX_OUTPUT_CHARS = 12_000;
 const ALLOWED = [
   /^bun install( --frozen-lockfile)?$/,
   /^bun test( [\w./-]+)*$/,
-  /^bun run (typecheck|test|bench)$/,
+  /^bun run (typecheck|test|bench|contract)$/,
   /^bunx tsc --noEmit$/,
   /^git (status|diff|log)( [\w./:=-]+)*$/,
   /^ls( -[al]+)?( [\w./-]+)?$/,
@@ -506,7 +506,9 @@ export async function openWorkspace(
     sql?: SqlStorage;
   },
 ): Promise<WorkspaceRef | WorkspaceRefused> {
-  const filesInWorker = env.AGENT_FILES_IN_WORKER !== "false";
+  // Off by default until the Worker-side path is proven live (it failed to publish on prod: fork
+  // not found before use, stale ref on push). Opt in with AGENT_FILES_IN_WORKER = "true".
+  const filesInWorker = env.AGENT_FILES_IN_WORKER === "true";
   const fork = `ws-${input.runId.slice(4)}`;
   const dir = `/workspace/${input.runId.slice(-24)}`;
   const stack = input.stack ?? [];
