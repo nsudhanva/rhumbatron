@@ -2,12 +2,14 @@
  * Release smoke check (P11-09; AGENTS.md sections 21.3, 37; ADR 0018).
  * Usage: bun run smoke:release [dev|prod] [--project <id>]
  *
- * Reads the release Project's latest release row through the API (as the Clerk smoke user, the
- * same Keychain items as `bun run smoke:dev`) and probes its release URL with the same probes the
+ * Reads the release Project's latest release row through the API (as the Clerk smoke user of that
+ * environment's Clerk instance: Keychain `rhumbatron-clerk-secret-key-<env>` and
+ * `rhumbatron-clerk-smoke-user-id-<env>`; prod uses the Clerk production instance) and probes its release URL with the same probes the
  * ReleaseWorkflow runs: the app shell and the products API. Read-only: no row is written, no build
  * starts. The Project defaults to the smoke user's `acme-shop-live` (created by `bun run demo:live`).
  */
 
+import { $ } from "bun";
 import { classifySmoke, runProbes, smokeProbes } from "../workers/integration/src/release-model.ts";
 import { connect } from "./inject/client.ts";
 
@@ -21,11 +23,16 @@ const environment = args.find((a) => !a.startsWith("--") && apis[a]) ?? "dev";
 const projectFlag = args.indexOf("--project");
 const projectArg = projectFlag >= 0 ? args[projectFlag + 1] : process.env.RELEASE_PROJECT_ID;
 
-const secretKey = process.env.CLERK_SECRET_KEY;
-const userId = process.env.CLERK_SMOKE_USER_ID;
+const keychain = async (service: string) =>
+  (await $`security find-generic-password -s ${service} -w`.quiet().nothrow().text()).trim();
+const secretKey =
+  process.env.CLERK_SECRET_KEY ?? (await keychain(`rhumbatron-clerk-secret-key-${environment}`));
+const userId =
+  process.env.CLERK_SMOKE_USER_ID ??
+  (await keychain(`rhumbatron-clerk-smoke-user-id-${environment}`));
 if (!secretKey || !userId) {
   console.error(
-    "CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID are required (use `bun run smoke:release`).",
+    `No Clerk smoke credentials for ${environment}: set CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID, or add the Keychain items rhumbatron-clerk-secret-key-${environment} and rhumbatron-clerk-smoke-user-id-${environment}.`,
   );
   process.exit(2);
 }
