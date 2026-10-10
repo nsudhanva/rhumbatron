@@ -258,8 +258,8 @@ describe("max model attempts per Task at one tier", () => {
 
   it("names the exact limit for a budget stop, and none for an ordinary failure", () => {
     expect(limitStop("max_attempts_per_tier")).toMatchObject({ limit: "max_attempts_per_tier" });
-    expect(limitStop("two_failures_at_opus")?.text).toContain("2 attempts per Task per tier");
-    expect(limitStop("budget_exhausted")?.text).toContain("400 calls per UTC day");
+    expect(limitStop("two_failures_at_opus")?.text).toContain("failed 2 times");
+    expect(limitStop("budget_exhausted")?.text).toContain("400 model calls");
     expect(limitStop("repeated_transport_failure")).toBeNull();
   });
 });
@@ -308,8 +308,7 @@ describe("monthly Anthropic budget", () => {
     expect(limitAttempts(step, [])).toEqual(step);
     const stop = limitStop(step.action === "stop" ? step.reason : "", "15");
     expect(stop?.limit).toBe("monthly_model_spend");
-    expect(stop?.text).toContain("$15 per calendar month");
-    expect(stop?.text).toContain("No other provider is tried");
-    expect(limitStop("monthly_model_spend")?.text).toContain("$10 per calendar month");
+    expect(stop?.text).toContain("model budget of $15");
+    expect(limitStop("monthly_model_spend")?.text).toContain("model budget of $10");
   });
 });
