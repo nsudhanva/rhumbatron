@@ -3,6 +3,7 @@ import { Button, cn } from "@cloudflare/kumo";
 import {
   Airplane,
   CaretUpDown,
+  Code,
   CurrencyDollar,
   Desktop,
   Folders,
@@ -150,6 +151,7 @@ function navItems(context: ShellContext): NavItem[] {
     projectPageItem(projectId, "events", Pulse),
     projectPageItem(projectId, "verification", SealCheck),
     projectPageItem(projectId, "workspace", TreeStructure),
+    projectPageItem(projectId, "code", Code),
     projectPageItem(projectId, "costs", CurrencyDollar),
     { label: "Settings", icon: GearSix, unavailable: SOON },
   ];

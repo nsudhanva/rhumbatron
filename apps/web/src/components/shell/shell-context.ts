@@ -16,6 +16,7 @@ export const PROJECT_PAGES = {
   events: "Events",
   verification: "Verification",
   workspace: "Workspace",
+  code: "Code",
   costs: "Costs",
 } as const;
 

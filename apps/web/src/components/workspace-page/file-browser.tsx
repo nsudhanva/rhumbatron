@@ -1,6 +1,6 @@
-import { Input } from "@cloudflare/kumo";
+import { cn, Input } from "@cloudflare/kumo";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import type { WorkspaceFileIndex } from "../../lib/api";
 import { formatNumber } from "../../lib/format";
 import { EmptyState } from "../ui/empty-state";
@@ -14,7 +14,16 @@ const MATCH_LIMIT = 200;
  * and close in place; a filter switches to a flat list of matching paths. Rows use the tree-list
  * dress (DESIGN.md 9.11): mono 12px with box-drawing prefixes in `subtle`.
  */
-export function FileBrowser({ index }: { index: WorkspaceFileIndex }) {
+export function FileBrowser({
+  index,
+  onOpen,
+  selected,
+}: {
+  index: WorkspaceFileIndex;
+  /** Makes files openable (Code page). Without it, file rows are plain text as before. */
+  onOpen?: (path: string) => void;
+  selected?: string | undefined;
+}) {
   const root = useMemo(() => buildFileTree(index.files), [index.files]);
   const [expanded, setExpanded] = useState(() => defaultExpanded(root));
   const [filter, setFilter] = useState("");
@@ -67,11 +76,19 @@ export function FileBrowser({ index }: { index: WorkspaceFileIndex }) {
               {matches.length > MATCH_LIMIT ? ` · first ${formatNumber(MATCH_LIMIT)} shown` : ""}
             </p>
             <ul aria-label="Matching files" className="py-1 font-mono text-[12px] leading-[1.7]">
-              {matches.slice(0, MATCH_LIMIT).map((path) => (
-                <li key={path} className="truncate px-3" title={path}>
-                  {path}
-                </li>
-              ))}
+              {matches.slice(0, MATCH_LIMIT).map((path) =>
+                onOpen ? (
+                  <li key={path}>
+                    <OpenButton path={path} selected={path === selected} onOpen={onOpen}>
+                      <span className="min-w-0 truncate">{path}</span>
+                    </OpenButton>
+                  </li>
+                ) : (
+                  <li key={path} className="truncate px-3" title={path}>
+                    {path}
+                  </li>
+                ),
+              )}
             </ul>
           </>
         ) : (
@@ -96,6 +113,11 @@ export function FileBrowser({ index }: { index: WorkspaceFileIndex }) {
                       {formatNumber(row.files)} {row.files === 1 ? "file" : "files"}
                     </span>
                   </button>
+                ) : onOpen ? (
+                  <OpenButton path={row.path} selected={row.path === selected} onOpen={onOpen}>
+                    <TreePrefix prefix={row.prefix} />
+                    <span className="min-w-0 truncate">{row.name}</span>
+                  </OpenButton>
                 ) : (
                   <span className="flex min-w-0 items-center gap-1.5 px-3" title={row.path}>
                     <TreePrefix prefix={row.prefix} />
@@ -111,6 +133,34 @@ export function FileBrowser({ index }: { index: WorkspaceFileIndex }) {
   );
 }
 FileBrowser.displayName = "FileBrowser";
+
+/** An openable file row: the tree-list dress with the selected-row fill and accent bar. */
+function OpenButton({
+  path,
+  selected,
+  onOpen,
+  children,
+}: {
+  path: string;
+  selected: boolean;
+  onOpen: (path: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={path}
+      aria-current={selected || undefined}
+      onClick={() => onOpen(path)}
+      className={cn(
+        "flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 text-left transition-colors duration-(--rh-dur-ui) hover:bg-kumo-row-hover focus-visible:outline-offset-[-2px] pointer-coarse:min-h-11",
+        selected && "bg-kumo-faint font-semibold shadow-[inset_2px_0_0_var(--color-accent-500)]",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
 
 function TreePrefix({ prefix }: { prefix: string }) {
   return (

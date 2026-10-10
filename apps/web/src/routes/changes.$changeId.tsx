@@ -14,6 +14,7 @@ import {
   changeSpend,
   InvariantList,
 } from "../components/change/change-overview";
+import { ChangeFilesChanged } from "../components/code/files-changed";
 import { ConflictCard } from "../components/conflict-card";
 import { DeadLetters } from "../components/dead-letters";
 import { useEventFeed } from "../components/project/use-event-feed";
@@ -356,6 +357,8 @@ function ChangeView() {
           !["cancelled", "failed", "completed", "promoting", "releasing"].includes(data.status)
         }
       />
+
+      <ChangeFilesChanged changeId={changeId} />
 
       <div className="grid gap-7 min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
         <Section

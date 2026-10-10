@@ -1036,3 +1036,133 @@ export const markNotificationsRead = createServerFn({ method: "POST" })
   .handler(({ data }) =>
     call<{ marked: number }>("/v1/notifications/read", { method: "POST", body: { ids: data } }),
   );
+
+/* Code view (P16-17, P16-18): canonical file contents, diffs, and version history. */
+
+/** Who produced a ChangeSet. `files` are the files it changed itself. */
+export type ChangeSetAttribution = {
+  id: string;
+  changeId: string;
+  agentId: string;
+  agentRole: string | null;
+  taskId: string | null;
+  taskKey: string | null;
+  taskTitle: string | null;
+  summary: string;
+  status: string;
+  files: string[];
+  /** False for ChangeSets published before patches were stored. */
+  patchRecorded: boolean;
+  createdAt: string;
+};
+
+export type DiffFile = {
+  path: string;
+  oldPath: string | null;
+  status: "added" | "deleted" | "modified" | "renamed";
+  binary: boolean;
+  additions: number;
+  deletions: number;
+  /** Unified hunks from the first `@@` line. */
+  patch: string;
+  /** The stored patch was cut inside this file. */
+  truncated: boolean;
+  changeSetIds: string[];
+};
+
+export type CodeDiff = {
+  recorded: boolean;
+  base: string | null;
+  head: string | null;
+  bytes: number;
+  truncated: boolean;
+  files: DiffFile[];
+};
+
+export type CodeTree = {
+  kind: "tree";
+  treeSha: string;
+  commit: string | null;
+  live: boolean;
+  contents: "complete" | "partial" | "missing";
+  files: { path: string; size: number | null; stored: boolean }[];
+};
+
+export type CodeFile = {
+  kind: "file";
+  treeSha: string;
+  commit: string | null;
+  live: boolean;
+  path: string;
+  blob: string;
+  size: number | null;
+  binary: boolean;
+  content: string | null;
+  unavailable: "binary" | "too_large" | "not_stored" | null;
+};
+
+export type CodeVersion = {
+  generation: number;
+  treeSha: string | null;
+  commit: string | null;
+  live: boolean;
+  at: string | null;
+  change: { id: string; goal: string } | null;
+  candidateId: string | null;
+  changeSets: ChangeSetAttribution[];
+};
+
+export type CodeVersions = {
+  liveGeneration: number;
+  versions: CodeVersion[];
+  truncated: boolean;
+};
+
+const codeQuery = (input: { tree?: string | undefined; path?: string | undefined }) => {
+  const params = new URLSearchParams();
+  if (input.tree) params.set("tree", input.tree);
+  if (input.path) params.set("path", input.path);
+  const text = params.toString();
+  return text ? `?${text}` : "";
+};
+
+export const getCodeTree = createServerFn()
+  .inputValidator((input: { projectId: string; tree?: string | undefined }) => input)
+  .handler(({ data }) =>
+    call<CodeTree>(`/v1/projects/${data.projectId}/code${codeQuery({ tree: data.tree })}`),
+  );
+
+export const getCodeFile = createServerFn()
+  .inputValidator((input: { projectId: string; tree?: string | undefined; path: string }) => input)
+  .handler(({ data }) =>
+    call<CodeFile>(
+      `/v1/projects/${data.projectId}/code${codeQuery({ tree: data.tree, path: data.path })}`,
+    ),
+  );
+
+export const getCodeVersions = createServerFn()
+  .inputValidator((projectId: string) => projectId)
+  .handler(({ data }) => call<CodeVersions>(`/v1/projects/${data}/versions`));
+
+export const listChangeSets = createServerFn()
+  .inputValidator((changeId: string) => changeId)
+  .handler(({ data }) => call<ChangeSetAttribution[]>(`/v1/changes/${data}/changesets`));
+
+export const getChangeSetDiff = createServerFn()
+  .inputValidator((changeSetId: string) => changeSetId)
+  .handler(({ data }) =>
+    call<{ changeSet: ChangeSetAttribution; diff: CodeDiff }>(`/v1/changesets/${data}/diff`),
+  );
+
+export const getCandidateDiff = createServerFn()
+  .inputValidator((candidateId: string) => candidateId)
+  .handler(({ data }) =>
+    call<{
+      candidateId: string;
+      changeId: string;
+      baseGeneration: number;
+      composedCommit: string | null;
+      changeSets: ChangeSetAttribution[];
+      diff: CodeDiff;
+    }>(`/v1/candidates/${data}/diff`),
+  );

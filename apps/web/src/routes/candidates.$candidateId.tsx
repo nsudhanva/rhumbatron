@@ -21,6 +21,7 @@ import {
 import { CandidateSkeleton } from "../components/candidate/skeleton";
 import { CandidateEvidence } from "../components/candidate-evidence";
 import { CandidatePromotion } from "../components/candidate-promotion";
+import { CandidateFilesChanged } from "../components/code/files-changed";
 import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../components/ui/data-table";
 import { EmptyState } from "../components/ui/empty-state";
 import { SegmentedSteps, ThresholdMeter } from "../components/ui/meter";
@@ -193,6 +194,8 @@ function CandidateView() {
           <CandidateEvidence candidate={data} rows={rows} />
         )}
       </Section>
+
+      <CandidateFilesChanged candidateId={data.id} />
 
       {others.length > 0 && (
         <Section
