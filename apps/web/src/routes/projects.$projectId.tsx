@@ -580,10 +580,53 @@ function RiskCell({ risk }: { risk: string | null }) {
   );
 }
 
+type ChangeDraft = { goal: string; budget: string };
+const DEFAULT_BUDGET = "3";
+/** Unsent drafts live outside the component so a remount (auth refresh, route re-render) keeps them. */
+const drafts = new Map<string, ChangeDraft>();
+
+function readDraft(projectId: string): ChangeDraft {
+  const held = drafts.get(projectId);
+  if (held) return held;
+  try {
+    const raw = sessionStorage.getItem(`rhumbatron:draft:${projectId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ChangeDraft>;
+      return {
+        goal: typeof parsed.goal === "string" ? parsed.goal : "",
+        budget: typeof parsed.budget === "string" ? parsed.budget : DEFAULT_BUDGET,
+      };
+    }
+  } catch {
+    // Storage unavailable or corrupt: start from an empty draft.
+  }
+  return { goal: "", budget: DEFAULT_BUDGET };
+}
+
+function writeDraft(projectId: string, draft: ChangeDraft | null) {
+  const key = `rhumbatron:draft:${projectId}`;
+  if (draft) drafts.set(projectId, draft);
+  else drafts.delete(projectId);
+  try {
+    if (draft) sessionStorage.setItem(key, JSON.stringify(draft));
+    else sessionStorage.removeItem(key);
+  } catch {
+    // Best effort only.
+  }
+}
+
 function NewChange({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [goal, setGoal] = useState("");
+  const [draft, setDraft] = useState(() => readDraft(projectId));
+  const { goal, budget } = draft;
+  const update = (patch: Partial<ChangeDraft>) => {
+    const next = { ...readDraft(projectId), ...patch };
+    writeDraft(projectId, next);
+    setDraft(next);
+  };
+  const setGoal = (value: string) => update({ goal: value });
+  const setBudget = (value: string) => update({ budget: value });
   // Shares the Overview's project query; suggestions are cached per Canonical Generation.
   const project = useQuery({
     queryKey: ["project", projectId],
@@ -598,11 +641,12 @@ function NewChange({ projectId }: { projectId: string }) {
     retry: false,
   });
   const pills = suggestions.data?.suggestions ?? [];
-  const [budget, setBudget] = useState("3");
   const budgetUsd = Number(budget);
   const create = useMutation({
     mutationFn: () => createChange({ data: { projectId, goal: goal.trim(), budgetUsd } }),
     onSuccess: async ({ id }) => {
+      writeDraft(projectId, null);
+      setDraft({ goal: "", budget: DEFAULT_BUDGET });
       await queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
       await navigate({ to: "/changes/$changeId", params: { changeId: id } });
     },
