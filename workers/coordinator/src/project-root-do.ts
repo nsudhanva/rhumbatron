@@ -8,11 +8,17 @@ import {
   type PromotionAttempt,
   type PromotionDecision,
 } from "./promotion-cas.ts";
+import {
+  type RegisterScopeInput,
+  type RequestScope,
+  RequestScopes,
+  type ScopeRegistration,
+} from "./request-scopes.ts";
 
 /**
  * Authoritative owner of one Project's cold, project-wide truth (AGENTS.md section 13.1).
  * One instance per Project: `env.PROJECT_ROOT.idFromName(projectId)`.
- * Not an event bus: only canonical state and promotion go through here.
+ * Cold Project truth: canonical state, promotion, and request admission go through here.
  */
 
 export type InitializeInput = {
@@ -67,12 +73,14 @@ type RootRow = {
 
 export class ProjectRootDO extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  private readonly requestScopes: RequestScopes;
   private readonly outbox: OutboxPublisher;
   private readonly alarms: AlarmGuard;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.requestScopes = new RequestScopes(this.sql);
     this.outbox = new OutboxPublisher(this.sql, env);
     this.alarms = new AlarmGuard(this.sql, ctx.storage, "ProjectRootDO");
     // Schema setup runs before any request reaches this instance.
@@ -96,8 +104,32 @@ export class ProjectRootDO extends DurableObject<Env> {
         updated_at TEXT NOT NULL
       );
     `);
+    this.requestScopes.migrate();
     migrateOutbox(this.sql);
     this.alarms.migrate();
+  }
+
+  async admit(
+    changeId: string,
+    requester?: { requesterUserId: string; requesterRank: number },
+  ): Promise<number> {
+    return this.ctx.storage.transactionSync(() => this.requestScopes.admit(changeId, requester));
+  }
+
+  async registerScope(input: RegisterScopeInput): Promise<ScopeRegistration> {
+    return this.ctx.storage.transactionSync(() => this.requestScopes.register(input));
+  }
+
+  async updateScope(input: RegisterScopeInput): Promise<void> {
+    this.requestScopes.update(input);
+  }
+
+  async getScope(changeId: string): Promise<RequestScope | null> {
+    return this.requestScopes.scope(changeId);
+  }
+
+  async release(changeId: string): Promise<void> {
+    this.requestScopes.release(changeId);
   }
 
   private row(): RootRow | null {
