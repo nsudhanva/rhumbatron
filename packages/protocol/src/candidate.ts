@@ -36,6 +36,11 @@ export const ChangeSetIntent = z.object({
       startCommit: z.string().optional(),
       /** Files this Task itself changed (diff from `startCommit`). Absent when nothing stacked. */
       ownFiles: z.array(z.string()).optional(),
+      /**
+       * R2 key of the stored `git diff` (section 15.4), from `startCommit` when stacked, else from
+       * `baseCommit`. Absent on ChangeSets published before patches were stored.
+       */
+      patchRef: z.string().optional(),
     })
     .optional(),
 });
