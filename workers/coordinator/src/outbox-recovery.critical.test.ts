@@ -3,6 +3,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
+  bindingFor,
   type K2SendResult,
   MAX_PUBLISH_ATTEMPTS,
   migrateOutbox,
@@ -105,5 +106,26 @@ describe("outbox under a K2 outage", () => {
       { eventId: "e1", eventType: "project.created", attempts: MAX_PUBLISH_ATTEMPTS, failed: true },
     ]);
     expect(outbox.nextDueAt()).toBeNull();
+  });
+
+  it("fails rows at once, with the binding named, when their stream has no producer", async () => {
+    const sql = fakeSql();
+    migrateOutbox(sql);
+    insertEvent(sql, "e1");
+    const { env } = controllableK2();
+    const binding = bindingFor("proj_1");
+    const outbox = new OutboxPublisher(sql, { ...env, [binding]: undefined } as unknown as Env);
+
+    expect(outbox.nextDueAt()).toBe(0);
+    expect(await outbox.publishAllDue(0)).toBe(0);
+    // No retry: the row is failed, unsent (0 attempts), and no alarm stays due for it.
+    expect(outbox.pending()).toEqual([
+      { eventId: "e1", eventType: "project.created", attempts: 0, failed: true },
+    ]);
+    expect(outbox.nextDueAt()).toBeNull();
+    const [row] = sql
+      .exec<{ last_error: string }>("SELECT last_error FROM outbox WHERE event_id = 'e1'")
+      .toArray();
+    expect(row?.last_error).toContain(`no K2 producer binding ${binding}`);
   });
 });

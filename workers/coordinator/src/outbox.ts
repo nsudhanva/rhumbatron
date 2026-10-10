@@ -1,13 +1,15 @@
 /**
  * Transactional outbox shared by the coordinator Durable Objects (AGENTS.md sections 18 and 42.6).
  * State changes insert outbox rows in the same transaction; an alarm publishes due rows to K2.
- * Retries are bounded: exponential backoff up to 5 minutes, then the row is marked failed.
+ * Retries are bounded: exponential backoff up to 5 minutes, then the row is marked failed. A row
+ * whose stream has no producer binding is marked failed at once: no retry can bind it.
  */
 import { fnv1a32 } from "./shard-key.ts";
 
 /**
  * K2 producer bindings EVENTS_00..EVENTS_07 come from Terraform with stream IDs that wrangler.jsonc
- * does not know, so they are typed here. They are absent in local dev; the outbox then accumulates.
+ * does not know, so they are typed here. They are absent in local dev: no alarm is set for the
+ * outbox alone, and rows that another alarm finds due are marked failed as unbound.
  */
 export type K2SendResult = { success: boolean; error?: { message: string; retryable: boolean } };
 export type K2Producer = {
@@ -33,9 +35,13 @@ export function streamIndex(projectId: string, count = K2_STREAM_COUNT): number 
   return fnv1a32(projectId) % count;
 }
 
+/** Producer binding name of a project's stream, for example `EVENTS_03`. */
+export function bindingFor(projectId: string): string {
+  return `EVENTS_${String(streamIndex(projectId)).padStart(2, "0")}`;
+}
+
 function producerFor(env: Env, projectId: string): K2Producer | undefined {
-  const key = `EVENTS_${String(streamIndex(projectId)).padStart(2, "0")}`;
-  return (env as unknown as K2Env)[key] as K2Producer | undefined;
+  return (env as unknown as K2Env)[bindingFor(projectId)] as K2Producer | undefined;
 }
 
 export type PublishOutcome =
@@ -56,6 +62,18 @@ export function decideOutcome(
   // retry is still safe. Stop after MAX_PUBLISH_ATTEMPTS and keep the row visible as failed.
   if (attemptCount >= MAX_PUBLISH_ATTEMPTS) return { kind: "failed", attemptCount, error };
   return { kind: "retry", attemptCount, nextAttemptAt: now + retryDelayMs(attemptCount), error };
+}
+
+/**
+ * A row whose stream has no producer binding. Nothing was sent, so the attempt count stays; the
+ * row fails at once, because a retry cannot add a binding and would only keep the alarm firing.
+ */
+function unboundOutcome(previousAttempts: number, binding: string): PublishOutcome {
+  return {
+    kind: "failed",
+    attemptCount: previousAttempts,
+    error: `unbound: no K2 producer binding ${binding} for this project's stream (Terraform Worker bindings)`,
+  };
 }
 
 /** Creates the outbox table and adds columns that older instances are missing. */
@@ -128,8 +146,6 @@ export class OutboxPublisher {
     now: number,
   ): Promise<{ published: number; pending: number }> {
     const producer = producerFor(this.env, projectId);
-    if (!producer) return { published: 0, pending: 0 };
-
     const rows = this.sql
       .exec<OutboxRow>(
         `SELECT id, event_id, payload_json, attempt_count FROM outbox
@@ -142,6 +158,11 @@ export class OutboxPublisher {
       )
       .toArray();
     if (rows.length === 0) return { published: 0, pending: 0 };
+    if (!producer) {
+      const binding = bindingFor(projectId);
+      for (const row of rows) this.record(row, unboundOutcome(row.attempt_count, binding), now);
+      return { published: 0, pending: rows.length };
+    }
 
     const encoder = new TextEncoder();
     let result: K2SendResult;
@@ -156,38 +177,40 @@ export class OutboxPublisher {
       result = { success: false, error: { message: String(error), retryable: true } };
     }
 
-    const stamp = new Date(now).toISOString();
-    for (const row of rows) {
-      const outcome = decideOutcome(row.attempt_count, result, now);
-      if (outcome.kind === "published") {
-        this.sql.exec(
-          "UPDATE outbox SET published_at = ?, last_error = NULL WHERE id = ?",
-          stamp,
-          row.id,
-        );
-      } else if (outcome.kind === "retry") {
-        this.sql.exec(
-          "UPDATE outbox SET attempt_count = ?, next_attempt_at = ?, last_error = ? WHERE id = ?",
-          outcome.attemptCount,
-          outcome.nextAttemptAt,
-          outcome.error,
-          row.id,
-        );
-      } else {
-        this.sql.exec(
-          "UPDATE outbox SET attempt_count = ?, failed_at = ?, last_error = ? WHERE id = ?",
-          outcome.attemptCount,
-          stamp,
-          outcome.error,
-          row.id,
-        );
-        console.error(
-          JSON.stringify({ event: "outbox.failed", eventId: row.event_id, error: outcome.error }),
-        );
-      }
-    }
+    for (const row of rows) this.record(row, decideOutcome(row.attempt_count, result, now), now);
     if (result.success) await this.nudgeRouter(projectId);
     return { published: result.success ? rows.length : 0, pending: rows.length };
+  }
+
+  /** Writes one row's outcome. A failed row stays visible with its `last_error`. */
+  private record(row: OutboxRow, outcome: PublishOutcome, now: number) {
+    const stamp = new Date(now).toISOString();
+    if (outcome.kind === "published") {
+      this.sql.exec(
+        "UPDATE outbox SET published_at = ?, last_error = NULL WHERE id = ?",
+        stamp,
+        row.id,
+      );
+    } else if (outcome.kind === "retry") {
+      this.sql.exec(
+        "UPDATE outbox SET attempt_count = ?, next_attempt_at = ?, last_error = ? WHERE id = ?",
+        outcome.attemptCount,
+        outcome.nextAttemptAt,
+        outcome.error,
+        row.id,
+      );
+    } else {
+      this.sql.exec(
+        "UPDATE outbox SET attempt_count = ?, failed_at = ?, last_error = ? WHERE id = ?",
+        outcome.attemptCount,
+        stamp,
+        outcome.error,
+        row.id,
+      );
+      console.error(
+        JSON.stringify({ event: "outbox.failed", eventId: row.event_id, error: outcome.error }),
+      );
+    }
   }
 
   /** Asks the event router to consume this project's stream now. Best effort: cron is the backstop. */
