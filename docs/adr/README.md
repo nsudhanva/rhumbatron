@@ -26,3 +26,4 @@ Architecture Decision Records (ADRs) record each decision, its reason and its co
 | [0020](./0020-live-apps-dynamic-workers.md) | Live apps on Dynamic Workers |
 | [0021](./0021-anthropic-model-provider.md) | Anthropic as the model provider |
 | [0022](./0022-empty-repositories.md) | Every Project starts from an empty repository |
+| [0023](./0023-shared-projects-and-request-priority.md) | Shared Projects and request priority |
