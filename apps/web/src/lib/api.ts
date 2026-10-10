@@ -172,16 +172,14 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
 export const listProjects = createServerFn().handler(() => call<ProjectSummary[]>("/v1/projects"));
 
 export const createProject = createServerFn({ method: "POST" })
-  .inputValidator((input: { name: string; slug: string; template: "empty" | "acme-shop" }) => input)
+  .inputValidator((input: { name: string; slug: string }) => input)
   .handler(({ data }) => call<{ id: string }>("/v1/projects", { method: "POST", body: data }));
 
+/** Creates the empty repository of a Project that has none yet (Projects from before blank repos). */
 export const provisionProject = createServerFn({ method: "POST" })
-  .inputValidator((input: { projectId: string; template: "acme-shop" }) => input)
+  .inputValidator((projectId: string) => projectId)
   .handler(({ data }) =>
-    call<{ queued: boolean }>(`/v1/projects/${data.projectId}/provision`, {
-      method: "POST",
-      body: { template: data.template },
-    }),
+    call<{ queued: boolean }>(`/v1/projects/${data}/provision`, { method: "POST" }),
   );
 
 export const listChanges = createServerFn()
@@ -214,6 +212,13 @@ export type ProjectAppView = {
   /** "Open" links of promoted generations whose bundle is stored (Versions page). */
   versions: { generation: number; url: string }[];
 };
+
+/** Goal suggestion pills (Clef-ranked, cached per Canonical Generation). Empty when none. */
+export const getGoalSuggestions = createServerFn()
+  .inputValidator((projectId: string) => projectId)
+  .handler(({ data }) =>
+    call<{ suggestions: string[]; generation: number | null }>(`/v1/projects/${data}/suggestions`),
+  );
 
 export const getProjectApp = createServerFn()
   .inputValidator((projectId: string) => projectId)

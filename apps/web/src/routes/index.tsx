@@ -1,5 +1,5 @@
 import { Show, SignInButton } from "@clerk/tanstack-react-start";
-import { Button, Checkbox, Input } from "@cloudflare/kumo";
+import { Button, Input } from "@cloudflare/kumo";
 import { SignIn } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -137,10 +137,8 @@ function NewProject() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
-  const [demo, setDemo] = useState(true);
   const create = useMutation({
-    mutationFn: () =>
-      createProject({ data: { name: name.trim(), slug, template: demo ? "acme-shop" : "empty" } }),
+    mutationFn: () => createProject({ data: { name: name.trim(), slug } }),
     onSuccess: async (project) => {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
       await navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
@@ -170,20 +168,9 @@ function NewProject() {
             description="Lowercase letters, numbers and hyphens. Names the project's resources."
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
-            {...(slugInvalid ? { error: "Use lowercase kebab-case, for example acme-shop" } : {})}
+            {...(slugInvalid ? { error: "Use lowercase kebab-case, for example my-app" } : {})}
             required
           />
-        </div>
-        <div className="grid gap-1">
-          <Checkbox
-            label="Start from the Acme Shop demo codebase"
-            checked={demo}
-            onCheckedChange={(checked) => setDemo(checked === true)}
-          />
-          <p className="pl-6 text-[12px] text-kumo-subtle">
-            Seeds the canonical source with a small shop: catalog, cart and a test identity. Leave
-            it off for an empty codebase.
-          </p>
         </div>
         {create.isError && (
           <SectionError message={`The project was not created. ${create.error.message}`} />

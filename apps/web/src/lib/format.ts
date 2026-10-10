@@ -1,8 +1,5 @@
 import type { ChangeDetail, TaskDetail, TaskRun } from "./api";
 
-export const DEMO_GOAL =
-  "Add shared wishlists. Users can create a wishlist, share it with a link, and let collaborators add or remove products. Keep existing cart behavior unchanged. Keep API p95 below 200 ms.";
-
 /*
  * Number and time formats (DESIGN.md section 12): thousands separators, a space before units,
  * money as $0.00, durations as 48s / 3m 12s / 2 h, relative ages as 7m / 2d / just now, the

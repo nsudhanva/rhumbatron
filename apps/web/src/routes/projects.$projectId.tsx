@@ -24,13 +24,14 @@ import { Tag } from "../components/ui/tag";
 import {
   type ChangeSummary,
   createChange,
+  getGoalSuggestions,
   getProject,
   getProjectStats,
   listChanges,
   type ProjectStats as ProjectStatsData,
   provisionProject,
 } from "../lib/api";
-import { DEMO_GOAL, EMPTY, formatAge, formatNumber, formatUsd, generation } from "../lib/format";
+import { EMPTY, formatAge, formatNumber, formatUsd, generation } from "../lib/format";
 import { useProjectLive } from "../lib/live";
 
 export const Route = createFileRoute("/projects/$projectId")({ component: ProjectPage });
@@ -80,7 +81,7 @@ function Overview() {
       seeding && query.state.data?.canonical.artifactRef === UNASSIGNED ? 2000 : false,
   });
   const seed = useMutation({
-    mutationFn: () => provisionProject({ data: { projectId, template: "acme-shop" } }),
+    mutationFn: () => provisionProject({ data: projectId }),
     onSuccess: () => setSeeding(true),
   });
   const changes = useQuery({
@@ -120,7 +121,7 @@ function Overview() {
   const assigned = !!source && source.artifactRef !== UNASSIGNED;
   const seedButton = (
     <Button variant="secondary" loading={seed.isPending || seeding} onClick={() => seed.mutate()}>
-      Seed Acme Shop source
+      Create repository
     </Button>
   );
 
@@ -244,16 +245,16 @@ function Overview() {
           ) : project.data ? (
             <>
               <EmptyState
-                what="No canonical source yet."
+                what="No repository yet."
                 how={
                   seeding
-                    ? "Seeding the Acme Shop codebase. This page updates when the source is assigned."
-                    : "Seed the Acme Shop demo codebase so agents have code to change."
+                    ? "Creating the empty repository. This page updates when the source is assigned."
+                    : "Create the empty repository so agents can build the app."
                 }
                 action={seedButton}
               />
               {seed.isError && (
-                <SectionError message={`Seeding did not start. ${seed.error.message}`} />
+                <SectionError message={`The repository was not created. ${seed.error.message}`} />
               )}
             </>
           ) : (
@@ -417,7 +418,21 @@ function RiskCell({ risk }: { risk: string | null }) {
 function NewChange({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [goal, setGoal] = useState(DEMO_GOAL);
+  const [goal, setGoal] = useState("");
+  // Shares the Overview's project query; suggestions are cached per Canonical Generation.
+  const project = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => getProject({ data: projectId }),
+  });
+  const currentGeneration = project.data?.canonical.generation;
+  const suggestions = useQuery({
+    queryKey: ["goal-suggestions", projectId, currentGeneration],
+    queryFn: () => getGoalSuggestions({ data: projectId }),
+    enabled: currentGeneration !== undefined,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const pills = suggestions.data?.suggestions ?? [];
   const [budget, setBudget] = useState("3");
   const budgetUsd = Number(budget);
   const create = useMutation({
@@ -444,6 +459,21 @@ function NewChange({ projectId }: { projectId: string }) {
           rows={4}
           required
         />
+        {pills.length > 0 && (
+          <ul className="-mt-2 flex flex-wrap gap-2" aria-label="Suggested goals">
+            {pills.map((pill) => (
+              <li key={pill}>
+                <button
+                  type="button"
+                  className="bg-tone-100 px-2.5 py-[3px] text-[12px] leading-tight text-tone-800 hover:bg-tone-200"
+                  onClick={() => setGoal(pill)}
+                >
+                  {pill}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="max-w-56">
           <Input
             label="Budget (USD)"
