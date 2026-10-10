@@ -135,7 +135,7 @@ flowchart TB
   L3["3. Causal caps<br/>1,000 commands per Change per day,<br/>Clef-flash 200 calls per day"]
   L4["4. Section 44 limits<br/>8 agents, 4 Sandboxes, 3 Candidates,<br/>2 attempts per tier, 2 browser runs"]
   L5["5. Queue and K2 bounds<br/>3 retries then dead-letter,<br/>K2 batch dead-lettered after 5 failures"]
-  L6["6. Metered caps in D1<br/>Sandbox 5 h per month, Browser 250 s per day,<br/>400 model calls per day,<br/>Anthropic $15 dev, $10 prod per month"]
+  L6["6. Metered caps in D1<br/>Sandbox 5 h dev, 15 h prod per month,<br/>Browser 250 s per day,<br/>400 model calls per day,<br/>Anthropic $15 dev, $10 prod per month"]
   L7["7. AI Gateway<br/>20 requests per minute,<br/>Anthropic spend limit (best effort)"]
   L8["8. Account budget alerts<br/>email at $10, $25, $100"]
   L9["Pause switch<br/>locals.paused"]
@@ -182,7 +182,7 @@ pie showData
 pie showData
   title Sandbox hours per month
   "dev" : 5
-  "prod" : 5
+  "prod" : 15
 ```
 
 ```mermaid
@@ -193,7 +193,7 @@ pie showData
 ```
 
 The two Browser Run shares add up to 500 s, below the free 10 minutes per day.
-The two Sandbox shares add up to the approved 10 hours per month.
+The two Sandbox shares add up to the approved 20 hours per month.
 
 ## Pause switch
 

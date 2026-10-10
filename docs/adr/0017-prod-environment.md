@@ -131,7 +131,7 @@ Idle means no Change is running.
 | Queues | 10,000 ops/day | 6 queues, 3 consumers | 0 ops idle; ~3 ops per woken Task. |
 | K2 | 20 streams, 10 GB | 8 streams | 16 of 20. Billing disabled in beta. |
 | Workflows | 3,000 steps/day | 2 workflows | ~7 steps per Change, 10–14 per Candidate. Shared with dev. |
-| Sandbox / Containers | 25 GiB-h memory, 375 vCPU-min, 200 GB-h disk / month | 1 app, `basic`, `max_instances = 1`, 5 h/month meter in prod D1 | `SANDBOX_MONTHLY_SECONDS = 18000` in each environment: dev 5 h + prod 5 h = the approved 10 h (HOM-192). |
+| Sandbox / Containers | 25 GiB-h memory, 375 vCPU-min, 200 GB-h disk / month | 1 app, `basic`, `max_instances = 1`, 15 h/month meter in prod D1 | `SANDBOX_MONTHLY_SECONDS`: dev 18000 (5 h) + prod 54000 (15 h) = the approved 20 h, inside the ~25 included basic-instance hours. |
 | Browser Run | 10 min/day (free figure) | 250 s/day guard in prod D1 | `BROWSER_DAILY_SECONDS = 250` in each environment: 500 s/day together, under 600 s/day. |
 | Workers AI | 10,000 Neurons/day | Clef-flash cap 200 calls/day in prod D1 | Doubles the worst case. |
 | AI Gateway | free core features | 1 gateway, 10,000 stored logs | Vertex cap per gateway: prod $10, dev $40 per 30 days (~$50 total). |
@@ -192,9 +192,9 @@ The owner decided to apply prod before the hackathon, with no new spend.
    Workers for budget-stop and Costs page text.
 2. **OpenRouter quota.** Accepted as shared: dev and prod share the key's per-minute and per-day
    limits, so the second environment may overflow to Vertex sooner. The Vertex caps bound the cost.
-3. **Sandbox hours.** Split the approved 10 h/month: `SANDBOX_MONTHLY_SECONDS = 18000` (5 h) in
-   each environment (agents and integration Workers; the API shows it on the Costs page). Code
-   fallback without the binding: 36,000.
+3. **Sandbox hours.** Split the approved 20 h/month: `SANDBOX_MONTHLY_SECONDS = 18000` (5 h) in
+   dev and `54000` (15 h) in prod (agents and integration Workers; the API shows it on the Costs
+   page). Code fallback without the binding: 36,000. (Was 5 h each, 10 h total, until 2026-10-10.)
 4. **Browser Run.** Split the 500 s/day guard: `BROWSER_DAILY_SECONDS = 250` in each environment
    (integration Worker). Code fallback without the binding: 500.
 5. **Demo code paths.** `FIXTURES_ENABLED = "true"` in dev and prod enables the Wishlist fixture

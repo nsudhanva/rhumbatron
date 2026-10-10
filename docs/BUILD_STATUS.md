@@ -28,7 +28,7 @@ Phases 0 through 13 and 16 are complete. Prod serves each Project as a live app 
 
 ## Cost
 - Workers Paid account shared with other projects. Rhumbatron stays within free and included limits.
-- Sandbox: 1 instance. Agent Workspaces sleep after 10 idle minutes, and Candidate checks sleep after 2. The hard cap is 5 hours per month per environment.
+- Sandbox: 1 instance. Agent Workspaces and Candidate checks sleep after 2 idle minutes. The hard cap is 5 hours per month in dev and 15 in prod.
 - Browser Run: Capped at 250 seconds per day per environment.
 - Anthropic: code budgets of 15 USD (dev) and 10 USD (prod) per month. Model work stops at the budget (ADR 0021).
 - Live apps: 60 app builds per day; preview bundles expire after 7 days.

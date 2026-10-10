@@ -82,11 +82,14 @@ Use the first-party resources when the provider adds a container application res
 - The attach adapter (`scripts/containers-sync.ts`, `terraform_data.sandbox_container`) no longer
   exists. The `Sandbox` class lives in the `rhumbatron-sandbox-<env>` Worker (ADR 0012). The agents
   Worker binds it cross-script, and its own migrations hold only `AgentDO` (v1).
-- The monthly cap is per environment: `SANDBOX_MONTHLY_SECONDS = 18000` (5 hours) in dev and in
-  prod, which is the approved 10 hours in total (ADR 0017). The code fallback is still 36,000 s.
-- Agent workspaces now use `sleepAfter` 600 s and settle a 600 s idle tail, so the checkout
-  survives a slow model call. Candidate checks in the integration Worker keep `sleepAfter: "2m"`,
-  reserve 900 s, and settle a 120 s tail. Both use the same `sandbox-seconds` meter.
+- The monthly cap is per environment: `SANDBOX_MONTHLY_SECONDS = 18000` (5 hours) in dev and
+  `54000` (15 hours) in prod, which is the approved 20 hours in total (ADR 0017). The code
+  fallback is still 36,000 s.
+- Agent workspaces use `sleepAfter` 120 s and settle a 120 s idle tail (it was 600 s). A model
+  call longer than 2 minutes lets the Sandbox sleep; the next tool call restores the checkout
+  from the fork, and edits not yet committed are lost. Candidate checks in the integration Worker
+  keep `sleepAfter: "2m"`, reserve 900 s, and settle a 120 s tail. Both use the same
+  `sandbox-seconds` meter.
 - A Change can hold only a limited number of open coding Sandboxes (section 44). The workspace
   refuses an open over that limit before any fork, as it does for an open over the meter.
 - The workspace tools are now `list_files`, `read_file`, `write_file`, `run_command`,

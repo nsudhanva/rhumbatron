@@ -165,7 +165,7 @@ See [docs/operations/deploy.md](docs/operations/deploy.md) and [infrastructure/t
 
 Cost controls ([docs/operations/costs.md](docs/operations/costs.md)):
 - Rhumbatron runs on a shared Workers Paid account within included allowances.
-- Sandbox: 5 hours per month per environment.
+- Sandbox: 5 hours per month in dev, 15 in prod.
 - Browser Run: 250 seconds per day per environment.
 - Claude (Anthropic): code stops model work at 15 USD (dev) and 10 USD (prod) per calendar month (ADR 0021).
 - Account budget alerts at 10, 25, and 100 USD (ADR 0019, `envs/global`).

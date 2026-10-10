@@ -47,7 +47,7 @@ per month, 10 M requests and 30 M CPU-ms shared with Workers.
   The commit is the content address: a stored bundle is reused, never rebuilt.
 - Builder: `AppBuilder` entrypoint of the apps Worker, with `@cloudflare/worker-bundler` 0.2.6
   (esbuild-wasm). It runs in the Worker, not in the Sandbox, so builds use no container time
-  (the Sandbox cap is 5 h per month per environment). npm dependencies come from the public
+  (the Sandbox cap is 15 h per month in prod). npm dependencies come from the public
   registry at build time. The integration Worker reads the build inputs of one commit through
   its Artifacts binding (one read per file; it skips tests, benchmarks, lockfiles, and docs).
   It then calls `APPS.build(...)` over a service binding with `entrypoint = "AppBuilder"`.
@@ -109,7 +109,9 @@ rejected (401). The template's tests cover both cases.
 - `GET /v1/projects/:projectId/app` returns `{ enabled, app }`. `enabled` is false without
   `APPS_DOMAIN` (dev, or prod while routing is off).
 - Archiving a Project marks its app `removed` (410 at once). Its cleanup deletes the
-  `AppDataDO` stores, the `apps/<project>/` and `app-previews/<project>/` prefixes, and the rows.
+  `AppDataDO` stores, the `apps/<project>/` and `app-previews/<project>/` prefixes, and the preview
+  and version rows. The production row stays as a tombstone (status `removed`, no commit, no
+  bundle), so the hosts keep answering 410, not 404.
 
 ### Previews, releases, versions, rollback (milestone B)
 Built 2026-10-10 (P16-10 to P16-15). Runtime data only; no Terraform at release time.
@@ -125,7 +127,11 @@ Built 2026-10-10 (P16-10 to P16-15). Runtime data only; no Terraform at release 
   with the same tree; the preview bundle copied from `app-previews/`, which expires after 7 days;
   else a build), then the production pointer moves by compare-and-swap on the row it read, then
   the `release-model.ts` smoke probes run through the router (`AppBuilder.probe`, fresh pointer
-  read, no public route needed). A late release never moves the pointer back to an older
+  read, no public route needed). The probes are generic: `/` must answer 2xx or 3xx and not a
+  router status page ("Nothing built yet", "Building"), plus up to 3 static GET routes (no path
+  params) from the app's own route table in the released Candidate's contract Evidence, the
+  routes the Change added first. Without a route table only `/` is probed. The dev Acme Shop Live
+  Workers Builds target also keeps its `/api/products` JSON probe. A late release never moves the pointer back to an older
   generation. Live apps replace Workers Builds for these Projects (P16-15).
 - **Smoke failure (P16-12).** The pointer moves back to the version it replaced, as a new
   recorded transition (`deployment.completed` with status `restored`), and the release is
@@ -151,8 +157,9 @@ Built 2026-10-10 (P16-10 to P16-15). Runtime data only; no Terraform at release 
 ### Removal, cost, and retention (milestone D)
 - **Remove app (P16-20).** `DELETE /v1/projects/:id/app` marks every row `removed` (410 on every
   host at once) and queues `app.remove`. Cleanup wipes the data stores (`AppBuilder.wipeData`),
-  deletes both R2 prefixes, then the rows. The Project and its history stay; "Deploy app" can
-  publish it again on a new pointer.
+  deletes both R2 prefixes and the preview and version rows, then reduces the production row to a
+  tombstone (status `removed`, no commit, no bundle): the hosts keep answering 410. The Project
+  and its history stay; "Deploy app" revives the tombstone and publishes again on the same label.
 - **Cost (P16-21).** At most 60 app builds per day (`usage_counters` `app-builds`), checked before
   each build. `bun run cost:report` shows the apps router requests and CPU, builds against the cap,
   ready bundles as an upper bound on Dynamic Workers per month, and bundle bytes in R2 (alert at

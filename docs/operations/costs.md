@@ -51,7 +51,7 @@ flowchart LR
     dv[Anthropic 15 USD / month]
   end
   subgraph prod[prod]
-    ps[Sandbox 5 h/month]
+    ps[Sandbox 15 h/month]
     pb[Browser Run 250 s/day]
     pv[Anthropic 10 USD / month]
   end
@@ -65,11 +65,11 @@ flowchart LR
 
 ### Sandbox Container Usage (`SANDBOX_MONTHLY_SECONDS`)
 
-- **Total allowance**: 10 container hours/month total (HOM-192, 36,000 seconds).
+- **Total allowance**: 20 container hours/month total (72,000 seconds), inside the ~25 included basic-instance hours of Workers Paid.
 - **Split across environments** ([ADR 0017](../adr/0017-prod-environment.md)):
   - Dev: `SANDBOX_MONTHLY_SECONDS = 18000` (5 hours)
-  - Prod: `SANDBOX_MONTHLY_SECONDS = 18000` (5 hours)
-- **Idle timeout**: Agent Workspace Sandboxes sleep after 10 idle minutes (`workers/agents/src/workspace.ts`). Candidate check Sandboxes sleep after 2 idle minutes (`workers/integration/src/candidate-sandbox.ts`).
+  - Prod: `SANDBOX_MONTHLY_SECONDS = 54000` (15 hours)
+- **Idle timeout**: Agent Workspace Sandboxes sleep after 2 idle minutes (`workers/agents/src/workspace.ts`). Candidate check Sandboxes sleep after 2 idle minutes (`workers/integration/src/candidate-sandbox.ts`).
 - **Period**: The D1 meter counts per UTC calendar month.
 - **Instance count**: `max_instances = 1` per environment.
 
