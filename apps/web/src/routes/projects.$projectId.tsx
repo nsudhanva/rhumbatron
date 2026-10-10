@@ -529,12 +529,7 @@ function ChangeOutcomeLine({ change, all }: { change: ChangeSummary; all: Change
       </span>
     );
   }
-  if (outcome.kind === "selected") {
-    return <span className="text-[12px] text-kumo-subtle">Selected</span>;
-  }
-  if (outcome.kind === "partially_selected") {
-    return <span className="text-[12px] text-kumo-subtle">Partially selected</span>;
-  }
+  // An owner's choice is also `selected`; say why it was built.
   if (change.supersedesChangeId) {
     return (
       <span className="text-[12px] text-kumo-subtle inline-flex flex-wrap items-center gap-1">
@@ -548,6 +543,12 @@ function ChangeOutcomeLine({ change, all }: { change: ChangeSummary; all: Change
         </Link>
       </span>
     );
+  }
+  if (outcome.kind === "selected") {
+    return <span className="text-[12px] text-kumo-subtle">Selected</span>;
+  }
+  if (outcome.kind === "partially_selected") {
+    return <span className="text-[12px] text-kumo-subtle">Partially selected</span>;
   }
   if (outcome.kind === "replaces") {
     return <span className="text-[12px] text-kumo-subtle">Replaces earlier request</span>;
