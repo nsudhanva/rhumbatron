@@ -72,7 +72,7 @@ If K2 is down, the state change is still correct. Only the dashboard lags (secti
 
 The event router pulls from K2 over HTTP with `K2_CONSUMER_TOKEN`.
 It runs two subscriptions per stream on every nudge and every cron tick.
-The cron tick also runs the `audit-archiver` subscription.
+The cron tick also runs the `audit-archiver` subscription, and, on ticks without maintenance or the release sweep, one `analytics-projector` batch.
 
 ```mermaid
 flowchart TB
@@ -90,6 +90,7 @@ flowchart TB
   CNT -->|"below 5"| NACK["nack: redeliver later"]
   CNT -->|"5th failure"| DL["dead_letters row, mark events processed, ack"]
   START --> ARC["Cron only: audit-archiver<br/>gzip NDJSON to R2 events/"]
+  START --> AN["Cron only: analytics-projector<br/>1 batch, dedupe, Analytics Engine"]
 ```
 
 Notes:
@@ -97,7 +98,8 @@ Notes:
 - The subrequest budget is at most 37 per invocation, below the Workers Free limit of 50.
 - Claims are released before a nack. Without that step, a redelivery would skip the events as duplicates.
 - The archive key is `events/<day>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz`. The R2 lifecycle expires `events/` after 30 days in dev and 365 days in prod.
-- Terraform creates four subscriptions: `causal-router`, `project-view-projector`, `audit-archiver`, and `analytics-projector`. No code consumes `analytics-projector` yet.
+- Terraform creates four subscriptions: `causal-router`, `project-view-projector`, `audit-archiver`, and `analytics-projector`.
+- `analytics-projector` (`workers/event-router/src/analytics.ts`) maps lifecycle Events to section 41.1 metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others) and writes one data point each to the `rhumbatron_event_metrics_<env>` dataset (binding `EVENT_METRICS`). Its own dataset keeps these points apart from the source points in `METRICS`. Dedupe uses `processed_events` like the other consumers. It skips maintenance and release-sweep ticks, so a tick stays at 46 subrequests or fewer. Expected volume: about 1,000 points on a busy day (free: 100,000).
 
 ## Causal routing
 
@@ -137,7 +139,7 @@ Notes:
 
 All Queues are named `rhumbatron-<purpose>-<env>`.
 Terraform creates six Queues (`modules/async`) with 1 day of message retention.
-Four of them carry traffic today.
+All six carry traffic.
 
 ```mermaid
 flowchart LR
@@ -147,6 +149,8 @@ flowchart LR
   WQ[["agent-wakeups"]]
   IQ[["integration"]]
   XQ[["indexing"]]
+  VQ[["verification"]]
+  RQ[["release"]]
   DLQ[["dead-letter"]]
   AG["rhumbatron-agents"]
   IDX["rhumbatron-indexer"]
@@ -158,6 +162,10 @@ flowchart LR
   ER -->|"change.dispatch, candidate.create,<br/>forks.sweep, project.cleanup"| IQ
   API -->|"project.provision, project.cleanup,<br/>fixture.publish, dead-letter retry"| IQ
   ER -->|"index.build, index.purge"| XQ
+  INT -->|"verification.start, release.start"| VQ
+  INT --> RQ
+  VQ --> INT
+  RQ --> INT
   WQ --> AG
   IQ --> INT
   XQ --> IDX
@@ -172,8 +180,12 @@ flowchart LR
 | `integration` | `rhumbatron-integration` | 10 | 3 | 30 s | `dead-letter` |
 | `indexing` | `rhumbatron-indexer` | 1, concurrency 1 | 3 | 30 s | none (failure recorded in `project_indexes`) |
 | `dead-letter` | `rhumbatron-event-router` | 5 | 5 | 60 s | none (dropped and logged) |
-| `verification` | none | | | | |
-| `release` | none | | | | |
+| `verification` | `rhumbatron-integration` | 5 | 3 | 30 s | `dead-letter` |
+| `release` | `rhumbatron-integration` | 5 | 3 | 30 s | `dead-letter` |
+
+`verification.start` (one per Candidate) and `release.start` (one per promoted generation with a release target) carry a stable `commandId` and the idempotency key (Candidate ID or release ID).
+The consumer starts the existing Workflow with that key as the instance ID, so a redelivery finds the running instance.
+Only when the send fails does the producer start the Workflow directly (`workers/integration/src/workflow-commands.ts`).
 
 The integration consumer also bounds its own work.
 A command that has more work asks for another delivery, at most 4 deliveries in total.
@@ -218,7 +230,8 @@ Every retry boundary has a stable key, so a retry never creates a second logical
 | Wake command | `cmd_<task>_ready` | Wake consumer: same agent already holds the Task means duplicate |
 | Dead-letter record | `command_id` | D1 `dead_letters` |
 | Change creation | `(project_id, client_request_id)` | D1 unique constraint and `ON CONFLICT DO NOTHING` |
-| Workflow start | Instance ID = Change ID or Candidate ID | Workflows reject a second instance with the same ID |
+| Workflow start | Instance ID = Change ID, Candidate ID, or release ID | Workflows reject a second instance with the same ID |
+| Workflow start command | `cmd_<candidate>_verify`, `cmd_<release>_release` | `workflowStartFor` maps the command to that instance ID |
 | Candidate composition | SHA-256 composition key | Candidate ID derives from the key |
 | Promotion | Candidate ID + expected generation | `decidePromotion` returns `already_promoted` |
 | Release | `rel_<project>_<generation>` | D1 `releases` primary key |

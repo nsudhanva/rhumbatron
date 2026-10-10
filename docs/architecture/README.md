@@ -71,13 +71,12 @@ flowchart LR
 | Event | DO SQLite outbox, K2 streams, Queues, Workflows | `workers/coordinator/src/outbox.ts`, `workers/event-router` |
 | Agent | AgentDO, Pi harness, AI Gateway, Workers AI (Clef-flash) | `workers/agents`, `packages/model-router` |
 | Execution | Sandbox container, Browser Run | `workers/sandbox`, `workers/integration/src/candidate-sandbox.ts` |
-| State | Artifacts, R2, D1, DO SQLite, Vectorize | `workers/integration`, `workers/indexer` |
-| Observability | Analytics Engine (`METRICS`), Workers Logs, AI Gateway logs | `workers/agents`, `workers/indexer` |
+| State | Artifacts, R2, D1, DO SQLite, KV (`CONFIG`), Vectorize | `workers/integration`, `workers/indexer` |
+| Observability | Analytics Engine (`METRICS`, `EVENT_METRICS`), Workers Logs, AI Gateway logs | `workers/agents`, `workers/indexer`, `workers/event-router` |
 
 Differences from `AGENTS.md`:
 
-- The KV namespace `rhumbatron-config-<env>` exists in Terraform, but no Worker binds it.
-- The Queues `rhumbatron-verification-<env>` and `rhumbatron-release-<env>` exist, but no Worker produces to them or consumes them. Workflows do that work.
+- The KV namespace `rhumbatron-config-<env>` (binding `CONFIG` on the integration Worker) holds only a 5-minute snapshot of the Project policy. D1 `project_policies` is the source of truth, and no API writes it yet: a Project without a row uses the default policy. Only promotion and approval read it. Candidate verification still plans with the default policy.
 - No OpenTelemetry tracing is configured. Durable Object Workers set `traces.enabled = false`.
 
 ## Deployables map
