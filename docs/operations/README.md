@@ -1,12 +1,12 @@
 # Rhumbatron Operations Guide
 
-Operational runbooks and procedures for managing Rhumbatron environments, infrastructure, quotas, and deployments.
+These runbooks tell operators how to run Rhumbatron environments, infrastructure, quotas, and deployments.
 
 ## Core Policies
 
-1. **Terraform-Only Remote Control Plane**: Remote Cloudflare infrastructure and Worker deployments are strictly managed by Terraform. No manual dashboard changes and no `wrangler deploy` (`AGENTS.md` section 2, [ADR 0004](../adr/0004-resource-organization-and-bootstrap-credentials.md)).
-2. **Quota and Free-Tier Discipline**: Operate within Cloudflare free/included limits and capped model spend (`AGENTS.md` section 7 and rule 50).
-3. **Executable Evidence Gates**: Releases and promotions depend on machine-verifiable evidence, never model confidence or unverified claims.
+1. **Terraform-only remote control plane**: Terraform manages all remote Cloudflare infrastructure and Worker deployments. Do not make manual dashboard changes. Do not run `wrangler deploy` (`AGENTS.md` section 2, [ADR 0004](../adr/0004-resource-organization-and-bootstrap-credentials.md)).
+2. **Quota and free-tier discipline**: Stay within Cloudflare free and included limits and within the model spend caps (`AGENTS.md` section 7 and rule 50).
+3. **Executable Evidence gates**: Releases and promotions depend on machine-verifiable Evidence. Model confidence and unverified claims never pass a gate.
 
 ---
 
@@ -15,9 +15,9 @@ Operational runbooks and procedures for managing Rhumbatron environments, infras
 | Runbook | Purpose | Primary Commands |
 |---|---|---|
 | [Deployment](./deploy.md) | Terraform deployments for dev, prod, and global; bundle generation; bootstrap/apex switches; D1 migration ordering. | `bun run cf:bundle`<br>`bun run tf:plan:dev` / `tf:apply:dev`<br>`bun run tf:plan:prod` / `tf:apply:prod`<br>`bun run tf global <args>`<br>`bun run tf:drift` / `tf:drift:prod`<br>`bun run smoke:dev` / `smoke:prod` |
-| [Pause & Resume](./pause-resume.md) | Global `paused` switch to halt background cron sweeps and container execution to preserve quota. | `bun run tf:plan:<env>` / `tf:apply:<env>` |
-| [Cleanup & Retention](./cleanup.md) | Purging smoke test projects, project archiving pipeline, daily fork sweeps, and R2 retention lifecycles. | `bun run cleanup:projects`<br>`bun run cleanup:projects --dry-run` |
-| [Costs & Budgets](./costs.md) | Cost reporting, guard layers, budget ceilings (Sandbox, Browser Run, Vertex AI), account budget alerts, call quotas, and cap trip remediation. | `bun run cost:report`<br>`bun run cost:report --alerts-only` |
+| [Pause & Resume](./pause-resume.md) | Global `paused` switch that stops background cron sweeps and container execution to save quota. | `bun run tf:plan:<env>` / `tf:apply:<env>` |
+| [Cleanup & Retention](./cleanup.md) | Smoke-test Project cleanup, the Project archive pipeline, daily fork sweeps, and R2 retention lifecycles. | `bun run cleanup:projects`<br>`bun run cleanup:projects --dry-run` |
+| [Costs & Budgets](./costs.md) | Cost reports, guard layers, budget ceilings (Sandbox, Browser Run, Vertex AI), account budget alerts, call quotas, and recovery after a cap trips. | `bun run cost:report`<br>`bun run cost:report --alerts-only` |
 | [Application Releases](./release.md) | Cloudflare Workers Builds releases (blocked: no Artifacts connection yet), smoke verification, one-time dashboard/CLI setup, and failure injection. | `bun run smoke:release`<br>`bun run inject --only=release-smoke-failure` |
 | [Resource Naming](./naming.md) | Conventions for naming and tagging Cloudflare resources and Workers. | `bun run check:guardrails` |
 

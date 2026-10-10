@@ -15,7 +15,7 @@ Many agents can propose many futures of one codebase. Only verified evidence can
 
 Terraform deploys both environments (`envs/dev`, `envs/prod`, ADR 0017).
 
-A real model-driven Change ran end to end on dev. The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically, passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. It was approved and promoted from S0 to S1. Model cost was about 0.91 USD.
+A real model-driven Change ran end to end on dev. The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD.
 
 ## Architecture
 
@@ -39,20 +39,20 @@ flowchart LR
 
 A user submits a goal for a Project. The Root Planner compiles it into a Work Graph of Tasks (`ChangeWorkflow`). The Causal Router wakes only the agents whose Tasks are ready.
 
-Each agent (`AgentDO` with the Pi harness, models through AI Gateway) declares a typed Intent, works in an Artifacts workspace inside a capped Sandbox, and publishes a ChangeSet.
+Each agent is an `AgentDO` with the Pi harness, and it calls models through AI Gateway. The agent declares a typed Intent, works in an Artifacts Workspace inside a capped Sandbox, and publishes a ChangeSet.
 
 Durable Objects hold authoritative state:
 - `ProjectRootDO`: Holds Canonical Generation and compare-and-swap promotion.
 - `ResourceShardDO`: Holds Claims and Intents.
 - `ProjectViewDO`: Holds live read-model and socket state.
 
-Every mutation writes a transactional outbox row published to K2. The event router projects Events into the live view and archives them to R2.
+Every mutation writes a transactional outbox row, and the outbox publisher sends it to K2. The event router projects Events into the live view and archives them to R2.
 
-Deterministic conflict detection checks Intents on semantic resources. Model conflict review resolves ambiguous overlaps using Sonnet, with escalation to Opus. Conflicting paths fork into Candidates.
+A deterministic detector checks Intents on semantic resources. Sonnet reviews ambiguous overlaps and can escalate to Opus. Conflicting paths fork into Candidates.
 
-Each Candidate is composed and verified in the Sandbox (build, unit, contract, Cart invariant, p95, security). Verification Evidence is recorded in D1 and R2.
+The integration Worker composes each Candidate and verifies it in the Sandbox (build, unit, contract, Cart invariant, p95, security). It records verification Evidence in D1 and R2.
 
-When required checks pass and policy approvals are granted, a compare-and-swap operation atomically promotes the winning Candidate and advances the Canonical Generation.
+If the required checks pass and the policy approvals exist, `ProjectRootDO` promotes the winning Candidate with one atomic compare-and-swap. The promotion advances the Canonical Generation.
 
 Reliability safeguards:
 - Dead-letter consumer with Retry and Dismiss.
@@ -170,11 +170,11 @@ Cost controls ([docs/operations/costs.md](docs/operations/costs.md)):
 - Gemini on Vertex: AI Gateway caps it at 40 USD (dev) and 10 USD (prod) per 30 days.
 - Account budget alerts at 10, 25, and 100 USD (ADR 0019, `envs/global`).
 - Pause switch: `locals.paused` in `infrastructure/terraform/envs/{dev,prod}/main.tf` ([pause-resume.md](docs/operations/pause-resume.md)).
-- Application release through Workers Builds is built and applied, but blocked: the dashboard Artifacts connection does not exist yet ([release.md](docs/operations/release.md)).
+- Application release through Workers Builds is built and applied. It is blocked because the dashboard Artifacts connection does not exist yet ([release.md](docs/operations/release.md)).
 
 ## CI
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main`: install, lint, typecheck, critical tests, build, Worker bundles, and Terraform `fmt -check` and `validate` with `-backend=false`. It requires no secrets and does not deploy. Other CI/CD is skipped by choice: deploys run locally through Terraform.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`. It runs install, lint, typecheck, critical tests, build, Worker bundles, and Terraform `fmt -check` and `validate` with `-backend=false`. It requires no secrets and does not deploy. The project has no other CI/CD by choice. Deploys run locally through Terraform.
 
 ## Git hooks
 

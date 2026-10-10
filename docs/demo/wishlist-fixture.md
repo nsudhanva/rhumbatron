@@ -1,8 +1,8 @@
 # Wishlist design-conflict fixture (P9-08)
 
-The repeatable source of the demo conflict (AGENTS.md sections 4, 32.4, 54, 55). Two complete
-implementations of shared wishlists on top of `fixtures/acme-shop`, published as real ChangeSets
-without a model call. Executable Evidence, not the fixture, decides the winner.
+This fixture is the repeatable source of the demo conflict (AGENTS.md sections 4, 32.4, 54, 55).
+It holds two complete implementations of shared wishlists on top of `fixtures/acme-shop`. Rhumbatron
+publishes them as real ChangeSets without a model call. Executable Evidence decides the winner.
 
 ## Designs
 
@@ -20,24 +20,24 @@ flowchart TB
 
 | | Design A | Design B |
 |---|---|---|
-| Data model | Normalized mutable tables. `wishlist_collaborators` rows are updated in place on remove and revoke. | Append-only membership event log. A materialized current-member set is updated by each event. |
-| Read path | Access is derived from the collaborator table on every request: one scan per check, and one check per item for `addedByRole`. | Reads use the materialized set: one map lookup per check. |
+| Data model | Normalized mutable tables. Remove and revoke update `wishlist_collaborators` rows in place. | Append-only membership event log. Each event updates a materialized current-member set. |
+| Read path | Every request computes access from the collaborator table. That is one scan per check, and one check per item for `addedByRole`. | Reads use the materialized set: one map lookup per check. |
 | Task key | `wishlist-membership-table` | `wishlist-membership-log` |
 
 The two designs share the HTTP contract, the page `public/wishlist.html`, the acceptance and
 authorization tests, and the benchmark (`fixtures/wishlist/files/shared`). Only
-`src/wishlist/model.ts` and one model test differ. Their Intents both name `wishlist:membership`
-and declare incompatible storage models (`mutable_table` and `append_only`), so the deterministic
-detector reports a confirmed conflict with `fork_candidates`.
+`src/wishlist/model.ts` and one model test differ. Both Intents name `wishlist:membership` and
+declare incompatible storage models (`mutable_table` and `append_only`). The deterministic
+detector therefore reports a confirmed conflict with `fork_candidates`.
 
 ## Why Design A fails
 
 `bench/wishlist.bench.ts` loads the same seeded dataset for both designs: 30,001 wishlists,
-2,000 products, about 360,000 memberships and 240,000 items. It then sends the requests a busy
-shared list gets (80% reads, 20% item adds and removes, as a collaborator) to the newest list,
-which has 42 members and 120 items. Design A does about 120 scans of the 360,000-row membership
-table per read. That is the cost of recomputing access from the table, not a sleep. Design B
-does 120 map lookups. `bun run bench` runs the cart and wishlist benchmarks and reports the
+2,000 products, about 360,000 memberships and 240,000 items. It then sends the traffic of a busy
+shared list to the newest list, which has 42 members and 120 items. The traffic is 80% reads and
+20% item adds and removes, as a collaborator. Design A does about 120 scans of the 360,000-row
+membership table per read. This cost comes from recomputing access from the table. The benchmark
+contains no sleep. Design B does 120 map lookups. `bun run bench` runs the cart and wishlist benchmarks and reports the
 slowest endpoint's p95 as the API p95.
 
 Measured on an Apple Silicon laptop (`bun run demo:wishlist --local`):
@@ -51,35 +51,39 @@ Measured on an Apple Silicon laptop (`bun run demo:wishlist --local`):
 | security (`--test-name-pattern authorization`) | 6 pass | 6 pass |
 | performance (p95 < 200 ms) | 414 to 509 ms: fail | 0.07 to 0.10 ms: pass |
 
-The Project Sandbox (`basic`, 1/4 vCPU) is slower, which makes A slower still and leaves B far
+The Project Sandbox (`basic`, 1/4 vCPU) is slower. There, A is slower still, and B stays far
 below the budget. The wishlist benchmark stops after 15 s with at least 12 samples, so A stays
 inside the 120 s check timeout.
 
 With the page in `public/`, the Candidate plan also has the Browser Run check (risk `high`, UI
 touched). The shop root has no `data-testid="wishlist"`, so the browser check runs its section
-35 API scenario, which this contract satisfies.
+35 API scenario. This contract satisfies that scenario.
 
 ## Pipeline
 
 1. `POST /v1/changes/:changeId/fixture-changesets` `{"design": "a" | "b" | "both"}`. The route
    answers 404 unless `FIXTURES_ENABLED` is `"true"` or `ENVIRONMENT` is `dev` or `local`
-   (`workers/api/src/fixtures.ts`). Terraform sets `FIXTURES_ENABLED = "true"` in dev and prod. Requires auth and Project
-   membership, an active Project, and a Change in `created` (unplanned) or `verifying`. It queues
-   `fixture.publish` on the integration Queue. `GET` on the same path shows what is published.
-2. The integration Worker (`workers/integration/src/fixture-changesets.ts`), per design:
-   records a Work Graph Task (`completed`, model policy `fixture`, `touchesAuthorization`), forks
-   the canonical repo into `ws-<run>`, commits the design on the canonical commit with
-   isomorphic-git (fixed commit date, so a retry is a no-op), and inserts a `task_runs` row (tier
-   `fixture`, zero model calls) and a `proposed` ChangeSet. It sets the Change to `verifying` with
-   risk `high`, the acceptance criteria, and the Cart invariant. It then declares both Intents on
-   the Change's ResourceShardDO and records the conflict and its Challenge, using the agents'
-   detector and conflict ID rule. Events use actor `system:fixture`.
+   (`workers/api/src/fixtures.ts`). Terraform sets `FIXTURES_ENABLED = "true"` in dev and prod.
+   The route requires auth, Project membership, an active Project, and a Change in `created`
+   (unplanned) or `verifying`. It queues `fixture.publish` on the integration Queue. `GET` on the
+   same path shows the published designs.
+2. The integration Worker (`workers/integration/src/fixture-changesets.ts`) does these actions
+   for each design:
+   - It records a Work Graph Task (`completed`, model policy `fixture`, `touchesAuthorization`).
+   - It forks the canonical repo into `ws-<run>`.
+   - It commits the design on the canonical commit with isomorphic-git. The commit date is fixed,
+     so a retry is a no-op.
+   - It inserts a `task_runs` row (tier `fixture`, zero model calls) and a `proposed` ChangeSet.
+
+   It sets the Change to `verifying` with risk `high`, the acceptance criteria, and the Cart
+   invariant. It then declares both Intents on the Change's ResourceShardDO. It records the
+   conflict and its Challenge with the agents' detector and conflict ID rule. Events use actor
+   `system:fixture`.
 3. `POST /v1/changes/:changeId/candidates` takes an optional `{"changeSetIds": [...]}` subset, so
    design A and design B become separate Candidates. Without a body it composes every proposed
    ChangeSet, as before.
 
-Workspace forks are tracked by their `task_runs` rows, so Project cleanup and the fork sweep
-delete them.
+Each Workspace fork has a `task_runs` row, so Project cleanup and the fork sweep delete it.
 
 ## Commands
 
@@ -90,13 +94,13 @@ bun run demo:wishlist                  # dev: new Change on acme-shop-demo, then
 bun run demo:wishlist --change chg_... # dev: resume or re-print an existing Change
 ```
 
-The remote run expects `acme-shop-demo` (`bun run demo:project`) and the dev Workers deployed.
-It ends with A `rejected` on `performance` and B `verified`, waiting for human approval.
+The remote run needs `acme-shop-demo` (`bun run demo:project`) and the deployed dev Workers.
+At the end, A is `rejected` on `performance`, and B is `verified` and waits for human approval.
 
 ## Limits
 
 - The shop's store is in memory per isolate. On the deployed shop Worker, wishlist state and
-  share links do not survive an isolate restart and are not shared across isolates.
-- The fixture applies to the Acme Shop baseline. After a promotion changes `src/app.ts`,
-  `src/store.ts`, `package.json`, `README.md`, or `public/index.html`, publishing refuses with an
-  anchor error instead of committing a wrong patch.
+  share links are lost on an isolate restart. Isolates do not share them.
+- The fixture applies to the Acme Shop baseline. A promotion can change `src/app.ts`,
+  `src/store.ts`, `package.json`, `README.md`, or `public/index.html`. After that, publishing
+  stops with an anchor error and does not commit a wrong patch.

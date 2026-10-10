@@ -1,7 +1,7 @@
 # Failure injection
 
-Phase 13 (P13-05 to P13-12) and AGENTS.md section 42. Each fault must have an observable recovery
-path, and no fault may silently corrupt the Canonical State.
+This page covers Phase 13 (P13-05 to P13-12) and AGENTS.md section 42. Each fault must have an
+observable recovery path. No fault may silently corrupt the Canonical State.
 
 Two kinds of proof exist:
 
@@ -10,9 +10,9 @@ Two kinds of proof exist:
 - **Live injection** (`bun run inject`) applies faults through the public dev API, as the Clerk
   smoke user, and reports pass or fail per fault.
 
-A fault that needs an internal hook is not injected live. The hook it needs is listed below.
-Nobody added these hooks: each one is a test-only path into production code and needs its own
-review.
+The live run does not inject a fault that needs an internal hook. This page lists each needed
+hook. No one has added these hooks yet. Each hook is a test-only path into production code and
+needs its own review.
 
 ## Run live injection
 
@@ -37,16 +37,16 @@ bun run inject --only=stale-candidate,promotion-double-submit --sandbox
 bun run inject --keep               # do not archive the Projects it created
 ```
 
-- Credentials: the same Keychain items as `bun run smoke:dev`
+- Credentials: The same Keychain items as `bun run smoke:dev`
   (`rhumbatron-clerk-secret-key-dev`, `rhumbatron-clerk-smoke-user-id-dev`). No new secret.
-- Target: dev only (`https://api-dev.rhumbatron.com`). Dev must be running (not paused).
-- Model calls: none. Every Change is created with `startPlanning: false`.
-- Sandbox: none by default. `--sandbox` runs one Acme Shop baseline Candidate verification (a few
-  minutes of the 5 h monthly dev Sandbox cap, ADR 0017). The stale Candidate stops at workflow step 1
-  and never opens the Sandbox.
-- Cleanup: every Project the run created is archived with `DELETE /v1/projects/:id`, which deletes
-  its Artifacts repos. Evidence and D1 rows stay.
-- A fault that could not run is reported as `FAIL`, never as a skipped pass (section 34.4.1).
+- Target: Dev only (`https://api-dev.rhumbatron.com`). Dev must be running (not paused).
+- Model calls: None. The script creates every Change with `startPlanning: false`.
+- Sandbox: None by default. `--sandbox` runs one Acme Shop baseline Candidate verification. It
+  uses a few minutes of the 5 h monthly dev Sandbox cap (ADR 0017). The stale Candidate stops at
+  workflow step 1 and never opens the Sandbox.
+- Cleanup: The script archives every Project that it created with `DELETE /v1/projects/:id`. The
+  archive deletes the Project's Artifacts repos. Evidence and D1 rows stay.
+- The script reports a fault that could not run as `FAIL`, never as a skipped pass (section 34.4.1).
 
 | Fault ID | Default | What it does | Expected recovery |
 |---|---|---|---|
@@ -66,10 +66,10 @@ bun run inject --keep               # do not archive the Projects it created
 ### Fixed risk found while writing `change-double-submit`
 
 `POST /v1/projects/:projectId/changes` read by `clientRequestId` and then inserted. Two concurrent
-requests could both miss the read, and the second insert failed with `500` on the `UNIQUE
+requests could both miss the read. The second insert then failed with `500` on the `UNIQUE
 (project_id, client_request_id)` constraint (migration 0001). `workers/api/src/projects.ts` now
-inserts with `ON CONFLICT (project_id, client_request_id) DO NOTHING` and reads the row back, so
-both callers get the same Change (section 60).
+inserts with `ON CONFLICT (project_id, client_request_id) DO NOTHING` and reads the row back.
+Both callers get the same Change (section 60).
 
 ## Fault map
 
@@ -89,61 +89,64 @@ both callers get the same Change (section 60).
 
 ### Budget stop
 
-OpenRouter free models cost $0, so on that path `checkRunBudget` receives `spentUsd: 0` in
-`AgentDO.beforeModelCall` and the cost cap cannot fire live without spending Vertex credit. The live stop is the call cap: the per-run cap fails the Task, and
-the daily cap (`AGENT_DAILY_CALL_CAP`, D1 `usage_counters` row `agent-model-calls`) ends the run
-with `budget_exhausted`, which `failTask` turns into Change status `budget_blocked`.
+OpenRouter free models cost $0. On that path, `checkRunBudget` receives `spentUsd: 0` in
+`AgentDO.beforeModelCall`. The cost cap cannot fire live without spending Vertex credit, so the
+live stop is the call cap. The per-run cap fails the Task. The daily cap (`AGENT_DAILY_CALL_CAP`,
+D1 `usage_counters` row `agent-model-calls`) ends the run with `budget_exhausted`. `failTask`
+turns that into Change status `budget_blocked`.
 
-Hook: a dev-only internal RPC on the agents Worker that sets today's `agent-model-calls` counter to
-the cap for the inject run. Then a planned Change's first agent run must stop with
-`budget_exhausted`, the Change must show `budget_blocked`, and the existing state must stay readable.
-This costs at most one Root Planner call. Of the section 44 limits, `workers/agents/src/limits.ts`
-enforces `max_active_agents_per_change` (8), `max_active_sandboxes_per_change` (4), and the attempt
-limit per tier (2); `maxCandidates` (3) is enforced in `packages/conflict`. The per-Change
-`max_sandbox_seconds_per_change` and `max_browser_seconds_per_change` are not enforced; the
-monthly Sandbox and daily Browser Run caps per environment apply instead.
+Hook: A dev-only internal RPC on the agents Worker that sets today's `agent-model-calls` counter
+to the cap for the inject run. Expected: The first agent run of a planned Change stops with
+`budget_exhausted`. The Change shows `budget_blocked`, and the existing state stays readable.
+This costs at most one Root Planner call.
+
+Of the section 44 limits, `workers/agents/src/limits.ts` enforces `max_active_agents_per_change`
+(8), `max_active_sandboxes_per_change` (4), and the attempt limit per tier (2). `packages/conflict`
+enforces `maxCandidates` (3). Nothing enforces the per-Change `max_sandbox_seconds_per_change` and
+`max_browser_seconds_per_change`. The monthly Sandbox cap and the daily Browser Run cap per
+environment apply instead.
 
 ### Duplicate Event
 
 Hook: a replay command for the event router that re-consumes one K2 offset range for one
 subscription (for example a `k2.replay` integration command with stream, subscription, and offset
-range). Expected: `claimEvents` reports every Event as a duplicate, the live view sequence does not
-advance, and no second R2 archive object appears.
+range). Expected: `claimEvents` reports every Event as a duplicate. The live view sequence does
+not advance, and no second R2 archive object appears.
 
 ### Expired Claim
 
 Claims are `ResourceShardDO` RPCs (`acquireClaim`, `renewClaim`, `releaseClaim`) with no public
 route. Hook: a dev-only internal RPC that acquires a Claim for a test agent with `ttlMs: 5000` and
-never renews it. Expected: after the lease, the shard alarm emits `claim.expired`, the activity feed
-shows the Claim as expired, and a second agent can acquire the resource.
+never renews it. Expected: After the lease ends, the shard alarm emits `claim.expired`. The
+activity feed shows the Claim as expired, and a second agent can acquire the resource.
 
 ### Sandbox loss
 
 Hook: a dev-only internal RPC on the agents Worker that calls `destroy()` on a Project's Sandbox
 (`getSandbox(SANDBOX, "proj-<id>")`). Run it between Candidate composition and the first check,
-then let `CandidateVerificationWorkflow` continue. Expected: the checks pass on a checkout restored
-from the Candidate fork, and the Candidate verifies. Task workspaces need the same proof:
+then let `CandidateVerificationWorkflow` continue. Expected: The checks pass on a checkout restored
+from the Candidate fork, and the Candidate verifies. Task Workspaces need the same proof.
 `openWorkspace` reuses an existing fork on a retried run, but no test covers that path yet.
 
 ### K2 outage
 
 Hook: a dev-only runtime flag (for example KV key `inject:k2-down-until` in `rhumbatron-config-dev`)
 that `OutboxPublisher` checks before each send and treats as a retryable K2 failure. KV values are
-runtime data, not Terraform configuration. Expected: mutations still commit, unpublished outbox
-rows grow, the dashboard lags, and every Event publishes once after the flag expires.
+runtime data, not Terraform configuration. Expected: Mutations still commit, and unpublished
+outbox rows grow. The dashboard lags. After the flag expires, every Event publishes once.
 
 ### Model timeout
 
 Hook: a dev-only per-Change flag that makes the gateway client abort the next model call after
-1 ms. Expected: one same-tier retry, then the Task stops with `repeated_transport_failure`; no
-escalation to a stronger tier. Live injection spends free-tier model calls (50 per day).
+1 ms. Expected: One same-tier retry, and then the Task stops with `repeated_transport_failure`.
+No escalation to a stronger tier occurs. Live injection spends free-tier model calls (50 per day).
 
 ### Poison command
 
-Consumers retry a failure and Queues move it to `rhumbatron-dead-letter-dev` after 3 retries. The
-event router consumes the dead-letter Queue (`workers/event-router/src/dead-letter.ts`): it
-records `task.failed`, blocks the Task, and the Project and Change pages show Retry and Dismiss
-(section 42.7).
+Consumers retry a failure. After 3 retries, the Queue moves it to `rhumbatron-dead-letter-dev`.
+The event router consumes the dead-letter Queue (`workers/event-router/src/dead-letter.ts`). It
+records `task.failed` and blocks the Task. The Project and Change pages then show Retry and
+Dismiss (section 42.7).
 
 Still needed for a live proof: a dev-only internal RPC that sends one schema-valid command whose
 handler always throws (the public API cannot enqueue arbitrary commands, by design).
@@ -157,18 +160,18 @@ deployment, and smoke checks the release URL. Injection:
 bun run inject --only=release-smoke-failure     # dev; RELEASE_PROJECT_ID=<id> to pick a Project
 ```
 
-- It needs a deployed release: the smoke user's `acme-shop-live` Project (`bun run demo:live`)
-  with its Workers Builds connection, and one promotion that deployed. It never runs by default,
-  because it changes the demo Project's release state.
-- What happens: `POST /v1/projects/:projectId/releases/inject-failure` (answers only where
-  `FIXTURES_ENABLED` is set, or in dev and local) probes the live release URL with the normal
+- The fault needs a deployed release. That is the smoke user's `acme-shop-live` Project
+  (`bun run demo:live`) with its Workers Builds connection and one promotion that deployed. The
+  fault never runs by default, because it changes the demo Project's release state.
+- What happens: `POST /v1/projects/:projectId/releases/inject-failure` answers only where
+  `FIXTURES_ENABLED` is set, or in dev and local. It probes the live release URL with the normal
   smoke probes plus `/__rhumbatron/injected-missing-route`. The app returns a real 404, so the
-  smoke check fails through the normal path: release `smoke_failed`, event
-  `release.smoke_failed` with `injected: true`, Evidence `release-s<N>-injected` in R2 and D1.
-- Expected: the Candidate page and the inbox show the failed release; the Canonical Generation
-  stays; nothing is deleted.
-- Recovery is a new canonical transition (section 42.10): run a new Change and promote it. Its
+  smoke check fails through the normal path. The result is release `smoke_failed`, event
+  `release.smoke_failed` with `injected: true`, and Evidence `release-s<N>-injected` in R2 and D1.
+- Expected: The Candidate page and the inbox show the failed release. The Canonical Generation
+  stays, and nothing is deleted.
+- Recovery is a new canonical transition (section 42.10). Run a new Change and promote it. Its
   release (`S<N+1>`) builds, deploys, and passes the smoke check.
 - A real build failure (a promoted commit whose build fails) takes the `failed` path with
-  `deployment.failed`. It is not injected live, because it needs a broken commit on canonical
-  `main`.
+  `deployment.failed`. The live run does not inject it, because it needs a broken commit on
+  canonical `main`.

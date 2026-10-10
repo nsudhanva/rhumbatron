@@ -38,7 +38,7 @@ Queue purposes: `agent-wakeups`, `integration`, `verification`, `indexing`, `rel
 
 ## Tags
 
-Standard tags, applied wherever Terraform supports them:
+Terraform applies these standard tags wherever it supports them.
 
 | Key | Values |
 |---|---|
@@ -47,10 +47,10 @@ Standard tags, applied wherever Terraform supports them:
 | `component` | the name's component part |
 | `managed-by` | `terraform` |
 
-- Workers: applied now as `key:value` strings through `cloudflare_worker.tags`.
+- Workers: Terraform applies them now as `key:value` strings through `cloudflare_worker.tags`.
 - D1, KV, R2, Queues, AI Gateway, Vectorize, Durable Object namespaces: Cloudflare Resource Tagging
-  supports them, but provider 5.27 has no resource for it. Apply when first-party support lands
-  (ADR 0004).
+  supports them, but provider 5.27 has no resource for it. Apply the tags when first-party support
+  exists (ADR 0004).
 
 ## Local
 

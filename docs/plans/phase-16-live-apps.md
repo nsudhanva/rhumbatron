@@ -36,15 +36,15 @@ This makes the "next GitHub" story complete. The familiar parts are the repo, di
 
 ## 3. Decision: Dynamic Workers
 
-Use **Dynamic Workers** (the Worker Loader binding). One router Worker serves every app. It loads the app code for the requested version into an isolate on demand.
+Use Dynamic Workers (the Worker Loader binding). One router Worker serves every app. It loads the app code for the requested version into an isolate on demand.
 
 Why:
 
 - It is in the frozen stack (AGENTS.md section 5.3, "Dynamic Workers or Code Mode").
-- It is on our Workers Paid plan. No new product, no new subscription.
+- It is included in our Workers Paid plan. It needs no new product and no new subscription.
 - It needs no Worker per Project, no build token, and no dashboard step.
 - Deploy is "write a bundle, move a pointer". It is fast and atomic.
-- Previews come free: a Candidate commit is one more version id.
+- Previews cost nothing extra. A Candidate commit is one more version id.
 - Isolation is built in: no network by default (`globalOutbound: null`), custom CPU limits, and only the bindings we pass.
 
 Rejected options:
@@ -109,7 +109,7 @@ sequenceDiagram
 
 ### 4.2 Domain (decided 2026-10-10)
 
-Apps run on subdomains of rhumbatron.com. No new zone. **Live apps run in prod only** (decided 2026-10-10): dev keeps building, checking and promoting Projects, but it does not host apps.
+Apps run on subdomains of rhumbatron.com, with no new zone. Live apps run in prod only (decided 2026-10-10). Dev keeps building, checking and promoting Projects, but it does not host apps.
 
 | Host | Meaning |
 |---|---|
@@ -117,11 +117,12 @@ Apps run on subdomains of rhumbatron.com. No new zone. **Live apps run in prod o
 | `<candidate-short-id>--<slug>.rhumbatron.com` | Preview of one Candidate |
 
 - All hosts are one level deep, so Universal SSL (`*.rhumbatron.com`) covers them. A two-level host such as `x.apps.rhumbatron.com` would need a paid certificate.
-- Terraform adds, in `envs/prod` only, a proxied wildcard DNS record `*` and one Worker route `*.rhumbatron.com/*` to the apps router. Explicit records keep priority: Workers custom domains (`dev`, `api`, `api-dev`, `www`, the apex) win over routes, and the Clerk CNAMEs (`clerk`, `accounts`, `clkmail`, DKIM) are DNS-only, so no route touches them.
-- Because dev has no apps runtime, P16 work is tested on prod with test Projects that the e2e suite archives. Each step is small and reversible: the route and the wildcard record can be removed with one apply.
-- Slugs that clash with Rhumbatron hosts are reserved: `www`, `api`, `dev`, `api-dev`, `clerk`, `accounts`, `clkmail`, and the DKIM hosts.
+- In `envs/prod` only, Terraform adds a proxied wildcard DNS record `*` and one Worker route `*.rhumbatron.com/*` to the apps router.
+- Explicit records keep priority. Workers custom domains (`dev`, `api`, `api-dev`, `www`, the apex) win over routes. The Clerk CNAMEs (`clerk`, `accounts`, `clkmail`, DKIM) are DNS-only, so no route touches them.
+- Dev has no apps runtime, so P16 tests run on prod with test Projects that the e2e suite archives. Each step is small and reversible. One apply can remove the route and the wildcard record.
+- Rhumbatron reserves the slugs that clash with Rhumbatron hosts: `www`, `api`, `dev`, `api-dev`, `clerk`, `accounts`, `clkmail`, and the DKIM hosts.
 
-Cookie safety without a separate zone. The router is the only path in and out of an app:
+The router keeps cookies safe without a separate zone. It is the only path in and out of an app.
 
 1. It removes the `Cookie` header from every request before the app sees it, except for cookies that the app set for its own host.
 2. It drops any `Set-Cookie` from the app that names a `Domain` attribute, so an app cannot set cookies for rhumbatron.com or other apps.
@@ -132,7 +133,7 @@ Cookie safety without a separate zone. The router is the only path in and out of
 Generated apps do not use Clerk or any real identity provider.
 
 - The app is open: anyone with the URL can use it.
-- If an instruction asks for accounts, sign-in or roles, agents build a **fake identity**: a demo user picker, or a "Sign in as Alice / Bob" switch, stored in a cookie on the app's own host. No passwords, no email, no third-party auth.
+- If an instruction asks for accounts, sign-in or roles, agents build a fake identity. This is a demo user picker or a "Sign in as Alice / Bob" switch, stored in a cookie on the app's own host. It has no passwords, no email and no third-party auth.
 - The Acme template already has a fixture identity (`src/identity.ts`). P16-08 makes it default to a demo user, so the shop works in a browser without a header. Today `/api/products` returns 401 without the test identity.
 - The context compiler adds this rule to every Task for an app Project: "Use the fake identity module for any auth need. Never add real authentication or collect credentials."
 - A verification check flags an app bundle that references real auth SDKs or password fields (a static check, P16-05).
@@ -152,12 +153,12 @@ Generated apps do not use Clerk or any real identity provider.
 2. Agents work; a Candidate composes; checks run (exists).
 3. **New:** the verification workflow builds the app bundle and publishes a preview. The Candidate page shows **Open preview**.
 4. Promotion runs (exists). **New:** the production pointer moves in the same step that records `canonical.advanced`. Section 37 says the release is a data-plane operation, so no Terraform is involved.
-5. Smoke check on the production host (reuse `release-model.ts` probes). On failure the release is `smoke_failed` and the pointer moves back to the previous version, as a new transition.
+5. A smoke check runs on the production host (reuse the `release-model.ts` probes). If it fails, the release becomes `smoke_failed`. The pointer then moves back to the previous version as a new transition.
 
 ### 5.3 Many instructions at once
 
 - Independent Changes run in parallel and promote one after another.
-- A Candidate whose base generation is out of date becomes `stale` (exists). **New:** auto-recompose on the new canonical state and re-verify, up to 2 times. Then mark it blocked.
+- A Candidate whose base generation is out of date becomes `stale` (exists). **New:** Rhumbatron recomposes it on the new canonical state and verifies it again, up to 2 times. After that, it marks the Candidate blocked.
 
 ### 5.4 Rollback
 
@@ -168,7 +169,7 @@ Generated apps do not use Clerk or any real identity provider.
 ### 5.5 Remove app
 
 - **Remove app** on Settings sets the app status to `removed`. The router answers 410 with a plain page.
-- The existing archive flow then cleans up the source. It also deletes bundles (R2 prefix), facet storage (`facets.delete`) and deployment rows. The data is gone after cleanup; say so in the UI.
+- The existing archive flow then cleans up the source. It also deletes bundles (R2 prefix), facet storage (`facets.delete`) and deployment rows. After cleanup, the data is gone. The UI must say so.
 
 ### 5.6 View code
 
@@ -179,7 +180,7 @@ Generated apps do not use Clerk or any real identity provider.
 ### 5.7 Edit code
 
 - **Edit** on a file opens an editor. **Save** creates a human ChangeSet on a new Change ("Edit src/catalog.ts by Sudhanva").
-- That Change goes through the same Candidate and checks. Human edits never bypass evidence. This is the core invariant: only verified evidence advances the Canonical State.
+- That Change goes through the same Candidate and checks. Human edits never bypass Evidence. This keeps the core invariant: only verified Evidence advances the Canonical State.
 
 ## 6. Work breakdown
 
@@ -264,7 +265,7 @@ Streams A/B and C can run in parallel with separate file ownership. C touches `w
 | Requests and CPU | Small | Per-app CPU limit; existing Workers meters |
 | Sandbox build time | About 30 to 60 seconds per bundle | Reuse the verification Sandbox session; existing 5 h per month cap |
 | R2 bundle storage | Under 100 MB | Lifecycle rule for previews |
-| Domain | None (rhumbatron.com subdomains, Universal SSL) | — |
+| Domain | None (rhumbatron.com subdomains, Universal SSL) | None |
 | Model spend | Unchanged per Change | Existing caps |
 
 ## 9. Risks

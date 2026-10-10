@@ -1,29 +1,29 @@
 # Resource Cleanup and Retention Runbook
 
-Operations guide for smoke test cleanup, project archiving, automated fork sweeping, and R2 object retention.
+This runbook covers smoke-test cleanup, Project archive, the daily fork sweep, and R2 object retention.
 
 ## Purpose
 
-Rhumbatron manages Git repositories in Cloudflare Artifacts, scratch contexts in R2, and database records in D1. Regular cleanup keeps usage safely within Cloudflare free and included resource tiers (`AGENTS.md` sections 7 and 43, [ADR 0010](../adr/0010-artifacts-project-source.md)).
+Rhumbatron keeps Git repositories in Cloudflare Artifacts, scratch contexts in R2, and database records in D1. Regular cleanup keeps usage within the Cloudflare free and included tiers (`AGENTS.md` sections 7 and 43, [ADR 0010](../adr/0010-artifacts-project-source.md)).
 
 ---
 
 ## 1. Smoke Project Cleanup (`cleanup:projects`)
 
-Ephemeral projects created by automated smoke tests (`scripts/smoke.ts`) on `dev` are purged using `scripts/cleanup-projects.ts`.
+Automated smoke tests (`scripts/smoke.ts`) make temporary Projects on `dev`. `scripts/cleanup-projects.ts` deletes them.
 
-- **Target Match**: Matches slugs conforming to `/^(smoke|sandbox)-\d+$/`.
-- **Protected Slugs**: Explicitly keeps designated demo projects, including `acme-shop-demo`.
+- **Target match**: The script selects slugs that match `/^(smoke|sandbox)-\d+$/`.
+- **Protected slugs**: The script keeps the named demo Projects, including `acme-shop-demo`.
 
 ### Dry Run
 
-Inspect which projects match without deleting anything:
+List the matching Projects without deleting anything:
 
 ```sh
 bun run cleanup:projects --dry-run
 ```
 
-Outputs listed projects, count of matched smoke projects, and kept projects.
+The output shows the listed Projects, the count of matched smoke Projects, and the kept Projects.
 
 ### Real Execution
 
@@ -31,13 +31,13 @@ Outputs listed projects, count of matched smoke projects, and kept projects.
 bun run cleanup:projects
 ```
 
-Invokes `DELETE /v1/projects/:id` for each matched project using the Clerk smoke user credentials.
+The script calls `DELETE /v1/projects/:id` for each matched Project with the Clerk smoke user credentials.
 
 ---
 
 ## 2. Project Archiving (`DELETE /v1/projects/:id`)
 
-When a project is deleted via the API or UI, the API marks it `archived` in D1 and queues `project.cleanup` for the integration Worker (`workers/integration/src/project-cleanup.ts`):
+When a user deletes a Project through the API or UI, the API marks it `archived` in D1. The API then queues `project.cleanup` for the integration Worker (`workers/integration/src/project-cleanup.ts`).
 
 ```mermaid
 flowchart TB
@@ -53,33 +53,33 @@ flowchart TB
   cron[Daily maintenance 04:17 UTC] -.->|re-queue leftovers| q
 ```
 
-1. **State Update**: The API has already set project status to `archived` in D1. Cleanup skips a Project that is not archived.
-2. **Order of Deletion** (bounded per queue message):
-   - **Workspace and Candidate Forks**: Deletes all active forks (`ws-*` and `cand-*`) recorded in D1 (`task_runs` and `candidates`) via `ARTIFACTS.delete()`.
-   - **Canonical Repository**: Deletes the canonical project repository in Cloudflare Artifacts (`ARTIFACTS.delete(projectId)`).
-   - **R2 Storage**: Lists and deletes all objects under prefixes `source/${projectId}/` and `context/${projectId}/`.
-   - **Feed Purge**: Removes `project_events` rows for the project, and updates `projects.cleaned_at = now()`.
-3. **Preserved Records**: Project rows remain in D1 with status `archived` and `cleaned_at` set for historical audit logs. Evidence objects in R2 are preserved until expired by bucket lifecycle rules.
+1. **State update**: The API has already set the Project status to `archived` in D1. Cleanup skips a Project that is not archived.
+2. **Order of deletion** (bounded per queue message):
+   - **Workspace and Candidate forks**: Cleanup deletes all active forks (`ws-*` and `cand-*`) that D1 records in `task_runs` and `candidates`. It uses `ARTIFACTS.delete()`.
+   - **Canonical repository**: Cleanup deletes the canonical Project repository in Cloudflare Artifacts (`ARTIFACTS.delete(projectId)`).
+   - **R2 storage**: Cleanup lists and deletes all objects under the prefixes `source/${projectId}/` and `context/${projectId}/`.
+   - **Feed purge**: Cleanup removes the `project_events` rows for the Project and sets `projects.cleaned_at = now()`.
+3. **Kept records**: Project rows stay in D1 with status `archived` and `cleaned_at` set, for the audit history. Evidence objects stay in R2 until the bucket lifecycle rules expire them.
 
 ---
 
 ## 3. Daily Fork Sweep (`forks.sweep`)
 
-Active projects accumulate ephemeral forks during task execution and candidate verification. The daily sweep (`sweepForks` in `workers/integration/src/project-cleanup.ts`) prunes unneeded forks once retention expires:
+Active Projects collect temporary forks while Tasks run and Candidates verify. The daily sweep (`sweepForks` in `workers/integration/src/project-cleanup.ts`) deletes unneeded forks after their retention expires.
 
-- **Retention Periods** ([ADR 0017](../adr/0017-prod-environment.md)):
+- **Retention periods** ([ADR 0017](../adr/0017-prod-environment.md)):
   - Dev: 7 days after completion.
   - Prod: 30 days after completion.
-- **Forks Swept**:
-  - **Workspace Forks (`ws-*`)**:
+- **Forks swept**:
+  - **Workspace forks (`ws-*`)**:
     - Task runs that failed.
     - Task runs that completed without producing a ChangeSet.
     - Task runs whose parent Change has ended (`completed`, `cancelled`, or `failed`).
-  - **Candidate Forks (`cand-*`)**:
+  - **Candidate forks (`cand-*`)**:
     - Candidates in `rejected` or `stale` states.
-    - Candidates in `promoted` state, verified only after canonical `main` is confirmed to contain the composed commit.
-- **Limits**: Deletes up to 20 repositories per message, updating `fork_deleted_at` in D1 to guarantee idempotency.
-- **Schedule**: The event router's every-minute cron queues one `forks.sweep` per day at 04:17 UTC (`workers/event-router/src/maintenance.ts`). The same tick re-queues `project.cleanup` for up to 10 archived Projects with leftovers. While `paused = true`, the cron and therefore the sweep do not run.
+    - Candidates in `promoted` state. The sweep deletes these only after it confirms that canonical `main` contains the composed commit.
+- **Limits**: The sweep deletes up to 20 repositories per message. It sets `fork_deleted_at` in D1, so a retry is idempotent.
+- **Schedule**: The event router's every-minute cron queues one `forks.sweep` per day at 04:17 UTC (`workers/event-router/src/maintenance.ts`). The same tick re-queues `project.cleanup` for up to 10 archived Projects with leftovers. While `paused = true`, the cron does not run, so the sweep does not run.
 
 ---
 

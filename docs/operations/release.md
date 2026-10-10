@@ -1,12 +1,12 @@
 # Application Releases Runbook
 
-Operations guide for application releases via Cloudflare Workers Builds, smoke verification, and failure injection.
+This runbook covers application releases through Cloudflare Workers Builds, release smoke checks, and failure injection.
 
 ## Principles
 
-Rhumbatron manages application releases through git push triggers to Cloudflare Artifacts, verified by automated workflows and executable machine evidence (`AGENTS.md` sections 21.3 and 37, [ADR 0018](../adr/0018-release-via-workers-builds.md)).
+A Git push to Cloudflare Artifacts starts each application release. `ReleaseWorkflow` then verifies the release with executable Evidence (`AGENTS.md` sections 21.3 and 37, [ADR 0018](../adr/0018-release-via-workers-builds.md)).
 
-**Status (2026-10-10): connected.** The Workers Builds connection from the Artifacts repo `rhumbatron-projects-dev/proj_077b581d-15b3-4f6d-b68a-6a6659cc2668` (Acme Shop Live) to `rhumbatron-acme-shop-dev` exists. It was made in the dashboard (Worker → Settings → Builds → Connect), because the Builds API rejects `cloudflare_artifacts` request bodies (error 12065).
+**Status (2026-10-10): connected.** The Workers Builds connection from the Artifacts repo `rhumbatron-projects-dev/proj_077b581d-15b3-4f6d-b68a-6a6659cc2668` (Acme Shop Live) to `rhumbatron-acme-shop-dev` exists. An operator made it in the dashboard (Worker → Settings → Builds → Connect), because the Builds API rejects `cloudflare_artifacts` request bodies (error 12065).
 
 | Item | Value |
 |---|---|
@@ -46,31 +46,31 @@ sequenceDiagram
   Note over R: deployed, smoke_failed, failed, or superseded
 ```
 
-1. **Promotion Trigger**:
-   - When a Candidate is accepted, promotion fast-forwards the canonical `main` branch in the project's Cloudflare Artifacts repository.
-   - Promotion immediately starts `ReleaseWorkflow` with instance ID `rel_<project>_<generation>`.
-   - **No Direct Deploy API Calls**: Rhumbatron never invokes a Workers Builds write API at runtime; the push to `main` triggers Workers Builds directly.
-2. **Workers Builds Execution**:
+1. **Promotion trigger**:
+   - When a Candidate is accepted, promotion fast-forwards the canonical `main` branch in the Project's Cloudflare Artifacts repository.
+   - Promotion then starts `ReleaseWorkflow` with instance ID `rel_<project>_<generation>`.
+   - **No direct deploy API calls**: Rhumbatron never calls a Workers Builds write API at runtime. The push to `main` starts Workers Builds directly.
+2. **Workers Builds run**:
    - Terraform manages the release target Worker shell (`cloudflare_worker.acme_shop`, `rhumbatron-acme-shop-<env>`).
-   - Workers Builds owns the Worker's versions and deployments as runtime data, avoiding Terraform drift.
-3. **Workflow Observation Steps** (`ReleaseWorkflow` on integration Worker):
-   - **Verify Canonical**: Confirms generation is still canonical in `ProjectRootDO`. Sets state to `building` (`build.started`).
-   - **Poll Builds**: Polls `GET /builds/workers/{tag}/builds` with backoff (15 s, 30 s, 60 s; up to 15 minutes). Verifies that the build trigger commit matches the promoted commit SHA.
-   - **Confirm Deployment**: Confirms the active script deployment version via `GET /workers/scripts/{name}/deployments`. Emits `deployment.completed`.
-   - **Probe Release URL**: Probes `/` (200), `/api/products` (200 JSON), and up to two contract routes added by the Change.
-   - **Save Evidence**: Stores release evidence in R2 and D1 `evidence_index` under check ID `release-s<generation>`.
-   - **Status Transition**: Transitions to `deployed` on success, or `smoke_failed` / `failed` on probe failure.
+   - Workers Builds owns the Worker's versions and deployments as runtime data, so Terraform shows no drift.
+3. **Workflow observation steps** (`ReleaseWorkflow` on the integration Worker):
+   - **Verify canonical**: The workflow confirms that the generation is still canonical in `ProjectRootDO`. It sets the state to `building` (`build.started`).
+   - **Poll builds**: The workflow polls `GET /builds/workers/{tag}/builds` with backoff (15 s, 30 s, 60 s; up to 15 minutes). It checks that the build trigger commit matches the promoted commit SHA.
+   - **Confirm deployment**: The workflow reads the active script deployment version through `GET /workers/scripts/{name}/deployments`. It emits `deployment.completed`.
+   - **Probe release URL**: The workflow probes `/` (200), `/api/products` (200 JSON), and up to two contract routes that the Change added.
+   - **Save Evidence**: The workflow stores release Evidence in R2 and in D1 `evidence_index` under check ID `release-s<generation>`.
+   - **Status transition**: On success, the release goes to `deployed`. On probe failure, it goes to `smoke_failed` or `failed`.
 4. **Superseding**:
-   - If a new generation is promoted while an existing release is `queued` or `building`, the earlier release is automatically marked `superseded`.
-5. **Forward-Only Recovery**:
-   - A failed release **never rolls back the Canonical Generation** and never deletes history.
-   - Recovery is forward-only: promote a new generation (a fix or revert Change).
+   - A new generation can be promoted while an older release is `queued` or `building`. The workflow then marks the older release `superseded`.
+5. **Forward-only recovery**:
+   - A failed release never rolls back the Canonical Generation and never deletes history.
+   - To recover, promote a new generation (a fix or revert Change).
 
 ---
 
 ## 2. One-Time Workers Builds Setup
 
-Connecting a project's Artifacts repository to Workers Builds is performed once per release Worker ([ADR 0014](../adr/0014-workers-builds-artifacts-connection.md), [ADR 0018](../adr/0018-release-via-workers-builds.md)):
+Connect the Project's Artifacts repository to Workers Builds once per release Worker ([ADR 0014](../adr/0014-workers-builds-artifacts-connection.md), [ADR 0018](../adr/0018-release-via-workers-builds.md)).
 
 ### Option A: `cf` CLI Connection ([ADR 0018](../adr/0018-release-via-workers-builds.md))
 
@@ -86,24 +86,26 @@ cf builds workers create \
 ### Option B: Cloudflare Dashboard ([ADR 0014](../adr/0014-workers-builds-artifacts-connection.md))
 
 1. Go to Worker `rhumbatron-acme-shop-<env>` → **Settings** → **Builds**.
-2. Click **Connect** → choose Artifacts namespace `rhumbatron-projects-<env>`.
-3. Select the project repository and set production branch to `main`.
-4. Set build command to `npx wrangler@4.149.0 deploy`.
-5. Authorize with a dedicated build token.
+2. Click **Connect**.
+3. Choose the Artifacts namespace `rhumbatron-projects-<env>`.
+4. Select the Project repository.
+5. Set the production branch to `main`.
+6. Set the deploy command to `npx wrangler@4.149.0 deploy`.
+7. Authorize with a dedicated build token.
 
 ### Runtime Token
 
-`ReleaseWorkflow` observes builds using the sensitive Terraform variable `builds_api_token` (`rhumbatron-cloudflare-builds-token` in Keychain), bound as secret `BUILDS_API_TOKEN` on the integration Worker with permissions:
+`ReleaseWorkflow` observes builds with the sensitive Terraform variable `builds_api_token` (`rhumbatron-cloudflare-builds-token` in Keychain). Terraform binds it as the secret `BUILDS_API_TOKEN` on the integration Worker. The token has these permissions:
 - `Workers Builds Configuration Edit`
 - `Workers Scripts Read`
 
-The worker performs read-only GET requests and never logs the token. Target configuration is recorded in D1 table `release_targets`.
+The Worker sends only read-only GET requests and never logs the token. The D1 table `release_targets` holds the target configuration.
 
 ---
 
 ## 3. Release Smoke Check (`smoke:release`)
 
-Run automated release smoke tests against the deployed release target:
+Run the release smoke check against the deployed release target:
 
 ```sh
 # Smoke check dev:
@@ -116,30 +118,30 @@ bun run smoke:release prod
 bun run smoke:release dev --project <project-id>
 ```
 
-- **Execution**: Connects using the Clerk smoke user credentials (`CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` from Keychain). The script loads the dev items (`rhumbatron-clerk-*-dev`). Prod uses the Clerk production instance, so a prod run needs prod smoke-user credentials in those variables.
-- **Checks Verified**:
-  - Release target is registered in `release_targets`.
-  - Latest non-superseded release has status `deployed`.
-  - Deployed `versionId` is recorded in D1.
-  - Release smoke Evidence object is recorded in R2/D1.
-  - Live HTTP probes against the app shell and products API return 200 OK.
+- **Credentials**: The script uses the Clerk smoke user credentials (`CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` from Keychain). It loads the dev items (`rhumbatron-clerk-*-dev`). Prod uses the Clerk production instance. For a prod run, put the prod smoke-user credentials in those variables.
+- **Checks**:
+  - `release_targets` contains the release target.
+  - The latest release that is not superseded has status `deployed`.
+  - D1 contains the deployed `versionId`.
+  - R2 and D1 contain the release smoke Evidence object.
+  - Live HTTP probes against the app shell and the products API return 200 OK.
 
 ---
 
 ## 4. Release Failure Injection (P13-12)
 
-Simulate a production deployment failure without breaking canonical Git history:
+Simulate a production deployment failure. Canonical Git history stays intact.
 
 ```sh
 bun run inject --only=release-smoke-failure
 ```
 
 - **Mechanism**:
-  - Targets the smoke user's `acme-shop-live` project on dev.
-  - Calls `POST /v1/projects/:projectId/releases/inject-failure` (enabled by `FIXTURES_ENABLED = "true"`).
-  - Probes the live release URL with standard probes plus missing route `/__rhumbatron/injected-missing-route`.
-  - The resulting HTTP 404 triggers the standard failure path: marks the release `smoke_failed`, uploads Evidence `release-s<N>-injected` to R2, and emits event `release.smoke_failed` (`injected: true`).
-- **Invariants Maintained**:
-  - Canonical Generation stays unchanged (does not roll back).
-  - Existing release and change history are fully preserved.
-  - Recovery requires authoring and promoting a subsequent generation `S<N+1>`.
+  - The injection targets the smoke user's `acme-shop-live` Project on dev.
+  - It calls `POST /v1/projects/:projectId/releases/inject-failure` (enabled by `FIXTURES_ENABLED = "true"`).
+  - It probes the live release URL with the standard probes plus the missing route `/__rhumbatron/injected-missing-route`.
+  - The HTTP 404 starts the standard failure path. The release becomes `smoke_failed`, Evidence `release-s<N>-injected` goes to R2, and the event `release.smoke_failed` (`injected: true`) is emitted.
+- **Invariants kept**:
+  - The Canonical Generation does not change and does not roll back.
+  - All release and Change history stays.
+  - To recover, write and promote the next generation `S<N+1>`.
