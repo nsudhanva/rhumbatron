@@ -3,6 +3,7 @@ import {
   AnyCommandEnvelope,
   type ApprovalOutcome,
   type ChangeCommandOutcome,
+  type CodeEditOutcome,
   type PromotionOutcome,
   type ReleaseInjectionOutcome,
 } from "@rhumbatron/protocol";
@@ -19,6 +20,7 @@ import { backfillTreeCode, type CodeBackfill } from "./code-store.ts";
 import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { handleFixtureCommand } from "./fixture-changesets.ts";
+import { type HumanEditInput, submitHumanEdit } from "./human-edit.ts";
 import { cleanupProject, forkRetentionDays, sweepForks } from "./project-cleanup.ts";
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
@@ -275,6 +277,14 @@ export default class Integration extends WorkerEntrypoint<Env> {
    */
   async backfillTreeCode(input: { projectId: string; treeSha: string }): Promise<CodeBackfill> {
     return backfillTreeCode(this.env, input);
+  }
+
+  /**
+   * P16-19: one file saved on the Code page becomes a new Change with one human ChangeSet, then
+   * composes and verifies like agent work. The API checked membership and the edit limits.
+   */
+  async submitHumanEdit(input: HumanEditInput): Promise<CodeEditOutcome> {
+    return submitHumanEdit(this.env, input);
   }
 
   /** P11-01: one human decision on a gated Candidate (section 40.2). */
