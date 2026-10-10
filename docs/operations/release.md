@@ -6,11 +6,34 @@ Operations guide for application releases via Cloudflare Workers Builds, smoke v
 
 Rhumbatron manages application releases through git push triggers to Cloudflare Artifacts, verified by automated workflows and executable machine evidence (`AGENTS.md` sections 21.3 and 37, [ADR 0018](../adr/0018-release-via-workers-builds.md)).
 
+**Status (2026-10-09): blocked.** The release path is built and applied. The Workers Builds connection from the Artifacts repo to `rhumbatron-acme-shop-dev` does not exist yet (see "One-Time Workers Builds Setup" below). Until it does, `ReleaseWorkflow` finds no build trigger and fails the release with reason `not_connected`.
+
 ---
 
 ## 1. How Releases Work ([ADR 0018](../adr/0018-release-via-workers-builds.md))
 
 ### Architecture
+
+```mermaid
+sequenceDiagram
+  participant P as ProjectRootDO
+  participant A as Artifacts main
+  participant R as ReleaseWorkflow
+  participant B as Workers Builds
+  participant W as rhumbatron-acme-shop-env
+  P->>A: promotion fast-forwards main
+  P->>R: start rel_project_generation
+  A->>B: push triggers build
+  R->>P: still canonical? (build.started)
+  loop every 15 s, 30 s, then 60 s, up to 15 min
+    R->>B: GET builds for the promoted commit
+  end
+  B->>W: deploy new version
+  R->>W: GET deployments (deployment.completed)
+  R->>W: probe / and /api/products
+  R->>R: Evidence release-sN to R2 and D1
+  Note over R: deployed, smoke_failed, failed, or superseded
+```
 
 1. **Promotion Trigger**:
    - When a Candidate is accepted, promotion fast-forwards the canonical `main` branch in the project's Cloudflare Artifacts repository.
@@ -75,14 +98,14 @@ Run automated release smoke tests against the deployed release target:
 # Smoke check dev:
 bun run smoke:release
 
-# Smoke check prod:
+# Smoke check prod (see the note below):
 bun run smoke:release prod
 
 # Smoke check a specific project:
 bun run smoke:release dev --project <project-id>
 ```
 
-- **Execution**: Connects using the Clerk smoke user credentials (`CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` from Keychain).
+- **Execution**: Connects using the Clerk smoke user credentials (`CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` from Keychain). The script loads the dev items (`rhumbatron-clerk-*-dev`). Prod uses the Clerk production instance, so a prod run needs prod smoke-user credentials in those variables.
 - **Checks Verified**:
   - Release target is registered in `release_targets`.
   - Latest non-superseded release has status `deployed`.

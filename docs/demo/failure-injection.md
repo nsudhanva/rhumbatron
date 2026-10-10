@@ -16,6 +16,20 @@ review.
 
 ## Run live injection
 
+```mermaid
+flowchart LR
+  start[bun run inject] --> sel{Flags}
+  sel -->|default| d[API faults:<br/>retry, double submit, budget]
+  sel -->|"--sandbox"| c[Candidate faults:<br/>one Sandbox verification]
+  sel -->|"--only=release-smoke-failure"| r[Release smoke fault]
+  d --> rep[pass or FAIL per fault]
+  c --> rep
+  r --> rep
+  rep --> keep{"--keep set?"}
+  keep -->|no| arch[Archive created Projects]
+  keep -->|yes| stay[Keep Projects]
+```
+
 ```sh
 bun run inject                      # default faults: no Sandbox, no model calls, ~15 D1 rows
 bun run inject --sandbox            # adds the Candidate faults: one Sandbox verification
@@ -28,7 +42,7 @@ bun run inject --keep               # do not archive the Projects it created
 - Target: dev only (`https://api-dev.rhumbatron.com`). Dev must be running (not paused).
 - Model calls: none. Every Change is created with `startPlanning: false`.
 - Sandbox: none by default. `--sandbox` runs one Acme Shop baseline Candidate verification (a few
-  minutes of the 10 h monthly Sandbox cap, ADR 0011). The stale Candidate stops at workflow step 1
+  minutes of the 5 h monthly dev Sandbox cap, ADR 0017). The stale Candidate stops at workflow step 1
   and never opens the Sandbox.
 - Cleanup: every Project the run created is archived with `DELETE /v1/projects/:id`, which deletes
   its Artifacts repos. Evidence and D1 rows stay.
@@ -49,15 +63,13 @@ bun run inject --keep               # do not archive the Projects it created
 | `stale-candidate` | `--sandbox` | Promotes a Candidate built on the old base. | `409 stale`; Candidate marked `stale`; generation does not move. |
 | `release-smoke-failure` | `--only` | Probes the demo Project's latest deployed release with the normal smoke probes plus a route that does not exist (P13-12). | `200`; release `smoke_failed` with `release-s<N>-injected` Evidence; a repeat is `repeated`; generation does not move. |
 
-### Known risk found while writing `change-double-submit`
+### Fixed risk found while writing `change-double-submit`
 
-`POST /v1/projects/:projectId/changes` reads by `clientRequestId` and then inserts. Two concurrent
-requests can both miss the read; the second insert then hits the `UNIQUE (project_id,
-client_request_id)` constraint (migration 0001) and the request fails with `500` instead of
-returning the first Change. The table cannot hold a duplicate, so state stays correct, but the
-retry contract (section 60) is broken for that caller. Expected fix in `workers/api/src/projects.ts`:
-`INSERT ... ON CONFLICT (project_id, client_request_id) DO NOTHING`, then read the row and return
-`200` when the insert changed nothing. The live fault reports `FAIL` until that ships.
+`POST /v1/projects/:projectId/changes` read by `clientRequestId` and then inserted. Two concurrent
+requests could both miss the read, and the second insert failed with `500` on the `UNIQUE
+(project_id, client_request_id)` constraint (migration 0001). `workers/api/src/projects.ts` now
+inserts with `ON CONFLICT (project_id, client_request_id) DO NOTHING` and reads the row back, so
+both callers get the same Change (section 60).
 
 ## Fault map
 
@@ -77,17 +89,19 @@ retry contract (section 60) is broken for that caller. Expected fix in `workers/
 
 ### Budget stop
 
-Free models cost $0, so `checkRunBudget` receives `spentUsd: 0` in `AgentDO.beforeModelCall` and
-the cost cap cannot fire live. The live stop is the call cap: the per-run cap fails the Task, and
+OpenRouter free models cost $0, so on that path `checkRunBudget` receives `spentUsd: 0` in
+`AgentDO.beforeModelCall` and the cost cap cannot fire live without spending Vertex credit. The live stop is the call cap: the per-run cap fails the Task, and
 the daily cap (`AGENT_DAILY_CALL_CAP`, D1 `usage_counters` row `agent-model-calls`) ends the run
 with `budget_exhausted`, which `failTask` turns into Change status `budget_blocked`.
 
 Hook: a dev-only internal RPC on the agents Worker that sets today's `agent-model-calls` counter to
 the cap for the inject run. Then a planned Change's first agent run must stop with
 `budget_exhausted`, the Change must show `budget_blocked`, and the existing state must stay readable.
-This costs at most one Root Planner call. The section 44 limits (`max_sandbox_seconds_per_change`,
-`max_active_agents_per_change`, and the others) are not enforced per Change yet; only the monthly
-Sandbox cap and `maxCandidates` are.
+This costs at most one Root Planner call. Of the section 44 limits, `workers/agents/src/limits.ts`
+enforces `max_active_agents_per_change` (8), `max_active_sandboxes_per_change` (4), and the attempt
+limit per tier (2); `maxCandidates` (3) is enforced in `packages/conflict`. The per-Change
+`max_sandbox_seconds_per_change` and `max_browser_seconds_per_change` are not enforced; the
+monthly Sandbox and daily Browser Run caps per environment apply instead.
 
 ### Duplicate Event
 
@@ -126,15 +140,13 @@ escalation to a stronger tier. Live injection spends free-tier model calls (50 p
 
 ### Poison command
 
-Consumers retry a failure and Queues move it to `rhumbatron-dead-letter-dev` after 3 retries. But
-nothing consumes the dead-letter Queue, so section 42.7 ("mark the related Task blocked, show an
-operator action in the UI") is not implemented. Needed:
+Consumers retry a failure and Queues move it to `rhumbatron-dead-letter-dev` after 3 retries. The
+event router consumes the dead-letter Queue (`workers/event-router/src/dead-letter.ts`): it
+records `task.failed`, blocks the Task, and the Project and Change pages show Retry and Dismiss
+(section 42.7).
 
-1. A dead-letter consumer that marks the Task `blocked` (or `failed` with reason `dead_lettered`)
-   and emits `task.failed`.
-2. A blocked state with an operator action in the Change page.
-3. Hook: a dev-only internal RPC that sends one schema-valid command whose handler always throws
-   (the public API cannot enqueue arbitrary commands, by design).
+Still needed for a live proof: a dev-only internal RPC that sends one schema-valid command whose
+handler always throws (the public API cannot enqueue arbitrary commands, by design).
 
 ### Deployment failure
 

@@ -4,17 +4,38 @@
 
 Many agents can propose many futures of one codebase. Only verified evidence can advance the canonical state.
 
-`AGENTS.md` is the authoritative build plan. `docs/BUILD_STATUS.md` tracks progress. `docs/demo/runbook.md` is the demo sequence.
+`AGENTS.md` is the authoritative build plan. `docs/BUILD_STATUS.md` tracks progress. `docs/demo/runbook.md` is the demo sequence. [docs/architecture/README.md](docs/architecture/README.md) explains the architecture. [docs/operations/README.md](docs/operations/README.md) lists the runbooks.
 
 ## Live Status
 
-- Dev environment: `https://dev.rhumbatron.com`
-- Dev API: `https://api-dev.rhumbatron.com`
-- Production environment: Terraform in progress.
+| Environment | Web | API | Sign-in |
+|---|---|---|---|
+| prod | `https://rhumbatron.com` (`www` redirects to the apex) | `https://api.rhumbatron.com` | Clerk production instance. Email and password only. Google is off until an OAuth client exists. |
+| dev | `https://dev.rhumbatron.com` | `https://api-dev.rhumbatron.com` | Clerk development instance. |
+
+Terraform deploys both environments (`envs/dev`, `envs/prod`, ADR 0017).
 
 A real model-driven Change ran end to end on dev. The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically, passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. It was approved and promoted from S0 to S1. Model cost was about 0.91 USD.
 
 ## Architecture
+
+[docs/architecture/README.md](docs/architecture/README.md) has the full guide. This is the short version.
+
+```mermaid
+flowchart LR
+  user[User goal] --> api[rhumbatron-api]
+  api --> cw[ChangeWorkflow<br/>Root Planner]
+  cw --> router[Causal Router<br/>event-router]
+  router -->|wake ready Tasks| agent[AgentDO + Pi]
+  agent -->|fork| art[(Artifacts)]
+  agent -->|run| sbx[Sandbox]
+  agent -->|ChangeSet| integ[integration<br/>Candidate + verify]
+  integ --> ev[(Evidence<br/>D1 + R2)]
+  integ -->|CAS promote| root[ProjectRootDO]
+  root -->|outbox| k2[(K2 events)]
+  k2 --> router
+  router -->|project| view[ProjectViewDO] --> web[rhumbatron-web]
+```
 
 A user submits a goal for a Project. The Root Planner compiles it into a Work Graph of Tasks (`ChangeWorkflow`). The Causal Router wakes only the agents whose Tasks are ready.
 
@@ -35,7 +56,8 @@ When required checks pass and policy approvals are granted, a compare-and-swap o
 
 Reliability safeguards:
 - Dead-letter consumer with Retry and Dismiss.
-- Section 44 concurrency limits: 8 active agents, 4 Sandboxes per Change, 2 attempts per tier.
+- Section 44 limits (`workers/agents/src/limits.ts`): 8 active agents and 4 Sandboxes per Change, 2 attempts per tier.
+- Runaway-billing guards (ADR 0019): capped Durable Object alarms, capped causal wakeups, and account budget alerts.
 - Advisory Claims to avoid overlapping writes without rigid locking.
 
 ## UI Routes
@@ -70,6 +92,16 @@ bun run dev          # runs all apps and Workers locally
 
 For the web app, copy `apps/web/.env.example` to `apps/web/.env.local` and add Clerk development keys.
 
+Remote scripts (`tf`, `smoke:*`, `demo:*`, `inject`, `cost:report`) read credentials from the macOS Keychain. `scripts/tf.ts` lists the items for each Terraform root. The `package.json` scripts list the rest.
+
+```mermaid
+flowchart LR
+  a[bun install] --> b[bun run typecheck] --> c[bun run build] --> d[bun run dev]
+  d --> e{Change ready?}
+  e -->|yes| f[bun run check]
+  f --> g[Deployment:<br/>bundle, plan, apply]
+```
+
 ## Layout
 
 ```text
@@ -99,23 +131,27 @@ scripts/                 Bundle, checks, smoke, demo, failure injection, cost re
 | `bun run check:secrets` | Run gitleaks scan on history and staged changes. |
 | `bun run tf:check` | Run `terraform fmt`, `validate`, and tflint on all roots without remote access. |
 | `bun run cf:bundle` | Build Worker bundles and `dist/bundles/manifest.json` for Terraform. |
-| `bun run tf:plan:dev` / `tf:apply:dev` | Plan and apply dev infrastructure. |
-| `bun run tf:drift` | Post-apply plan that must show zero changes. |
-| `bun run smoke:dev` | Remote smoke check of dev API and web flows. |
-| `bun run smoke:sandbox` | Remote smoke check of Sandbox execution. |
+| `bun run tf <bootstrap\|global\|dev\|prod> <args>` | Run Terraform for one root with Keychain credentials. Refuses `-auto-approve`. |
+| `bun run tf:plan:dev` / `tf:apply:dev` | Plan dev to `dev.tfplan`, then apply that plan. |
+| `bun run tf:plan:prod` / `tf:apply:prod` | Plan prod to `prod.tfplan`, then apply that plan. |
+| `bun run tf:drift` / `tf:drift:prod` | Post-apply plan that must show zero changes (`global` and `dev`; `prod`). |
+| `bun run smoke:dev` / `smoke:prod` | Remote smoke check. Dev runs the signed-in flow; prod runs public checks only. |
+| `bun run smoke:plan` | Dev smoke plus one real goal through the Root Planner (1 to 4 model calls). |
+| `bun run smoke:sandbox` | Dev smoke plus Sandbox verification and promotion of the Acme Shop baseline. |
+| `bun run smoke:models` | One model call per tier through AI Gateway, plus one Vertex fallback call. |
+| `bun run smoke:release` | Read-only check of the latest Acme Shop Live release. |
 | `bun run demo:project` | Create or reuse the Acme Shop demo Project on dev. |
-| `bun run demo:wishlist` | Run the scripted Wishlist demo (Designs A vs B, conflict, verification, promotion). |
+| `bun run demo:wishlist` | Run the scripted Wishlist demo (Designs A vs B, conflict, verification). |
+| `bun run demo:live` | Run a real model-driven Change on dev and stream progress. |
 | `bun run inject` | Run failure injection against public dev APIs. |
-| `bun run cleanup:projects` | Remove test projects and reset state. |
-| `bun run cost:report` | Report Cloudflare usage, spend, and active resources. |
-
-Remote scripts read credentials from the macOS Keychain.
+| `bun run cleanup:projects` | Archive smoke-test Projects (`--dry-run` lists them only). |
+| `bun run cost:report` | Read-only report of usage, caps, and leftover resources (`--alerts-only`). |
 
 ## Deployment
 
 Terraform is the only way to change Cloudflare control-plane configuration. Never run `wrangler deploy`, make manual dashboard edits, or issue direct REST writes (one documented exception: ADR 0014).
 
-Dev deployment sequence:
+Deployment sequence (dev; prod uses the `:prod` scripts):
 
 ```sh
 bun run cf:bundle
@@ -125,19 +161,20 @@ bun run tf:drift
 bun run smoke:dev
 ```
 
-See `infrastructure/terraform/README.md`.
+See [docs/operations/deploy.md](docs/operations/deploy.md) and [infrastructure/terraform/README.md](infrastructure/terraform/README.md).
 
-Cost controls:
+Cost controls ([docs/operations/costs.md](docs/operations/costs.md)):
 - Rhumbatron runs on a shared Workers Paid account within included allowances.
-- Sandbox is capped at 10 hours per month.
-- Browser Run is capped at 500 seconds per day.
-- Gemini on Vertex is capped by AI Gateway at 9 USD per 30 days.
-- Dev compute can be paused via `locals.paused` in `infrastructure/terraform/envs/dev/main.tf`.
-- Application release via Workers Builds (P11-07/08) is currently parked.
+- Sandbox: 5 hours per month per environment.
+- Browser Run: 250 seconds per day per environment.
+- Gemini on Vertex: AI Gateway caps it at 40 USD (dev) and 10 USD (prod) per 30 days.
+- Account budget alerts at 10, 25, and 100 USD (ADR 0019, `envs/global`).
+- Pause switch: `locals.paused` in `infrastructure/terraform/envs/{dev,prod}/main.tf` ([pause-resume.md](docs/operations/pause-resume.md)).
+- Application release through Workers Builds is built and applied, but blocked: the dashboard Artifacts connection does not exist yet ([release.md](docs/operations/release.md)).
 
 ## CI
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main`: install, lint, typecheck, critical tests, build, Worker bundles, and Terraform `fmt -check` and `validate` with `-backend=false`. It requires no secrets and does not deploy.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`: install, lint, typecheck, critical tests, build, Worker bundles, and Terraform `fmt -check` and `validate` with `-backend=false`. It requires no secrets and does not deploy. Other CI/CD is skipped by choice: deploys run locally through Terraform.
 
 ## Git hooks
 

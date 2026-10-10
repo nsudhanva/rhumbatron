@@ -15,6 +15,21 @@ The pause setting is declared in Terraform environment definitions:
 - Dev: `infrastructure/terraform/envs/dev/main.tf` (`locals { paused = false }`)
 - Prod: `infrastructure/terraform/envs/prod/main.tf` (`locals { paused = false }`)
 
+```mermaid
+stateDiagram-v2
+  [*] --> Running
+  Running --> Paused: paused = true, plan, apply
+  Paused --> Running: paused = false, plan, apply, drift check
+  note right of Running
+    Cron sweep every minute.
+    Sandbox max_instances = 1.
+  end note
+  note right of Paused
+    No cron sweep. Sandbox max_instances = 0.
+    Web, API, Queues, and data stay up.
+  end note
+```
+
 ---
 
 ## 2. What `paused = true` Stops
@@ -31,7 +46,7 @@ The pause setting is declared in Terraform environment definitions:
      max_instances = local.paused ? 0 : 1
      ```
    - Sets maximum container instances to 0 ([ADR 0012](../adr/0012-sandbox-worker.md)).
-   - Existing instances stop; new container starts are rejected, capping container runtime to $0.
+   - No new container can start, so Sandbox runtime stops growing.
 
 ---
 
@@ -42,6 +57,7 @@ Pausing does not destroy resources or take the application offline:
 - **Data Plane**: D1 databases, Durable Object SQLite storage, R2 evidence buckets, KV namespaces, K2 event logs, and Cloudflare Artifacts repositories remain fully intact.
 - **Web & API Ingress**: Both the web frontend (`rhumbatron.com` / `dev.rhumbatron.com`) and the API Worker (`api.rhumbatron.com` / `api-dev.rhumbatron.com`) continue serving HTTP traffic.
 - **Queues & Direct Triggers**: Queue consumers and low-latency coordinator publish nudges remain bound; existing messages can be processed or held in queues.
+- **Durable Object alarms**: The pause does not stop them. The alarm guards of [ADR 0019](../adr/0019-runaway-billing-guards.md) bound them (at most 2,000 fires per object per UTC day).
 
 ---
 

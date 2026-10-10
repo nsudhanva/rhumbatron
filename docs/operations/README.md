@@ -14,11 +14,11 @@ Operational runbooks and procedures for managing Rhumbatron environments, infras
 
 | Runbook | Purpose | Primary Commands |
 |---|---|---|
-| [Deployment](./deploy.md) | Terraform deployments for dev, prod, and global; bundle generation; bootstrap/apex switches; D1 migration ordering. | `bun run cf:bundle`<br>`bun run tf:plan:dev` / `apply:dev`<br>`bun run tf:plan:prod` / `apply:prod`<br>`bun run tf:drift` |
-| [Pause & Resume](./pause-resume.md) | Global `paused` switch to halt background cron sweeps and container execution to preserve quota. | `bun run tf:plan:dev` / `apply:dev` |
+| [Deployment](./deploy.md) | Terraform deployments for dev, prod, and global; bundle generation; bootstrap/apex switches; D1 migration ordering. | `bun run cf:bundle`<br>`bun run tf:plan:dev` / `tf:apply:dev`<br>`bun run tf:plan:prod` / `tf:apply:prod`<br>`bun run tf global <args>`<br>`bun run tf:drift` / `tf:drift:prod`<br>`bun run smoke:dev` / `smoke:prod` |
+| [Pause & Resume](./pause-resume.md) | Global `paused` switch to halt background cron sweeps and container execution to preserve quota. | `bun run tf:plan:<env>` / `tf:apply:<env>` |
 | [Cleanup & Retention](./cleanup.md) | Purging smoke test projects, project archiving pipeline, daily fork sweeps, and R2 retention lifecycles. | `bun run cleanup:projects`<br>`bun run cleanup:projects --dry-run` |
-| [Costs & Budgets](./costs.md) | Cost reporting, budget ceilings (Sandbox, Browser Run, Vertex AI), call quotas, and cap trip remediation. | `bun run cost:report`<br>`bun run cost:report --alerts-only` |
-| [Application Releases](./release.md) | Cloudflare Workers Builds releases, smoke verification, one-time dashboard/CLI setup, and failure injection. | `bun run smoke:release`<br>`bun run inject --only=release-smoke-failure` |
+| [Costs & Budgets](./costs.md) | Cost reporting, guard layers, budget ceilings (Sandbox, Browser Run, Vertex AI), account budget alerts, call quotas, and cap trip remediation. | `bun run cost:report`<br>`bun run cost:report --alerts-only` |
+| [Application Releases](./release.md) | Cloudflare Workers Builds releases (blocked: no Artifacts connection yet), smoke verification, one-time dashboard/CLI setup, and failure injection. | `bun run smoke:release`<br>`bun run inject --only=release-smoke-failure` |
 | [Resource Naming](./naming.md) | Conventions for naming and tagging Cloudflare resources and Workers. | `bun run check:guardrails` |
 
 ---
@@ -35,3 +35,4 @@ Operational runbooks and procedures for managing Rhumbatron environments, infras
 - [ADR 0016: Gemini overflow](../adr/0016-gemini-overflow.md)
 - [ADR 0017: Prod environment](../adr/0017-prod-environment.md)
 - [ADR 0018: Release via Workers Builds](../adr/0018-release-via-workers-builds.md)
+- [ADR 0019: Runaway-billing guards](../adr/0019-runaway-billing-guards.md)

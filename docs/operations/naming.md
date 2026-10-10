@@ -24,8 +24,11 @@ rhumbatron-<component>-<env>
 | KV config namespace | `rhumbatron-config-dev` | `rhumbatron-config-prod` | |
 | R2 evidence bucket | `rhumbatron-evidence-dev` | `rhumbatron-evidence-prod` | |
 | Queues | `rhumbatron-<purpose>-dev` | `rhumbatron-<purpose>-prod` | |
-| Vectorize (deferred) | `rhumbatron-memory-dev` | `rhumbatron-memory-prod` | |
+| Vectorize index | `rhumbatron-memory-dev` | `rhumbatron-memory-prod` | |
+| AI Gateway | `rhumbatron-models-dev` | `rhumbatron-models-prod` | |
+| Artifacts namespace | `rhumbatron-projects-dev` | `rhumbatron-projects-prod` | |
 | Workers | `rhumbatron-<component>-dev` | `rhumbatron-<component>-prod` | |
+| Release target Worker | `rhumbatron-acme-shop-dev` | `rhumbatron-acme-shop-prod` | |
 | K2 streams | `rhumbatron_events_00_dev`..`07` | `rhumbatron_events_00_prod`..`07` | |
 
 K2 streams are the one exception: K2 names allow only letters, digits, and underscores, so they

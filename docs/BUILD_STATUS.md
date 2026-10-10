@@ -13,7 +13,7 @@ Reliability and cost hardening on dev and prod. Phases 0 through 13 are complete
 - P12: All UI pages, Flight Control (`/changes/<id>/flight`), and notification bell.
 - P13: Dead-letter consumer with Retry and Dismiss, section 44 limits, advisory Claims, failure injection (`bun run inject`), smoke checks (`bun run smoke:dev`, `bun run smoke:sandbox`), and cleanup (`bun run cleanup:projects`).
 - P14: `.github/workflows/ci.yml` (checks only; no deploy credentials). CI/CD is otherwise skipped by choice.
-- Production: `https://rhumbatron.com` is served by Terraform from `envs/prod` (ADR 0017). Smoke: `bun run smoke:prod`.
+- Production: `https://rhumbatron.com` is served by Terraform from `envs/prod` (ADR 0017). `www` redirects to the apex. Sign-in uses the Clerk production instance. Smoke: `bun run smoke:prod`.
 - Runaway-billing guards (ADR 0019): Durable Object alarm caps, causal wakeup caps, and account budget alerts at 10, 25, and 100 USD.
 - Milestone: A real model-driven Change ran end to end on dev (`https://dev.rhumbatron.com`). The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically, passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. It was approved and promoted from S0 to S1. Model cost was about 0.91 USD.
 
@@ -21,8 +21,9 @@ Reliability and cost hardening on dev and prod. Phases 0 through 13 are complete
 - None.
 
 ## Blocked
-- Live release of Acme Shop Live (P11-07, P11-08, P13-12 live run): the Workers Builds connection for
-  `rhumbatron-acme-shop-dev` has no build configuration or trigger.
+- Live release of Acme Shop Live (P11-07, P11-08, P13-12 live run): the release path is built and
+  applied, but the dashboard Workers Builds connection from Artifacts to `rhumbatron-acme-shop-dev`
+  does not exist yet. ReleaseWorkflow fails with `not_connected` until it does.
 - Google sign-in on prod: the Clerk production instance (rhumbatron.com) has email and password only
   until a Google Cloud OAuth client exists.
 
@@ -31,12 +32,13 @@ Reliability and cost hardening on dev and prod. Phases 0 through 13 are complete
 - Sandbox: 1 instance; agent workspaces sleep after 10 idle minutes, Candidate checks after 2; hard cap at 5 hours per month per environment.
 - Browser Run: Capped at 250 seconds per day per environment.
 - Gemini on Vertex: Capped by AI Gateway at 40 USD (dev) and 10 USD (prod) per 30 days.
+- Account budget alerts: 10, 25, and 100 USD (ADR 0019).
 - Pause switch: `locals.paused` in `infrastructure/terraform/envs/{dev,prod}/main.tf`.
 - Cost reporting: `bun run cost:report`.
 
 ## Decisions
 - Terraform owns remote control-plane changes. Never `wrangler deploy`.
-- Deployment sequence: `bun run cf:bundle`, `bun run tf:plan:dev`, `bun run tf:apply:dev`, and `bun run tf:drift`.
+- Deployment sequence: `bun run cf:bundle`, `bun run tf:plan:<env>`, `bun run tf:apply:<env>`, and `bun run tf:drift` (dev) or `bun run tf:drift:prod`.
 - Artifacts is canonical source for managed Projects (ADR 0010).
 - Release via Workers Builds: promotion push, observed by ReleaseWorkflow (ADR 0018).
 - CI runs checks only and needs no credentials. Deployment stays local through Terraform.

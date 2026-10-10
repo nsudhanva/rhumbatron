@@ -6,6 +6,18 @@ without a model call. Executable Evidence, not the fixture, decides the winner.
 
 ## Designs
 
+```mermaid
+flowchart TB
+  base[Acme Shop canonical] --> a[Design A<br/>mutable_table]
+  base --> b[Design B<br/>append_only]
+  a --> conflict{Both Intents on<br/>wishlist:membership}
+  b --> conflict
+  conflict -->|fork_candidates| ca[Candidate A]
+  conflict -->|fork_candidates| cb[Candidate B]
+  ca --> ra[p95 414 to 509 ms<br/>rejected on performance]
+  cb --> rb[p95 under 1 ms<br/>verified, waits for approval]
+```
+
 | | Design A | Design B |
 |---|---|---|
 | Data model | Normalized mutable tables. `wishlist_collaborators` rows are updated in place on remove and revoke. | Append-only membership event log. A materialized current-member set is updated by each event. |
@@ -49,8 +61,9 @@ touched). The shop root has no `data-testid="wishlist"`, so the browser check ru
 
 ## Pipeline
 
-1. `POST /v1/changes/:changeId/fixture-changesets` `{"design": "a" | "b" | "both"}`. Dev only:
-   the route answers 404 unless `ENVIRONMENT` is `dev` or `local`. Requires auth and Project
+1. `POST /v1/changes/:changeId/fixture-changesets` `{"design": "a" | "b" | "both"}`. The route
+   answers 404 unless `FIXTURES_ENABLED` is `"true"` or `ENVIRONMENT` is `dev` or `local`
+   (`workers/api/src/fixtures.ts`). Terraform sets `FIXTURES_ENABLED = "true"` in dev and prod. Requires auth and Project
    membership, an active Project, and a Change in `created` (unplanned) or `verifying`. It queues
    `fixture.publish` on the integration Queue. `GET` on the same path shows what is published.
 2. The integration Worker (`workers/integration/src/fixture-changesets.ts`), per design:

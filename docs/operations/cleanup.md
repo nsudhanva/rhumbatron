@@ -37,9 +37,23 @@ Invokes `DELETE /v1/projects/:id` for each matched project using the Clerk smoke
 
 ## 2. Project Archiving (`DELETE /v1/projects/:id`)
 
-When a project is deleted via the API or UI, the deletion triggers `project.cleanup` on the integration Worker (`workers/integration/src/project-cleanup.ts`):
+When a project is deleted via the API or UI, the API marks it `archived` in D1 and queues `project.cleanup` for the integration Worker (`workers/integration/src/project-cleanup.ts`):
 
-1. **State Update**: Updates project status to `archived` in D1.
+```mermaid
+flowchart TB
+  del[DELETE /v1/projects/:id] --> arch[API: status = archived]
+  arch --> q[integration Queue: project.cleanup]
+  q --> f[Delete ws-* and cand-* forks<br/>max 20 per message]
+  f --> more{More forks?}
+  more -->|yes| q
+  more -->|no| canon[Delete canonical repo]
+  canon --> r2[Delete R2 source/ and context/]
+  r2 --> feed[Delete project_events rows]
+  feed --> done[Set cleaned_at]
+  cron[Daily maintenance 04:17 UTC] -.->|re-queue leftovers| q
+```
+
+1. **State Update**: The API has already set project status to `archived` in D1. Cleanup skips a Project that is not archived.
 2. **Order of Deletion** (bounded per queue message):
    - **Workspace and Candidate Forks**: Deletes all active forks (`ws-*` and `cand-*`) recorded in D1 (`task_runs` and `candidates`) via `ARTIFACTS.delete()`.
    - **Canonical Repository**: Deletes the canonical project repository in Cloudflare Artifacts (`ARTIFACTS.delete(projectId)`).
@@ -65,6 +79,7 @@ Active projects accumulate ephemeral forks during task execution and candidate v
     - Candidates in `rejected` or `stale` states.
     - Candidates in `promoted` state, verified only after canonical `main` is confirmed to contain the composed commit.
 - **Limits**: Deletes up to 20 repositories per message, updating `fork_deleted_at` in D1 to guarantee idempotency.
+- **Schedule**: The event router's every-minute cron queues one `forks.sweep` per day at 04:17 UTC (`workers/event-router/src/maintenance.ts`). The same tick re-queues `project.cleanup` for up to 10 archived Projects with leftovers. While `paused = true`, the cron and therefore the sweep do not run.
 
 ---
 
