@@ -1505,8 +1505,21 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     return row ? (JSON.parse(row.ws_json) as WorkspaceRef) : null;
   }
 
+  /** In-flight workspace opens by run: parallel tool calls of one turn share a single open. */
+  private opening = new Map<string, Promise<WorkspaceRef | string>>();
+
   /** Opens the run's workspace on first use. A string explains why there is none (no source, Task kind, or a Sandbox limit). */
-  private async workspace(): Promise<WorkspaceRef | string> {
+  private workspace(): Promise<WorkspaceRef | string> {
+    const runId = this.runSource()?.run.run_id;
+    if (!runId) return this.openRunWorkspace();
+    const pending = this.opening.get(runId);
+    if (pending) return pending;
+    const opened = this.openRunWorkspace().finally(() => this.opening.delete(runId));
+    this.opening.set(runId, opened);
+    return opened;
+  }
+
+  private async openRunWorkspace(): Promise<WorkspaceRef | string> {
     const source = this.runSource();
     if (!source) return NO_SOURCE;
     const input = JSON.parse(source.run.input_json) as {

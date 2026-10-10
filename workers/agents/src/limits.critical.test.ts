@@ -200,6 +200,19 @@ describe("max active coding Sandboxes per Change", () => {
     expect(await admit("run_0")).toBe(false);
   });
 
+  it("a run that holds its slot is admitted again, even when the Change is full (parallel tool calls)", async () => {
+    const { db, d1 } = fakeD1();
+    runs(db, 5, CHANGE_LIMITS.maxActiveSandboxesPerChange);
+    const admit = (runId: string) => admitSandbox(d1, { runId, changeId: "chg_1", now: NOW });
+
+    expect(await Promise.all([admit("run_0"), admit("run_0"), admit("run_0")])).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(await admit("run_4")).toBe(false);
+  });
+
   it("a refused workspace forks nothing, reserves no Sandbox time, and names the limit", async () => {
     const { db, d1 } = fakeD1();
     runs(db, 5, CHANGE_LIMITS.maxActiveSandboxesPerChange);

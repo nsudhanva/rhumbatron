@@ -126,6 +126,14 @@ export async function admitSandbox(
   db: Db,
   input: { runId: string; changeId: string; now: string },
 ): Promise<boolean> {
+  // A run that already holds its slot keeps it: a repeat admit is not a second Sandbox.
+  const held = await db
+    .prepare(
+      "SELECT 1 AS held FROM task_runs WHERE id = ? AND workspace_opened_at IS NOT NULL AND workspace_closed_at IS NULL",
+    )
+    .bind(input.runId)
+    .first<{ held: number }>();
+  if (held) return true;
   const taken = await db
     .prepare(
       `UPDATE task_runs SET workspace_opened_at = ?, workspace_closed_at = NULL
