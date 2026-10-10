@@ -182,6 +182,7 @@ flowchart LR
 3. [Agents and models](agents-and-models.md): AgentDO, the Pi loop, model routing, providers, and the Context Packet.
 4. [Source and verification](source-and-verification.md): Artifacts repos and forks, the Sandbox, checks, coverage, and promotion.
 5. [Infrastructure and cost](infrastructure-and-cost.md): Terraform roots, adapters, state, cost guards, and the pause switch.
+6. [Shared Projects and simultaneous requests](shared-projects.md): membership, owner and collaborator roles, and how Rhumbatron compares requests that run at the same time.
 
 Related documents:
 
