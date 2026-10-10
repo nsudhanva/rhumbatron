@@ -28,7 +28,7 @@ sequenceDiagram
 | Name | Requester | Text |
 |---|---|---|
 | A | Alice | `Show how many items are left next to each day's heading` |
-| B | Bob | `Add a Clear completed button to each day...` (use the full text from the earlier Daily Planner runs) |
+| B | Bob | `Add a Clear completed button to each day that deletes that day's checked items.` |
 | C1 | Alice | `Change the page background to dark navy with white text.` |
 | C2 | Bob | `Change the page background to light yellow.` |
 
