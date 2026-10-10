@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { deployProjectApp, getProjectApp } from "../../lib/api";
+import { useState } from "react";
+import { deployProjectApp, getProjectApp, removeProjectApp } from "../../lib/api";
 import { Mono } from "../ui/mono";
 
 const LINK = "text-kumo-link underline-offset-2 hover:underline";
 
 /**
  * "Live at <host> · Open app" under the Project title (Phase 16, ADR 0020). Renders nothing where
- * live apps are off (dev). A Project from before live apps gets a "Deploy app" action.
+ * live apps are off (dev). A Project from before live apps gets a "Deploy app" action. "Remove
+ * app" (P16-20) confirms in place; the Project and its history stay.
  */
 export function LiveAppLine({ projectId, hasSource }: { projectId: string; hasSource: boolean }) {
   const queryClient = useQueryClient();
@@ -14,6 +16,14 @@ export function LiveAppLine({ projectId, hasSource }: { projectId: string; hasSo
     queryKey: ["project-app", projectId],
     queryFn: () => getProjectApp({ data: projectId }),
     refetchInterval: (q) => (q.state.data?.app?.status === "building" ? 3000 : false),
+  });
+  const [confirming, setConfirming] = useState(false);
+  const remove = useMutation({
+    mutationFn: () => removeProjectApp({ data: projectId }),
+    onSettled: () => {
+      setConfirming(false);
+      void queryClient.invalidateQueries({ queryKey: ["project-app", projectId] });
+    },
   });
   const deploy = useMutation({
     mutationFn: () => deployProjectApp({ data: projectId }),
@@ -48,7 +58,11 @@ export function LiveAppLine({ projectId, hasSource }: { projectId: string; hasSo
       </span>
     ) : null;
   }
-  if (app.status === "removed") return <span className="basis-full">App removed</span>;
+  if (app.status === "removed") {
+    return (
+      <span className="basis-full">App removed · its bundles and data are deleted by cleanup</span>
+    );
+  }
   const host = new URL(app.url).host;
   return (
     <span className="flex basis-full flex-wrap items-center gap-x-3">
@@ -75,6 +89,33 @@ export function LiveAppLine({ projectId, hasSource }: { projectId: string; hasSo
           {action("Retry")}
         </>
       )}
+      <span aria-hidden>·</span>
+      {confirming ? (
+        <span className="flex items-center gap-x-3">
+          <span>Remove the app and delete its data?</span>
+          <button
+            type="button"
+            className="text-kumo-danger underline-offset-2 hover:underline"
+            disabled={remove.isPending}
+            onClick={() => remove.mutate()}
+          >
+            {remove.isPending ? "Removing" : "Remove"}
+          </button>
+          <button
+            type="button"
+            className={LINK}
+            disabled={remove.isPending}
+            onClick={() => setConfirming(false)}
+          >
+            Keep
+          </button>
+        </span>
+      ) : (
+        <button type="button" className={LINK} onClick={() => setConfirming(true)}>
+          Remove app
+        </button>
+      )}
+      {remove.isError && <span>{remove.error.message}</span>}
     </span>
   );
 }

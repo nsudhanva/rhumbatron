@@ -26,6 +26,7 @@ import { Route as ProjectsProjectIdCostsRouteImport } from './routes/projects_.$
 import { Route as ProjectsProjectIdEventsRouteImport } from './routes/projects_.$projectId.events'
 import { Route as ProjectsProjectIdGraphRouteImport } from './routes/projects_.$projectId.graph'
 import { Route as ProjectsProjectIdVerificationRouteImport } from './routes/projects_.$projectId.verification'
+import { Route as ProjectsProjectIdVersionsRouteImport } from './routes/projects_.$projectId.versions'
 import { Route as ProjectsProjectIdWorkspaceRouteImport } from './routes/projects_.$projectId.workspace'
 import { Route as EvidenceCandidateIdCheckIdNRouteImport } from './routes/evidence.$candidateId.$checkId.$n'
 
@@ -115,6 +116,12 @@ const ProjectsProjectIdVerificationRoute =
     path: '/projects/$projectId/verification',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ProjectsProjectIdVersionsRoute =
+  ProjectsProjectIdVersionsRouteImport.update({
+    id: '/projects_/$projectId/versions',
+    path: '/projects/$projectId/versions',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ProjectsProjectIdWorkspaceRoute =
   ProjectsProjectIdWorkspaceRouteImport.update({
     id: '/projects_/$projectId/workspace',
@@ -146,6 +153,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId/events': typeof ProjectsProjectIdEventsRoute
   '/projects/$projectId/graph': typeof ProjectsProjectIdGraphRoute
   '/projects/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
+  '/projects/$projectId/versions': typeof ProjectsProjectIdVersionsRoute
   '/projects/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
   '/evidence/$candidateId/$checkId/$n': typeof EvidenceCandidateIdCheckIdNRoute
 }
@@ -167,6 +175,7 @@ export interface FileRoutesByTo {
   '/projects/$projectId/events': typeof ProjectsProjectIdEventsRoute
   '/projects/$projectId/graph': typeof ProjectsProjectIdGraphRoute
   '/projects/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
+  '/projects/$projectId/versions': typeof ProjectsProjectIdVersionsRoute
   '/projects/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
   '/evidence/$candidateId/$checkId/$n': typeof EvidenceCandidateIdCheckIdNRoute
 }
@@ -189,6 +198,7 @@ export interface FileRoutesById {
   '/projects_/$projectId/events': typeof ProjectsProjectIdEventsRoute
   '/projects_/$projectId/graph': typeof ProjectsProjectIdGraphRoute
   '/projects_/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
+  '/projects_/$projectId/versions': typeof ProjectsProjectIdVersionsRoute
   '/projects_/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
   '/evidence/$candidateId/$checkId/$n': typeof EvidenceCandidateIdCheckIdNRoute
 }
@@ -212,6 +222,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/events'
     | '/projects/$projectId/graph'
     | '/projects/$projectId/verification'
+    | '/projects/$projectId/versions'
     | '/projects/$projectId/workspace'
     | '/evidence/$candidateId/$checkId/$n'
   fileRoutesByTo: FileRoutesByTo
@@ -233,6 +244,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/events'
     | '/projects/$projectId/graph'
     | '/projects/$projectId/verification'
+    | '/projects/$projectId/versions'
     | '/projects/$projectId/workspace'
     | '/evidence/$candidateId/$checkId/$n'
   id:
@@ -254,6 +266,7 @@ export interface FileRouteTypes {
     | '/projects_/$projectId/events'
     | '/projects_/$projectId/graph'
     | '/projects_/$projectId/verification'
+    | '/projects_/$projectId/versions'
     | '/projects_/$projectId/workspace'
     | '/evidence/$candidateId/$checkId/$n'
   fileRoutesById: FileRoutesById
@@ -276,6 +289,7 @@ export interface RootRouteChildren {
   ProjectsProjectIdEventsRoute: typeof ProjectsProjectIdEventsRoute
   ProjectsProjectIdGraphRoute: typeof ProjectsProjectIdGraphRoute
   ProjectsProjectIdVerificationRoute: typeof ProjectsProjectIdVerificationRoute
+  ProjectsProjectIdVersionsRoute: typeof ProjectsProjectIdVersionsRoute
   ProjectsProjectIdWorkspaceRoute: typeof ProjectsProjectIdWorkspaceRoute
   EvidenceCandidateIdCheckIdNRoute: typeof EvidenceCandidateIdCheckIdNRoute
 }
@@ -401,6 +415,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectIdVerificationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects_/$projectId/versions': {
+      id: '/projects_/$projectId/versions'
+      path: '/projects/$projectId/versions'
+      fullPath: '/projects/$projectId/versions'
+      preLoaderRoute: typeof ProjectsProjectIdVersionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projects_/$projectId/workspace': {
       id: '/projects_/$projectId/workspace'
       path: '/projects/$projectId/workspace'
@@ -436,6 +457,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsProjectIdEventsRoute: ProjectsProjectIdEventsRoute,
   ProjectsProjectIdGraphRoute: ProjectsProjectIdGraphRoute,
   ProjectsProjectIdVerificationRoute: ProjectsProjectIdVerificationRoute,
+  ProjectsProjectIdVersionsRoute: ProjectsProjectIdVersionsRoute,
   ProjectsProjectIdWorkspaceRoute: ProjectsProjectIdWorkspaceRoute,
   EvidenceCandidateIdCheckIdNRoute: EvidenceCandidateIdCheckIdNRoute,
 }

@@ -18,6 +18,7 @@ import {
   shortHash,
   VERDICT_STATUS,
 } from "../components/candidate/model";
+import { PreviewLink } from "../components/candidate/preview-link";
 import { CandidateSkeleton } from "../components/candidate/skeleton";
 import { CandidateEvidence } from "../components/candidate-evidence";
 import { CandidatePromotion } from "../components/candidate-promotion";
@@ -142,6 +143,7 @@ function CandidateView() {
               tree <Mono>{shortHash(data.composedTree) ?? EMPTY}</Mono>
             </span>
             <span title={data.createdAt}>created {timeAgo(data.createdAt)}</span>
+            <PreviewLink candidateId={data.id} active={active} />
           </>
         }
         actions={

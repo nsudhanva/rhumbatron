@@ -17,6 +17,7 @@ export const PROJECT_PAGES = {
   verification: "Verification",
   workspace: "Workspace",
   code: "Code",
+  versions: "Versions",
   costs: "Costs",
 } as const;
 

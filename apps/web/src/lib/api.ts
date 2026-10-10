@@ -211,6 +211,8 @@ export type ProjectAppView = {
     failureReason: string | null;
     updatedAt: string;
   } | null;
+  /** "Open" links of promoted generations whose bundle is stored (Versions page). */
+  versions: { generation: number; url: string }[];
 };
 
 export const getProjectApp = createServerFn()
@@ -221,6 +223,60 @@ export const deployProjectApp = createServerFn({ method: "POST" })
   .inputValidator((projectId: string) => projectId)
   .handler(({ data }) =>
     call<{ status: "queued" | "disabled" }>(`/v1/projects/${data}/app`, { method: "POST" }),
+  );
+
+/** "Remove app" (P16-20): 410 at once, then cleanup deletes bundles, data, and rows. */
+export const removeProjectApp = createServerFn({ method: "POST" })
+  .inputValidator((projectId: string) => projectId)
+  .handler(({ data }) =>
+    call<{ status: "removing" | "not_found" }>(`/v1/projects/${data}/app`, { method: "DELETE" }),
+  );
+
+/** Live preview of one Candidate (P16-10). `enabled` is false where apps are not served. */
+export type CandidatePreviewView = {
+  enabled: boolean;
+  preview: {
+    url: string;
+    status: "building" | "ready" | "failed" | "removed";
+    commit: string | null;
+    failureReason: string | null;
+    updatedAt: string;
+  } | null;
+};
+
+export const getCandidatePreview = createServerFn()
+  .inputValidator((candidateId: string) => candidateId)
+  .handler(({ data }) => call<CandidatePreviewView>(`/v1/candidates/${data}/preview`));
+
+/** "Roll back to Sk" (P16-13): a new canonical transition with Sk's tree. */
+export type RollbackResult =
+  | {
+      status: "promoted";
+      changeId: string;
+      candidateId: string;
+      targetGeneration: number;
+      generation: number;
+      alreadyPromoted: boolean;
+    }
+  | {
+      status: "awaiting_approval";
+      changeId: string;
+      candidateId: string;
+      targetGeneration: number;
+    };
+
+export const rollbackProject = createServerFn({ method: "POST" })
+  .inputValidator(
+    (input: { projectId: string; targetGeneration: number; expectedGeneration: number }) => input,
+  )
+  .handler(({ data }) =>
+    call<RollbackResult>(`/v1/projects/${data.projectId}/rollback`, {
+      method: "POST",
+      body: {
+        targetGeneration: data.targetGeneration,
+        expectedGeneration: data.expectedGeneration,
+      },
+    }),
   );
 
 export const createChange = createServerFn({ method: "POST" })
