@@ -60,12 +60,10 @@ export function evaluateAppCheckOutcome(
   let status = result.status;
   let coverage = result.coverage;
 
+  // A pass without supported coverage did not prove anything: it is an error, never a pass.
   if (status === "pass" && coverage !== "checked_supported") {
-    coverage = "checked_supported";
-  }
-
-  if (coverage === "not_checked" && status === "pass") {
     status = "error";
+    coverage = "not_checked";
   }
 
   return {

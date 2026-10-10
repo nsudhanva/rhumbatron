@@ -150,11 +150,9 @@ describe("app check outcome evaluation and fallback", () => {
       supported: true,
     };
     const evaluated = evaluateAppCheckOutcome("unit", invalidSupported);
-    if (evaluated.handled) {
-      if (evaluated.outcome.coverage === "not_checked") {
-        expect(evaluated.outcome.status).not.toBe("pass");
-      }
-    }
+    expect(evaluated.handled).toBe(true);
+    if (!evaluated.handled) return;
+    expect(evaluated.outcome).toMatchObject({ status: "error", coverage: "not_checked" });
   });
 });
 
