@@ -6,9 +6,11 @@ import {
   type CodeEditOutcome,
   type PromotionOutcome,
   type ReleaseInjectionOutcome,
+  type RollbackOutcome,
 } from "@rhumbatron/protocol";
 import { z } from "zod";
 import { provisionApp } from "./app-provision.ts";
+import { expirePreviews, removeApp } from "./app-release.ts";
 import {
   type CreateCandidateOutcome,
   composeChangeCandidates,
@@ -25,6 +27,7 @@ import { cleanupProject, forkRetentionDays, sweepForks } from "./project-cleanup
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
 import { injectReleaseFailure, recoverStuckRelease } from "./release.ts";
+import { requestRollback } from "./rollback.ts";
 import { startWorkflow, workflowStartFor } from "./workflow-commands.ts";
 
 export { ChangeWorkflow } from "./change-workflow.ts";
@@ -88,9 +91,19 @@ async function handleCommand(
     return;
   }
   if (command.data.commandType === "project.cleanup") {
+    // Live apps (P16-20): the app's data stores go too. Prod only; bounded per delivery.
+    const app = env.APPS ? await removeApp(env, command.data.projectId) : null;
     const result = await cleanupProject(env, command.data.projectId);
     console.warn(
       JSON.stringify({ event: "project.cleanup", projectId: command.data.projectId, ...result }),
+    );
+    return result.status === "partial" || app?.status === "partial" ? "continue" : undefined;
+  }
+  // "Remove app" (P16-20): the API already answers 410; delete data stores, bundles, and rows.
+  if (command.data.commandType === "app.remove") {
+    const result = await removeApp(env, command.data.projectId);
+    console.warn(
+      JSON.stringify({ event: "app.remove", projectId: command.data.projectId, ...result }),
     );
     return result.status === "partial" ? "continue" : undefined;
   }
@@ -99,7 +112,9 @@ async function handleCommand(
       now: Date.now(),
       retentionDays: forkRetentionDays(env.ENVIRONMENT),
     });
-    console.warn(JSON.stringify({ event: "forks.sweep", ...result }));
+    // P16-22: preview rows (and their data) expire with their 7-day bundles.
+    const previews = await expirePreviews(env);
+    console.warn(JSON.stringify({ event: "forks.sweep", ...result, ...previews }));
     return result.more ? "continue" : undefined;
   }
   // A Change stuck in `releasing` (event router sweep, HOM-204). Bounded: one Change per command.
@@ -285,6 +300,19 @@ export default class Integration extends WorkerEntrypoint<Env> {
    */
   async submitHumanEdit(input: HumanEditInput): Promise<CodeEditOutcome> {
     return submitHumanEdit(this.env, input);
+  }
+
+  /**
+   * P16-13: roll back to Sk as the new transition Sn -> Sn+1 with Sk's tree, through the same
+   * Candidate, approval, and compare-and-swap path as any promotion. The API checked membership.
+   */
+  async requestRollback(input: {
+    projectId: string;
+    targetGeneration: number;
+    expectedGeneration: number;
+    actorUserId: string;
+  }): Promise<RollbackOutcome> {
+    return requestRollback(this.env, input);
   }
 
   /** P11-01: one human decision on a gated Candidate (section 40.2). */

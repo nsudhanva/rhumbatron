@@ -21,7 +21,7 @@ export type SourceSync =
   | { synced: false; commit: null; detail: string };
 
 /** Short-lived repo token as isomorphic-git auth, plus its revoke handle. */
-async function repoAccess(env: Env, name: string, scope: "read" | "write") {
+export async function repoAccess(env: Env, name: string, scope: "read" | "write") {
   using repo = await env.ARTIFACTS.get(name);
   const info = await repo.info();
   const token = await repo.createToken(scope, 600);
