@@ -478,6 +478,17 @@ describe("parseBenchOutput", () => {
 });
 
 describe("contract route parsing", () => {
+  it("reads a route named later in a declaration", () => {
+    const declared =
+      'Added GET /api/version API route returning {"name":"acme-shop","version":"1"}';
+    expect(contractKey(declared)).toBe(contractKey("GET /api/version"));
+    expect(diffContract([], ["GET /api/version"], [declared]).undeclared).toEqual([]);
+    expect(contractKey("Expose a new endpoint (POST /api/wishlists/:id/share).")).toBe(
+      contractKey("POST /api/wishlists/:id/share"),
+    );
+    // Lowercase prose is not a route: "get started" has no path.
+    expect(contractKey("Users get started with wishlists")).not.toMatch(/^GET /);
+  });
   it("reads the route before trailing punctuation in a declaration", () => {
     expect(contractKey("POST /api/wishlists: Creates a new wishlist")).toBe(
       contractKey("POST /api/wishlists"),

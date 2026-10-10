@@ -48,6 +48,9 @@ export type CompatibilityOptions = {
 
 // The path stops before trailing punctuation: "POST /api/wishlists: creates…" names /api/wishlists.
 const HTTP_ROUTE = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+([^\s,;]+?)[:.,;]*(?=\s|$)/i;
+/** A route later in the text ("Added GET /api/version route ..."): the path must start with `/`. */
+const HTTP_ROUTE_INLINE =
+  /(?:^|[\s("'`])(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/[^\s,;)"'`]*?)[:.,;)]*(?=[\s"'`]|$)/;
 
 /** Words that describe the kind of change, not the contract it applies to. */
 const STOPWORDS = new Set(
@@ -80,7 +83,7 @@ function routeSegments(path: string): string[] {
 
 /** What a declared change applies to, as tokens: route segments, or the head without change verbs. */
 function subject(change: string): { route?: string; tokens: string[] } {
-  const route = HTTP_ROUTE.exec(change.trim());
+  const route = HTTP_ROUTE.exec(change.trim()) ?? HTTP_ROUTE_INLINE.exec(change);
   if (route?.[1] && route[2]) {
     const segments = routeSegments(route[2]);
     return {
@@ -171,8 +174,10 @@ function migrationNumbers(cs: ComposableChangeSet): number[] {
  * the composition is an unsatisfied dependency; overlap uses the files a ChangeSet itself changed.
  * 8: the Verification Plan maps an invariant that keeps existing product, API, route, or endpoint
  * behavior to the contract and unit checks, not to an unrunnable procedure gap.
+ * 9: a declared contract change names its route anywhere in the text ("Added GET /api/version
+ * route ..."), not only at the start, so the contract check matches it to the observed route.
  */
-export const COMPOSITION_RULES_VERSION = 8;
+export const COMPOSITION_RULES_VERSION = 9;
 
 /**
  * Transitive `stackedOn` ancestors of each ChangeSet. A pair where one is an ancestor of the other
