@@ -16,7 +16,7 @@ A Verification Workflow runs executable checks on each Candidate.
 Only `checked_supported` Evidence with status `pass` can satisfy a required check.
 A human approves a gated Candidate.
 ProjectRootDO then advances the Canonical Generation with compare-and-swap.
-Workers Builds builds the promoted source.
+The release moves the live app pointer in prod (ADR 0020). On dev, Workers Builds builds the promoted source for Acme Shop Live.
 A Release Workflow observes the deployment.
 
 > Many Agents can propose many futures. Only verified evidence can advance the Canonical State.
@@ -82,7 +82,8 @@ Differences from `AGENTS.md`:
 
 ## Deployables map
 
-There are eight Rhumbatron Workers plus one release target Worker for the Acme Shop demo.
+There are nine Rhumbatron Workers plus one release target Worker for the Acme Shop demo.
+`rhumbatron-apps` runs live apps and exists in prod only (ADR 0020). The docs site is a tenth, assets-only Worker in prod.
 Each Worker is named `rhumbatron-<component>-<env>`, where `<env>` is `dev` or `prod`.
 
 The first diagram shows how the Workers call each other.
@@ -156,12 +157,13 @@ flowchart TB
 | `rhumbatron-agents` | AgentDO (Agents SDK `Agent` with Pi harness) | `DB`, `AGENT`, `SANDBOX`, `PROJECT_ROOT`, `RESOURCE_SHARD`, `ARTIFACTS`, `EVIDENCE`, `METRICS`, `AI`, `MEMORY`, AI Gateway variables | `rhumbatron-agent-wakeups` Queue, `sandboxSmoke` RPC |
 | `rhumbatron-indexer` | Symbol, dependency, Product Graph, and vector indexes | `DB`, `EVIDENCE`, `PROJECT_ROOT`, `ARTIFACTS`, `MEMORY`, `AI`, `METRICS` | `rhumbatron-indexing` Queue only |
 | `rhumbatron-sandbox` | `Sandbox` container class from `@cloudflare/sandbox` | Image `docker.io/cloudflare/sandbox:0.12.6`, instance type `basic`, `max_instances` 1 | Cross-script DO binding only |
+| `rhumbatron-apps` | Live apps of Projects on Dynamic Workers (prod only, ADR 0020) | `LOADER` (Worker Loader), `DB`, `EVIDENCE`, `APP_DATA` (DO) | Wildcard route `<slug>.rhumbatron.com` |
 | `rhumbatron-acme-shop` | Release target for the Acme Shop demo | None in Terraform. Workers Builds owns its versions | `workers.dev` URL |
 
 Notes:
 
 - `AGENTS.md` section 12 lists seven deployables. The code adds `rhumbatron-sandbox` because the provider cannot attach a container to a DO class in another Worker (ADR 0012).
-- The release Worker is in Terraform (`cloudflare_worker.acme_shop`). Its Workers Builds connection is a one-time dashboard step (ADR 0014). The live release is blocked until that connection has a build trigger (`docs/BUILD_STATUS.md`).
+- The release Worker is in Terraform (`cloudflare_worker.acme_shop`). Its Workers Builds connection exists on dev (ADR 0018). Live apps replace this path on prod (ADR 0020).
 
 ## Reading order
 
@@ -186,6 +188,7 @@ flowchart LR
 
 Related documents:
 
+- [Tech stack](tech-stack.md): every technology in use today, what it does, and where it differs from `AGENTS.md`.
 - `AGENTS.md`: the authoritative build plan.
 - `docs/adr/`: one record per architecture decision. This guide cites ADRs by number.
 - `docs/BUILD_STATUS.md`: current phase, blockers, and caps.

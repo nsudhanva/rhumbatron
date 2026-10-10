@@ -15,7 +15,7 @@ Many agents can propose many futures of one codebase. Only verified evidence can
 
 Terraform deploys both environments (`envs/dev`, `envs/prod`, ADR 0017).
 
-A real model-driven Change ran end to end on dev. The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD.
+A real model-driven Change ran end to end on dev. The Root Planner and four agents built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD. That run used Gemini on Vertex AI. Anthropic has replaced it (ADR 0021).
 
 ## Architecture
 

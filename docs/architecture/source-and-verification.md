@@ -24,7 +24,7 @@ flowchart TB
     WS2[("ws-run<br/>Task workspace fork")]
     CA[("cand-id<br/>Candidate fork")]
   end
-  PROV["project.provision<br/>(integration Worker)"] -->|"create, seed template"| CAN
+  PROV["project.provision<br/>(integration Worker)"] -->|"create, seed empty repo"| CAN
   AG["AgentDO run"] -->|"fork on first write"| WS1
   AG --> WS2
   VW["CandidateVerificationWorkflow"] -->|"fork, merge ChangeSets"| CA
