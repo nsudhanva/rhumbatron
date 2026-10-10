@@ -52,6 +52,7 @@ function setup() {
       get: async (key: string) =>
         objects.has(key) ? { json: async () => JSON.parse(objects.get(key) as string) } : null,
     },
+    AGENT_FILES_IN_WORKER: "false",
   } as unknown as Parameters<typeof openWorkspace>[0];
   const open = async () => {
     const ws = await openWorkspace(env, {

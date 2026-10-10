@@ -74,12 +74,16 @@ import { type ChangeSetRowForStack, type StackSource, stackFor } from "./stack.t
 import { taskExtension } from "./task-tools.ts";
 import {
   closeWorkspace,
+  deleteWorkspaceFile,
+  getWorkspaceTree,
+  listWorkspaceFiles,
   openWorkspace,
   type Published,
   publishWorkspace,
   readWorkspaceFile,
   runCommand,
   type WorkspaceRef,
+  type WorkspaceTree,
   writeWorkspaceFile,
 } from "./workspace.ts";
 
@@ -230,6 +234,16 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       "CREATE TABLE IF NOT EXISTS run_workspaces (run_id TEXT PRIMARY KEY, ws_json TEXT NOT NULL)",
     );
     ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS run_workspace_tree (
+        run_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        content TEXT,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        dirty INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (run_id, path)
+      )`,
+    );
+    ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS run_tool_logs (
         ordinal INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL,
         tool TEXT NOT NULL, target TEXT NOT NULL, output TEXT NOT NULL
@@ -262,6 +276,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
             this.withBudget(this.noteStep("read_file", path, this.readSourceFile(path))),
           writeFile: (path, content) =>
             this.withBudget(this.noteStep("write_file", path, this.writeSourceFile(path, content))),
+          deleteFile: (path) =>
+            this.withBudget(this.noteStep("delete_file", path, this.deleteSourceFile(path))),
           runCommand: (command) =>
             this.withBudget(this.noteStep("run_command", command, this.runSourceCommand(command))),
         },
@@ -924,6 +940,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
             this.env,
             ws,
             `${input.taskId}: ${String(result.intent.summary ?? "")}`,
+            this.tree(run.run_id),
           );
       } catch (error) {
         log({
@@ -933,7 +950,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         });
         result = { ok: false, kind: "invalid_output", reason: "ChangeSet could not be published" };
       } finally {
-        await closeWorkspace(this.env, ws);
+        await closeWorkspace(this.env, ws, this.tree(run.run_id));
       }
     }
     if (result.ok && published)
@@ -1471,6 +1488,10 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     );
   }
 
+  private tree(runId: string): WorkspaceTree {
+    return getWorkspaceTree(this.ctx.storage.sql, runId);
+  }
+
   private workspaceRef(runId: string): WorkspaceRef | null {
     const row = this.ctx.storage.sql
       .exec<{ ws_json: string }>("SELECT ws_json FROM run_workspaces WHERE run_id = ?", runId)
@@ -1497,6 +1518,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       runId: source.run.run_id,
       baseCommit: source.commit,
       stack: source.stack,
+      sql: this.ctx.storage.sql,
     });
     if ("refused" in ws) {
       // Dependencies that do not merge: no fork, no Sandbox time left behind; the Task fails.
@@ -1517,12 +1539,28 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
 
   private async writeSourceFile(path: string, content: string): Promise<string> {
     const ws = await this.workspace();
-    return typeof ws === "string" ? ws : writeWorkspaceFile(this.env, ws, path, content);
+    return typeof ws === "string"
+      ? ws
+      : writeWorkspaceFile(this.env, ws, path, content, this.tree(ws.runId));
+  }
+
+  private async deleteSourceFile(path: string): Promise<string> {
+    const ws = await this.workspace();
+    return typeof ws === "string"
+      ? ws
+      : deleteWorkspaceFile(this.env, ws, path, this.tree(ws.runId));
   }
 
   private async runSourceCommand(command: string): Promise<string> {
     const ws = await this.workspace();
-    return typeof ws === "string" ? ws : runCommand(this.env, ws, command);
+    if (typeof ws === "string") return ws;
+    const result = await runCommand(this.env, ws, command, this.tree(ws.runId));
+    this.ctx.storage.sql.exec(
+      "INSERT OR REPLACE INTO run_workspaces (run_id, ws_json) VALUES (?, ?)",
+      ws.runId,
+      JSON.stringify(ws),
+    );
+    return result;
   }
 
   /** Appends the remaining model-call budget so the agent can plan its last steps. */
@@ -1610,6 +1648,10 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   private async listFiles(prefix?: string): Promise<string> {
     const source = this.runSource();
     if (!source) return NO_SOURCE;
+    const ws = this.workspaceRef(source.run.run_id);
+    if (ws) {
+      return listWorkspaceFiles(this.env, ws, prefix, this.tree(ws.runId));
+    }
     const all = [...new Set([...source.files, ...source.stack.flatMap((s) => s.files)])].sort();
     const files = all.filter((f) => !prefix || f.startsWith(prefix.replace(/^\.?\//, "")));
     return files.join("\n") || "No files match.";
@@ -1627,7 +1669,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       ws = opened;
     }
     if (ws)
-      return readWorkspaceFile(this.env, ws, path).catch(
+      return readWorkspaceFile(this.env, ws, path, this.tree(ws.runId)).catch(
         (e) => `Cannot read ${path}: ${String(e).slice(0, 120)}`,
       );
     const clean = path.replace(/^\.?\//, "");

@@ -204,12 +204,15 @@ describe("max active coding Sandboxes per Change", () => {
     const { db, d1 } = fakeD1();
     runs(db, 5, CHANGE_LIMITS.maxActiveSandboxesPerChange);
     const artifacts = { get: vi.fn(), delete: vi.fn() };
-    const ws = await openWorkspace({ DB: d1, ARTIFACTS: artifacts, SANDBOX: {} } as never, {
-      projectId: "proj_1",
-      change: { changeId: "chg_1", taskId: "task_ws4" },
-      runId: "run_4",
-      baseCommit: "abc",
-    });
+    const ws = await openWorkspace(
+      { DB: d1, ARTIFACTS: artifacts, SANDBOX: {}, AGENT_FILES_IN_WORKER: "false" } as never,
+      {
+        projectId: "proj_1",
+        change: { changeId: "chg_1", taskId: "task_ws4" },
+        runId: "run_4",
+        baseCommit: "abc",
+      },
+    );
     expect(ws).toMatchObject({ refused: "max_active_sandboxes_per_change" });
     expect(artifacts.get).not.toHaveBeenCalled();
     expect(spies.getSandbox).not.toHaveBeenCalled();

@@ -68,6 +68,13 @@ const WriteFileArgs = Type.Object({
   }),
   content: Type.String({ maxLength: 60_000, description: "The complete new file content." }),
 });
+const DeleteFileArgs = Type.Object({
+  path: Type.String({
+    minLength: 1,
+    maxLength: 300,
+    description: "Repository-relative file path.",
+  }),
+});
 const RunCommandArgs = Type.Object({
   command: Type.String({
     minLength: 2,
@@ -85,6 +92,7 @@ export type SourceReader = {
   listFiles(prefix?: string): Promise<string>;
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<string>;
+  deleteFile(path: string): Promise<string>;
   runCommand(command: string): Promise<string>;
 };
 
@@ -146,6 +154,15 @@ export function taskExtension(
       return { content: [{ type: "text", text: await source.writeFile(args.path, args.content) }] };
     },
   };
+  const deleteFile: ToolRegistration<typeof DeleteFileArgs> = {
+    name: "delete_file",
+    description: "Delete one file in your Task workspace.",
+    parameters: DeleteFileArgs,
+    replay: "safe",
+    async execute(args) {
+      return { content: [{ type: "text", text: await source.deleteFile(args.path) }] };
+    },
+  };
   const runCommand: ToolRegistration<typeof RunCommandArgs> = {
     name: "run_command",
     description:
@@ -159,6 +176,6 @@ export function taskExtension(
   return {
     name: "rhumbatron-task",
     sections: [{ key: "task", render: prompt, tag: false }],
-    tools: [listFiles, readFile, writeFile, runCommand, complete, fail],
+    tools: [listFiles, readFile, writeFile, deleteFile, runCommand, complete, fail],
   } as unknown as Extension;
 }

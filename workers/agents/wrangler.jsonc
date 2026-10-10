@@ -15,7 +15,8 @@
     "ENVIRONMENT": "local",
     "SERVICE_NAME": "rhumbatron-agents",
     "AI_ACCOUNT_ID": "",
-    "AI_GATEWAY_ID": "rhumbatron-models-dev"
+    "AI_GATEWAY_ID": "rhumbatron-models-dev",
+    "AGENT_FILES_IN_WORKER": "true"
   },
   // Workers AI: Clef-flash routing decisions only, capped per day (rule 50).
   "ai": { "binding": "AI" },
