@@ -23,6 +23,7 @@ import { changeAfterPromotion, PROMOTABLE_FROM } from "./change-status.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
 import { loadProjectPolicy } from "./policy.ts";
+import { recomposeQuietly } from "./recompose.ts";
 import { changeEndedEvent, hasReleaseTarget, startRelease } from "./release.ts";
 
 /**
@@ -191,6 +192,50 @@ async function markStale(
   return reason;
 }
 
+/** Verified Candidates per promotion that the sweep marks stale (bounded work per request). */
+const STALE_SWEEP_LIMIT = 10;
+
+/**
+ * Marks verified Candidates of this Project whose base is behind `generation` stale, settles their
+ * Changes out of `awaiting_approval`, and recomposes them (P16-14). Never fails the caller.
+ */
+async function staleBehind(env: Env, projectId: string, generation: number) {
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT c.id FROM candidates c JOIN changes ch ON ch.id = c.change_id
+       WHERE ch.project_id = ? AND c.status = 'verified' AND c.base_generation < ?
+       ORDER BY c.updated_at LIMIT ?`,
+    )
+      .bind(projectId, generation, STALE_SWEEP_LIMIT)
+      .all<{ id: string }>();
+    for (const { id } of results) await markCandidateStale(env, id, generation);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "promotion.stale_sweep_failed",
+        message: String(error).slice(0, 200),
+      }),
+    );
+  }
+}
+
+/**
+ * Section 42.9 for a Candidate that cannot promote because canonical moved: stale, its Change out
+ * of `awaiting_approval`, then recomposed on the new canonical state (at most twice per lineage).
+ * Used by the promotion sweep and by verification when canonical moved during the checks.
+ */
+export async function markCandidateStale(
+  env: Env,
+  candidateId: string,
+  canonicalGeneration: number,
+) {
+  const row = await loadCandidate(env, candidateId);
+  if (!row || ["stale", "promoted", "rejected"].includes(row.status)) return;
+  await markStale(env, row, canonicalGeneration);
+  await settleAwaitingApproval(env, row.change_id, new Date().toISOString()).run();
+  await recomposeQuietly(env, candidateId);
+}
+
 /** Product metadata mirrors of the authoritative transition. Safe to repeat. */
 async function recordPromoted(env: Env, row: CandidateRow, generation: number) {
   const now = new Date().toISOString();
@@ -257,6 +302,9 @@ async function promoted(
       commit: sync.commit,
     });
   }
+  // P16-14: verified Candidates of other Changes on an older base can no longer promote. Mark them
+  // stale now and recompose them on this generation, so parallel Changes ship without a person.
+  await staleBehind(env, row.project_id, generation);
   return {
     status: "promoted",
     candidateId: row.id,
@@ -360,6 +408,8 @@ export async function promoteCandidate(
     // A rejected Candidate stays rejected; any other Candidate on an old base is stale.
     if (row.status !== "rejected" && check.blocks.some((b) => b.kind === "stale")) {
       const reason = await markStale(env, row, canonical.generation);
+      await settleAwaitingApproval(env, row.change_id, new Date().toISOString()).run();
+      await recomposeQuietly(env, row.id);
       return {
         status: "stale",
         candidateId: row.id,
@@ -461,6 +511,8 @@ export async function promoteCandidate(
     result.detail.reason === "tree_mismatch",
   );
   await leavePromoting(env, row);
+  // After the Change left `promoting`: recomposition skips a closed Change.
+  await recomposeQuietly(env, row.id);
   return {
     status: "stale",
     candidateId: row.id,

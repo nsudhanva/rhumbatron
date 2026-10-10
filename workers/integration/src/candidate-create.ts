@@ -20,7 +20,10 @@ import {
  * unique per composition.
  */
 
-/** Policy `maxCandidates` (section 53). Counts every Candidate of the Change, in any state. */
+/**
+ * Policy `maxCandidates` (section 53). Counts every Candidate of the Change, in any state, except
+ * recompositions of a stale Candidate (P16-14): they replace their root, bounded per lineage.
+ */
 export const MAX_CANDIDATES = 3;
 
 const ACTOR = { kind: "system", id: "candidate-composer" } as const;
@@ -331,7 +334,7 @@ async function insertCandidate(
     `INSERT INTO candidates (id, change_id, base_generation, status, created_at, updated_at,
        composition_key, change_set_ids_json)
      SELECT ?, ?, ?, 'composing', ?, ?, ?, ?
-     WHERE (SELECT COUNT(*) FROM candidates WHERE change_id = ?) < ?
+     WHERE (SELECT COUNT(*) FROM candidates WHERE change_id = ? AND recomposed_from IS NULL) < ?
      ON CONFLICT DO NOTHING`,
   )
     .bind(
