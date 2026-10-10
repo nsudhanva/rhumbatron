@@ -16,7 +16,7 @@ const manifest: WorkspaceManifest = {
     id: "proj-1",
     dir: "/workspace/run_1",
     openedAt: "2026-10-09T12:00:00.000Z",
-    sleepAfter: 600,
+    sleepAfter: 120,
   },
   toolsAllowed: ["read_file", "write_file"],
   commandAllowlistVersion: 1,

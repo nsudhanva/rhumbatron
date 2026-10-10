@@ -24,8 +24,8 @@ import { type StackSource, stackedOn } from "./stack.ts";
  */
 
 /**
- * HOM-192: hard stop at 10 Sandbox hours per calendar month, counted conservatively. ADR 0017
- * splits the 10 hours between dev and prod: each environment's `SANDBOX_MONTHLY_SECONDS` binding
+ * Hard stop at the monthly Sandbox hours, counted conservatively. ADR 0017 splits the approved
+ * 20 hours between dev (5) and prod (15): each environment's `SANDBOX_MONTHLY_SECONDS` binding
  * sets its own meter. This is the fallback when the binding is absent.
  */
 const MONTHLY_SECONDS = 36_000;
@@ -37,8 +37,8 @@ const monthlySeconds = (configured?: string) => {
 };
 /** Charged when a session opens; the rest is settled when it closes. */
 const OPEN_RESERVATION_SECONDS = 300;
-/** Idle time billed after the last command, until the Sandbox sleeps. */
-const SLEEP_TAIL_SECONDS = 600;
+/** Idle time billed after the last command, until the Sandbox sleeps. Below the open reservation. */
+const SLEEP_TAIL_SECONDS = 120;
 /** Increment when ALLOWED or FORBIDDEN_CHARS changes. */
 const COMMAND_ALLOWLIST_VERSION = 1;
 const WORKSPACE_TOOLS = [
@@ -132,8 +132,8 @@ type WorkspaceEnv = {
 const sandboxFor = (env: WorkspaceEnv, projectId: string) =>
   // Cross-script binding to the Sandbox Worker's class (ADR 0012).
   getSandbox(env.SANDBOX as unknown as DurableObjectNamespace<Sandbox>, sandboxId(projectId), {
-    // Longer than a slow model call, so an idle wait between calls keeps the checkout and the
-    // agent's uncommitted edits. The monthly meter (HOM-192) still caps Sandbox time.
+    // Each command renews the timer. A model call longer than the tail lets the Sandbox sleep;
+    // the next tool call restores the checkout (`ensureCheckout`) and tells the agent.
     sleepAfter: SLEEP_TAIL_SECONDS,
   });
 
