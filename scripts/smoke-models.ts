@@ -1,16 +1,27 @@
 /**
- * Live model check through the AI Gateway: one tool-calling request per tier (3 free requests),
- * then one Vertex fallback request with OpenRouter forced to 429 (about $0.0004 of GCP credit).
- * Usage: bun run smoke:models
- * OpenRouter free models allow 50 requests per day on an account with under $10 of credit
- * purchases, so run this only when the model path changes. Prints metadata only, never content.
+ * Live model check through the AI Gateway's Anthropic endpoint (ADR 0021). Usage:
+ *   bun run smoke:models [dev|prod]
+ * Four small requests, well under one US cent in total:
+ * 1. A bogus `anthropic-workspace-id` must be rejected by Anthropic: proves the gateway forwards
+ *    the header (a rejected request is not billed).
+ * 2. One tool-calling request per tier: haiku, sonnet, and opus (Sonnet unless ALLOW_OPUS=true).
+ * 3. The same Haiku request twice with a system prompt above the 512-token cache minimum: the
+ *    second must read the cache.
+ * Prints metadata only (models, tokens, cost), never the key or any content.
  */
-import { complete, ModelCallError, TIER_MODELS } from "@rhumbatron/model-router";
+import { complete, ModelCallError, opusAllowed, TIER_MODELS } from "@rhumbatron/model-router";
 
-const { OPENROUTER_API_KEY, CLOUDFLARE_ACCOUNT_ID, VERTEX_SERVICE_ACCOUNT } = process.env;
-const gatewayId = `rhumbatron-models-${process.argv[2] ?? "dev"}`;
-if (!OPENROUTER_API_KEY || !CLOUDFLARE_ACCOUNT_ID) {
-  console.error("OPENROUTER_API_KEY and CLOUDFLARE_ACCOUNT_ID are required (see package.json).");
+const { ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID, CLOUDFLARE_ACCOUNT_ID, ALLOW_OPUS } =
+  process.env;
+const env = process.argv[2] ?? "dev";
+if (!["dev", "prod"].includes(env)) {
+  console.error("Usage: bun run smoke:models [dev|prod]");
+  process.exit(2);
+}
+if (!ANTHROPIC_API_KEY || !ANTHROPIC_WORKSPACE_ID || !CLOUDFLARE_ACCOUNT_ID) {
+  console.error(
+    "ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID and CLOUDFLARE_ACCOUNT_ID are required (see package.json).",
+  );
   process.exit(2);
 }
 
@@ -25,65 +36,89 @@ const readFile = {
 
 const config = {
   accountId: CLOUDFLARE_ACCOUNT_ID,
-  gatewayId,
-  apiKey: OPENROUTER_API_KEY,
-  ...(VERTEX_SERVICE_ACCOUNT ? { vertexServiceAccount: VERTEX_SERVICE_ACCOUNT } : {}),
+  gatewayId: `rhumbatron-models-${env}`,
+  apiKey: ANTHROPIC_API_KEY,
+  workspaceId: ANTHROPIC_WORKSPACE_ID,
+  allowOpus: opusAllowed(ALLOW_OPUS),
+  timeoutMs: 60_000,
 };
 
 let failed = 0;
+let spent = 0;
+const detail = (error: unknown) =>
+  (error instanceof ModelCallError
+    ? `${error.kind} ${error.status ?? ""} ${error.message}`
+    : String(error)
+  ).slice(0, 200);
+
+// 1. Header pass-through: Anthropic, not the gateway, must reject an unknown workspace.
+try {
+  await complete(
+    { ...config, workspaceId: "wrkspc_00000000000000000000000000" },
+    { tier: "haiku", maxOutputTokens: 16, messages: [{ role: "user", content: "ok" }] },
+  );
+  failed++;
+  console.log("FAIL  workspace header  a bogus workspace id was accepted");
+} catch (error) {
+  const text = detail(error);
+  const forwarded = /workspace/i.test(text);
+  if (!forwarded) failed++;
+  console.log(`${forwarded ? "pass" : "FAIL"}  workspace header  rejected: ${text}`);
+}
+
+// 2. One tool call per tier.
 for (const tier of Object.keys(TIER_MODELS) as (keyof typeof TIER_MODELS)[]) {
   try {
     const result = await complete(config, {
       tier,
-      maxOutputTokens: 2000,
+      maxOutputTokens: tier === "haiku" ? 512 : 1024,
       metadata: { source: "smoke-models", tier },
       messages: [{ role: "user", content: "Use the tool to read src/cart.ts." }],
       tools: [readFile],
     });
+    spent += result.costUsd;
     const called = result.toolCalls[0]?.function.name === "read_file";
     if (!called) failed++;
     console.log(
-      `${called ? "pass" : "FAIL"}  ${tier}  ${result.provider}/${result.model}  ${result.latencyMs}ms  in=${result.inputTokens} out=${result.outputTokens} cost=$${result.costUsd}`,
+      `${called ? "pass" : "FAIL"}  ${tier}  ${result.model}${result.requestedTier ? ` (requested ${result.requestedTier})` : ""}  ${result.latencyMs}ms  in=${result.inputTokens} out=${result.outputTokens} cost=$${result.costUsd.toFixed(6)} log=${result.gatewayLogId ?? "-"}`,
     );
   } catch (error) {
     failed++;
-    const detail =
-      error instanceof ModelCallError ? `${error.kind} ${error.message}` : String(error);
-    console.log(`FAIL  ${tier}  ${detail.slice(0, 200)}`);
+    console.log(`FAIL  ${tier}  ${detail(error)}`);
   }
-}
-if (VERTEX_SERVICE_ACCOUNT) {
-  // Simulate an exhausted free pool so the call takes the paid Vertex path.
-  const forceOpenRouter429 = (input: string | URL | Request, init?: RequestInit) =>
-    String(input).includes("/openrouter/")
-      ? Promise.resolve(
-          Response.json({ error: { message: "simulated", code: 429 } }, { status: 429 }),
-        )
-      : fetch(input, init);
-  try {
-    const result = await complete(
-      { ...config, fetch: forceOpenRouter429 },
-      {
-        tier: "haiku",
-        maxOutputTokens: 500,
-        metadata: { source: "smoke-models", tier: "haiku-vertex" },
-        messages: [{ role: "user", content: "Use the tool to read src/cart.ts." }],
-        tools: [readFile],
-      },
-    );
-    const ok = result.provider === "google-vertex-ai" && result.toolCalls.length > 0;
-    if (!ok) failed++;
-    console.log(
-      `${ok ? "pass" : "FAIL"}  fallback  ${result.provider}/${result.model}  ${result.latencyMs}ms  cost=$${result.costUsd.toFixed(6)}`,
-    );
-  } catch (error) {
-    failed++;
-    const detail =
-      error instanceof ModelCallError ? `${error.kind} ${error.message}` : String(error);
-    console.log(`FAIL  fallback  ${detail.slice(0, 200)}`);
-  }
-} else {
-  console.log("skip  fallback  VERTEX_SERVICE_ACCOUNT not set");
 }
 
+// 3. Prompt caching: a stable system prompt above the 512-token minimum, sent twice.
+const stable = Array.from(
+  { length: 60 },
+  (_, i) =>
+    `Rule ${i + 1}: keep each answer short, factual, and limited to the file the user names.`,
+).join("\n");
+const cached: number[] = [];
+for (let i = 0; i < 2; i++) {
+  try {
+    const result = await complete(config, {
+      tier: "haiku",
+      maxOutputTokens: 16,
+      metadata: { source: "smoke-models", tier: "haiku-cache" },
+      messages: [
+        { role: "system", content: stable },
+        { role: "user", content: "Reply with: ok" },
+      ],
+    });
+    spent += result.costUsd;
+    cached.push(result.cacheReadTokens);
+    console.log(
+      `info  cache ${i + 1}  write=${result.cacheWriteTokens} read=${result.cacheReadTokens} cost=$${result.costUsd.toFixed(6)}`,
+    );
+  } catch (error) {
+    failed++;
+    console.log(`FAIL  cache ${i + 1}  ${detail(error)}`);
+  }
+}
+const hit = (cached[1] ?? 0) > 0;
+if (!hit) failed++;
+console.log(`${hit ? "pass" : "FAIL"}  prompt cache  second call read ${cached[1] ?? 0} tokens`);
+
+console.log(`total cost $${spent.toFixed(6)}`);
 process.exit(failed === 0 ? 0 : 1);

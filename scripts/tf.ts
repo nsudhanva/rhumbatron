@@ -25,8 +25,9 @@ const rootKeychain: Record<string, Record<string, string>> = {
   dev: {
     TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-dev",
     TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-dev",
-    TF_VAR_openrouter_api_key: "rhumbatron-openrouter-api-key",
-    TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-dev",
+    // ADR 0021: Anthropic key (secret) and workspace ID (not secret, sent on every request).
+    TF_VAR_anthropic_api_key: "rhumbatron-anthropic-api-key",
+    TF_VAR_anthropic_workspace_id: "rhumbatron-anthropic-workspace-id",
     // ADR 0018: release observation (Builds API GETs) on the integration Worker.
     TF_VAR_builds_api_token: "rhumbatron-cloudflare-builds-token",
   },
@@ -34,14 +35,15 @@ const rootKeychain: Record<string, Record<string, string>> = {
   global: {
     TF_VAR_alert_email: "rhumbatron-alert-email",
   },
-  // ADR 0017. Prod reuses dev's K2 Consume-only token, Vertex service account (one GCP project;
-  // the per-gateway caps split the budget), and OpenRouter key. Clerk is the production instance.
+  // ADR 0017. Prod reuses dev's K2 Consume-only token. ADR 0021: prod uses the same Anthropic key
+  // and workspace as dev; each environment has its own monthly budget. Clerk is the production
+  // instance.
   prod: {
     TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-prod",
     TF_VAR_clerk_publishable_key: "rhumbatron-clerk-publishable-key-prod",
     TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-dev",
-    TF_VAR_openrouter_api_key: "rhumbatron-openrouter-api-key",
-    TF_VAR_vertex_service_account: "rhumbatron-vertex-sa-dev",
+    TF_VAR_anthropic_api_key: "rhumbatron-anthropic-api-key",
+    TF_VAR_anthropic_workspace_id: "rhumbatron-anthropic-workspace-id",
     TF_VAR_builds_api_token: "rhumbatron-cloudflare-builds-token",
   },
 };

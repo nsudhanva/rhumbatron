@@ -5,12 +5,7 @@
  * Exit code 1 when any line is ALERT, so a loop can watch it.
  */
 
-import {
-  AGENT_DAILY_CALL_CAP,
-  OPENROUTER_DAILY_CALL_CAP,
-  USAGE_COUNTER,
-  vertexSpendLimit,
-} from "@rhumbatron/model-router";
+import { AGENT_DAILY_CALL_CAP, USAGE_COUNTER } from "@rhumbatron/model-router";
 
 const token = process.env.CLOUDFLARE_MONITOR_TOKEN;
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -24,11 +19,12 @@ if (!token || !accountId) {
 const alertsOnly = process.argv.includes("--alerts-only");
 const env = "dev";
 /**
- * Dev's caps from envs/dev/main.tf (ADR 0017): `VERTEX_SPEND_LIMIT_USD` and
- * `SANDBOX_MONTHLY_SECONDS`. Prod has its own (Vertex $10, Sandbox 5 h).
+ * Dev's Sandbox cap from envs/dev/main.tf (ADR 0017): `SANDBOX_MONTHLY_SECONDS`; prod has its own.
+ * Anthropic budgets per calendar month from `anthropic_monthly_budget_usd` in each env's
+ * variables.tf (ADR 0021): dev $15 + prod $10 = the approved $25 total.
  */
-const DEV_VERTEX_CAP = vertexSpendLimit("40");
 const DEV_SANDBOX_HOURS = 18_000 / 3600;
+const ANTHROPIC_MONTHLY_BUDGET_USD = { dev: 15, prod: 10 } as const;
 const api = `https://api.cloudflare.com/client/v4/accounts/${accountId}`;
 
 type Level = "OK" | "WARN" | "ALERT" | "ERROR";
@@ -298,25 +294,47 @@ await section("rhumbatron meters", async () => {
     AGENT_DAILY_CALL_CAP,
     "calls, all providers (daily cap)",
   );
-  // Reaching the OpenRouter cap is expected: runs overflow to Gemini, capped by the gateway (ADR 0016).
-  const openrouterUsedUp =
-    value(USAGE_COUNTER.openrouterExhausted) > 0 ||
-    value(USAGE_COUNTER.openrouterCalls) >= OPENROUTER_DAILY_CALL_CAP;
-  report(
-    openrouterUsedUp ? "WARN" : "OK",
-    "openrouter today",
-    `${value(USAGE_COUNTER.openrouterCalls)} / ${OPENROUTER_DAILY_CALL_CAP} calls${
-      openrouterUsedUp
-        ? `; used up, new runs use Gemini (Vertex, $${DEV_VERTEX_CAP.usd} per ${DEV_VERTEX_CAP.days} days cap)`
-        : ""
-    }${value(USAGE_COUNTER.vertexSpendLimited) > 0 ? "; Vertex spend cap reached today" : ""}`,
-  );
   usage("clef-flash calls today", value("clef-flash"), 200, "calls (daily cap)");
   usage(
     "sandbox this month",
     value("sandbox-seconds") / 3600,
     DEV_SANDBOX_HOURS,
     "hours (HOM-192 cap, dev share)",
+  );
+});
+
+/**
+ * Anthropic spend this calendar month per environment (ADR 0021), from each environment's D1 meter
+ * (`usage_counters` counter `anthropic-usd-micro`, micro-USD, open reservations included). Code
+ * stops model work at each budget; this report only shows how close each one is.
+ */
+await section("anthropic spend", async () => {
+  if (!d1Token) {
+    report("WARN", "anthropic spend", "set CLOUDFLARE_D1_TOKEN to read usage_counters");
+    return;
+  }
+  const month = today.slice(0, 7);
+  let total = 0;
+  for (const database of ["dev", "prod"] as const) {
+    const [row] = await d1Query<{ count: number }>(
+      "SELECT count FROM usage_counters WHERE day = ? AND counter = ?",
+      [month, USAGE_COUNTER.anthropicSpend],
+      database,
+    );
+    const usd = (row?.count ?? 0) / 1_000_000;
+    total += usd;
+    const budget = ANTHROPIC_MONTHLY_BUDGET_USD[database];
+    const ratio = usd / budget;
+    report(
+      ratio >= 0.85 ? "ALERT" : ratio >= 0.6 ? "WARN" : "OK",
+      `anthropic ${database} ${month}`,
+      `$${usd.toFixed(4)} / $${budget} (${Math.round(ratio * 100)}%; model work stops at 100%)`,
+    );
+  }
+  report(
+    total >= 25 ? "ALERT" : "OK",
+    "anthropic total",
+    `$${total.toFixed(4)} of the $25 approved across dev and prod in ${month}`,
   );
 });
 
