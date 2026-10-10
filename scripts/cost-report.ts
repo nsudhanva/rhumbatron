@@ -19,11 +19,12 @@ if (!token || !accountId) {
 const alertsOnly = process.argv.includes("--alerts-only");
 const env = "dev";
 /**
- * Dev's Sandbox cap from envs/dev/main.tf (ADR 0017): `SANDBOX_MONTHLY_SECONDS`; prod has its own.
+ * Sandbox caps from `local.caps.sandbox_monthly_seconds` in each env's main.tf (ADR 0017): dev
+ * 18,000 s (5 h) + prod 54,000 s (15 h) = the approved 20 h, inside the included container hours.
  * Anthropic budgets per calendar month from `anthropic_monthly_budget_usd` in each env's
  * variables.tf (ADR 0021): dev $15 + prod $10 = the approved $25 total.
  */
-const DEV_SANDBOX_HOURS = 18_000 / 3600;
+const SANDBOX_MONTHLY_HOURS = { dev: 18_000 / 3600, prod: 54_000 / 3600 } as const;
 const ANTHROPIC_MONTHLY_BUDGET_USD = { dev: 15, prod: 10 } as const;
 const api = `https://api.cloudflare.com/client/v4/accounts/${accountId}`;
 
@@ -296,10 +297,21 @@ await section("rhumbatron meters", async () => {
   );
   usage("clef-flash calls today", value("clef-flash"), 200, "calls (daily cap)");
   usage(
-    "sandbox this month",
+    "sandbox dev this month",
     value("sandbox-seconds") / 3600,
-    DEV_SANDBOX_HOURS,
-    "hours (HOM-192 cap, dev share)",
+    SANDBOX_MONTHLY_HOURS.dev,
+    "hours (dev cap; 20 h total with prod)",
+  );
+  const [prod] = await d1Query<{ count: number }>(
+    "SELECT count FROM usage_counters WHERE day = ? AND counter = 'sandbox-seconds'",
+    [today.slice(0, 7)],
+    "prod",
+  );
+  usage(
+    "sandbox prod this month",
+    (prod?.count ?? 0) / 3600,
+    SANDBOX_MONTHLY_HOURS.prod,
+    "hours (prod cap; 20 h total with dev)",
   );
 });
 
