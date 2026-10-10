@@ -332,7 +332,10 @@ export const smokePassed = (outcome: SmokeOutcome) =>
 
 /** The base and Candidate route tables in contract Evidence output; null when one is absent. */
 function contractTables(output: string) {
-  const marker = "\n$ bun run contract\n";
+  // Both check runners record the same route table with different command markers.
+  const marker = ["\n$ bun run contract\n", "\n$ [dynamic-worker] contract\n"].sort(
+    (a, b) => output.lastIndexOf(b) - output.lastIndexOf(a),
+  )[0] as string;
   const at = output.lastIndexOf(marker);
   if (at < 0) return { base: null, candidate: null };
   const table = (text: string) => {

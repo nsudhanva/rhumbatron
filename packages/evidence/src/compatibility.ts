@@ -187,8 +187,10 @@ function migrationNumbers(cs: ComposableChangeSet): number[] {
  * behavior to the contract and unit checks, not to an unrunnable procedure gap.
  * 9: a declared contract change names its route anywhere in the text ("Added GET /api/version
  * route ..."), not only at the start, so the contract check matches it to the observed route.
+ * 13: live apps require preview smoke and its contract route table before verification; old
+ * Candidates without these checks must not reuse the previous composition key.
  */
-export const COMPOSITION_RULES_VERSION = 12;
+export const COMPOSITION_RULES_VERSION = 13;
 
 /**
  * Transitive `stackedOn` ancestors of each ChangeSet. A pair where one is an ancestor of the other

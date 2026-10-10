@@ -18,7 +18,12 @@ import {
   type VerificationCheck,
   type VerificationPlan,
 } from "@rhumbatron/protocol";
-import { canonicalCommitOf, publishPreview } from "./app-release.ts";
+import {
+  canonicalCommitOf,
+  type PreviewOutcome,
+  productionRow,
+  publishPreview,
+} from "./app-release.ts";
 import { runBrowserCheck } from "./browser-check.ts";
 import {
   type ChangeSetRow,
@@ -49,6 +54,7 @@ import { classifyBrowser, classifySecurity } from "./check-semantics.ts";
 import { storeTreeCode } from "./code-store.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
+import { runPreviewSmoke } from "./preview-smoke.ts";
 import { markCandidateStale, promoteCandidate } from "./promotion.ts";
 import { recomposeQuietly } from "./recompose.ts";
 import {
@@ -368,10 +374,9 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     }
 
     let lastSandboxAt = reservation.at;
-    let gated: { status: string; promotable: boolean; gaps: CheckGap[] } | null = null;
+    let plan: VerificationPlan | null = null;
     /** The composed source, for the live preview after the checks (P16-10). */
     let composedRef: { commit: string; tree: string } | null = null;
-    let humanApprovalRequired = false;
     let halt: Halt | null = null;
     try {
       // Step 2 (P10-03): compose the ChangeSets in Work Graph order.
@@ -448,6 +453,11 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
             riskTier: loaded.riskTier,
             policy: DEFAULT_POLICY,
             ...scope,
+            // App provisioning is automatic with APPS. A missing row is a pending app,
+            // not permission to promote without runtime Evidence. Removed apps stay disabled.
+            liveAppEnabled:
+              Boolean(this.env.APPS) &&
+              (await productionRow(this.env, ctx.projectId))?.status !== "removed",
           });
           await this.env.DB.prepare(
             `UPDATE candidates SET status = 'verifying', artifact_ref = ?, composed_commit = ?,
@@ -499,7 +509,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         }),
       );
       if (isHalt(planned)) return await stop(planned);
-      const plan = planned;
+      plan = planned;
 
       // Contract changes the ChangeSets declared; the contract check fails on any other.
       const declared = loaded.changeSets.flatMap(
@@ -508,6 +518,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
 
       // Steps 3-8: one step per check, so each has its own timeout, retry, and Evidence.
       for (const check of plan.checks) {
+        // Preview smoke runs only after publication, outside the Sandbox work.
+        if (check.checkId === "preview-smoke") continue;
         const name = `check ${check.checkId}`;
         try {
           const at = await step.do(
@@ -569,59 +581,6 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       }
 
       if (halt) return await stop(halt);
-
-      // Steps 9-10: gate on authoritative Evidence rows.
-      const gateStep = await step.do("gate required checks", () =>
-        this.guard(candidateId, async () => {
-          const rows = await this.env.DB.prepare(
-            "SELECT * FROM evidence_index WHERE candidate_id = ?",
-          )
-            .bind(candidateId)
-            .all<EvidenceRow>();
-          const records = (rows.results ?? []).map(toRecord);
-          const gate = gateRequiredChecks(plan, records);
-          const status = gate.promotable ? "verified" : "rejected";
-          const p95 = records.find((r) => r.checkId === "performance")?.metrics?.p95Ms;
-          const score = {
-            ...gate,
-            humanApprovalRequired: plan.humanApprovalRequired,
-            ...(p95 === undefined ? {} : { p95Ms: p95 }),
-          };
-          const reason = gate.promotable
-            ? null
-            : `Required checks not satisfied: ${gate.gaps.map((g) => `${g.checkId} (${g.reason})`).join(", ")}`;
-          await this.env.DB.prepare(
-            `UPDATE candidates SET status = ?, status_reason = ?, score_json = ?, updated_at = ?
-             WHERE id = ? AND status = 'verifying'`,
-          )
-            .bind(status, reason, JSON.stringify(score), new Date().toISOString(), candidateId)
-            .run();
-          const events: EventEnvelope[] = [
-            await changeEvent(
-              ctx,
-              "verification.completed",
-              { candidateId, status, ...score },
-              { key: candidateId, actor: ACTOR },
-            ),
-          ];
-          // Section 36 rule 4: a gated Candidate waits for a human decision before promotion.
-          if (gate.promotable && plan.humanApprovalRequired) {
-            events.push(
-              await changeEvent(
-                ctx,
-                "approval.requested",
-                { candidateId, riskTier: loaded.riskTier, policyVersion: plan.policyVersion },
-                { key: candidateId, actor: ACTOR },
-              ),
-            );
-          }
-          await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, events);
-          return { status, promotable: gate.promotable, gaps: gate.gaps };
-        }),
-      );
-      if (isHalt(gateStep)) return await stop(gateStep);
-      gated = gateStep;
-      humanApprovalRequired = plan.humanApprovalRequired;
     } finally {
       await step.do("settle sandbox", async () => {
         await settleSandbox(this.env.DB, reservation.at);
@@ -632,44 +591,151 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       });
     }
 
-    // P16-10: a live preview of the composed source (prod only), after the checks and only when
-    // the build passed. Never changes the verification result; a failure marks only the preview.
+    if (!plan || !composedRef) return { skipped: "missing_plan" };
     const preview = composedRef;
-    const verdict = gated;
-    if (preview && verdict && this.env.APPS) {
-      await step.do(
-        "publish preview",
-        { retries: { limit: 1, delay: "30 seconds", backoff: "constant" }, timeout: "5 minutes" },
-        async () => {
-          try {
-            if (!verdict.promotable) {
+    const smokeCheck = plan.checks.find((check) => check.checkId === "preview-smoke");
+    if (smokeCheck) {
+      let published: PreviewOutcome | { status: "skipped" | "error"; reason?: string } | Halt;
+      try {
+        published = await step.do(
+          "publish preview",
+          { retries: { limit: 1, delay: "30 seconds", backoff: "constant" }, timeout: "5 minutes" },
+          () =>
+            this.guard(candidateId, async () => {
               const build = await this.env.DB.prepare(
                 `SELECT 1 AS ok FROM evidence_index WHERE candidate_id = ? AND kind = 'build'
-                   AND status = 'pass' AND coverage = 'checked_supported' LIMIT 1`,
+               AND status = 'pass' AND coverage = 'checked_supported' LIMIT 1`,
               )
                 .bind(candidateId)
                 .first<{ ok: number }>();
               if (!build) return { status: "skipped" as const };
-            }
-            return await publishPreview(this.env, ctx, {
-              candidateId,
-              commit: preview.commit,
-              treeSha: preview.tree,
-            });
-          } catch (error) {
-            console.error(
-              JSON.stringify({
-                event: "preview.failed",
+              try {
+                return await publishPreview(this.env, ctx, {
+                  candidateId,
+                  commit: preview.commit,
+                  treeSha: preview.tree,
+                });
+              } catch (error) {
+                return { status: "error" as const, reason: String(error).slice(0, 300) };
+              }
+            }),
+        );
+      } catch (error) {
+        published = { status: "error", reason: String(error).slice(0, 300) };
+      }
+      if (isHalt(published)) return await stop(published);
+      const publication = published;
+      const ref = `artifacts://${fork}@${preview.commit}`;
+      try {
+        const smoked = await step.do(
+          "check preview-smoke",
+          { retries: { limit: 0, delay: "1 second" }, timeout: smokeCheck.timeoutMs },
+          () =>
+            this.guard(candidateId, async () => {
+              const startedAt = new Date().toISOString();
+              const smoke = await runPreviewSmoke(this.env, {
+                projectId: ctx.projectId,
                 candidateId,
-                message: String(error).slice(0, 200),
-              }),
-            );
-            return { status: "error" as const };
-          }
-        },
-      );
+                commit: preview.commit,
+                publication,
+              });
+              await this.recordEvidence(ctx, candidateId, {
+                checkId: smokeCheck.checkId,
+                kind: smokeCheck.kind,
+                outcome: smoke.outcome,
+                startedAt,
+                output: JSON.stringify(smoke, null, 2),
+                sourceRefs: [ref, `app-preview://${ctx.projectId}/${candidateId}`],
+                report: { probes: smoke.results },
+                runner: "dynamic-worker",
+              });
+              return null;
+            }),
+        );
+        if (isHalt(smoked)) return await stop(smoked);
+      } catch (error) {
+        await step.do("check preview-smoke gap", () =>
+          this.recordEvidence(ctx, candidateId, {
+            checkId: smokeCheck.checkId,
+            kind: smokeCheck.kind,
+            outcome: {
+              status: "error",
+              coverage: "not_checked",
+              summary: "Preview check could not run: no result from the preview.",
+            },
+            startedAt: new Date().toISOString(),
+            output: String(error),
+            sourceRefs: [ref],
+            runner: "dynamic-worker",
+          }),
+        );
+      }
     }
-    if (!gated?.promotable) return gated;
+
+    const verificationPlan = plan;
+    // Steps 9-10: gate on authoritative Evidence rows.
+    const gateStep = await step.do("gate required checks", () =>
+      this.guard(candidateId, async () => {
+        const rows = await this.env.DB.prepare(
+          "SELECT * FROM evidence_index WHERE candidate_id = ?",
+        )
+          .bind(candidateId)
+          .all<EvidenceRow>();
+        const records = (rows.results ?? []).map(toRecord);
+        const gate = gateRequiredChecks(verificationPlan, records);
+        const status = gate.promotable ? "verified" : "rejected";
+        const p95 = records.find((r) => r.checkId === "performance")?.metrics?.p95Ms;
+        const score = {
+          ...gate,
+          humanApprovalRequired: verificationPlan.humanApprovalRequired,
+          ...(p95 === undefined ? {} : { p95Ms: p95 }),
+        };
+        const smokeGap = gate.gaps.find((gap) => gap.checkId === "preview-smoke");
+        const smokeRecord = records.find((record) => record.checkId === "preview-smoke");
+        // A passing probe result can still miss the check deadline. Report the gate gap in
+        // that case, never a success summary as the reason for rejecting the Candidate.
+        const smokeReason = smokeRecord?.status !== "pass" ? smokeRecord?.summary : undefined;
+        const reason = gate.promotable
+          ? null
+          : smokeGap && smokeReason
+            ? smokeReason.replace(/ \(runner: [^)]+\)$/, "")
+            : `Required checks not satisfied: ${gate.gaps.map((g) => `${g.checkId} (${g.reason})`).join(", ")}`;
+        await this.env.DB.prepare(
+          `UPDATE candidates SET status = ?, status_reason = ?, score_json = ?, updated_at = ?
+             WHERE id = ? AND status = 'verifying'`,
+        )
+          .bind(status, reason, JSON.stringify(score), new Date().toISOString(), candidateId)
+          .run();
+        const events: EventEnvelope[] = [
+          await changeEvent(
+            ctx,
+            "verification.completed",
+            { candidateId, status, reason, ...score },
+            { key: candidateId, actor: ACTOR },
+          ),
+        ];
+        // Section 36 rule 4: a gated Candidate waits for a human decision before promotion.
+        if (gate.promotable && verificationPlan.humanApprovalRequired) {
+          events.push(
+            await changeEvent(
+              ctx,
+              "approval.requested",
+              {
+                candidateId,
+                riskTier: loaded.riskTier,
+                policyVersion: verificationPlan.policyVersion,
+              },
+              { key: candidateId, actor: ACTOR },
+            ),
+          );
+        }
+        await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, events);
+        return { status, promotable: gate.promotable, gaps: gate.gaps };
+      }),
+    );
+    if (isHalt(gateStep)) return await stop(gateStep);
+    const gated = gateStep;
+    if (!gated.promotable) return gated;
 
     // After the gate (section 21.1 steps 9-11): a gated Candidate waits for a person; a Candidate
     // that policy `autoPromoteRiskTiers` allows promotes through the same path as a manual promote.
@@ -698,7 +764,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       const decided = autoPromoteDecision({
         candidateStatus: candidate?.status ?? "missing",
         promotable: true,
-        plan: { humanApprovalRequired },
+        plan: { humanApprovalRequired: plan.humanApprovalRequired },
         riskTier: riskTier === null ? null : RiskTier.catch("medium").parse(riskTier),
         policy: DEFAULT_POLICY,
       });

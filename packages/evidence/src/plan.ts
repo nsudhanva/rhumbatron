@@ -29,6 +29,8 @@ export type BuildVerificationPlanInput = {
   touches: VerificationTouches;
   /** Wishlist API p95 budget in the demo benchmark (section 54). */
   p95BudgetMs?: number;
+  /** APPS is available and the Project has an app, including its pending first deployment. */
+  liveAppEnabled?: boolean;
 };
 
 const TIERS: readonly RiskTier[] = ["low", "medium", "high", "critical"];
@@ -159,10 +161,12 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
   if (wanted.has("targeted")) {
     checks.push(unitCheck("Project tests must pass on the composed source."));
   }
-  if (wanted.has("contract")) {
+  if (wanted.has("contract") || input.liveAppEnabled) {
     checks.push(
       contractCheck(
-        `Risk tier ${riskTier} requires contract Evidence for declared API and data changes.`,
+        input.liveAppEnabled
+          ? "Live app smoke probes need the composed API route table and declared contract changes."
+          : `Risk tier ${riskTier} requires contract Evidence for declared API and data changes.`,
       ),
     );
   }
@@ -269,6 +273,21 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
       required: true,
       expected: { kind: "procedure", description: "Every flow step passes (k/N with k = N)" },
       evidenceOutput: ["report.json", "stdout.txt", "screenshot-<n>.png"],
+    });
+  }
+
+  if (input.liveAppEnabled) {
+    checks.push({
+      checkId: "preview-smoke",
+      kind: "smoke",
+      reason: "The live app must answer the release probes before Canonical State can advance.",
+      procedure:
+        "Publish the Candidate preview, then run the release GET probes through APPS against " +
+        "its preview channel and isolated DATA store. Every probe must answer as expected.",
+      timeoutMs: 30_000,
+      required: true,
+      expected: { kind: "procedure", description: "Every preview smoke probe passes" },
+      evidenceOutput: ["report.json", "stdout.txt"],
     });
   }
 

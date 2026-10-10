@@ -229,6 +229,17 @@ describe("a smoke failure never marks a release deployed (sections 34.4.1, 42.10
     expect(smokeProbes({ routes: null, added: [] }).map((p) => p.path)).toEqual(["/"]);
   });
 
+  it("bounds probes and excludes every write method and placeholder route", () => {
+    const many = Array.from({ length: 100 }, (_, i) => `GET /api/route-${i}`);
+    const bounded = smokeProbes({ routes: ["POST /api/recipes", "GET /api/recipes/:id", ...many] });
+    expect(bounded.map((probe) => probe.path)).toEqual([
+      "/",
+      "/api/route-0",
+      "/api/route-1",
+      "/api/route-2",
+    ]);
+  });
+
   it("the dev Acme Shop target keeps its products API probe, never probed twice", () => {
     const acme = smokeProbes({ routes: ["GET /api/products"], fixed: ACME_SHOP_LIVE_PROBES });
     expect(acme.map((p) => `${p.path} ${p.expect}`)).toEqual(["/ page", "/api/products json"]);
@@ -272,6 +283,9 @@ describe("a smoke failure never marks a release deployed (sections 34.4.1, 42.10
     ].join("\n");
     expect(routesFromContract(output)).toEqual(["GET /api/health", "GET /api/wishlists"]);
     expect(addedRoutesFromContract(output)).toEqual(["GET /api/wishlists"]);
+    const dynamic = output.replace("$ bun run contract", "$ [dynamic-worker] contract");
+    expect(routesFromContract(dynamic)).toEqual(["GET /api/health", "GET /api/wishlists"]);
+    expect(addedRoutesFromContract(dynamic)).toEqual(["GET /api/wishlists"]);
     const firstChange = output.replace('{"routes":["GET /api/health"]}', "error: no src/app.ts");
     expect(routesFromContract(firstChange)).toEqual(["GET /api/health", "GET /api/wishlists"]);
     expect(addedRoutesFromContract(firstChange)).toEqual([]);

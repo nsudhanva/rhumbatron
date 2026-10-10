@@ -489,28 +489,38 @@ export async function upsertVersionRow(
     .run();
 }
 
-/** Runs smoke probes against the app's production host through the apps router (no Internet). */
+/** Runs release or preview GET probes through the apps router (no Internet). */
 export async function probeApp(
   env: Env,
   label: string,
   probes: readonly Probe[],
+  previewId?: string,
 ): Promise<ProbeResult[]> {
   const apps = env.APPS;
   if (!apps) return [];
   return Promise.all(
     probes.map(async (probe): Promise<ProbeResult> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const result = await apps.probe({
-          label,
-          path: probe.path,
-          ...(probe.headers ? { headers: probe.headers } : {}),
-        });
+        const result = await Promise.race([
+          apps.probe({
+            label,
+            path: probe.path,
+            ...(previewId ? { previewId } : {}),
+            ...(probe.headers ? { headers: probe.headers } : {}),
+          }),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error("probe timed out after 10 seconds")), 10_000);
+          }),
+        ]);
         if (result.status === null) {
           return { probe, status: null, ok: false, detail: result.error.slice(0, 120) };
         }
         return judgeProbe(probe, result.status, result.body);
       } catch (error) {
         return { probe, status: null, ok: false, detail: String(error).slice(0, 120) };
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
       }
     }),
   );

@@ -557,7 +557,7 @@ export async function cloudflareGet(env: Env, path: string): Promise<unknown> {
  * The promoted Candidate's route table and the routes its Change added, from its contract
  * Evidence. Null routes when there is no contract Evidence (for example a rollback Candidate).
  */
-async function routeTable(
+export async function routeTable(
   env: Env,
   candidateId: string,
 ): Promise<{ routes: string[] | null; added: string[] }> {

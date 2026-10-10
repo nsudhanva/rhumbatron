@@ -37,6 +37,25 @@ const plan = (riskTier: ProjectPolicy["humanGateRiskTiers"][number], t: Partial<
 const ids = (p: ReturnType<typeof plan>) => p.requiredCheckIds;
 
 describe("buildVerificationPlan", () => {
+  it("requires preview smoke and its route table for live apps at every risk tier", () => {
+    for (const riskTier of ["low", "medium", "high", "critical"] as const) {
+      const p = buildVerificationPlan({
+        candidateId: "cand_b",
+        riskTier,
+        policy,
+        touches,
+        liveAppEnabled: true,
+      });
+      expect(p.requiredCheckIds).toEqual(expect.arrayContaining(["contract", "preview-smoke"]));
+      expect(p.checks.find((c) => c.checkId === "preview-smoke")).toMatchObject({
+        kind: "smoke",
+        required: true,
+        timeoutMs: 30_000,
+      });
+    }
+    expect(ids(plan("low", {}))).not.toContain("preview-smoke");
+  });
+
   it("high risk with UI requires security, browser, and a human gate", () => {
     const p = plan("high", { ui: true });
     expect(ids(p)).toEqual(
@@ -169,6 +188,31 @@ const ev = (checkId: string, over: Partial<EvidenceRecord> = {}): EvidenceRecord
 });
 
 describe("gateRequiredChecks", () => {
+  it("preview smoke must produce supported passing Evidence, including at promotion", () => {
+    const p = buildVerificationPlan({
+      candidateId: "cand_b",
+      riskTier: "low",
+      policy,
+      touches,
+      liveAppEnabled: true,
+    });
+    const other = p.requiredCheckIds.filter((id) => id !== "preview-smoke").map((id) => ev(id));
+    expect(gateRequiredChecks(p, other).promotable).toBe(false);
+    for (const outcome of [
+      { status: "fail", coverage: "checked_supported" },
+      { status: "error", coverage: "not_checked" },
+      { status: "pass", coverage: "not_checked" },
+    ] as const) {
+      expect(
+        gateRequiredChecks(p, [...other, ev("preview-smoke", { kind: "smoke", ...outcome })])
+          .promotable,
+      ).toBe(false);
+    }
+    expect(
+      gateRequiredChecks(p, [...other, ev("preview-smoke", { kind: "smoke" })]).promotable,
+    ).toBe(true);
+  });
+
   const p = plan("low", { performanceConstraint: true });
   const perf = ev("performance", { metrics: { p95Ms: 42 } });
 
