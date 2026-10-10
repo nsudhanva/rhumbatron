@@ -136,6 +136,15 @@ export const apps = new Hono<AppEnv>()
         .bind(projectId)
         .first<{ status: string }>();
       if (project?.status !== "active") return fail(c, 409, "conflict", "Project is archived");
+      // A removed app whose cleanup finished keeps a tombstone row (410 on its hosts, its label).
+      // Publishing again revives it; a removal still in progress (commit or bundle left) is not.
+      await c.env.DB.prepare(
+        `UPDATE app_deployments SET status = 'building', updated_at = ?
+         WHERE project_id = ? AND channel = ? AND status = 'removed'
+           AND commit_sha IS NULL AND bundle_key IS NULL`,
+      )
+        .bind(new Date().toISOString(), projectId, APP_PRODUCTION_CHANNEL)
+        .run();
       await c.env.INTEGRATION_COMMANDS.send(
         {
           commandId: `cmd_${crypto.randomUUID()}`,
@@ -153,7 +162,8 @@ export const apps = new Hono<AppEnv>()
 
   /**
    * P16-20: "Remove app" keeps the Project. Every host of the app answers 410 at once; the
-   * integration Worker then deletes its data stores, bundles, and rows (`app.remove`, bounded).
+   * integration Worker then deletes its data stores, bundles, and preview and version rows, and
+   * keeps the production row as a tombstone so the hosts go on answering 410 (`app.remove`).
    */
   .delete(
     "/v1/projects/:projectId/app",
