@@ -85,8 +85,21 @@ export async function queueMaintenance(
   if (indexing.length > 0) {
     await env.INDEXING.sendBatch(indexing.map((body) => ({ body, contentType: "json" as const })));
   }
+  // Consumer dedupe rows outlive K2 redelivery (7-day retention) by a margin, then go. Bounded so
+  // one day never spends more than MAX_DEDUPE_PRUNE of the D1 daily write allowance.
+  const cutoff = new Date(scheduledTime - DEDUPE_RETENTION_MS).toISOString();
+  await env.DB.prepare(
+    `DELETE FROM processed_events WHERE rowid IN
+       (SELECT rowid FROM processed_events WHERE processed_at < ? ORDER BY processed_at LIMIT ?)`,
+  )
+    .bind(cutoff, MAX_DEDUPE_PRUNE)
+    .run();
   return { cleanups: commands.length - 1 };
 }
+
+/** Twice the K2 retention (AGENTS.md section 19): a redelivered event is still recognised. */
+const DEDUPE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+const MAX_DEDUPE_PRUNE = 5000;
 
 /**
  * Stuck-release sweep (HOM-204, AGENTS.md section 42.10). Every 5 minutes (minute 4, 9, ... of the
