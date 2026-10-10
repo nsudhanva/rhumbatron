@@ -1,4 +1,5 @@
 import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
+import { WorkspaceManifest, workspaceManifestKey } from "@rhumbatron/protocol";
 import {
   admitSandbox,
   type LimitKey,
@@ -6,7 +7,7 @@ import {
   releaseSandbox,
   sandboxLimitReason,
 } from "./limits.ts";
-import type { StackSource } from "./stack.ts";
+import { type StackSource, stackedOn } from "./stack.ts";
 
 /**
  * Task Workspace (AGENTS.md sections 29.2 and 30): an Artifacts fork of the canonical repo,
@@ -31,6 +32,17 @@ const monthlySeconds = (configured?: string) => {
 const OPEN_RESERVATION_SECONDS = 300;
 /** Idle time billed after the last command, until the Sandbox sleeps. */
 const SLEEP_TAIL_SECONDS = 600;
+/** Increment when ALLOWED or FORBIDDEN_CHARS changes. */
+const COMMAND_ALLOWLIST_VERSION = 1;
+const WORKSPACE_TOOLS = [
+  "list_files",
+  "read_file",
+  "write_file",
+  "run_command",
+  "complete_task",
+  "fail_task",
+];
+const sandboxId = (projectId: string) => `proj-${projectId.slice(5)}`;
 const COMMAND_TIMEOUT_MS = 180_000;
 const MAX_OUTPUT_CHARS = 12_000;
 
@@ -83,6 +95,8 @@ export type WorkspaceRef = {
   startCommit?: string;
   /** Fixed git date (Unix seconds) of the stack merge commits, so a restore reproduces `startCommit`. */
   stackTime?: number;
+  /** Also retained in AgentDO state, so a failed R2 open write can be retried on publish/close. */
+  manifest?: WorkspaceManifest;
 };
 
 export type Published = {
@@ -102,20 +116,17 @@ type WorkspaceEnv = {
   SANDBOX: DurableObjectNamespace;
   ARTIFACTS: Artifacts;
   DB: D1Database;
+  EVIDENCE: R2Bucket;
   SANDBOX_MONTHLY_SECONDS?: string;
 };
 
 const sandboxFor = (env: WorkspaceEnv, projectId: string) =>
   // Cross-script binding to the Sandbox Worker's class (ADR 0012).
-  getSandbox(
-    env.SANDBOX as unknown as DurableObjectNamespace<Sandbox>,
-    `proj-${projectId.slice(5)}`,
-    {
-      // Longer than a slow model call, so an idle wait between calls keeps the checkout and the
-      // agent's uncommitted edits. The monthly meter (HOM-192) still caps Sandbox time.
-      sleepAfter: "10m",
-    },
-  );
+  getSandbox(env.SANDBOX as unknown as DurableObjectNamespace<Sandbox>, sandboxId(projectId), {
+    // Longer than a slow model call, so an idle wait between calls keeps the checkout and the
+    // agent's uncommitted edits. The monthly meter (HOM-192) still caps Sandbox time.
+    sleepAfter: SLEEP_TAIL_SECONDS,
+  });
 
 /** The Sandbox drops stdout's trailing newline; keep stderr on its own line so line parsers work. */
 const joinOutput = (stdout: string, stderr: string) =>
@@ -153,7 +164,7 @@ export type WorkspaceRefused =
 const SHA = /^[0-9a-f]{40}$/;
 
 type Prepared =
-  | { ok: true; startCommit: string }
+  | { ok: true; startCommit: string; remoteHost: string }
   | { ok: false; changeSetId: string; files: string[]; detail: string };
 
 /**
@@ -231,7 +242,22 @@ async function prepareCheckout(
   const head = await run(sandbox, "git rev-parse HEAD", ws.dir);
   if (!head.ok) throw new Error(`rev-parse failed (${head.exitCode})`);
   await run(sandbox, "bun install", ws.dir);
-  return { ok: true, startCommit: head.output.trim() };
+  return { ok: true, startCommit: head.output.trim(), remoteHost: new URL(own.remote).hostname };
+}
+
+/** Manifest storage is observability: a failure must not change the run outcome or leak errors. */
+async function writeManifest(env: WorkspaceEnv, ws: WorkspaceRef) {
+  if (!ws.manifest) return;
+  try {
+    const manifest = WorkspaceManifest.parse(ws.manifest);
+    await env.EVIDENCE.put(workspaceManifestKey(manifest), JSON.stringify(manifest), {
+      httpMetadata: { contentType: "application/json" },
+      customMetadata: { openedAt: manifest.sandbox.openedAt },
+    });
+  } catch {
+    // Do not log exception text: storage errors can contain request headers or credentials.
+    console.warn(JSON.stringify({ event: "workspace.manifest_write_failed", runId: ws.runId }));
+  }
 }
 
 /** Read-scoped repo token as a git header value, plus its revoke handle. */
@@ -331,7 +357,7 @@ export async function openWorkspace(
       message: `dependency_merge_conflict: ${prepared.changeSetId} does not merge with ${before.join(", ") || "the canonical base"} (${prepared.files.join(", ") || prepared.detail}). The dependencies of this Task conflict, so it cannot start from their work.`,
     };
   }
-  return {
+  const ws: WorkspaceRef = {
     projectId: input.projectId,
     runId: input.runId,
     fork,
@@ -342,6 +368,32 @@ export async function openWorkspace(
     startCommit: prepared.startCommit,
     stackTime,
   };
+  if (change) {
+    ws.manifest = {
+      manifestVersion: 1,
+      projectId: ws.projectId,
+      changeId: change.changeId,
+      taskId: change.taskId,
+      runId: ws.runId,
+      fork: ws.fork,
+      remoteHost: prepared.remoteHost,
+      baseCommit: ws.baseCommit,
+      startCommit: prepared.startCommit,
+      stackedOn: stackedOn(stack),
+      sandbox: {
+        id: sandboxId(ws.projectId),
+        dir: ws.dir,
+        openedAt: new Date(ws.openedAt).toISOString(),
+        sleepAfter: SLEEP_TAIL_SECONDS,
+      },
+      toolsAllowed: [...WORKSPACE_TOOLS],
+      commandAllowlistVersion: COMMAND_ALLOWLIST_VERSION,
+      files: [],
+      status: "open",
+    };
+    await writeManifest(env, ws);
+  }
+  return ws;
 }
 
 /**
@@ -466,13 +518,17 @@ export async function publishWorkspace(
   // canonical; `ownFiles` is what this Task changed on top of its stacked dependencies.
   const files = await names(ws.baseCommit);
   const stack = ws.stack ?? [];
+  if (ws.manifest) {
+    ws.manifest = { ...ws.manifest, files, status: "published" };
+    await writeManifest(env, ws);
+  }
   return {
     fork: ws.fork,
     commit,
     baseCommit: ws.baseCommit,
     diffStat,
     files,
-    stackedOn: stack.map((s) => s.changeSetId),
+    stackedOn: stackedOn(stack),
     ...(stack.length > 0 && ws.startCommit
       ? { startCommit: ws.startCommit, ownFiles: await names(ws.startCommit) }
       : {}),
@@ -481,6 +537,32 @@ export async function publishWorkspace(
 
 /** Settles the meter for this session and removes the run directory. The Sandbox sleeps itself. */
 export async function closeWorkspace(env: WorkspaceEnv, ws: WorkspaceRef) {
+  if (ws.manifest) {
+    // AgentDO may resume from the open ref after publish. Preserve published files from R2.
+    if (ws.manifest.status === "open") {
+      try {
+        const stored = await env.EVIDENCE.get(workspaceManifestKey(ws.manifest));
+        const parsed = WorkspaceManifest.safeParse(stored ? await stored.json() : null);
+        if (
+          parsed.success &&
+          workspaceManifestKey(parsed.data) === workspaceManifestKey(ws.manifest)
+        ) {
+          ws.manifest = parsed.data;
+        }
+      } catch {
+        console.warn(JSON.stringify({ event: "workspace.manifest_read_failed", runId: ws.runId }));
+      }
+    }
+    ws.manifest = {
+      ...ws.manifest,
+      status: "closed",
+      sandbox: {
+        ...ws.manifest.sandbox,
+        closedAt: ws.manifest.sandbox.closedAt ?? new Date().toISOString(),
+      },
+    };
+    await writeManifest(env, ws);
+  }
   const elapsed = Math.ceil((Date.now() - ws.openedAt) / 1000) + SLEEP_TAIL_SECONDS;
   await settleSeconds(env.DB, elapsed - OPEN_RESERVATION_SECONDS);
   // Frees the Change's Sandbox slot (section 44) before the directory cleanup, which may fail.

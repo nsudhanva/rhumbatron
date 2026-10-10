@@ -17,6 +17,9 @@ export type StackSource = {
   files: string[];
 };
 
+/** The manifest and published ChangeSet use the same dependency merge order. */
+export const stackedOn = (stack: readonly StackSource[]) => stack.map((s) => s.changeSetId);
+
 /** A `changesets` row joined to the Task whose run published it. */
 export type ChangeSetRowForStack = {
   id: string;

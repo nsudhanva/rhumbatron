@@ -17,6 +17,7 @@ import { releases } from "./releases.ts";
 import { screenshots } from "./screenshots.ts";
 import { verification } from "./verification.ts";
 import { workspace } from "./workspace.ts";
+import { workspaceManifest } from "./workspace-manifest.ts";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -45,6 +46,7 @@ app.route("/", activity);
 app.route("/", agents);
 app.route("/", cost);
 app.route("/", workspace);
+app.route("/", workspaceManifest);
 app.route("/", productGraph);
 app.route("/", deadLetters);
 app.route("/", decisions);
