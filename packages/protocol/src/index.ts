@@ -1,5 +1,6 @@
 export * from "./activity.ts";
 export * from "./api.ts";
+export * from "./app.ts";
 export * from "./candidate.ts";
 export * from "./code.ts";
 export * from "./command.ts";
