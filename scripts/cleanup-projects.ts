@@ -24,22 +24,66 @@ if (!secretKey || !userId) {
 const dryRun = process.argv.includes("--dry-run");
 const all = process.argv.includes("--all");
 
-async function clerk<T>(path: string, body: unknown): Promise<T> {
+async function clerk<T>(path: string, body?: unknown, method = "POST"): Promise<T> {
   const response = await fetch(`https://api.clerk.com/v1${path}`, {
-    method: "POST",
+    method,
     headers: { authorization: `Bearer ${secretKey}`, "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) throw new Error(`Clerk ${path} returned ${response.status}`);
   return (await response.json()) as T;
 }
 
-const session = await clerk<{ id: string }>("/sessions", { user_id: userId });
-// Clerk session tokens live 60 seconds: mint one per request.
-const headers = async () => {
-  const { jwt } = await clerk<{ jwt: string }>(`/sessions/${session.id}/tokens`, {});
-  return { authorization: `Bearer ${jwt}` };
-};
+/**
+ * The prod Clerk instance refuses Backend API sessions, so the script signs in with a one-time
+ * sign-in token on the Frontend API from the app origin (the same flow as scripts/e2e.ts). Clerk
+ * session tokens live 60 seconds: `headers()` mints one per request.
+ */
+async function signIn() {
+  const domains = await clerk<{
+    data: { name: string; frontend_api_url: string; is_satellite: boolean }[];
+  }>("/domains", undefined, "GET");
+  const domain = domains.data.find((d) => !d.is_satellite);
+  if (!domain) throw new Error("Clerk has no primary domain");
+  const origin = `https://${domain.name}`;
+  const fapi = domain.frontend_api_url;
+  const ticket = await clerk<{ token: string }>("/sign_in_tokens", {
+    user_id: userId,
+    expires_in_seconds: 120,
+  });
+  const response = await fetch(`${fapi}/v1/client/sign_ins`, {
+    method: "POST",
+    headers: { origin, "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ strategy: "ticket", ticket: ticket.token }),
+  });
+  const signed = (await response.json()) as {
+    response?: { status?: string; created_session_id?: string };
+  };
+  const sessionId = signed.response?.created_session_id;
+  if (response.status !== 200 || signed.response?.status !== "complete" || !sessionId) {
+    throw new Error(`Clerk ticket sign-in returned ${response.status}`);
+  }
+  const cookie = response.headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .join("; ");
+  return {
+    headers: async () => {
+      const r = await fetch(`${fapi}/v1/client/sessions/${sessionId}/tokens`, {
+        method: "POST",
+        headers: { origin, cookie },
+      });
+      const body = (await r.json()) as { jwt?: string };
+      if (r.status !== 200 || !body.jwt)
+        throw new Error(`Clerk session token returned ${r.status}`);
+      return { authorization: `Bearer ${body.jwt}` };
+    },
+    close: () => clerk(`/sessions/${sessionId}/revoke`, {}),
+  };
+}
+
+const session = await signIn();
+const headers = session.headers;
 
 type Summary = { id: string; slug: string; name: string; status: string; createdAt: string };
 
@@ -99,6 +143,6 @@ try {
     if (failed > 0) exitCode = 1;
   }
 } finally {
-  await clerk(`/sessions/${session.id}/revoke`, {});
+  await session.close();
 }
 process.exit(exitCode);
