@@ -17,15 +17,15 @@ if (!token || !accountId) {
   process.exit(2);
 }
 const alertsOnly = process.argv.includes("--alerts-only");
-const env = "dev";
+const env = "prod";
 /**
- * Sandbox caps from `local.caps.sandbox_monthly_seconds` in each env's main.tf (ADR 0017): dev
- * 18,000 s (5 h) + prod 54,000 s (15 h) = the approved 20 h, inside the included container hours.
- * Anthropic budgets per calendar month from `anthropic_monthly_budget_usd` in each env's
- * variables.tf (ADR 0021): dev $15 + prod $10 = the approved $25 total.
+ * Sandbox cap from `local.caps.sandbox_monthly_seconds` in envs/prod/main.tf (ADR 0017): 54,000 s
+ * (15 h), inside the included container hours. Anthropic budget per calendar month from
+ * `anthropic_monthly_budget_usd` in envs/prod/variables.tf (ADR 0021): $10. Prod is the only
+ * environment.
  */
-const SANDBOX_MONTHLY_HOURS = { dev: 18_000 / 3600, prod: 54_000 / 3600 } as const;
-const ANTHROPIC_MONTHLY_BUDGET_USD = { dev: 15, prod: 10 } as const;
+const SANDBOX_MONTHLY_HOURS = 54_000 / 3600;
+const ANTHROPIC_MONTHLY_BUDGET_USD = 10;
 const api = `https://api.cloudflare.com/client/v4/accounts/${accountId}`;
 
 type Level = "OK" | "WARN" | "ALERT" | "ERROR";
@@ -108,12 +108,14 @@ await section("workers", async () => {
     "agents",
     "sandbox",
     "indexer",
+    "apps",
+    "docs",
     // Release target: Terraform owns the Worker; Workers Builds owns its versions (ADR 0014).
     "acme-shop",
   ].map((c) => `rhumbatron-${c}-${env}`);
   const scripts = await get<{ id: string }[]>("/workers/scripts");
   const ours = scripts.map((s) => s.id).filter((id) => id.startsWith("rhumbatron-"));
-  const orphans = ours.filter((id) => !expected.includes(id) && !id.endsWith("-prod"));
+  const orphans = ours.filter((id) => !expected.includes(id));
   report(
     orphans.length ? "WARN" : "OK",
     "workers",
@@ -296,27 +298,20 @@ await section("rhumbatron meters", async () => {
     "calls, all providers (daily cap)",
   );
   usage("clef-flash calls today", value("clef-flash"), 200, "calls (daily cap)");
-  usage(
-    "sandbox dev this month",
-    value("sandbox-seconds") / 3600,
-    SANDBOX_MONTHLY_HOURS.dev,
-    "hours (dev cap; 20 h total with prod)",
-  );
-  const [prod] = await d1Query<{ count: number }>(
+  const [sandbox] = await d1Query<{ count: number }>(
     "SELECT count FROM usage_counters WHERE day = ? AND counter = 'sandbox-seconds'",
     [today.slice(0, 7)],
-    "prod",
   );
   usage(
-    "sandbox prod this month",
-    (prod?.count ?? 0) / 3600,
-    SANDBOX_MONTHLY_HOURS.prod,
-    "hours (prod cap; 20 h total with dev)",
+    "sandbox this month",
+    (sandbox?.count ?? 0) / 3600,
+    SANDBOX_MONTHLY_HOURS,
+    "hours (monthly cap)",
   );
 });
 
 /**
- * Anthropic spend this calendar month per environment (ADR 0021), from each environment's D1 meter
+ * Anthropic spend this calendar month (ADR 0021), from the D1 meter
  * (`usage_counters` counter `anthropic-usd-micro`, micro-USD, open reservations included). Code
  * stops model work at each budget; this report only shows how close each one is.
  */
@@ -326,27 +321,16 @@ await section("anthropic spend", async () => {
     return;
   }
   const month = today.slice(0, 7);
-  let total = 0;
-  for (const database of ["dev", "prod"] as const) {
-    const [row] = await d1Query<{ count: number }>(
-      "SELECT count FROM usage_counters WHERE day = ? AND counter = ?",
-      [month, USAGE_COUNTER.anthropicSpend],
-      database,
-    );
-    const usd = (row?.count ?? 0) / 1_000_000;
-    total += usd;
-    const budget = ANTHROPIC_MONTHLY_BUDGET_USD[database];
-    const ratio = usd / budget;
-    report(
-      ratio >= 0.85 ? "ALERT" : ratio >= 0.6 ? "WARN" : "OK",
-      `anthropic ${database} ${month}`,
-      `$${usd.toFixed(4)} / $${budget} (${Math.round(ratio * 100)}%; model work stops at 100%)`,
-    );
-  }
+  const [row] = await d1Query<{ count: number }>(
+    "SELECT count FROM usage_counters WHERE day = ? AND counter = ?",
+    [month, USAGE_COUNTER.anthropicSpend],
+  );
+  const usd = (row?.count ?? 0) / 1_000_000;
+  const ratio = usd / ANTHROPIC_MONTHLY_BUDGET_USD;
   report(
-    total >= 25 ? "ALERT" : "OK",
-    "anthropic total",
-    `$${total.toFixed(4)} of the $25 approved across dev and prod in ${month}`,
+    ratio >= 0.85 ? "ALERT" : ratio >= 0.6 ? "WARN" : "OK",
+    `anthropic ${month}`,
+    `$${usd.toFixed(4)} / $${ANTHROPIC_MONTHLY_BUDGET_USD} (${Math.round(ratio * 100)}%; model work stops at 100%)`,
   );
 });
 

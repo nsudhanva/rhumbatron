@@ -673,19 +673,17 @@ locals {
 
     # Off until the owner accepts the routing layout (ADR 0020, "Routing"). Cloudflare runs a
     # Workers route before a Worker custom domain on the same hostname, so `*.rhumbatron.com/*`
-    # alone would capture api, www, dev, and api-dev. With routing on, Terraform adds the proxied
+    # alone would capture api, www, and docs. With routing on, Terraform adds the proxied
     # wildcard record, the wildcard route, one route without a Worker per custom-domain host (it
     # negates the wildcard there), and APPS_DOMAIN on the API (the "Live at" line).
     routing = true
 
-    # Every Worker custom domain under the zone, dev and prod, including docs (docs.tf). The apex
+    # Every Worker custom domain under the zone, including docs (docs.tf). The apex
     # does not match `*.`. The Clerk records are DNS-only, so no Worker route runs on them. Add any
     # new proxied subdomain here before it goes live.
     bypass_hosts = [
       local.hostnames.api,
       "www.${local.hostnames.web}",
-      "dev.${var.zone_name}",
-      "api-dev.${var.zone_name}",
       "docs.${var.zone_name}",
     ]
   }

@@ -15,7 +15,7 @@ const offlineEnv = (dir: string) => ({
   AWS_SECRET_ACCESS_KEY: "",
   AWS_PROFILE: "",
 });
-const roots = ["bootstrap", "envs/global", "envs/dev", "envs/prod"];
+const roots = ["bootstrap", "envs/global", "envs/prod"];
 
 await $`terraform fmt -check -recursive ${tfRoot}`;
 

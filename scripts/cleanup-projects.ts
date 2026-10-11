@@ -1,5 +1,7 @@
 /**
- * Archives the smoke-test Projects of the smoke user on dev (AGENTS.md section 43).
+ * Archives the smoke-test Projects of the smoke user on prod (AGENTS.md section 43).
+ * CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID must both be set in the environment, for the prod
+ * Clerk instance. Nothing reads them from the Keychain.
  * Usage: bun run cleanup:projects [--dry-run] [--all]
  *
  * Matches only slugs `smoke-<digits>` and `sandbox-<digits>` (scripts/smoke.ts). Every other
@@ -8,7 +10,7 @@
  * the same path the product uses: the integration Worker then deletes each Project's Artifacts
  * repos and R2 source and context objects. `--dry-run` lists the matches and changes nothing.
  */
-const api = "https://api-dev.rhumbatron.com";
+const api = "https://api.rhumbatron.com";
 const SMOKE_SLUG = /^(smoke|sandbox)-\d+$/;
 const NEVER = new Set(["acme-shop-demo"]);
 const PAGE = 200;
@@ -16,7 +18,7 @@ const PAGE = 200;
 const secretKey = process.env.CLERK_SECRET_KEY;
 const userId = process.env.CLERK_SMOKE_USER_ID;
 if (!secretKey || !userId) {
-  console.error("CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID are required (see package.json).");
+  console.error("CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID are required (prod Clerk instance).");
   process.exit(2);
 }
 const dryRun = process.argv.includes("--dry-run");

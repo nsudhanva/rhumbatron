@@ -95,7 +95,7 @@ const nameAttribute = /^\s*(name|queue_name|title|bucket_name)\s*=\s*"([^"]+)"/g
 const literalSegment = "[a-z0-9-]";
 const interpolation = "\\$\\{[^}]+\\}";
 const validName = new RegExp(
-  `^rhumbatron-(${literalSegment}|${interpolation})+(-(dev|prod|global)|${interpolation})$`,
+  `^rhumbatron-(${literalSegment}|${interpolation})+(-(prod|global)|${interpolation})$`,
 );
 for (const file of tracked) {
   if (!tfResourceFile.test(file) || /(outputs|variables)\.tf$/.test(file)) continue;
@@ -105,7 +105,7 @@ for (const file of tracked) {
     if (!validName.test(value)) {
       const line = text.slice(0, match.index).split("\n").length;
       failures.push(
-        `${file}:${line} [resource-naming] "${value}" must follow rhumbatron-<component>-<dev|prod|global>.`,
+        `${file}:${line} [resource-naming] "${value}" must follow rhumbatron-<component>-<prod|global>.`,
       );
     }
   }

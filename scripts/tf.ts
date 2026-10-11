@@ -1,6 +1,6 @@
 /**
  * Runs Terraform for one root with credentials loaded from the macOS Keychain.
- * Usage: bun run tf <bootstrap|global|dev|prod> <terraform args...>
+ * Usage: bun run tf <bootstrap|global|prod> <terraform args...>
  * Values already set in the environment take precedence (for CI later).
  */
 import { resolve } from "node:path";
@@ -9,7 +9,6 @@ import { $ } from "bun";
 const roots: Record<string, string> = {
   bootstrap: "bootstrap",
   global: "envs/global",
-  dev: "envs/dev",
   prod: "envs/prod",
 };
 
@@ -22,22 +21,12 @@ const keychain: Record<string, string> = {
 
 // Per-root secrets, loaded only for the root that needs them.
 const rootKeychain: Record<string, Record<string, string>> = {
-  dev: {
-    TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-dev",
-    TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-dev",
-    // ADR 0021: Anthropic key (secret) and workspace ID (not secret, sent on every request).
-    TF_VAR_anthropic_api_key: "rhumbatron-anthropic-api-key",
-    TF_VAR_anthropic_workspace_id: "rhumbatron-anthropic-workspace-id",
-    // ADR 0018: release observation (Builds API GETs) on the integration Worker.
-    TF_VAR_builds_api_token: "rhumbatron-cloudflare-builds-token",
-  },
   // Billing budget alerts (ADR 0019) go to the account owner's address, kept out of source.
   global: {
     TF_VAR_alert_email: "rhumbatron-alert-email",
   },
-  // ADR 0017. Prod reuses dev's K2 Consume-only token. ADR 0021: prod uses the same Anthropic key
-  // and workspace as dev; each environment has its own monthly budget. Clerk is the production
-  // instance.
+  // ADR 0017, ADR 0021, ADR 0024. The K2 Consume-only token keeps
+  // its original Keychain item name. Clerk is the production instance.
   prod: {
     TF_VAR_clerk_secret_key: "rhumbatron-clerk-secret-key-prod",
     TF_VAR_clerk_publishable_key: "rhumbatron-clerk-publishable-key-prod",

@@ -1,6 +1,6 @@
 /**
  * Live model check through the AI Gateway's Anthropic endpoint (ADR 0021). Usage:
- *   bun run smoke:models [dev|prod]
+ *   bun run smoke:models [prod]
  * Four small requests, well under one US cent in total:
  * 1. A bogus `anthropic-workspace-id` must be rejected by Anthropic: proves the gateway forwards
  *    the header (a rejected request is not billed).
@@ -13,9 +13,9 @@ import { complete, ModelCallError, opusAllowed, TIER_MODELS } from "@rhumbatron/
 
 const { ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID, CLOUDFLARE_ACCOUNT_ID, ALLOW_OPUS } =
   process.env;
-const env = process.argv[2] ?? "dev";
-if (!["dev", "prod"].includes(env)) {
-  console.error("Usage: bun run smoke:models [dev|prod]");
+const env = process.argv[2] ?? "prod";
+if (env !== "prod") {
+  console.error("Usage: bun run smoke:models [prod]");
   process.exit(2);
 }
 if (!ANTHROPIC_API_KEY || !ANTHROPIC_WORKSPACE_ID || !CLOUDFLARE_ACCOUNT_ID) {

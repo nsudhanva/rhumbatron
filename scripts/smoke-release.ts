@@ -1,12 +1,12 @@
 /**
  * Release smoke check (P11-09; AGENTS.md sections 21.3, 37; ADR 0018).
- * Usage: bun run smoke:release [dev|prod] [--project <id>]
+ * Usage: bun run smoke:release [prod] [--project <id>]
  *
  * Reads the release Project's latest release row through the API (as the Clerk smoke user of that
  * environment's Clerk instance: Keychain `rhumbatron-clerk-secret-key-<env>` and
  * `rhumbatron-clerk-smoke-user-id-<env>`; prod uses the Clerk production instance) and probes its release URL with the same probes the
  * ReleaseWorkflow runs for this target: the home page and the products API. Read-only: no row is written, no build
- * starts. The Project defaults to the smoke user's `acme-shop-live` (created by `bun run demo:live`).
+ * starts. The Project defaults to the smoke user's `acme-shop-live` (created by a live run).
  */
 
 import { $ } from "bun";
@@ -19,12 +19,11 @@ import {
 import { connect } from "./inject/client.ts";
 
 const apis: Record<string, string> = {
-  dev: "https://api-dev.rhumbatron.com",
   prod: "https://api.rhumbatron.com",
 };
 
 const args = process.argv.slice(2);
-const environment = args.find((a) => !a.startsWith("--") && apis[a]) ?? "dev";
+const environment = args.find((a) => !a.startsWith("--") && apis[a]) ?? "prod";
 const projectFlag = args.indexOf("--project");
 const projectArg = projectFlag >= 0 ? args[projectFlag + 1] : process.env.RELEASE_PROJECT_ID;
 

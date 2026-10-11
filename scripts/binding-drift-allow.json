@@ -28,7 +28,7 @@
       "worker": "workers/integration",
       "side": "terraform-only",
       "names": ["ANTHROPIC_MONTHLY_BUDGET_USD", "BROWSER_DAILY_SECONDS", "SANDBOX_MONTHLY_SECONDS"],
-      "reason": "Per-environment cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
+      "reason": "Cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
     },
     {
       "worker": "workers/integration",
@@ -38,10 +38,9 @@
     },
     {
       "worker": "workers/integration",
-      "envs": ["prod"],
       "side": "terraform-only",
       "names": ["APPS"],
-      "reason": "Service binding to the prod-only apps Worker (AppBuilder entrypoint); absent in dev and not emulated locally."
+      "reason": "Service binding to the apps Worker (AppBuilder entrypoint); not emulated locally."
     },
     {
       "worker": "workers/event-router",
@@ -59,7 +58,7 @@
       "worker": "workers/agents",
       "side": "terraform-only",
       "names": ["ANTHROPIC_MONTHLY_BUDGET_USD", "SANDBOX_MONTHLY_SECONDS"],
-      "reason": "Per-environment cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
+      "reason": "Cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
     },
     {
       "worker": "workers/agents",
@@ -83,27 +82,20 @@
       "worker": "workers/api",
       "side": "terraform-only",
       "names": ["ANTHROPIC_MONTHLY_BUDGET_USD", "SANDBOX_MONTHLY_SECONDS"],
-      "reason": "Per-environment cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
+      "reason": "Cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
     },
     {
       "worker": "workers/api",
       "side": "terraform-only",
       "names": ["FIXTURES_ENABLED"],
-      "reason": "Gate for demo fixture routes; Terraform sets it per environment, local environments enable fixtures by name (fixtures.ts)."
+      "reason": "Gate for demo fixture routes; Terraform sets it, local environments enable fixtures by name (fixtures.ts)."
     },
     {
       "worker": "workers/api",
-      "envs": ["prod"],
       "side": "terraform-only",
       "names": ["APPS_DOMAIN"],
-      "reason": "Prod-only wildcard apps routing: the API prints the 'Live at' line only when it is set (ADR 0020)."
+      "reason": "Wildcard apps routing: the API prints the 'Live at' line only when it is set (ADR 0020)."
     }
   ],
-  "notDeployed": [
-    {
-      "worker": "workers/apps",
-      "env": "dev",
-      "reason": "Prod-only apps router Worker (ADR 0020); dev has no apps Worker, route, or wildcard record."
-    }
-  ]
+  "notDeployed": []
 }

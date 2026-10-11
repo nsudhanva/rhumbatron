@@ -27,21 +27,21 @@ function consumerBlocks(tf: string): Map<string, string> {
 }
 
 describe("Queue consumers send poison commands to the dead-letter Queue", () => {
-  const dev = consumerBlocks(read("infrastructure/terraform/envs/dev/main.tf"));
+  const prod = consumerBlocks(read("infrastructure/terraform/envs/prod/main.tf"));
 
-  it("finds the dev consumers", () => {
-    expect([...dev.keys()].sort()).toEqual(
+  it("finds the prod consumers", () => {
+    expect([...prod.keys()].sort()).toEqual(
       expect.arrayContaining(["agent_wakeups", "integration"]),
     );
   });
 
-  for (const [name, block] of dev) {
+  for (const [name, block] of prod) {
     // The dead-letter Queue's own consumer is the end of the line: checked below.
     if (name === "dead_letter") continue;
     // Index commands have no Task to block and must not be retried onto the integration Queue:
     // the indexer records the last failed delivery itself (checked below).
     if (name === "indexing") continue;
-    it(`dev consumer ${name} has a dead-letter Queue and bounded retries`, () => {
+    it(`prod consumer ${name} has a dead-letter Queue and bounded retries`, () => {
       expect(block).toMatch(/dead_letter_queue\s*=\s*module\.async\.queues\["dead-letter"\]\.name/);
       const retries = Number(/max_retries\s*=\s*(\d+)/.exec(block)?.[1] ?? Number.NaN);
       expect(retries).toBeGreaterThanOrEqual(1);
@@ -49,8 +49,8 @@ describe("Queue consumers send poison commands to the dead-letter Queue", () => 
     });
   }
 
-  it("dev dead-letter Queue is consumed by the event router, with bounded retries and no loop", () => {
-    const block = dev.get("dead_letter") ?? "";
+  it("prod dead-letter Queue is consumed by the event router, with bounded retries and no loop", () => {
+    const block = prod.get("dead_letter") ?? "";
     expect(block).toMatch(/queue_id\s*=\s*module\.async\.queues\["dead-letter"\]\.id/);
     expect(block).toMatch(/script_name\s*=\s*module\.event_router_worker\.name/);
     // A dead-letter Queue for the dead-letter consumer would be a loop.
@@ -60,8 +60,8 @@ describe("Queue consumers send poison commands to the dead-letter Queue", () => 
     expect(retries).toBeLessThanOrEqual(5);
   });
 
-  it("dev indexing consumer has bounded retries and the indexer records its last failure", () => {
-    const block = dev.get("indexing") ?? "";
+  it("prod indexing consumer has bounded retries and the indexer records its last failure", () => {
+    const block = prod.get("indexing") ?? "";
     expect(block).toMatch(/script_name\s*=\s*module\.indexer_worker\.name/);
     expect(block).not.toMatch(/dead_letter_queue/);
     const retries = Number(/max_retries\s*=\s*(\d+)/.exec(block)?.[1] ?? Number.NaN);

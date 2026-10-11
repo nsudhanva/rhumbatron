@@ -1,6 +1,6 @@
 /**
- * Authenticated client for the public dev API, as the Clerk smoke user (same credentials as
- * `bun run smoke:dev`). Clerk session tokens live 60 seconds, so every request mints a fresh one.
+ * Authenticated client for the public API, as the Clerk smoke user (same credentials as
+ * `bun run smoke:release`). Clerk session tokens live 60 seconds, so every request mints a fresh one.
  */
 
 export type Reply<T = unknown> = {
@@ -48,19 +48,4 @@ export async function connect(base: string, secretKey: string, userId: string): 
       await clerk(`/sessions/${session.id}/revoke`, {});
     },
   };
-}
-
-/** Polls `read` every `everyMs` until `done` holds or the deadline passes. Returns the last value. */
-export async function waitFor<T>(
-  read: () => Promise<T>,
-  done: (value: T) => boolean,
-  { timeoutMs, everyMs }: { timeoutMs: number; everyMs: number },
-): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  let value = await read();
-  while (!done(value) && Date.now() < deadline) {
-    await Bun.sleep(everyMs);
-    value = await read();
-  }
-  return value;
 }

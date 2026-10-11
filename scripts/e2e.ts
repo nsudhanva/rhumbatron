@@ -2,7 +2,7 @@
  * End-to-end check of every public API endpoint (AGENTS.md section 16) against a deployed
  * environment, with real requests: status codes, error codes, and response shapes (the Zod
  * schemas of packages/protocol where they exist; a small structural check otherwise).
- * Usage: bun run e2e <dev|prod>
+ * Usage: bun run e2e <prod>
  *
  * Signs in as the Clerk smoke user of that environment's Clerk instance: Keychain
  * `rhumbatron-clerk-secret-key-<env>` and `rhumbatron-clerk-smoke-user-id-<env>` (or
@@ -53,7 +53,6 @@ import {
 import { ProjectViewSnapshot } from "../workers/coordinator/src/view-model.ts";
 
 const apis: Record<string, string> = {
-  dev: "https://api-dev.rhumbatron.com",
   prod: "https://api.rhumbatron.com",
 };
 
@@ -648,7 +647,7 @@ async function pollHost(url: string, status: number, timeoutMs: number) {
 
 /**
  * Edit validation only: every request here is refused, so nothing is committed. `source` is the
- * live tree and one file of it when the Project has canonical source, else null (dev).
+ * live tree and one file of it when the Project has canonical source, else null (an empty Project).
  */
 async function editChecks(
   projectId: string,

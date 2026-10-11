@@ -79,7 +79,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ""
         run: |
           set -euo pipefail
-          for dir in bootstrap envs/global envs/dev envs/prod modules/worker modules/durable-worker; do
+          for dir in bootstrap envs/global envs/prod modules/worker modules/durable-worker; do
             echo "== ${dir}"
             terraform -chdir="infrastructure/terraform/${dir}" init -backend=false -input=false -no-color
             terraform -chdir="infrastructure/terraform/${dir}" validate -no-color

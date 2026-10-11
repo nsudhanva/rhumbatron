@@ -3,7 +3,7 @@ import { DESIGNS, type DeclaredIntent, type WishlistDesign } from "./manifest.ts
 /**
  * Applies one wishlist design to a checkout of the canonical Acme Shop source. Pure: the caller
  * supplies the fixture files and reads the base. Used by the integration Worker (which commits the
- * result to an Artifacts fork) and by `bun run demo:wishlist --local` (which runs the checks).
+ * result to an Artifacts fork).
  */
 
 export type DesignChanges = {

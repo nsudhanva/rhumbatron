@@ -1,9 +1,9 @@
 /**
  * Remote smoke check for a deployed environment.
- * Usage: bun scripts/smoke.ts <dev|prod> [--plan]
+ * Usage: bun scripts/smoke.ts prod [--plan] [--sandbox]
  *
  * Public checks are read-only. When CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID are set
- * (`bun run smoke:dev` loads them from the Keychain), it also runs the authenticated flow:
+ * (set them for the prod Clerk instance), it also runs the authenticated flow:
  * create a Project and a Change, read them back, and check idempotency and the snapshot.
  * Each authenticated run writes about five D1 rows.
  * `--plan` also submits a real goal and waits for the Work Graph: 1 to 4 model calls (ADR 0007).
@@ -14,11 +14,10 @@
  */
 
 const hosts: Record<string, { web: string; api: string }> = {
-  dev: { web: "https://dev.rhumbatron.com", api: "https://api-dev.rhumbatron.com" },
   prod: { web: "https://rhumbatron.com", api: "https://api.rhumbatron.com" },
 };
 
-const env = process.argv[2] ?? "dev";
+const env = process.argv[2] ?? "prod";
 const target = hosts[env];
 if (!target) {
   console.error(`Usage: bun scripts/smoke.ts <${Object.keys(hosts).join("|")}>`);

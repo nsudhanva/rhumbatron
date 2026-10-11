@@ -5,7 +5,7 @@
  * source is never changed. On prod it then asks for the app ("Deploy app"), which shows
  * "Nothing built yet" until the first Change ships.
  *
- * Usage: bun scripts/seed-repo.ts <projectId> <dev|prod> [--user <Clerk user ID or email>]
+ * Usage: bun scripts/seed-repo.ts <projectId> <prod> [--user <Clerk user ID or email>]
  *
  * Signs in to that environment's Clerk instance (Keychain `rhumbatron-clerk-secret-key-<env>`, or
  * CLERK_SECRET_KEY) as the Project's member: `--user`, else the smoke user
@@ -17,7 +17,6 @@
 import { $ } from "bun";
 
 const apis: Record<string, string> = {
-  dev: "https://api-dev.rhumbatron.com",
   prod: "https://api.rhumbatron.com",
 };
 
@@ -27,7 +26,7 @@ const userArg = userFlag > 0 ? process.argv[userFlag + 1] : undefined;
 const base = apis[environment];
 if (!/^proj_[a-z0-9-]+$/.test(projectId) || !base) {
   console.error(
-    "Usage: bun scripts/seed-repo.ts <projectId> <dev|prod> [--user <Clerk user ID or email>]",
+    "Usage: bun scripts/seed-repo.ts <projectId> <prod> [--user <Clerk user ID or email>]",
   );
   process.exit(2);
 }
