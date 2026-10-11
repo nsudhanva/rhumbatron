@@ -1,76 +1,68 @@
 # Shared Projects and simultaneous requests
 
-This page explains how several people use one Project at the same time.
-It covers membership, the intake gate that checks each request before planning, the check that compares simultaneous requests, and the system arbiter.
-The system decides what gets built. The role of a person never decides between two requests.
-ADR 0025 records the decision.
+This page covers Project membership, the intake gate, the comparison of simultaneous requests, and the system arbiter.
+The system decides between two requests. The role of a person never decides (ADR 0025).
 
 Main source files:
 
-- `migrations/d1/0022_shared_projects.sql`: members, invitations, request columns on `changes`, `request_conflicts`.
-- `migrations/d1/0024_intake_and_system_decisions.sql`: `clarification_json`, `clarification_answers_json`, the `duplicate` verdict, pair rounds, `change_decisions`.
-- `workers/api/src/identity.ts`: `projectRole`, `canAccessProject`, `ownerOnlyMessage`.
-- `workers/api/src/members.ts`: invitations, members, request conflicts.
-- `workers/api/src/clarify.ts`: `POST /v1/changes/:changeId/clarify`.
-- `workers/coordinator/src/request-scopes.ts`: serialized admission and scope receipts in ProjectRootDO.
-- `workers/integration/src/intake-context.ts`: related requests, the current app summary, stored answers.
-- `workers/integration/src/intake.ts`: the intake cascade (retrieval, Clef-flash, Sonnet) and its citation checks.
-- `workers/integration/src/request-policy.ts`: overlap pass, review validation, the arbiter, quality gate.
-- `workers/integration/src/request-check.ts`: `checkRequestPair`, one comparison of two Changes.
-- `workers/integration/src/change-workflow.ts`: the `intake review` and `check other requests` steps, and the wait for an answer.
-- `workers/integration/src/change-commands.ts`: `clarifyChange`, `closeNeedsInput`.
+| File | Contents |
+|---|---|
+| `migrations/d1/0022_shared_projects.sql` | `project_members`, `project_invitations`, request columns on `changes`, `request_conflicts` |
+| `migrations/d1/0024_intake_and_system_decisions.sql` | `clarification_json`, `clarification_answers_json`, the `duplicate` verdict, pair rounds, `change_decisions` |
+| `workers/api/src/identity.ts` | `projectRole`, `canAccessProject`, `ownerOnlyMessage` |
+| `workers/api/src/members.ts` | Members, invitations, `GET /v1/changes/:changeId/request-conflicts` |
+| `workers/api/src/clarify.ts` | `POST /v1/changes/:changeId/clarify` |
+| `workers/coordinator/src/request-scopes.ts` | Admission order and scope receipts in ProjectRootDO SQLite |
+| `workers/integration/src/intake-context.ts` | Related requests, the current app summary, stored answers |
+| `workers/integration/src/intake.ts` | The intake cascade and its citation checks |
+| `workers/integration/src/request-policy.ts` | Overlap pass, review validation, arbiter, quality-gate rule |
+| `workers/integration/src/request-check.ts` | `checkRequestPair`: one comparison of two Changes |
+| `workers/integration/src/change-workflow.ts` | The steps `intake review` and `check other requests`, and the wait for an answer |
+| `workers/integration/src/change-commands.ts` | `clarifyChange`, `closeNeedsInput`, `cancelChange` |
 
-## Sharing a Project
+## Membership
 
 Membership is per Project.
-The table `project_members` holds one row for each user and Project.
-A collaborator sees only the shared Project, not the other Projects of the owner.
-Rhumbatron does not use Clerk Organizations for sharing.
+The D1 table `project_members` has one row for each user and Project.
+A collaborator sees only the shared Project.
+Rhumbatron does not use Clerk Organizations.
 
 | Role | How the user gets it |
 |---|---|
 | `owner` | Project creation inserts the owner row. A partial unique index allows one owner for each Project. |
 | `collaborator` | The user accepts an invitation. |
 
-The API never reads a role from the client.
-The `rank` column of `project_members` (owner 0, collaborator 10) only orders the members list.
-Each Change stores `requested_by` (the `created_by` column) and `requester_rank`, the role of the requester when the request was made.
-The UI shows the role. No build decision reads it.
+`projectRole` reads the role from D1. The API never reads a role from the client.
 
-`projectRole` returns `owner` for the owner row, or for a member of the organization that owns the Project.
-It returns `collaborator` for a member of `project_members`.
-It returns `null` otherwise, and the API answers `404`.
+- `owner`: the owner row, or a member of the organization that owns the Project.
+- `collaborator`: a `collaborator` row in `project_members`.
+- `null`: any other user. The API answers `404`.
+
+The `rank` column of `project_members` (owner 0, collaborator 10) only orders the members list.
+`changes.created_by` holds the requester. `changes.requester_rank` holds the role of the requester at request time, for display.
+No build decision reads `rank` or `requester_rank`.
 
 ### Invitations
 
-The owner invites a collaborator with `POST /v1/projects/:projectId/invitations` and an email address.
-The API changes the email to lowercase.
-An invitation is `pending` for 7 days.
-It then expires, and the owner can send a new one.
-Only one `pending` invitation can exist for one Project and email.
+1. The owner sends `POST /v1/projects/:projectId/invitations` with an email address. The API changes the email to lowercase.
+2. The invitation stays `pending` for 7 days. One `pending` invitation can exist for one Project and email. A repeat returns the same invitation.
+3. After 7 days the invitation expires. The owner can then send a new one.
+4. `GET /v1/invitations` lists the pending invitations for the Clerk email addresses of the caller that have the status `verified`.
+5. `POST /v1/invitations/:invitationId/accept` checks that the invitation email is one of these addresses. If not, the API answers `404`, as for a missing invitation.
+6. The member row stores the user ID, not the email. A second accept returns the same result.
 
-An invitation binds to a Clerk-verified email of the signed-in user.
-The API reads the Clerk profile and keeps only the email addresses with verification status `verified`.
-`GET /v1/invitations` lists the pending invitations for those addresses.
-`POST /v1/invitations/:invitationId/accept` checks that the invitation email is in that list.
-If it is not, the API gives the same answer as for a missing invitation.
-The member row stores the immutable user ID, not the email.
-Accepting twice is safe: the second call returns the same result.
+### Owner-only actions
 
-### What a collaborator can do
+The owner role covers administration only.
+A collaborator can open the Project, read its Changes and Candidates, create a Change, and cancel or answer their own Change.
+A collaborator can leave the Project. The API then cancels the open Changes of that collaborator.
+For each owner-only action, a collaborator gets `403` with the text "Only the project owner can ...".
 
-A collaborator can open the Project, read its Changes and Candidates, and create a Change.
-A collaborator can cancel and answer their own Change.
-The owner role is for administration only.
-All other actions are owner-only.
-The API answers `403` with the text "Only the project owner can ...".
-
-The owner-only actions in the code are:
+The owner-only actions are:
 
 - Share the Project, revoke an invitation, remove a member.
 - Change the Project settings.
-- Provision the Project and run its checks.
-- Remove the Project.
+- Provision the Project, run its checks, remove the Project.
 - Compose a Candidate, approve a release, promote a Candidate.
 - Publish the app, remove the app, roll back.
 - Resolve stopped (dead-letter) work.
@@ -79,191 +71,169 @@ The owner-only actions in the code are:
 - Cancel the Change of another person.
 - Inject a release failure.
 
-The owner can also answer a question on the Change of another person (`POST /v1/changes/:changeId/clarify`).
+The owner can also answer a question on the Change of another person.
 
 ## The intake gate
 
 Each Change runs its own ChangeWorkflow.
 The step `intake review` runs before the Root Planner.
-It decides whether the request is clear and whether it asks for something new.
-Rhumbatron never starts to build a request that it does not understand, or one that the app or another request already delivers.
-
+It decides whether the request is clear and whether the app or another request already delivers it.
 The cascade runs the cheap checks first.
-It asks a stronger or an independent model before it stops a request.
-A model never rejects a request: the worst outcome is a question to the requester.
+A model never rejects a request at intake. The strongest result is a question to the requester.
 
 ```mermaid
 flowchart TB
-  G["Goal plus earlier answers"] --> R["Retrieval: open Changes and the 20 latest completed ones,<br/>goal plus criteria, embeddings (cosine >= 0.55, top 10),<br/>reranker, keep 5. The current app is one more candidate."]
-  R --> C["Clef-flash, one call: per pair duplicate, already_covered,<br/>extends, overlaps or unrelated; and buildable as stated"]
+  G["Goal plus earlier answers"] --> R["Retrieval: embeddings (cosine >= 0.55, top 10),<br/>reranker, keep 5, plus the current app"]
+  R --> C["Clef-flash, one call: a choice per pair,<br/>and P(buildable)"]
   C --> D{"Pairs left after<br/>P(unrelated) >= 0.9?"}
   D -->|"yes"| S["Sonnet coverage review, twice,<br/>order swapped, quotes checked"]
   S --> V{"Covered votes"}
-  V -->|"Clef and both orders"| DUP["needs_input, kind duplicate"]
-  V -->|"one or two Sonnet orders"| ASK1["needs_input, kind unclear:<br/>what is different?"]
+  V -->|"Clef and both Sonnet orders"| DUP["needs_input, kind duplicate"]
+  V -->|"Sonnet only"| ASK1["needs_input, kind unclear:<br/>what is different?"]
   V -->|"none"| CL
   D -->|"no"| CL{"Clarity"}
-  CL -->|"rule: no product object"| ASK2["needs_input, kind unclear"]
-  CL -->|"Clef P(buildable) >= 0.9"| PLAN["plan"]
-  CL -->|"Clef <= 0.4"| ASK2
-  CL -->|"between"| I["Sonnet lists distinct readings,<br/>each quoting the goal"]
-  I -->|"2 or more"| ASK3["needs_input, kind unclear,<br/>readings as options"]
-  I -->|"fewer"| PLAN
+  CL -->|"rule passes,<br/>P(buildable) >= 0.9"| PLAN["Plan"]
+  CL -->|"rule fails, P <= 0.4, or between"| I["Sonnet lists distinct readings<br/>and open decisions"]
+  I -->|"rule fails, P <= 0.4,<br/>or 2 or more readings"| ASK2["needs_input, kind unclear"]
+  I -->|"between, fewer than 2 readings"| PLAN
 ```
 
 ### Retrieval
 
-`loadRelatedRequests` reads the open Changes of the Project (any status except `completed`, `failed`, `cancelled` and `not_selected`) and the 20 most recent completed Changes.
+`loadRelatedRequests` reads up to 50 open Changes of the Project and the 20 most recent `completed` Changes.
+An open Change has any status except `completed`, `failed`, `cancelled`, and `not_selected`.
 Each item is the goal plus the stored acceptance criteria.
 Each text has a packet ID: `<changeId>:goal`, `<changeId>:c1`, and so on.
 
-`retrieveRelated` embeds the new goal and each item with Workers AI `@cf/baai/bge-small-en-v1.5`.
-It keeps up to 10 items with a cosine similarity of 0.55 or more.
-If the embedding call fails, it keeps the items that share a product word with the goal.
-`@cf/baai/bge-reranker-base` then orders the shortlist, and the gate keeps 5.
-The current app is always one more candidate when the repository is not empty.
-Its packet items are `canonical:files` (paths from the canonical file listing), `canonical:deps` (dependency names of the root `package.json`) and `canonical:stack` (hints such as `react` or `angularjs`).
-Cosine only shortlists. It never decides.
+`retrieveRelated` then does these steps:
+
+1. Embed the goal and each item with Workers AI `@cf/baai/bge-small-en-v1.5`.
+2. Keep up to 10 items with a cosine similarity of 0.55 or more. If the embedding call fails, keep the items that share a non-generic word with the goal.
+3. Order the shortlist with `@cf/baai/bge-reranker-base`. Keep 5.
+
+The current app is one more target when its source is readable and has a `package.json`.
+Its packet items are `canonical:files` (up to 60 paths), `canonical:deps` (dependency names of the root `package.json`), and `canonical:stack` (hints such as `react` or `angularjs`).
+Cosine similarity only selects targets. It never decides.
 
 ### Clef-flash
 
-One Clef-flash call answers two kinds of question.
-For each pair it chooses `duplicate`, `already_covered`, `extends`, `overlaps` or `unrelated`.
-For the request it scores "buildable as stated".
-The call counts against the `clef-flash` daily counter (200 per UTC day) that the agents and event router Workers share.
-When the counter is spent, every answer is unknown, and the next stage runs.
+One Clef-flash call answers two kinds of question:
 
-Clef-flash can only clear.
+- For each pair: `duplicate`, `already_covered`, `extends`, `overlaps`, or `unrelated`.
+- For the request: `buildable` or `needs_detail`.
+
+The call uses the D1 `clef-flash` daily counter (200 calls per UTC day). The integration, agents, and event router Workers share this counter.
+When the counter is spent, Clef-flash abstains, and every later stage runs.
 A pair drops only when `unrelated` has a probability of 0.9 or more.
 Clef-flash alone never marks a duplicate.
 
 ### Duplicate check
 
-Sonnet answers one question for each remaining pair: which criteria of the existing request, or which features of the current app, already deliver the new request?
+Sonnet answers one question for each remaining pair: which criteria of the other request, or which features of the current app, already deliver the new request?
 The tool is `coverage_review`.
-A `duplicate` or `already_covered` verdict must quote the source text with its packet ID.
-Code checks each quote (`validateCoverage`): the text must be in that source of that target.
-A verdict with a quote that is not in the packet counts as `unsupported`.
-
-Sonnet runs twice, once with the new request first and once with the existing items first, because a model can prefer the item it reads first.
+A `duplicate` or `already_covered` verdict must quote source text with its packet ID.
+`validateCoverage` checks each quote: the text must be in that source of that target.
+A covered verdict without a valid quote counts as `unsupported`.
+Sonnet runs twice: once with the new request first, once with the other items first.
 
 | Clef-flash | Sonnet, first order | Sonnet, second order | Result |
 |---|---|---|---|
 | covered | covered | covered | `needs_input`, kind `duplicate` |
+| not covered | covered | covered | `needs_input`, kind `unclear` |
 | any | covered | not covered | `needs_input`, kind `unclear` |
 | any | not covered | covered | `needs_input`, kind `unclear` |
-| covered | not covered | not covered | Go on: Clef-flash alone does not stop a request. |
+| any | not covered | not covered | Continue to the clarity check. |
 
-The question quotes the covering criteria: "This looks covered by "<goal>": "<quote>". What is different in your request?"
+The question quotes the covering text: "This looks covered by "<goal>": "<quote>". What is different in your request?"
 
 ### Clarity
 
-A rule runs first: a goal with fewer than two words that name a product object (not words such as "add", "build", "feature" or "app") is unclear.
-"build the kanban" and "Add kanban feature" are unclear by this rule.
-Then the Clef-flash score decides: 0.9 or more is clear, 0.4 or less is unclear.
-Between the two, one Sonnet call (`list_interpretations`) lists the materially different readings of the request, each with a quote of the goal, and the product decisions that the request leaves open.
-Code drops a reading whose quote is not in the goal.
-Two or more readings make the request unclear, and the question shows them as options.
+1. A rule runs first. A goal with fewer than two words that name a product object fails the rule. Generic words such as "add", "build", "feature", and "app" do not count. "Add kanban feature" fails the rule.
+2. If the rule passes, a Clef-flash `buildable` probability of 0.9 or more makes the request clear. The request goes to planning.
+3. In all other cases, one Sonnet call (`list_interpretations`) lists up to 4 different readings of the goal and up to 4 open product decisions. Each reading must quote the goal. Code drops a reading whose quote is not in the goal.
+4. The request gets a question when the rule failed, when the probability is 0.4 or less, or when 2 or more readings remain. The readings go into the `options` of the question.
+5. Otherwise the request goes to planning.
 
 ### Waiting for an answer
 
-When the gate asks, the Change becomes `needs_input`.
-`clarification_json` holds the `ChangeClarification`: `kind` (`unclear`, `duplicate` or `conflict`), `summary`, up to 3 `questions`, `relatedChangeId`, `relatedGoal`, `askedAt` and `round`.
+A question sets the Change to `needs_input`.
+`clarification_json` holds the `ChangeClarification`: `kind` (`unclear`, `duplicate`, or `conflict`), `summary`, up to 3 `questions`, `relatedChangeId`, `relatedGoal`, `askedAt`, and `round` (1 to 3).
 The requester gets the notification `request_needs_input`.
 
 The workflow waits for the event `clarification`.
-It reads the D1 row after each event and once a day, so a lost event only delays it.
-After 7 days without an answer the Change becomes `cancelled` with the reason "No answer within 7 days".
+It reads the D1 row after each event and once a day.
+After 7 days without an answer, the Change becomes `cancelled` with the reason "No answer within 7 days".
 
-`POST /v1/changes/:changeId/clarify` takes one of three bodies.
+`POST /v1/changes/:changeId/clarify` accepts one of three bodies.
 Only the requester or the Project owner can call it.
 
 | Body | Effect |
 |---|---|
-| `{ "answers": [{ "questionId": "q1", "text": "..." }] }` | The answers append to `clarification_answers_json`. The Change returns to `compiling`. The next intake and the planner read the goal with the questions and answers. |
-| `{ "action": "proceed_anyway" }` | The Change returns to `compiling` and plans without another question. |
-| `{ "action": "withdraw" }` | The Change becomes `cancelled` with the reason "Withdrawn by the requester". A duplicate keeps `outcome = duplicate` and the related Change. |
+| `{ "answers": [{ "questionId": "q1", "text": "..." }] }` | The answers append to `clarification_answers_json`. The Change returns to `compiling`. The intake gate and the planner read the goal with the questions and answers. |
+| `{ "action": "proceed_anyway" }` | The Change returns to `compiling`. It plans without the intake gate and without another question. |
+| `{ "action": "withdraw" }` | The Change becomes `cancelled` with the reason "Withdrawn by the requester". |
 
-A request gets at most 3 rounds of questions.
-After the third answer it plans without another question.
-The update is guarded on the open round, so two answers to one round store one.
-If the first workflow instance of a Change has already ended, the answer starts a new instance with the ID `<changeId>_r<round>`.
+When a `duplicate` Change ends by withdrawal or by the 7-day limit, it also gets `outcome = duplicate` and the related Change ID.
+A request gets at most 3 rounds of questions. After the third answer, it plans without the intake gate and without another question.
+The update is guarded on the open round. Of two answers to one round, one applies.
+If the first workflow instance of the Change has ended, the answer starts a new instance with the ID `<changeId>_r<round>`.
 
-Each intake decision is a Decision Receipt in `change_decisions` (`decision_type = 'INTAKE'`) and the event `change.intake.reviewed`.
-The receipt holds the retrieval scores, the Clef-flash probabilities, the Sonnet verdicts and quotes, and the cost. It never holds private reasoning.
-The model cost counts against the Change budget, and the gate skips a Sonnet call when the budget is spent.
+Each intake run writes a Decision Receipt to `change_decisions` (`decision_type = 'INTAKE'`) and records the event `change.intake.reviewed`.
+The receipt holds the retrieval scores, the Clef-flash probabilities, the Sonnet verdicts and quotes, and the cost. It holds no private reasoning.
+The model cost counts against the Change budget. The gate skips a Sonnet call when the budget is spent.
+An answer records `change.clarification.answered`.
 
 ## Comparing simultaneous requests
 
-Two Changes of the same Project can run at the same time, so the workflow also compares them after planning.
-The comparison runs in the step `check other requests` of ChangeWorkflow.
+Two Changes of one Project can run at the same time.
+After planning, the ChangeWorkflow step `check other requests` compares the Change with the earlier open Changes.
 
 ### Admission and registration
 
-The workflow admits the Change in ProjectRootDO after the intake gate lets it plan.
-`admit` inserts a row in the SQLite table `request_scopes` and returns the admission order.
-The row starts with an empty scope (`scoped: false`) and the requester ID.
-A Change that waits for an answer before planning is not admitted, so it never holds back other requests.
+1. After the intake gate lets the Change plan, the workflow calls `admit` on ProjectRootDO. `admit` inserts a row in the SQLite table `request_scopes` and returns the admission order. The row starts with an empty scope (`scoped: false`).
+2. After planning, the workflow calls `registerScope` with the criteria (each has an ID) and the semantic resources of the Work Graph.
+3. `registerScope` runs in one ProjectRootDO transaction. It returns the scopes of all Changes with a lower admission order that are not released, and it stores this answer as a receipt.
+4. A retry gets the same receipt. After an answer, the next pass keeps the receipt and updates the scope with the new criteria.
 
-After planning, the workflow calls `registerScope` with the criteria (each has an ID) and the semantic resources of the Work Graph.
-ProjectRootDO runs this call in one serialized Durable Object.
-It returns the scopes of all Changes with a lower admission order that are not released.
-It stores this answer as a receipt.
-A retry gets the same receipt, never a new order or a new earlier set.
-After an answer, the next pass keeps the receipt and updates the scope with the new criteria.
-
-Because of this, each pair of Changes is compared once for each round of questions.
-The later-admitted Change of the pair does the comparison.
-The workflow releases the scope of a Change that ends as `completed`, `failed`, `cancelled` or `not_selected`.
+A Change that waits for an answer before planning has no admission, so it does not hold back other requests.
+The later-admitted Change of a pair does the comparison, once for each clarification round.
+The workflow releases the scope of a Change that ends as `completed`, `failed`, `cancelled`, or `not_selected`.
 
 ```mermaid
 sequenceDiagram
-  actor A as Alice
-  actor B as Bob
-  participant API as rhumbatron-api
   participant WA as ChangeWorkflow A
   participant WB as ChangeWorkflow B
   participant Root as ProjectRootDO
   participant Rev as Sonnet
   participant D1
 
-  A->>API: request A
-  B->>API: request B
-  API->>WA: start
-  API->>WB: start
-  WA->>WA: intake review: plan
-  WB->>WB: intake review: plan
   WA->>Root: admit A (order 1)
   WB->>Root: admit B (order 2)
-  WA->>WA: plan, criteria with IDs
-  WB->>WB: plan, criteria with IDs
   WA->>Root: registerScope A
   Root-->>WA: earlier = none
   WB->>Root: registerScope B
   Root-->>WB: earlier = [A]
-  loop up to 10 times, 15 s apart
-    WB->>Root: getScope A (scoped?)
+  loop up to 10 times, 15 s apart, while A is not scoped
+    WB->>Root: getScope A
   end
   WB->>WB: deterministic overlap pass
   alt resources or routes overlap
     WB->>Rev: review_requests: criteria of A and B
     Rev-->>WB: verdict with cited criterion IDs
-    opt conflicting, different requesters
+    opt supported conflict, different requesters
       WB->>Rev: arbitrate_requests, A first
       WB->>Rev: arbitrate_requests, B first
     end
   end
   WB->>D1: request_conflicts row (one per pair and round)
-  WB->>WB: continue, exclude criteria, or ask (needs_input)
+  WB->>WB: continue, exclude criteria, or needs_input
 ```
 
-### Waiting for an unscoped earlier request
+### Unscoped earlier request
 
-An earlier Change can still plan when the later Change registers.
-Its scope is then `scoped: false`.
-The later workflow reads the scope again, up to 10 times, with a 15 second sleep between reads.
-After the last read, the unscoped Change counts as overlapping.
-Rhumbatron never treats an unknown scope as independent.
+An earlier Change can still be in planning when the later Change registers. Its scope is then `scoped: false`.
+The later workflow reads the scope again, up to 10 times, with 15 seconds between reads.
+If the scope is still unscoped, the pair counts as overlapping.
 
 ### Deterministic overlap pass
 
@@ -271,171 +241,153 @@ Rhumbatron never treats an unknown scope as independent.
 It returns `true` if one of the two Changes is not scoped.
 Otherwise it compares two sets:
 
-- Resource tokens. The code removes the `project:<slug>` prefix, splits on `:` and `-`, and drops generic words such as `app`, `api`, `ui`, `web` and `src`. The two Changes overlap if one token is in both sets.
-- HTTP routes. The code finds route strings that start with `/` in the criteria text. The two Changes overlap if one route is in both sets.
+- Resource tokens. The code removes the `project:<slug>` prefix, splits on `:` and `-`, and drops the words `app`, `api`, `ui`, `project`, `frontend`, `backend`, `web`, and `src`. One shared token is an overlap.
+- HTTP routes. The code finds the strings that start with `/` in the criteria text. One shared route is an overlap.
 
-If the pair does not overlap, the verdict is `independent`, the cost is 0, and no model runs.
-The receipt records the method `deterministic`.
+A pair with no overlap gets the verdict `independent`, with cost 0 and the receipt method `deterministic`.
 
 ### Review and citation validation
 
-An overlapping pair gets one review from Sonnet.
-The model calls the tool `review_requests` once.
-It returns a verdict (`independent`, `compatible`, `conflicting` or `duplicate`) and its citations.
-Each conflict names one criterion ID of each Change and a short reason.
-A duplicate lists in `covered`, for each criterion of the later Change, the criterion of the earlier Change that delivers it, with a quote of its text.
+An overlapping pair gets one Sonnet review with the tool `review_requests`.
+The verdict is `independent`, `compatible`, `conflicting`, or `duplicate`.
 
-Application code then validates the answer (AGENTS.md section 34.4.2).
-The answer is not valid in these cases:
+- Each conflict cites one criterion ID of each Change and a short reason.
+- `dependentOnConflict` lists the criteria that only make sense if a conflicting criterion of the same side holds.
+- For `duplicate`, `covered` maps each criterion of the later Change to the earlier criterion that delivers it, with a quote.
 
-- The JSON does not match the schema, or the model returns no tool call, or more than one.
+`validateRequestReview` rejects the answer in these cases (AGENTS.md section 34.4.2):
+
+- The JSON does not match the schema, or the model returns no tool call or more than one.
 - A conflict cites an ID that is not a criterion of that Change.
-- The verdict is `conflicting` and the conflict list is empty, or the verdict is not `conflicting` and the list is not empty.
-- The verdict is `duplicate` and `covered` is empty, or a `covered` quote is not text of the cited earlier criterion.
+- The verdict is `conflicting` and the conflict list is empty, or the verdict is not `conflicting` and the conflict or dependent list is not empty.
+- The verdict is `duplicate` and `covered` is empty, or the verdict is not `duplicate` and `covered` is not empty.
+- A `covered` entry cites an unknown criterion, or its quote is not text of the cited earlier criterion.
+- A dependent entry does not chain back to a cited conflict of its side.
 
-An invalid answer, a provider error, and an abstention all become `unconfirmedReview`: verdict `conflicting`, `supported: false`, no cited criteria.
-A review that cannot confirm compatibility never lets both requests proceed.
+A rejected answer, a provider error, and an abstention all become `unconfirmedReview`: verdict `conflicting`, `supported: false`, no cited criteria.
+A review that cannot confirm compatibility never lets both requests proceed without a question.
 
-A Change makes at most 4 reviews, and only while its model spend is below the Change budget.
-Past that limit an overlapping pair gets the same conservative result (receipt method `review-limit`).
+Each comparison round of a Change makes at most 4 reviews, and only while its model spend is below the Change budget.
+Past that limit, an overlapping pair gets the same unconfirmed result (receipt method `review-limit`).
 
-`checkRequestPair` first inserts a `request_conflicts` row with a conservative receipt (`review-interrupted`).
-It does this before it calls the model.
-If the workflow stops after the call, the retry reads the stored review and does not spend again.
-The arbiter result is stored the same way.
+`checkRequestPair` inserts the `request_conflicts` row with an unconfirmed receipt (`review-interrupted`) before it calls the model.
+A retry reads the stored row and does not call the model again.
+The arbiter result is stored the same way (`arbiter-interrupted`).
 
 ## The system arbiter
 
 A supported `conflicting` review between different requesters goes to the arbiter.
-The arbiter is one Sonnet tool call, `arbitrate_requests`, that runs twice: once with the earlier request as `a`, once with the later request as `a`.
-It reads both goals, both criteria lists, the cited conflicts and the current app summary (files, dependency names, stack).
-The prompt says that who asked never matters, and that the request that fits the current app wins.
-For example, an app that already uses React keeps React over a request for AngularJS.
+The arbiter is the Sonnet tool `arbitrate_requests`. It runs twice: once with the earlier request as `a`, once with the later request as `a`.
+It reads both goals, both criteria lists, the cited conflicts, and the current app items (`canonical:files`, `canonical:deps`, `canonical:stack`).
+The prompt states that who asked never matters, and that the request that fits the current app wins.
 
-The verdict is closed: `prefer_a`, `prefer_b` or `ask`.
-The rationale must cite at least one criterion ID (`side` and `id`) and at least one packet item ID (`a:goal`, `b:goal`, `conflict:N`, `canonical:files`, `canonical:deps`, `canonical:stack`).
-Code checks every citation (`validateArbitration`).
-A preference applies only when both runs are valid and name the same request (`arbiterDecision`).
+The verdict is `prefer_a`, `prefer_b`, or `ask`.
+The answer must cite at least one criterion (`side` and `id`) and at least one packet item (`a:goal`, `b:goal`, `conflict:N`, or a `canonical:` item).
+`validateArbitration` checks every citation. An invalid answer counts as an unsupported `ask`.
+`arbiterDecision` applies a preference only when both runs are valid and name the same request.
 Two runs that each prefer the request they read first do not agree.
+The arbiter runs only while the model spend of the Change is below its budget. Otherwise the result is `ask`.
 
-The same requester asking twice is not a conflict between people: the later request replaces the earlier one, with `decided_by = system:same_requester`.
+When the same requester made both requests, no arbiter runs. The later request wins with `decided_by = system:same_requester`.
 
 ```mermaid
 flowchart TB
-  S["Earlier Change A, later Change B"] --> O{"Overlap pass:<br/>shared resource token<br/>or route, or unscoped?"}
-  O -->|"no"| IND["independent:<br/>both build in parallel"]
-  O -->|"yes"| R["Sonnet review of criteria"]
-  R --> V{"Valid, cited verdict?"}
-  V -->|"no, or review limit"| ASK["B becomes needs_input,<br/>kind conflict"]
-  V -->|"independent or compatible"| IND
-  V -->|"duplicate"| DUP["B becomes needs_input,<br/>kind duplicate"]
-  V -->|"conflicting"| SR{"Same requester?"}
-  SR -->|"yes"| LA["A is the loser"]
-  SR -->|"no"| AR{"Arbiter: both orders agree,<br/>citations valid?"}
+  O{"Overlap pass:<br/>shared token or route,<br/>or unscoped?"} -->|"no"| IND["independent:<br/>both continue"]
+  O -->|"yes"| R{"Sonnet review:<br/>valid, cited verdict?"}
+  R -->|"no, or review limit"| ASK["B: needs_input, kind conflict"]
+  R -->|"independent or compatible"| IND
+  R -->|"duplicate"| DUP["B: needs_input, kind duplicate"]
+  R -->|"conflicting"| SR{"Same requester?"}
+  SR -->|"yes"| LA["A loses"]
+  SR -->|"no"| AR{"Arbiter: both orders<br/>valid and agree?"}
   AR -->|"no, or ask"| ASK
   AR -->|"prefer B"| LA
-  AR -->|"prefer A"| LB["B is the loser"]
-  LA --> PR{"A already promoted?"}
-  PR -->|"yes"| KEEP["Keep A. B is marked<br/>replaces; no cancel"]
-  PR -->|"no"| CAN["Cancel A with the reason<br/>and the winner ID"]
-  LB --> EXC["Exclude the cited<br/>criteria of B"]
-  EXC --> NS{"Only quality-gate<br/>criteria left in B?"}
-  NS -->|"yes"| NOT["B stops as not_selected"]
-  NS -->|"no"| PART["Re-plan B without the<br/>losing criteria: partially_selected"]
+  AR -->|"prefer A"| LB["B loses: exclude its<br/>losing criteria"]
+  LA --> PR{"A has a promoted<br/>Candidate?"}
+  PR -->|"yes"| KEEP["Keep A.<br/>B: outcome replaces"]
+  PR -->|"no"| CAN["A: not_selected.<br/>B: outcome selected"]
+  LB --> NS{"Only quality-gate<br/>criteria left?"}
+  NS -->|"yes"| NOT["B: not_selected"]
+  NS -->|"no"| PART["Re-plan B:<br/>partially_selected"]
 ```
 
-A question from the comparison uses the same `needs_input` status, notification, answer route and 3-round limit as the intake gate.
-For kind `conflict` the owner also gets the notification.
-The question names both requests and the conflicting criteria and asks how the later request should change so both fit.
-After an answer the workflow runs the intake gate and the planner again, and compares the new criteria as a new round of the pair.
-After `proceed_anyway` or the third answer it does not ask again: a supported decision still applies, and an undecided pair lets both requests go on.
+A question from the comparison uses the same `needs_input` status, notification, route, and 3-round limit as the intake gate.
+For kind `conflict`, the Project owner also gets the notification.
+The question names the other request and up to 2 conflicting criterion pairs, and asks how the later request must change so both fit.
+After an answer, the workflow runs the intake gate and the planner again, and compares the new criteria as a new round of the pair.
+After `proceed_anyway` or the third answer, the comparison asks no question. A supported decision still applies. An undecided pair lets both requests continue.
 
-`request_conflicts.policy` records how the pair ended: `system_arbiter`, `same_requester` or `ask_requester`.
+`request_conflicts.policy` records the result: `system_arbiter`, `same_requester`, or `ask_requester`.
 `decided_by` is `system:arbiter` or `system:same_requester`.
-Each arbitration is also a Decision Receipt in `change_decisions` (`decision_type = 'REQUEST_ARBITER'`) with the two verdicts, their validity and the cost.
+Each arbitration writes a Decision Receipt to `change_decisions` (`decision_type = 'REQUEST_ARBITER'`) with the two verdicts, their validity, and the cost.
+The comparison records `conflict.reviewed` on the later Change, and on the winner when the winner is the earlier Change.
 
-### The loser is the later Change
+### The later Change loses
 
-This is the common case, because the later Change does the comparison.
-The workflow excludes the criteria that the review cited for the later Change.
-It also excludes the criteria that depend on a cited one (`losingCriterionIds`).
-The review lists them in `dependentOnConflict`, and code checks each entry like a citation.
-A deterministic rule adds a criterion that names the losing layout, for example "card" or "grid", when the winner does not.
-Example: "Each card shows the recipe title" depends on "renders as a grid of cards", so it loses with it.
-Then the workflow checks what remains.
+The workflow removes these criteria from the later Change (`losingCriterionIds`):
 
-`nothingSelected` returns true when every remaining criterion only restates the quality gate.
-An example is "typecheck, test and contract all pass".
-The planner adds such a criterion to most Changes, and it never conflicts.
-Without this rule a loser would stay alive as a partial selection with nothing to build.
-In that case the Change stores the planned criteria, so the user still sees the request, and ends as `not_selected` with the reason and the winner ID.
+- The criteria that the review cited for the later Change.
+- The valid `dependentOnConflict` entries that chain back to a cited criterion.
+- A criterion that names a layout noun of a cited losing criterion (for example "card" or "grid") when the winner does not name that noun.
 
-If a real criterion remains, the planner makes a new Work Graph for the selected criteria only.
-The Change continues with `outcome = partially_selected`.
-The text of the reason changes from "Not selected:" to "Partially selected:".
+`nothingSelected` returns `true` when every remaining criterion only restates the quality gate, for example "typecheck, test and contract all pass".
+In that case the Change stores the planned criteria and ends as `not_selected`, with the reason and the winner ID.
+Otherwise the planner makes a new Work Graph for the remaining criteria.
+The Change continues with `outcome = partially_selected`, and its reason starts with "Partially selected:".
 
-### The loser is the earlier Change
+### The earlier Change loses
 
-The workflow cancels the earlier Change with the reason and the winner ID.
-If its work is running, it stops.
-If the earlier Change already has a promoted Candidate, the workflow does not undo the promotion.
-Promotion is final once Root commits it.
-The winner gets `outcome = replaces`.
-If the cancel is refused because promotion has started, the later Change gets `outcome = replaces` too.
+- If the earlier Change has no promoted Candidate, `cancelChange` sets it to `not_selected` with the reason and the winner ID. Its open Tasks become `cancelled` and its open Candidates become `rejected`. The later Change gets `outcome = selected`.
+- If the earlier Change has a promoted Candidate, the workflow does not undo the promotion. The later Change gets `outcome = replaces`.
+- If `cancelChange` refuses because promotion has started, the later Change also gets `outcome = replaces`.
 
 ### Recompose guard
 
-`recomposeDecision` (`workers/integration/src/recompose.ts`) inserts a Candidate only if the Change is not blocked.
-The insert has a `WHERE EXISTS` condition.
-It refuses a Change with status `not_selected`, `cancelled` or `needs_input`.
-It also refuses a Change with outcome `not_selected` or `duplicate`.
-Without this guard, a stale recompose could ship the loser over the winner.
+A stale Candidate of a losing Change never recomposes.
+`recomposeDecision` (`workers/integration/src/app-release-model.ts`) skips a closed Change and a Change that cannot ship.
+The insert in `recomposeStaleCandidate` (`workers/integration/src/recompose.ts`) also has a `WHERE EXISTS` condition. It refuses a Change with status `not_selected`, `cancelled`, or `needs_input`, or with outcome `not_selected` or `duplicate`.
 
-## What the UI shows
+## Web UI
 
 - The Project page lists Changes in a table with a `Requested by` column.
-- Each Change row has an outcome line: `Not selected: <reason>` with a `(view winner)` link, `Selected`, `Partially selected`, `Replaces earlier request`, or `Duplicate`.
-- A Change in `needs_input` shows its `clarification`: the summary, the questions with their options, the related request, and the actions Answer, Proceed anyway and Withdraw for the requester and the owner.
-- The `Conflicting requests` card shows both goals, the cited criteria or covered quotes, and the winner.
-- The Project header has a Share dialog and a members list for the owner. The API shows invitations to the owner only, and the email of a member only to the owner and to that member.
-- The Settings page (`/projects/:projectId/settings`) has five sections: General (name, slug, live app host, created date), People (the same members list and invitations as the Share dialog), Defaults (the default Change budget), Display (the default Product or Systems view, stored in the browser), and Danger zone (Delete project for the owner, Leave project for a collaborator). A collaborator sees the owner-only fields as read-only values and the line "Only the project owner can change these."
-- The home page has a `Shared with you` section for Projects where the user is a collaborator, and pending invitations.
-- The UI hides owner-only buttons for a collaborator. The API still enforces the rule.
+- Each Change row has an outcome line: `Not selected: <reason>` with the link "View the selected change", `Selected`, `Partially selected`, `Replaces earlier request`, or `Duplicate: <reason>`.
+- A `needs_input` Change shows the summary, the questions, and a link to the related request. The requester and the owner get the actions "Send answers", "Build it as it is", and "Withdraw request".
+- The `Conflicting requests` card shows both goals, the cited criteria or covered quotes, and the winner. It reads `GET /v1/changes/:changeId/request-conflicts` (up to 10 `conflicting` or `duplicate` rows).
+- The Project header has a Share dialog for the owner and a Members dialog for a collaborator. The API shows invitations only to the owner. It shows the email of a member only to the owner and to that member.
+- The Settings page (`/projects/:projectId/settings`) has these sections: General (name, slug, live app host, created date), People (members and invitations), Defaults (the default Change budget, 0.5 to 25 USD), Display (the default Product or Systems view, stored in the browser), and Danger zone (Delete project for the owner, Leave project for a collaborator). A collaborator sees the owner-only values as read-only, with the line "Only the project owner can change these."
+- The home page has a `Shared with you` section and the pending invitations.
+- The UI hides owner-only buttons from a collaborator. The API enforces the same rule.
 
-## Known limitation
+## Limitation
 
-The review can miss a contradiction.
+The overlap pass can miss a contradiction.
 Two requests can use unrelated words and touch unrelated resources.
-The overlap pass then finds no overlap, and no model reads the pair.
-Both Changes ship in sequence, and the later one wins (last one wins).
-The tests of the earlier Change usually fail on the later tree and stop it.
-An agent can edit those tests.
-No check protects tests that agents can edit.
-Report such a miss as an incident.
+Then no model reads the pair, and both Changes build.
+The Change that promotes later builds on the tree of the earlier one.
+No check protects the tests of the earlier Change from edits by a later Agent.
 
 ## Examples
 
 ### A duplicate request
 
-Alice asks for "gta6 mission planner, calendar of missions, each day has a kanban list".
-Her Change C1 is running.
+Alice's Change C1 is running: "gta6 mission planner, calendar of missions, each day has a kanban list".
 Bob asks: "Add kanban feature".
 
-1. Retrieval finds C1. Clef-flash says `already_covered` for the pair.
-2. Both Sonnet orders say `already_covered` and quote the C1 criterion "Each calendar day shows a kanban list".
-3. The three votes agree, so C2 becomes `needs_input` with kind `duplicate` before any planning.
+1. Retrieval finds C1. Clef-flash answers `already_covered` for the pair.
+2. Both Sonnet orders answer `already_covered` and quote the C1 criterion "Each calendar day shows a kanban list".
+3. The three votes agree. Bob's Change becomes `needs_input` with kind `duplicate`, before any planning.
 4. Bob reads: "This looks covered by "gta6 mission planner, ...": "Each calendar day shows a kanban list". What is different in your request?"
-5. Bob withdraws the request, or answers what is different. Nothing is built twice.
+5. Bob withdraws the request or states what is different.
 
-The clarity rule also finds "Add kanban feature" unclear (one product word), but the duplicate check runs first and asks the more useful question.
+The duplicate check runs before the clarity check, so Bob gets the duplicate question.
 
-### A conflict the system decides
+### A conflict that the system decides
 
-Alice owns a Project whose app is React. Bob asks for an AngularJS rewrite while Alice's React request is running.
+Alice's Project has a React app. Alice's React request is running. Bob asks for an AngularJS rewrite.
 
-1. The two requests overlap, so the Sonnet review runs and returns `conflicting` with valid citations.
-2. The arbiter runs twice. Both runs prefer the React request and cite `canonical:deps` (`react`) and the conflicting criteria.
-3. The two runs agree, so the React request wins with `decided_by = system:arbiter`.
-4. Bob's request becomes `not_selected` with the reason, which quotes the arbiter rationale.
+1. The two requests overlap. The Sonnet review returns `conflicting` with valid citations.
+2. The arbiter runs twice. Both runs prefer the React request and cite `canonical:deps` and the conflicting criteria.
+3. The runs agree. The React request wins with `decided_by = system:arbiter`.
+4. Bob's request loses its conflicting criteria. When only quality-gate criteria remain, it ends as `not_selected`, and the reason quotes the arbiter rationale.
 
-If the two runs had disagreed, Bob's request would be `needs_input` with kind `conflict`, and Bob and Alice would see the question.
+When the two runs disagree, Bob's request becomes `needs_input` with kind `conflict`. Bob and Alice (the owner) get the notification.

@@ -1,6 +1,7 @@
 # Decisions
 
-Architecture Decision Records (ADRs) state each decision, its reason, and its consequences as the system is now.
+Each Architecture Decision Record (ADR) states one decision, its reason, and its consequences.
+The [architecture pages](../architecture/README.md) describe how the system works.
 
 | ADR | Decision |
 |---|---|
@@ -22,7 +23,8 @@ Architecture Decision Records (ADRs) state each decision, its reason, and its co
 | [0020](./0020-live-apps-dynamic-workers.md) | Live apps on Dynamic Workers |
 | [0021](./0021-anthropic-model-provider.md) | Anthropic as the model provider |
 | [0022](./0022-empty-repositories.md) | Every Project starts from an empty repository |
-| [0023](./0023-shared-projects-and-request-priority.md) | Shared Projects |
+| [0023](./0023-shared-projects.md) | Shared Projects |
 | [0024](./0024-single-prod-environment.md) | Prod is the only remote environment |
 | [0025](./0025-system-decides-requests.md) | The system decides requests, and asks before it builds |
 | [0026](./0026-candidate-selection-and-acceptance.md) | Candidate selection among siblings and the acceptance check |
+| [0027](./0027-server-rendered-page-data.md) | Server-rendered page data and the phone text floor |

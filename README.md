@@ -4,7 +4,7 @@
 
 Many agents can propose many futures of one codebase. Only verified evidence can advance the canonical state.
 
-`AGENTS.md` is the authoritative build plan. `docs/BUILD_STATUS.md` states the current phase and caps. `docs/demo/runbook.md` is the demo sequence. [docs/architecture/README.md](docs/architecture/README.md) explains the architecture. [docs/operations/README.md](docs/operations/README.md) lists the runbooks.
+`AGENTS.md` is the authoritative build plan. [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md) states the current phase and caps. [docs/demo/runbook.md](docs/demo/runbook.md) is the demo sequence. [docs/architecture/README.md](docs/architecture/README.md) explains the architecture. [docs/operations/README.md](docs/operations/README.md) lists the runbooks. [docs/protocols/README.md](docs/protocols/README.md) lists the protocol schemas and the request API.
 
 ## Live Status
 
@@ -16,7 +16,7 @@ Prod is the only remote environment. Terraform deploys it (`envs/prod`, ADR 0017
 
 ## Architecture
 
-[docs/architecture/README.md](docs/architecture/README.md) has the full guide. This is the short version.
+[docs/architecture/README.md](docs/architecture/README.md) has the full guide.
 
 ```mermaid
 flowchart LR
@@ -34,7 +34,7 @@ flowchart LR
   router -->|project| view[ProjectViewDO] --> web[rhumbatron-web]
 ```
 
-A user submits a goal for a Project. The Root Planner compiles it into a Work Graph of Tasks (`ChangeWorkflow`). The Causal Router wakes only the agents whose Tasks are ready.
+A user submits a goal for a Project. The intake gate checks that the goal is clear and new (ADR 0025). The Root Planner then compiles it into a Work Graph of Tasks (`ChangeWorkflow`). The Causal Router wakes only the agents whose Tasks are ready.
 
 Each agent is an `AgentDO` with the Pi harness. It calls Anthropic Claude models through AI Gateway (ADR 0021). The agent declares a typed Intent, works in an Artifacts Workspace inside a capped Sandbox, and publishes a ChangeSet.
 
@@ -47,9 +47,9 @@ Every mutation writes a transactional outbox row, and the outbox publisher sends
 
 A deterministic detector checks Intents on semantic resources. Sonnet reviews ambiguous overlaps. The review escalates to Opus only when `ALLOW_OPUS` is `true`. Otherwise Sonnet runs the Opus tier. Conflicting paths fork into Candidates.
 
-The integration Worker composes each Candidate and verifies it in the Sandbox (build, unit, contract, Cart invariant, p95, security). It records verification Evidence in D1 and R2.
+The integration Worker composes each Candidate and verifies it in the Sandbox. The checks come from the risk tier and the Change: build, unit, contract, protected invariants, p95 performance, security, browser, acceptance, and the preview smoke check (`packages/evidence/src/plan.ts`). It records verification Evidence in D1 and R2.
 
-If the required checks pass and the policy approvals exist, `ProjectRootDO` promotes the winning Candidate with one atomic compare-and-swap. The promotion advances the Canonical Generation.
+Sibling Candidates of one Change wait for each other. Selection ranks them by Evidence (ADR 0026). If the required checks pass and the policy approvals exist, `ProjectRootDO` promotes the selected Candidate with one atomic compare-and-swap. The promotion advances the Canonical Generation.
 
 Reliability safeguards:
 - Dead-letter consumer with Retry and Dismiss.
@@ -59,13 +59,14 @@ Reliability safeguards:
 
 ## UI Routes
 
-- `/`: Projects list. Header includes notification bell.
+- `/`: Projects list and invitations ("Shared with you"). The header has the notification bell.
 - `/projects/<id>`: Project overview.
 - `/changes/<id>`: Change details, acceptance criteria, invariants, candidates.
 - `/changes/<id>/flight`: Flight Control (execution DAG, agent swimlanes, workspace lanes, codebase heatmap, candidate arena, preview wall, evidence explorer, decisions, events, time machine, command palette Cmd+K).
 - `/candidates/<id>`: Candidate verification evidence, approval, promotion.
 - `/compare/<changeId>`: Candidate comparison matrix.
-- `/projects/<id>/{agents,events,verification,workspace,costs,graph,code,versions}`: Dedicated project management and monitoring views.
+- `/projects/<id>/{agents,events,verification,workspace,costs,graph,code,versions}`: Project views. The Events page has the Product and Systems toggle.
+- `/projects/<id>/settings`: Project name and default Change budget.
 
 ## Prerequisites
 
@@ -89,7 +90,7 @@ bun run dev          # runs all apps and Workers locally
 
 For the web app, copy `apps/web/.env.example` to `apps/web/.env.local` and add Clerk development keys.
 
-Remote scripts (`tf`, `smoke:*`, `cleanup:projects`, `cost:report`) read credentials from the macOS Keychain. `scripts/tf.ts` lists the items for each Terraform root. The `package.json` scripts list the rest.
+`tf`, `smoke:models`, `cost:report`, and `e2e` read credentials from the macOS Keychain. `scripts/tf.ts` lists the items for each Terraform root. The `package.json` scripts list the rest. The scripts that sign in as the Clerk smoke user read it from the environment (see below).
 
 ```mermaid
 flowchart LR
@@ -109,7 +110,7 @@ containers/coding-agent  Sandbox image
 fixtures/                Acme Shop source and the Wishlist designs for the demo
 infrastructure/terraform Bootstrap, env roots (global, prod), modules
 migrations/d1            D1 SQL migrations (applied by Terraform)
-docs/                    Architecture, ADRs, protocols, operations, demo, plans, build status
+docs/                    Architecture, ADRs, protocols, operations, demo, build status (published by apps/docs)
 scripts/                 Bundle, checks, smoke, cleanup, cost report
 ```
 
@@ -123,7 +124,9 @@ scripts/                 Bundle, checks, smoke, cleanup, cost report
 | `bun run lint` / `lint:fix` | Biome lint and format check. |
 | `bun run test:critical` | Critical tests only: protocols, invariants, failure modes (no coverage target). |
 | `bun run check` | Run all local quality gates (lint, types, guardrails, fixtures, deps, secrets, Terraform). |
-| `bun run check:guardrails` | Enforce Terraform-only and no-`wrangler deploy` policy. |
+| `bun run check:guardrails` | Enforce the Terraform-only and no-`wrangler deploy` policy and resource names. |
+| `bun run check:bindings` | Compare the binding names in each `wrangler.jsonc` with the bindings Terraform uploads. |
+| `bun run check:fixtures` | Fail when the embedded demo fixtures are stale. |
 | `bun run check:deps` | Run knip and sherif monorepo hygiene checks. |
 | `bun run check:secrets` | Run gitleaks scan on history and staged changes. |
 | `bun run tf:check` | Run `terraform fmt`, `validate`, and tflint on all roots without remote access. |
@@ -135,11 +138,12 @@ scripts/                 Bundle, checks, smoke, cleanup, cost report
 | `bun run smoke:models` | Anthropic through AI Gateway: workspace header, one tool call per tier, one prompt cache hit (under 1 cent). |
 | `bun run cleanup:projects` | Archive smoke-test Projects on prod (`--dry-run` lists them only). Needs `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` for the prod Clerk instance. |
 | `bun run cost:report` | Read-only report of usage, caps, and leftover resources (`--alerts-only`). |
+| `bun run e2e prod` | Every public API endpoint against prod, without model spend. Reads the Clerk smoke user from the Keychain. Removes every Project it creates. |
 | `bun run test:ui` | Playwright UI suite (`e2e/ui`) against prod, at 1440px and 412px. Signs in as the Clerk prod smoke user. Writes to `e2e/.results`. |
 | `bun run lighthouse` | Lighthouse on every page of the UI suite, mobile and desktop, against prod (`--only=<page>`, `--form=mobile\|desktop`). Writes to `e2e/.lighthouse`. |
 | `bun run journeys prod [A1,A2,...\|all]` | API journeys against prod: real builds through the public API (about $0.15 per build). Removes every Project it creates. |
 
-`test:ui`, `lighthouse`, `journeys`, `smoke:prod`, and `cleanup:projects` sign in as the Clerk prod smoke user. They read `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` from the environment; set them from the Keychain:
+`test:ui`, `lighthouse`, `journeys`, `smoke:prod`, and `cleanup:projects` sign in as the Clerk prod smoke user. They read `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` from the environment. Set them from the Keychain:
 
 ```bash
 CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-prod -w) \
@@ -178,6 +182,8 @@ Cost controls ([docs/operations/costs.md](docs/operations/costs.md)):
 
 ## Git hooks
 
-- pre-commit: Biome (auto-fix), gitleaks on staged changes, `terraform fmt`, guardrails.
-- commit-msg: Conventional Commits via commitlint.
-- pre-push: typecheck, dependency checks, Terraform checks.
+`lefthook.yml` defines the hooks:
+
+- pre-commit: Biome (auto-fix), gitleaks on staged changes, `terraform fmt -check`, guardrails.
+- commit-msg: Conventional Commits through commitlint.
+- pre-push: typecheck, dependency checks, Terraform checks, binding drift check.

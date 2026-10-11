@@ -3,8 +3,8 @@
 ## Context
 
 The frozen stack fixes Bun, Turborepo, TypeScript, Biome, Zod, Vitest, Terraform, and Wrangler.
-The repository also needs secret scanning, Git hooks, dependency hygiene, and a check that
-enforces the Terraform-only rule. These are developer tools. They do not change the runtime stack.
+The repository also needs secret scanning, Git hooks, dependency hygiene, and a check of the
+Terraform-only rule. These are developer tools. They do not change the runtime stack.
 
 ## Decision
 
@@ -12,16 +12,17 @@ enforces the Terraform-only rule. These are developer tools. They do not change 
 |---|---|---|
 | Lint and format (TS, JSON, CSS) | Biome | Frozen choice. |
 | Type checking | TypeScript (`tsc`) through Turborepo | Frozen choice. |
-| Cloudflare runtime types | `wrangler types` | Wrangler generates them per Worker from `wrangler.jsonc`. Git does not track them. |
+| Cloudflare runtime types | `wrangler types` (`bun run cf:types`) | Wrangler generates them per Worker from `wrangler.jsonc`. Git ignores `worker-configuration.d.ts`. |
 | Secret scanning | gitleaks (system binary) | Default rules plus Cloudflare, R2, and Anthropic rules in `.gitleaks.toml`. |
-| Git hooks | lefthook (dev dependency) | Single binary, parallel jobs, no shell glue. |
-| Commit messages | commitlint, conventional config | Readable history. |
+| Git hooks | lefthook (dev dependency) | One binary, parallel jobs, no shell scripts. |
+| Commit messages | commitlint, conventional config | One commit format. |
 | Unused code and dependencies | knip | Fails on undeclared and unused dependencies. |
-| Monorepo package hygiene | sherif | Catches version mismatches across workspaces. |
-| Terraform | `terraform fmt`, `terraform validate`, tflint | Static checks with no backend access. |
-| Project policy | `scripts/check-guardrails.ts` | Blocks `wrangler deploy`, remote Wrangler mutations, `-auto-approve`, direct API writes, and credential literals in Terraform. |
+| Monorepo package hygiene | sherif | Finds version mismatches across workspaces. |
+| Terraform | `terraform fmt`, `terraform validate`, tflint (`scripts/terraform-check.ts`) | Static checks with no backend access. |
+| Project policy | `scripts/check-guardrails.ts` | Blocks `wrangler deploy`, remote Wrangler mutations, `-auto-approve`, direct API writes, credential literals in Terraform, and resource names outside `rhumbatron-<component>-<prod\|global>`. |
 | Binding drift | `scripts/check-binding-drift.ts` | Compares each `wrangler.jsonc` with the bindings that Terraform uploads in `envs/prod`. It never contacts Cloudflare. |
-| Installs | Bun isolated linker, exact versions | A package cannot import a dependency that it does not declare. |
+| Installs | Bun isolated linker, exact versions (`bunfig.toml`) | A package cannot import a dependency that it does not declare. |
+| Checks against prod | `bun run smoke:prod`, `bun run e2e`, `bun run test:ui` (Playwright, `e2e/ui`), `bun run lighthouse` | They run on a developer machine against `rhumbatron.com`. |
 
 ## Consequences
 
@@ -32,7 +33,8 @@ enforces the Terraform-only rule. These are developer tools. They do not change 
 - `.github/workflows/ci.yml` runs on pull requests and on pushes to `main`. It runs lint, binding
   drift, typecheck, critical tests, build, bundle, `terraform fmt -check`, and `terraform validate`
   with `-backend=false`. It has no credentials, no remote state, and no deploy step.
-- Guardrails, the fixture check, knip, sherif, gitleaks, and tflint run only locally.
+- Guardrails, the fixture check, knip, sherif, gitleaks, tflint, and the checks against prod run
+  only on a developer machine.
 - Remote changes go through `terraform plan` and `terraform apply` on a developer machine.
 
 ## Diagram

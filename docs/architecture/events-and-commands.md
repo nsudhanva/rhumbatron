@@ -18,17 +18,20 @@ Both envelopes are Zod schemas in `packages/protocol/src`.
 | Event | `eventId`, `eventType`, `eventVersion`, `tenantId`, `projectId`, `changeId`, `taskId`, `actor`, `resource`, `canonicalGeneration`, `causedBy`, `correlationId`, `timestamp`, `payload` | `eventId` | `event.ts` |
 | Command | `commandId`, `commandType`, `projectId`, `changeId`, `taskId`, `attempt`, `createdAt`, `deadline`, `payload` | `commandId` | `command.ts` |
 
+`EVENT_TYPES` in `event.ts` is the closed list of Event types.
+
 Most Change Events get a deterministic ID from `stableEventId` in `workers/integration/src/events.ts`.
-The ID is `evt_` plus 16 bytes of SHA-256 over the Change ID, the Event type, the Task ID, and an optional key.
-A retried Workflow step therefore writes the same Event again, and the outbox ignores it.
-ProjectRootDO uses `crypto.randomUUID()` inside its own transaction.
-This is safe because the transaction runs once.
+The ID is `evt_` plus the first 16 bytes of SHA-256 over the Change ID, the Event type, the Task ID, and an optional key.
+A retried Workflow step writes the same Event ID again, and the outbox ignores the repeat.
+ProjectRootDO and ResourceShardDO use `crypto.randomUUID()` for Events that they create in their own transaction (for example `canonical.advanced` and `claim.acquired`).
+The transaction runs once, so the ID does not change on a retry.
 
 ## Transactional outbox to K2
 
 Two Durable Object classes own an outbox: ProjectRootDO and ResourceShardDO.
-ProjectRootDO writes project-wide facts (`project.created`, `artifact.promoted`, `canonical.advanced`).
-ResourceShardDO writes everything else, because Change events go to the shard that owns `change:<id>`.
+ProjectRootDO writes `project.created`, `artifact.promoted`, and `canonical.advanced`.
+ResourceShardDO writes all other Events.
+Change Events go to the shard that owns `change:<id>` (`appendChangeEvents` in `workers/integration/src/events.ts`).
 
 ```mermaid
 flowchart LR
@@ -38,20 +41,21 @@ flowchart LR
   AL --> PUB["OutboxPublisher.publishDue<br/>max 100 rows per project"]
   PUB --> H["streamIndex =<br/>fnv1a32(projectId) mod 8"]
   H --> P["Producer binding<br/>EVENTS_00 .. EVENTS_07"]
-  P --> K2[("K2 stream<br/>rhumbatron_events_NN_env")]
+  P --> K2[("K2 stream<br/>rhumbatron_events_NN_prod")]
   PUB -->|"after a successful send"| N["EVENT_ROUTER.nudge(streamIndex)"]
   CRON["Cron every minute<br/>one stream per tick"] --> ER["rhumbatron-event-router"]
   N --> ER
   K2 --> ER
 ```
 
-Rules in the code:
+Rules in the code (`workers/coordinator/src/outbox.ts`, `infrastructure/terraform/envs/prod/main.tf`):
 
-- There are 8 streams, named `rhumbatron_events_00_prod` through `rhumbatron_events_07_prod`. `AGENTS.md` uses hyphens. K2 names allow only letters, digits, and underscores (ADR 0006).
+- There are 8 streams, `rhumbatron_events_00_prod` to `rhumbatron_events_07_prod`. K2 names allow only letters, digits, and underscores (ADR 0006).
 - Retention is 7 days (`retention_seconds = 604800`).
-- One project always maps to one stream, so its Events stay in order on that stream.
-- The nudge is best effort. The cron sweep is the backstop. The cron visits one stream per minute, so each stream gets a sweep every 8 minutes.
-- A Terraform precondition fails the plan if the account would have more than 20 K2 streams.
+- One Project always maps to one stream. Its Events stay in order on that stream.
+- The nudge is best effort. The cron sweep is the backstop. The cron visits one stream per minute, so each stream gets a sweep every 8 minutes. The pause switch removes the cron.
+- A Terraform precondition fails the plan if the account would have more than 20 K2 streams (ADR 0017).
+- `AlarmGuard` (`alarm-guard.ts`) limits each Durable Object to 2,000 alarm fires per UTC day. An alarm with no due work is deleted.
 
 ### Outbox row states
 
@@ -73,17 +77,17 @@ If K2 is down, the state change is still correct. Only the dashboard lags (secti
 ## Event router: K2 pull consumer
 
 The event router pulls from K2 over HTTP with `K2_CONSUMER_TOKEN`.
-It runs two subscriptions per stream on every nudge and every cron tick.
-The cron tick also runs the `audit-archiver` subscription.
-On a tick without maintenance or the release sweep, it also runs one `analytics-projector` batch.
+Every nudge and every cron tick runs two subscriptions on one stream: `project-view-projector`, then `causal-router`.
+The cron tick also runs one `audit-archiver` batch.
+A cron tick without maintenance or the release sweep also runs one `analytics-projector` batch.
 
 ```mermaid
 flowchart TB
   START["nudge or cron tick for stream N"] --> SUBS["project-view-projector,<br/>then causal-router<br/>(max 2 consumes each)"]
   SUBS --> DEC["Decode envelopes"]
-  DEC --> CLAIM["claimEvents: INSERT OR IGNORE<br/>processed_events (consumer, event_id)"]
-  CLAIM --> FRESH{"Fresh events?"}
-  FRESH -->|"projector"| PV["ProjectViewDO.applyDelta<br/>max 15 calls per run<br/>+ project_events feed rows"]
+  DEC --> CLAIM["claimEvents: INSERT OR IGNORE<br/>processed_events (consumer, event_id)<br/>projector: + project_events feed rows"]
+  CLAIM --> FRESH{"Subscription"}
+  FRESH -->|"projector"| PV["ProjectViewDO.applyDelta<br/>max 15 calls per run"]
   FRESH -->|"causal-router"| CR["routeCausalBatch"]
   PV --> OK{"All applied?"}
   CR --> OK
@@ -96,18 +100,29 @@ flowchart TB
   START --> AN["Cron only: analytics-projector<br/>1 batch, dedupe, Analytics Engine"]
 ```
 
-Notes:
+Notes (`workers/event-router/src/index.ts`):
 
-- The subrequest budget is at most 37 per invocation, below the Workers Free limit of 50.
-- The router releases the claim rows before a nack. Without that step, a redelivery would skip the events as duplicates.
-- The archive key is `events/<day>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz`. The R2 lifecycle expires `events/` after 365 days.
+- A nudge uses at most 37 subrequests. A cron tick uses at most 46. The Workers Free limit is 50.
+- The router releases the claim rows before a nack. Otherwise a redelivery skips the events as duplicates.
+- Events that the 15-call `applyDelta` cap defers lose their claim and come back with the next delivery. A deferral does not count as a failure.
+- A dead-lettered K2 batch gets a `dead_letters` row with queue `k2-<consumer>`. An operator can only dismiss it (`poison-batch.ts`).
+- The archive key is `events/<yyyy>/<mm>/<dd>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz`. The R2 lifecycle deletes `events/` objects after 365 days.
 - Terraform creates four subscriptions: `causal-router`, `project-view-projector`, `audit-archiver`, and `analytics-projector`.
-- `analytics-projector` (`workers/event-router/src/analytics.ts`) maps lifecycle Events to section 41.1 metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others). It writes one data point for each Event to the `rhumbatron_event_metrics_<env>` dataset (binding `EVENT_METRICS`). This separate dataset keeps these points apart from the source points in `METRICS`. Dedupe uses `processed_events` like the other consumers. It skips maintenance and release-sweep ticks, so a tick stays at 46 subrequests or fewer. The expected volume is about 1,000 points on a busy day, and the free limit is 100,000.
+- `analytics-projector` (`analytics.ts`) maps lifecycle Events to section 41.1 metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others). It writes one data point per fresh Event, at most 100 per tick, to the `rhumbatron_event_metrics_prod` dataset (binding `EVENT_METRICS`). The source points of other Workers stay in `METRICS`.
+
+### Cron housekeeping
+
+The same every-minute cron runs two bounded sweeps (`workers/event-router/src/maintenance.ts`):
+
+| Tick | Work |
+|---|---|
+| 04:17 UTC, once a day | Queues one `forks.sweep`. Queues `project.cleanup` and `index.purge` for up to 10 archived Projects. Queues an `index.build` backfill for up to 10 active Projects without a ready index. Deletes at most 5,000 `processed_events` rows older than 14 days. |
+| Minute 4, 9, 14 ... of each hour | Queues one `release.recover` for each Change still `releasing` 45 minutes after promotion, at most 10 per sweep. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release). |
 
 ## Causal routing
 
-The causal router decides which Agents wake after each fresh Event.
-Deterministic rules come first. Clef-flash on Workers AI decides only an ambiguous resource overlap.
+The causal router decides which Agents wake after each fresh Event (`workers/event-router/src/causal.ts`, `packages/causal-router`).
+Deterministic rules come first. Clef-flash on Workers AI decides only a prefix resource overlap.
 
 ```mermaid
 flowchart TB
@@ -118,8 +133,8 @@ flowchart TB
   INF -->|"no"| TYPE{"Event type"}
   TYPE -->|"task.completed"| READY["Newly ready Tasks:<br/>change.dispatch"]
   TYPE -->|"verification.started<br/>(work_graph_completed)"| COMP["candidate.create"]
-  TYPE -->|"canonical.advanced"| CA["Wake active agents,<br/>mark old Candidates stale,<br/>candidates.recompose,<br/>index.build"]
-  TYPE -->|"intent, challenge,<br/>changeset, claim events"| OV{"Resource overlap<br/>with an active agent"}
+  TYPE -->|"canonical.advanced"| CA["Wake active agents,<br/>mark older Candidates stale,<br/>candidates.recompose"]
+  TYPE -->|"resource Event"| OV{"Resource overlap<br/>with an active agent"}
   OV -->|"exact"| WAKE["agent.wake"]
   OV -->|"prefix only"| CLEF{"Clef-flash<br/>(200 calls per day)"}
   CLEF -->|"wake, abstain, or cap reached"| WAKE
@@ -127,22 +142,23 @@ flowchart TB
   OV -->|"none"| NONE
   READY --> CAP{"1,000 commands per Change per day"}
   COMP --> CAP
-  CA --> CAP
   WAKE --> CAP
 ```
 
 Notes:
 
-- Clef-flash abstains below a probability of 0.7. An abstention wakes the Agent, which is the safe default.
-- `artifact.promoted` and `canonical.advanced` both queue `index.build` for the indexer.
-- When a Task completes or fails, it frees an Agent slot. If a ready Task waits at the 8-agent limit, the router dispatches the Change again.
-- The wake consumer checks relevance again. A stale wake ends at once and counts as a false wakeup in Analytics Engine.
+- Resource Events are `intent.declared`, `intent.changed`, `challenge.created`, `changeset.proposed`, `claim.released`, and `claim.expired`.
+- Clef-flash abstains below a probability of 0.7. An abstention wakes the Agent.
+- The 1,000-command cap counts `change.dispatch`, `candidate.create`, and `agent.wake`. The router logs the dropped commands as errors.
+- `artifact.promoted` and `canonical.advanced` both queue `index.build` for the indexer. The cap does not count `index.build` or `candidates.recompose`.
+- After `canonical.advanced`, the router marks the promoted Candidate `promoted` and every other open Candidate on an older base `stale`. A Change in `awaiting_approval` with no verified Candidate returns to `verifying`. The `candidates.recompose` command then settles each stale Candidate. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release).
+- `task.completed` and `task.failed` free an Agent slot. If a ready Task waits at the 8-agent limit, the router dispatches the Change again.
+- The wake consumer checks relevance again. A stale wake ends at once and counts as a false wakeup in Analytics Engine (`workers/agents/src/wake-consumer.ts`).
 
 ## Queues
 
-All Queues are named `rhumbatron-<purpose>-<env>`.
+All Queues are named `rhumbatron-<purpose>-prod`.
 Terraform creates six Queues (`modules/async`) with 1 day of message retention.
-All six carry traffic.
 
 ```mermaid
 flowchart LR
@@ -157,51 +173,54 @@ flowchart LR
   DLQ[["dead-letter"]]
   AG["rhumbatron-agents"]
   IDX["rhumbatron-indexer"]
-  ERC["event-router<br/>dead-letter consumer"]
 
   INT -->|"agent.wake"| WQ
   ER -->|"agent.wake"| WQ
-  API -->|"dead-letter retry"| WQ
-  ER -->|"change.dispatch, candidate.create,<br/>candidates.recompose,<br/>forks.sweep, project.cleanup"| IQ
-  API -->|"project.provision, project.cleanup,<br/>fixture.publish, dead-letter retry"| IQ
+  ER -->|"change.dispatch, candidate.create,<br/>candidates.recompose, forks.sweep,<br/>project.cleanup, release.recover"| IQ
+  API -->|"project.provision, project.cleanup,<br/>app.provision, app.remove,<br/>fixture.publish"| IQ
   ER -->|"index.build, index.purge"| XQ
-  INT -->|"verification.start, release.start"| VQ
-  INT --> RQ
-  VQ --> INT
-  RQ --> INT
+  INT -->|"verification.start,<br/>candidate.create after a rebase"| VQ
+  INT -->|"release.start"| RQ
   WQ --> AG
   IQ --> INT
+  VQ --> INT
+  RQ --> INT
   XQ --> IDX
-  WQ -.->|"after 3 retries"| DLQ
-  IQ -.->|"after 3 retries"| DLQ
-  DLQ --> ERC
+  WQ & IQ & VQ & RQ -.->|"after 3 retries"| DLQ
+  DLQ --> ER
 ```
 
 | Queue | Consumer | Batch | Retries | Retry delay | Dead-letter Queue |
 |---|---|---|---|---|---|
 | `agent-wakeups` | `rhumbatron-agents` | 10 | 3 | 30 s | `dead-letter` |
 | `integration` | `rhumbatron-integration` | 10 | 3 | 30 s | `dead-letter` |
-| `indexing` | `rhumbatron-indexer` | 1, concurrency 1 | 3 | 30 s | none (failure recorded in `project_indexes`) |
-| `dead-letter` | `rhumbatron-event-router` | 5 | 5 | 60 s | none (dropped and logged) |
 | `verification` | `rhumbatron-integration` | 5 | 3 | 30 s | `dead-letter` |
 | `release` | `rhumbatron-integration` | 5 | 3 | 30 s | `dead-letter` |
+| `indexing` | `rhumbatron-indexer` | 1, concurrency 1 | 3 | 30 s | none (the indexer records the failure in `project_indexes`) |
+| `dead-letter` | `rhumbatron-event-router` | 5 | 5 | 60 s | none (dropped and logged) |
+
+The integration Worker consumes the `integration`, `verification`, and `release` Queues with one handler.
 
 Two commands start Workflows: `verification.start` (one per Candidate) and `release.start` (one per promoted generation with a live app).
 Each command carries a stable `commandId` and the idempotency key (Candidate ID or release ID).
-The consumer starts the existing Workflow with that key as the instance ID, so a redelivery finds the running instance.
+The consumer starts the Workflow with that key as the instance ID, so a redelivery finds the existing instance.
 The producer starts the Workflow directly only if the send fails (`workers/integration/src/workflow-commands.ts`).
 
-The integration consumer also limits its own work.
-A command that has more work asks for another delivery, at most 4 deliveries in total.
-On the last delivery it acknowledges the message instead of sending it to the dead-letter Queue.
-The daily maintenance tick at 04:17 UTC queues the bounded work again.
+The integration consumer also limits its own work (`MAX_DELIVERIES = 4` in `workers/integration/src/index.ts`):
+
+1. A bounded command with more work asks for another delivery after 10 s.
+2. A `candidate.create` that waits for a conflict review asks for another delivery after 45 s. Its last delivery composes anyway.
+3. A thrown error retries after 30 s.
+4. On the 4th delivery the consumer acknowledges the message. It does not send it to the dead-letter Queue.
+
+The daily 04:17 UTC tick queues `forks.sweep` and `project.cleanup` again.
 
 ### Dead-letter path
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant Q as agent-wakeups or integration
+  participant Q as Origin Queue
   participant C as Consumer Worker
   participant DLQ as dead-letter Queue
   participant ER as Event router
@@ -214,14 +233,17 @@ sequenceDiagram
   Q->>DLQ: move poison command
   DLQ->>ER: deliver
   ER->>D1: dead_letters row (idempotent on command_id)
-  ER->>D1: Task blocked, blocked_limit dead_letter
+  ER->>D1: ready or assigned Task to blocked (blocked_limit dead_letter)
   ER->>Shard: task.failed (outbox)
   Op->>D1: Retry or Dismiss in the UI (API)
-  D1-->>Q: Retry sends the command back to its origin Queue
+  D1-->>Q: Retry sends the command again with attempt + 1
 ```
 
-The dead-letter consumer never re-sends a command by itself.
-Only an operator action re-sends it (ADR 0019).
+Notes (`workers/event-router/src/dead-letter.ts`, `workers/api/src/dead-letters.ts`):
+
+- A command without a Task, or with a Task that already runs, puts the reason on the Change instead. Only a blocked Task records `task.failed`.
+- Retry sends `agent.wake` to `agent-wakeups` and every other command to `integration`.
+- The dead-letter consumer never re-sends a command. Only an operator action re-sends it (ADR 0019).
 
 ## Idempotency and dedupe
 
@@ -229,10 +251,10 @@ Every retry boundary has a stable key, so a retry never creates a second logical
 
 | Boundary | Key | Where the code enforces it |
 |---|---|---|
-| Event publish | `eventId` | `outbox.event_id UNIQUE`; shard `appendEvents` ignores a repeat |
-| Event consume | `(consumer, event_id)` | D1 `processed_events`, `INSERT OR IGNORE` |
-| Wake command | `cmd_<task>_ready` | Wake consumer treats a Task that the same Agent already holds as a duplicate |
-| Dead-letter record | `command_id` | D1 `dead_letters` |
+| Event publish | `eventId` | `outbox.event_id UNIQUE`; shard `appendEvents` uses `INSERT OR IGNORE` |
+| Event consume | `(consumer, event_id)` | D1 `processed_events`, `INSERT OR IGNORE`, kept 14 days |
+| Wake command | `cmd_<task>_ready` (dispatch), `cmd_<event>_<task>` (router) | Wake consumer treats a ready wake for a Task that the same Agent holds as a duplicate; `admitAgent` assigns once |
+| Dead-letter record | `command_id` | D1 `dead_letters`, `UNIQUE` |
 | Change creation | `(project_id, client_request_id)` | D1 unique constraint and `ON CONFLICT DO NOTHING` |
 | Workflow start | Instance ID = Change ID, Candidate ID, or release ID | Workflows reject a second instance with the same ID |
 | Workflow start command | `cmd_<candidate>_verify`, `cmd_<release>_release` | `workflowStartFor` maps the command to that instance ID |
@@ -240,6 +262,7 @@ Every retry boundary has a stable key, so a retry never creates a second logical
 | Promotion | Candidate ID + expected generation | `decidePromotion` returns `already_promoted` |
 | Release | `rel_<project>_<generation>` | D1 `releases` primary key |
 | K2 batch failure | `(consumer, batch_key)` | D1 `k2_batch_failures` |
+| K2 archive object | Event IDs of the batch | Same key, so a redelivery overwrites the same R2 object |
 
 This sequence shows a duplicate K2 delivery.
 The second delivery finds the claim row and applies nothing.

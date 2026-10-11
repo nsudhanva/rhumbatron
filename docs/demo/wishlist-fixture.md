@@ -1,4 +1,4 @@
-# Wishlist design-conflict fixture (P9-08)
+# Wishlist design-conflict fixture
 
 This fixture is the repeatable source of the demo conflict (AGENTS.md sections 4, 32.4, 54, 55).
 It holds two complete implementations of shared wishlists on top of `fixtures/acme-shop`. Rhumbatron
@@ -37,8 +37,8 @@ detector therefore reports a confirmed conflict with `fork_candidates`.
 shared list to the newest list, which has 42 members and 120 items. The traffic is 80% reads and
 20% item adds and removes, as a collaborator. Design A does about 120 scans of the 360,000-row
 membership table per read. This cost comes from recomputing access from the table. The benchmark
-contains no sleep. Design B does 120 map lookups. `bun run bench` runs the cart and wishlist benchmarks and reports the
-slowest endpoint's p95 as the API p95.
+contains no sleep. Design B does 120 map lookups. `bun run bench` runs the cart and wishlist
+benchmarks and reports the p95 of the slowest endpoint as the API p95.
 
 Measured on an Apple Silicon laptop (a local run of both designs):
 
@@ -79,9 +79,9 @@ touched). The shop root has no `data-testid="wishlist"`, so the browser check ru
    invariant. It then declares both Intents on the Change's ResourceShardDO. It records the
    conflict and its Challenge with the agents' detector and conflict ID rule. Events use actor
    `system:fixture`.
-3. `POST /v1/changes/:changeId/candidates` takes an optional `{"changeSetIds": [...]}` subset, so
-   design A and design B become separate Candidates. Without a body it composes every proposed
-   ChangeSet.
+3. `POST /v1/changes/:changeId/candidates` (owner only) takes an optional `{"changeSetIds": [...]}`
+   subset, so design A and design B become separate Candidates. Without a body it composes every
+   proposed ChangeSet.
 
 Each Workspace fork has a `task_runs` row, so Project cleanup and the fork sweep delete it.
 
@@ -90,6 +90,8 @@ Each Workspace fork has a `task_runs` row, so Project cleanup and the fork sweep
 1. Create the Acme Shop Project with `POST /v1/fixtures/projects` (see [runbook.md](runbook.md)).
 2. Create a Change on it with `startPlanning: false`, so the Root Planner does not run.
 3. Send `POST /v1/changes/:changeId/fixture-changesets` with `{"design": "both"}`.
+4. As the owner, send `POST /v1/changes/:changeId/candidates` once with the ChangeSet ID of design A
+   and once with the ChangeSet ID of design B.
 
 ## Limits
 

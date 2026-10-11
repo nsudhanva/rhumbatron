@@ -24,7 +24,6 @@ export default defineConfig({
         { label: "Operations", items: [{ autogenerate: { directory: "operations" } }] },
         { label: "Demo", items: [{ autogenerate: { directory: "demo" } }] },
         { label: "Decisions", collapsed: true, items: [{ autogenerate: { directory: "adr" } }] },
-        { label: "Plans", items: [{ autogenerate: { directory: "plans" } }] },
         { label: "Protocols", items: [{ autogenerate: { directory: "protocols" } }] },
         { label: "Build status", link: "/build-status/" },
       ],

@@ -8,37 +8,38 @@ the dashboard, Wrangler, or a direct API call. Semantic retrieval needs the inde
 
 ## Decision
 
-An adapter creates the index. `scripts/vectorize-sync.ts` follows section 11.4 (idempotent,
-read-before-write, delete support, invoked only by `terraform apply`).
+An adapter creates the index. `scripts/vectorize-sync.ts` follows section 11.4: it is idempotent,
+reads before it writes, supports delete, and runs only from `terraform apply`.
 
-- `terraform_data.vectorize_index` creates the index when it is missing. It fails the apply on a
-  dimension or metric mismatch. It never replaces the index on its own.
+- `terraform_data.vectorize_index` creates the index when it does not exist. It fails the apply on
+  a dimension or metric mismatch. It never replaces the index.
 - `terraform_data.vectorize_index_teardown` deletes the index on a real destroy. The index holds
-  derived data that the indexer rebuilds.
+  derived data that the indexer builds again.
 - Name: `rhumbatron-memory-prod`. Dimensions: 384. Metric: cosine. The model is Workers AI
-  `bge-small-en-v1.5`. The vectors embed short file summaries (path, exports, local imports, first
-  doc line). At 384 dimensions, 13,020 vectors fit in 5M stored dimensions.
-- One namespace per Project (namespace = Project ID). Queries always pass the namespace. The
-  Context Compiler refuses a match whose metadata names another Project or a path that is not in
-  the canonical tree.
-- Binding `MEMORY` on `rhumbatron-indexer` (write) and `rhumbatron-agents` (query).
-- Vectorize supports semantic retrieval only. Exact indexes hold the dependency graph.
+  `@cf/baai/bge-small-en-v1.5`. Each vector embeds a short file summary (path, exports, local
+  imports, first doc line). At 384 dimensions, 13,020 vectors fit in 5M stored dimensions.
+- One namespace per Project (namespace = Project ID). Each query sends the namespace. The Context
+  Compiler refuses a match whose metadata names another Project or a path that is not in the
+  canonical tree (`packages/context-compiler/src/retrieval.ts`).
+- The `MEMORY` binding is on `rhumbatron-indexer` (write) and `rhumbatron-agents` (query).
+- Vectorize gives semantic retrieval only. Exact indexes hold the dependency graph.
 
 ## Limits in code
 
 | Item | Cap in code | Worst case | Free allowance |
 |---|---|---|---|
-| Stored vectors | 10,000 (`VECTOR_ACCOUNT_CAP`), 500 files per build | 3.84M dims | 5M dims |
-| Queries | 1,000 per day (`context-embed` counter) | (30,000 + 10,000) x 384 = 15.4M dims/month | 30M dims/month |
-| Embeddings | 2,000 texts per day (`index-embed`) + 1,000 queries | about 0.9k Neurons/day | 10k Neurons/day |
+| Stored vectors | 10,000 in the account (`VECTOR_ACCOUNT_CAP`), 500 files per build (`MAX_INDEXED_FILES`) | 3.84M dimensions | 5M dimensions |
+| Queries | 1,000 per UTC day (`context-embed` counter) | (30,000 queries + 10,000 stored vectors) x 384 = 15.4M dimensions per month | 30M dimensions per month |
+| Embeddings | 2,000 texts per UTC day (`index-embed` counter) plus 1,000 query texts | about 900 Neurons per day | 10,000 Neurons per day |
 
-The code counts rows in the prod D1 (`project_vectors`, `usage_counters`).
+The code counts in the prod D1 tables `project_vectors` and `usage_counters`.
 
 ## Consequences
 
 - One apply creates the index and the Workers that bind it.
-- The adapter exists because the provider has no resource. A first-party resource would replace it:
-  import the index, run `terraform state rm` on both `terraform_data` resources, and delete the script.
+- The adapter exists because the provider has no index resource. When the provider has one,
+  import the index, run `terraform state rm` on both `terraform_data` resources, and delete the
+  script.
 
 ## Diagram
 

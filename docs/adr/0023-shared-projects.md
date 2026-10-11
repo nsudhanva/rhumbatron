@@ -1,0 +1,76 @@
+# ADR 0023: Shared Projects
+
+## Context
+
+Two people work in one Project from separate accounts. Both can send requests at the same time,
+and two requests can contradict each other (for example "newest first" and "oldest first").
+Access to a Project does not grant each action: API routes check the role of the user. The
+ChangeWorkflow compares each Change with the other requests of the Project. ADR 0025 decides how
+the system chooses between requests. See
+[Shared Projects](../architecture/shared-projects.md).
+
+## Decision
+
+- Share per Project. Use the D1 table `project_members` with the roles `owner` and
+  `collaborator`. Its `rank` (0 and 10) only orders the members list. Do not use Clerk
+  Organizations.
+- An invitation (`project_invitations`) binds only to a Clerk-verified email of the signed-in
+  user. The grant binds to the immutable user ID. An invitation expires after 7 days. Clients never
+  send a role.
+- The owner is the `owner` row of the Project or a member of the organization that owns the
+  Project (`projectRole` in `workers/api/src/identity.ts`). A personal organization has one member.
+- Access is not permission. A collaborator can view the Project, create Changes, and cancel and
+  answer their own Changes. Owner-only actions get `403` with a reason for a collaborator:
+  - share the Project and manage members, change Project settings, and remove the Project;
+  - approve a release, promote a Candidate, compose a Candidate, and roll back;
+  - publish the app, remove the app, provision the Project, and run checks;
+  - edit code directly, raise a budget, cancel the request of another person, resolve stopped
+    work, and inject a release failure.
+
+  No owner-only action decides between requests.
+- One Change per request. The Change stores `created_by` as the requester, and `requester_rank`,
+  the role of the requester at creation, for display only.
+- Scope registration is serialized. After planning, the ChangeWorkflow calls `registerScope` on
+  ProjectRootDO (`workers/coordinator/src/request-scopes.ts`) with the criteria (each has an ID) and
+  the semantic resources. ProjectRootDO returns the earlier active Changes with a scope, in
+  registration order. The later Change compares itself with each of them, so each pair is compared
+  once per clarification round.
+- When an earlier Change has no scope yet, the later Change waits for it: 10 checks, 15 s apart.
+  After that, the earlier Change without a scope counts as overlapping.
+- Comparison (`workers/integration/src/request-policy.ts`, `request-check.ts`):
+  1. A deterministic pass checks shared resource tokens and shared routes in the criteria.
+  2. A pair that overlaps gets one Sonnet review of the criteria. The review returns
+     `independent`, `compatible`, `conflicting`, or `duplicate`, and cites criterion IDs.
+  3. Application code validates each citation. An invalid citation or an abstention counts as a
+     conflict that is not confirmed.
+  4. Clef and Haiku never confirm a conflict alone (AGENTS.md 32.3, 34.4.2).
+  5. At most 4 overlapping pairs get a review per Change.
+- Partial selection: a losing Change that has not dispatched work and has other criteria is planned
+  again without the losing criteria. In all other cases, the losing Change becomes `not_selected`,
+  and its running work is cancelled.
+- The recompose guard: `recomposeDecision` refuses a `not_selected`, `cancelled`, or `needs_input`
+  Change, and a Change with the outcome `not_selected` or `duplicate`. Without the guard, the
+  stale-Candidate recomposition merges cleanly and ships the losing request over the winner.
+- `ChangeStatus` has `not_selected` (terminal) and `needs_input` (ADR 0025).
+
+## Alternatives considered
+
+| Alternative | Why it lost |
+|---|---|
+| Clerk Organizations and paid roles | Needs a paid Clerk feature. Adding Bob to the organization of Alice shows him her other Projects. |
+| Read other Changes at plan time, with no ProjectRootDO serialization | Two planners can run at the same moment, and each sees the other without a scope. Both look independent, and both spend model budget. Serialization in ProjectRootDO makes the order exact. |
+| Haiku or Clef alone confirms a conflict | AGENTS.md 32.3 requires a Sonnet review for unclear semantics and forbids Clef-flash from confirming a conflict. A cheap model also cannot stop a Change alone (rule 45). |
+| Promoted criteria become Project invariants, to catch missed conflicts | It needs protected tests that an agent cannot edit. |
+| Reject the full losing Change | A request that asks for B and C2 then loses B. Partial selection keeps B. |
+
+## Consequences
+
+- Bob never sees the other Projects of Alice, and he cannot take owner actions.
+- Each pair of overlapping requests costs one Sonnet review, about $0.01. The limit is 4 pairs per
+  Change.
+- The design adds D1 migration `0022_shared_projects.sql` and no Cloudflare resource.
+- Known limitation: a conflict that both requests hide behind unrelated words and unrelated
+  resources can pass the review. Both Changes then ship in sequence, and the later one wins. The
+  tests of the earlier Change usually fail on the later tree and stop it, but an agent can edit
+  those tests. Report such a miss as an incident. Never mark both requests as satisfied without
+  Evidence.
