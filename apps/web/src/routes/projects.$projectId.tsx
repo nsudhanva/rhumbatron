@@ -8,6 +8,7 @@ import { DeadLetters } from "../components/dead-letters";
 import { EventStream } from "../components/project/event-stream";
 import { SectionError, SkeletonBar, SkeletonRows } from "../components/project/feedback";
 import { LiveAppLine } from "../components/project/live-app";
+import { ProjectRemove } from "../components/project/remove-dialog";
 import { ProjectShare } from "../components/project/share-dialog";
 import {
   ACTIVE_CHANGE_STATUSES,
@@ -165,7 +166,14 @@ function Overview() {
         }
         actions={
           project.data?.role ? (
-            <ProjectShare projectId={projectId} role={project.data.role} />
+            <>
+              <ProjectShare projectId={projectId} role={project.data.role} />
+              <ProjectRemove
+                projectId={projectId}
+                projectName={project.data.name}
+                role={project.data.role}
+              />
+            </>
           ) : undefined
         }
       />

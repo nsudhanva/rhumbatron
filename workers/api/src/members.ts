@@ -30,6 +30,7 @@ const InviteRequest = z.object({ email: z.string().trim().toLowerCase().email().
 /** Internal RPC on the integration Worker (service binding `INTEGRATION`). */
 type IntegrationRpc = {
   overrideRequest(input: { changeId: string; actorUserId: string }): Promise<unknown>;
+  cancelChange(input: { changeId: string; actorUserId: string }): Promise<unknown>;
 };
 const integration = (env: Env) => env.INTEGRATION as unknown as IntegrationRpc;
 
@@ -351,7 +352,11 @@ export const members = new Hono<AppEnv>()
     },
   )
 
-  /** The owner removes a collaborator. The owner row cannot be removed. */
+  /**
+   * The owner removes a collaborator, or a collaborator removes themselves (leaves). The owner row
+   * cannot be removed. A leaver's open requests are cancelled through the same integration command
+   * as `POST /v1/changes/:changeId/cancel`; their past Changes stay with the Project.
+   */
   .delete(
     "/v1/projects/:projectId/members/:userId",
     requireAuth,
@@ -361,7 +366,24 @@ export const members = new Hono<AppEnv>()
       const { projectId, userId: member } = c.req.valid("param");
       const role = await projectRole(c.env.DB, userId, projectId);
       if (!role) return fail(c, 404, "not_found", "Project not found");
-      if (role !== "owner") return fail(c, 403, "forbidden", ownerOnlyMessage("manage sharing"));
+      const leaving = role === "collaborator" && member === userId;
+      if (role !== "owner" && !leaving) {
+        return fail(c, 403, "forbidden", ownerOnlyMessage("manage sharing"));
+      }
+      if (leaving) {
+        const open = await c.env.DB.prepare(
+          `SELECT id FROM changes WHERE project_id = ? AND created_by = ?
+             AND status NOT IN ('completed', 'cancelled', 'failed', 'not_selected',
+                                'promoting', 'releasing')`,
+        )
+          .bind(projectId, userId)
+          .all<{ id: string }>();
+        // A refused cancel (the Change moved on) is fine; a thrown error fails the leave, so a
+        // retry cancels the rest while the membership still exists.
+        for (const { id } of open.results ?? []) {
+          await integration(c.env).cancelChange({ changeId: id, actorUserId: userId });
+        }
+      }
       const removed = await c.env.DB.prepare(
         `DELETE FROM project_members WHERE project_id = ? AND user_id = ? AND role = 'collaborator'`,
       )

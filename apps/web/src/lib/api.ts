@@ -1409,6 +1409,15 @@ export const removeProjectMember = createServerFn({ method: "POST" })
     ),
   );
 
+/** Owner only and irreversible: archives the Project and queues cleanup of all its data. */
+export const deleteProject = createServerFn({ method: "POST" })
+  .inputValidator((projectId: string) => projectId)
+  .handler(({ data }) =>
+    call<{ id: string; status: "archived"; cleanupQueued: boolean }>(`/v1/projects/${data}`, {
+      method: "DELETE",
+    }),
+  );
+
 export const listUserInvitations = createServerFn().handler(() =>
   call<UserInvitation[]>("/v1/invitations"),
 );
