@@ -25,8 +25,15 @@ vi.mock("@rhumbatron/integration/events", () => ({
 }));
 vi.mock("@cloudflare/sandbox", () => ({ getSandbox: spies.getSandbox }));
 
-const { admitAgent, admitSandbox, CHANGE_LIMITS, limitAttempts, limitStop, releaseSandbox } =
-  await import("./limits.ts");
+const {
+  admitAgent,
+  admitSandbox,
+  CHANGE_LIMITS,
+  limitAttempts,
+  limitStop,
+  nextAttempt,
+  releaseSandbox,
+} = await import("./limits.ts");
 const { handleWake } = await import("./wake-consumer.ts");
 const { openWorkspace } = await import("./workspace.ts");
 
@@ -269,11 +276,71 @@ describe("max model attempts per Task at one tier", () => {
     ).toMatchObject({ action: "retry", tier: "sonnet" });
   });
 
+  it("never escalates on a timeout, even with the tier's attempts used", () => {
+    const previous = [run("haiku", "agent_failed"), run("haiku", "timeout")];
+    const step = nextStep("haiku", [
+      { tier: "haiku", kind: "agent_failed" },
+      { tier: "haiku", kind: "timeout" },
+    ]);
+    expect(limitAttempts(step, previous)).toEqual({
+      action: "stop",
+      reason: "max_attempts_per_tier",
+    });
+  });
+
   it("names the exact limit for a budget stop, and none for an ordinary failure", () => {
     expect(limitStop("max_attempts_per_tier")).toMatchObject({ limit: "max_attempts_per_tier" });
     expect(limitStop("two_failures_at_opus")?.text).toContain("failed 2 times");
     expect(limitStop("budget_exhausted")?.text).toContain("400 model calls");
     expect(limitStop("repeated_transport_failure")).toBeNull();
+  });
+});
+
+// Run end and next start decide from the Task's whole failure history (sections 23.3, 42.8).
+describe("escalation over the Task's failure history", () => {
+  const at = (tier: "haiku" | "sonnet" | "opus", failure_kind: string | null, minute: number) => ({
+    tier,
+    failure_kind,
+    started_at: `2026-10-11T00:0${minute}:00.000Z`,
+  });
+
+  it("retries after one failure and escalates Haiku to Sonnet after two", () => {
+    const one = nextAttempt([at("haiku", "agent_failed", 1)], null);
+    expect(one.step).toMatchObject({ action: "retry", tier: "haiku" });
+    const two = nextAttempt(
+      [at("haiku", "agent_failed", 1), at("haiku", "invalid_output", 2)],
+      null,
+    );
+    expect(two.step).toEqual({
+      action: "escalate",
+      tier: "sonnet",
+      reason: "two_failures_at_haiku",
+    });
+  });
+
+  it("escalates Sonnet to Opus only while Opus is allowed, else stops for re-plan", () => {
+    const runs = [at("sonnet", "agent_failed", 1), at("sonnet", "agent_failed", 2)];
+    expect(nextAttempt(runs, null, { allowOpus: true }).step).toMatchObject({
+      action: "escalate",
+      tier: "opus",
+    });
+    expect(nextAttempt(runs, null, { allowOpus: false }).step).toEqual({
+      action: "replan",
+      reason: "two_failures_at_sonnet",
+    });
+  });
+
+  it("never escalates a timeout, and a budget raise opens a new attempt window", () => {
+    expect(nextAttempt([at("haiku", "timeout", 1)], null).step).toMatchObject({
+      action: "retry",
+      tier: "haiku",
+    });
+    const runs = [at("haiku", "agent_failed", 1), at("haiku", "agent_failed", 2)];
+    expect(nextAttempt(runs, "2026-10-11T00:02:00.000Z").step).toMatchObject({
+      action: "retry",
+      tier: "haiku",
+    });
+    expect(nextAttempt([], null).step).toBeNull();
   });
 });
 

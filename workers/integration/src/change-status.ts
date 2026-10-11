@@ -150,6 +150,41 @@ export function verificationHalt(
   return null;
 }
 
+/** Candidate statuses from which the Change can still ship. */
+const LIVE_CANDIDATE_STATUSES = ["composing", "composed", "verifying", "verified", "promoted"];
+/** A source merge rejection: rebase.ts re-runs the Tasks on the current files. */
+const SOURCE_CONFLICT = /^(?:file_conflict|source_conflict):/;
+
+/**
+ * Why a `verifying` Change can never ship, or null while it still can. Its Candidates on the
+ * newest base are all `rejected`, none of the Change's Candidates is live, and no rejection is a
+ * source conflict (rebase.ts re-runs those) or a cancel. A `stale` Candidate on the newest base
+ * waits for its recompose. Without this end, the Change would show `verifying` with nothing
+ * left to verify; the planning failure path ends the same way (`failed`, `change.failed`).
+ */
+export function verificationDeadEnd(
+  candidates: readonly { status: string; statusReason: string | null; baseGeneration: number }[],
+): string | null {
+  if (candidates.length === 0) return null;
+  if (candidates.some((c) => LIVE_CANDIDATE_STATUSES.includes(c.status))) return null;
+  const newest = Math.max(...candidates.map((c) => c.baseGeneration));
+  const group = candidates.filter((c) => c.baseGeneration === newest);
+  if (!group.every((c) => c.status === "rejected")) return null;
+  if (
+    group.some(
+      (c) =>
+        SOURCE_CONFLICT.test(c.statusReason ?? "") || c.statusReason === CHANGE_CANCELLED_REASON,
+    )
+  ) {
+    return null;
+  }
+  const reasons = [
+    ...new Set(group.map((c) => (c.statusReason ?? "rejected").replace(/\.$/, ""))),
+  ].join("; ");
+  const text = `No Candidate passed its required checks: ${reasons}`;
+  return `${text.length > 400 ? `${text.slice(0, 399)}…` : text}. Submit the request again.`;
+}
+
 /** Task stops that set the Change `budget_blocked` (agents limits.ts `limitStop`). */
 const BUDGET_STOP_LIMITS = [
   "daily_model_calls",
@@ -159,6 +194,9 @@ const BUDGET_STOP_LIMITS = [
   "max_cost_usd_per_change",
   "max_attempts_per_tier",
 ] as const;
+
+/** Budget stops after which a raise opens a new attempt window for the Task. */
+const ATTEMPT_WINDOW_LIMITS = ["max_attempts_per_tier", "max_cost_usd_per_change"] as const;
 
 export type RestorableTask = {
   id: string;
@@ -174,10 +212,16 @@ export type RestorableTask = {
  * and returns to `pending` only when every blocked ancestor is restored here; a Task below a
  * failed, cancelled, or dead-lettered Task stays blocked. The admission checks run again on the
  * next start, so a limit that is still reached stops the Task again with its exact name.
+ *
+ * `newAttemptWindow` lists the restored Tasks whose earlier runs must not count against the
+ * attempt limit: a repeated-failure stop, and a Change budget stop. A run that hits its share of
+ * a too-small budget ends as `run_call_cap`, so after two such runs the old history alone would
+ * stop the Task again before any new run (`nextAttempt` in agents limits.ts).
  */
 export function restoreAfterBudgetRaise(tasks: readonly RestorableTask[]): {
   ready: string[];
   pending: string[];
+  newAttemptWindow: string[];
 } {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const stopped = (t: RestorableTask) =>
@@ -211,5 +255,8 @@ export function restoreAfterBudgetRaise(tasks: readonly RestorableTask[]): {
     if (stopped(task) && depsDone) ready.push(task.id);
     else pending.push(task.id);
   }
-  return { ready, pending };
+  const newAttemptWindow = [...ready, ...pending].filter((id) =>
+    (ATTEMPT_WINDOW_LIMITS as readonly string[]).includes(byId.get(id)?.blockedLimit ?? ""),
+  );
+  return { ready, pending, newAttemptWindow };
 }

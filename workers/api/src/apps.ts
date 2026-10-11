@@ -163,9 +163,10 @@ export const apps = new Hono<AppEnv>()
   )
 
   /**
-   * P16-20: "Remove app" keeps the Project. Every host of the app answers 410 at once; the
-   * integration Worker then deletes its data stores, bundles, and preview and version rows, and
-   * keeps the production row as a tombstone so the hosts go on answering 410 (`app.remove`).
+   * P16-20: "Remove app" keeps the Project. Every host of the app answers 410 within the router's
+   * 10-second pointer cache; the integration Worker then deletes its data stores, bundles, and
+   * preview and version rows, and keeps the production row as a tombstone so the hosts go on
+   * answering 410 (`app.remove`).
    */
   .delete(
     "/v1/projects/:projectId/app",

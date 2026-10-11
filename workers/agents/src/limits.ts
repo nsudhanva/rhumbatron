@@ -1,8 +1,10 @@
 import {
   AGENT_DAILY_CALL_CAP,
   anthropicMonthlyBudgetUsd,
+  type Failure,
   type FailureKind,
   type NextStep,
+  nextStep,
   nextTier,
 } from "@rhumbatron/model-router";
 import type { ModelTier } from "@rhumbatron/protocol";
@@ -172,9 +174,9 @@ export async function noteSandboxRefused(db: Db, taskId: string, now: string) {
 /**
  * Applies the section 44 attempt limit to the escalation decision (section 23.3). The next attempt
  * at a tier that already had `maxAttemptsPerTier` attempts is refused: it escalates when an
- * intelligence failure happened at that tier and a stronger tier exists (never on transport
- * failures alone, section 42.8), and otherwise stops for re-plan. Sonnet is the top tier while Opus
- * is off (ADR 0021).
+ * intelligence failure happened at that tier, the latest failure is not a transport failure, and a
+ * stronger tier exists; otherwise it stops for re-plan. A network timeout or other transport
+ * failure never escalates (section 42.8). Sonnet is the top tier while Opus is off (ADR 0021).
  */
 export function limitAttempts(
   step: NextStep,
@@ -187,11 +189,43 @@ export function limitAttempts(
   const intelligence = at.some(
     (r) => r.failure_kind && !TRANSPORT.has(r.failure_kind as FailureKind),
   );
+  const latest = previous.at(-1)?.failure_kind;
+  const afterTransport = Boolean(latest && TRANSPORT.has(latest as FailureKind));
   const next = nextTier(step.tier, options.allowOpus ?? true);
-  if (intelligence && next) {
+  if (intelligence && !afterTransport && next) {
     return { action: "escalate", tier: next, reason: `max_attempts_at_${step.tier}` };
   }
   return { action: "stop", reason: "max_attempts_per_tier" };
+}
+
+/** One `task_runs` row of a Task, oldest first. */
+export type TaskRunHistory = {
+  tier: ModelTier;
+  failure_kind: string | null;
+  started_at: string;
+};
+
+/**
+ * The next attempt of a Task from its whole run history (sections 23.3, 42.8, 44): the escalation
+ * rules of the model router over every failure in the current attempt window, then the attempt
+ * limit. A person's budget raise after a repeated-failure stop opens a new window (`resetAt`, ADR
+ * 0021). Null before the first run. Both the run end (which emits `agent.escalated`) and the next
+ * start (which routes) use this, so they always agree.
+ */
+export function nextAttempt(
+  runs: readonly TaskRunHistory[],
+  resetAt: string | null,
+  options: { allowOpus?: boolean } = {},
+): { previous: TaskRunHistory[]; failures: Failure[]; step: NextStep | null } {
+  const previous = runs.filter((r) => !resetAt || r.started_at >= resetAt);
+  const failures: Failure[] = previous
+    .filter((r) => r.failure_kind)
+    .map((r) => ({ tier: r.tier, kind: r.failure_kind as FailureKind }));
+  const lastTier = previous.at(-1)?.tier;
+  const step = lastTier
+    ? limitAttempts(nextStep(lastTier, failures, options), previous, options)
+    : null;
+  return { previous, failures, step };
 }
 
 /**

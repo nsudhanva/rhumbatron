@@ -20,12 +20,10 @@ import {
   CLEF_ROUTE_ABSTAIN_BELOW,
   checkRunBudget,
   classifyProviderFailure,
-  type Failure,
   type FailureKind,
   MAX_CALLS_PER_RUN,
   meteredComplete,
   monthSpentUsd,
-  nextStep,
   opusAllowed,
   reserveEstimateUsd,
   reserveSpend,
@@ -60,7 +58,7 @@ import {
 } from "./conflict-review.ts";
 import { declareIntentAndDetect } from "./conflicts.ts";
 import { compactPriorLogs } from "./context-compaction.ts";
-import { limitAttempts, limitStop, takeQuota } from "./limits.ts";
+import { limitStop, nextAttempt, type TaskRunHistory, takeQuota } from "./limits.ts";
 import { createTierModels, modelIdFor, PROVIDER_ID, tierLimits } from "./models.ts";
 import { taskRetrieval } from "./retrieval.ts";
 import type {
@@ -510,20 +508,12 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       return { runId: "", accepted: false, state: { status: "idle" } };
     }
 
-    const allRuns = await this.env.DB.prepare(
-      "SELECT attempt, tier, failure_kind, started_at FROM task_runs WHERE task_id = ? ORDER BY attempt",
-    )
-      .bind(input.taskId)
-      .all<{ attempt: number; tier: ModelTier; failure_kind: string | null; started_at: string }>();
-    // A person's budget raise after a repeated-failure stop opens a new attempt window (0021).
-    const resetAt = task.attempts_reset_at;
-    const previous = {
-      results: (allRuns.results ?? []).filter((r) => !resetAt || r.started_at >= resetAt),
-    };
-    const failures: Failure[] = previous.results
-      .filter((r) => r.failure_kind)
-      .map((r) => ({ tier: r.tier, kind: r.failure_kind as FailureKind }));
-    const attempt = (allRuns.results?.length ?? 0) + 1;
+    const allRuns = await this.taskRuns(input.taskId);
+    // Escalation over the Task's whole failure history (sections 23.3, 42.8, 44). A person's
+    // budget raise after a repeated-failure stop opens a new attempt window (0021).
+    const allowOpus = opusAllowed(this.env.ALLOW_OPUS);
+    const { failures, step: next } = nextAttempt(allRuns, task.attempts_reset_at, { allowOpus });
+    const attempt = allRuns.length + 1;
     const flags = JSON.parse(task.route_json ?? "{}") as Record<string, boolean>;
     const [openTasks, spent, reviewSpent] = await this.env.DB.batch<{ n: number }>([
       this.env.DB.prepare(
@@ -550,15 +540,9 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     // Route (P6-07): rules, then Clef-flash for the generic case; escalation decides retries (P6-10).
     let tier: ModelTier;
     let receipt: Record<string, unknown>;
-    const lastTier = previous.results?.at(-1)?.tier;
-    if (lastTier) {
+    if (next) {
       // Section 44: at most 2 attempts per tier before escalation or re-plan (limits.ts).
-      const allowOpus = opusAllowed(this.env.ALLOW_OPUS);
-      const step = limitAttempts(
-        nextStep(lastTier, failures, { allowOpus }),
-        previous.results ?? [],
-        { allowOpus },
-      );
+      const step = next;
       if (step.action !== "retry" && step.action !== "escalate") {
         await this.failTask(input, task, step.reason);
         return { runId: "", accepted: false, state: { status: "idle" } };
@@ -594,7 +578,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         abstainBelow: CLEF_ROUTE_ABSTAIN_BELOW,
         allowCall: () => takeQuota(this.env.DB, today(), "clef-flash", 200),
       });
-      const routed = await routeStep(req, clef, { allowOpus: opusAllowed(this.env.ALLOW_OPUS) });
+      const routed = await routeStep(req, clef, { allowOpus });
       tier = routed.decision.selectedTier;
       receipt = routed.receipt;
     }
@@ -1123,16 +1107,26 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       await this.failTask(input, null, result.reason);
       return "Recorded. Stop now.";
     }
-    const failures: Failure[] = [{ tier: run.tier, kind: result.kind }];
-    const step = nextStep(run.tier, failures, { allowOpus: opusAllowed(this.env.ALLOW_OPUS) });
+    // The decision reads the Task's whole failure history, this run included (section 23.3): one
+    // failure retries, two at a tier escalate, a transport failure never escalates (section 42.8).
+    // The next start re-reads the same rows and routes to the same tier.
+    const resetRow = await this.env.DB.prepare("SELECT attempts_reset_at FROM tasks WHERE id = ?")
+      .bind(input.taskId)
+      .first<{ attempts_reset_at: string | null }>();
+    const { step: decided } = nextAttempt(
+      await this.taskRuns(input.taskId),
+      resetRow?.attempts_reset_at ?? null,
+      { allowOpus: opusAllowed(this.env.ALLOW_OPUS) },
+    );
+    const step = decided ?? { action: "retry", tier: run.tier, reason: "first_attempt" };
     log({
       event: "agent.run_failed",
       taskId: input.taskId,
       runId: run.run_id,
       kind: result.kind,
       next: step.action,
+      reason: step.reason,
     });
-    // The next attempt re-reads every prior failure from D1 and applies the escalation rules.
     if (step.action === "retry" || step.action === "escalate") {
       await this.scheduleGuarded(5, "retryTask", input);
       if (step.action === "escalate") {
@@ -1149,6 +1143,16 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       await this.failTask(input, null, step.reason);
     }
     return "Recorded. Stop now.";
+  }
+
+  /** Every `task_runs` row of a Task, oldest first: the failure history escalation reads. */
+  private async taskRuns(taskId: string): Promise<TaskRunHistory[]> {
+    const rows = await this.env.DB.prepare(
+      "SELECT tier, failure_kind, started_at FROM task_runs WHERE task_id = ? ORDER BY attempt",
+    )
+      .bind(taskId)
+      .all<TaskRunHistory>();
+    return rows.results ?? [];
   }
 
   /** Claim scope of a run. `intentHash` names the Intent the run will declare. */

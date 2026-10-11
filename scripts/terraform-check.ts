@@ -29,7 +29,7 @@ for (const dir of roots) {
   await $`tflint --config=${tfRoot}/.tflint.hcl --recursive --no-color`.cwd(cwd);
 }
 
-// The worker module is not called from any root yet, so validate it directly.
+// Validate the reusable modules on their own as well as through the roots that call them.
 for (const module of ["modules/worker", "modules/durable-worker"]) {
   const cwd = resolve(tfRoot, module);
   console.log(`\n== ${module}`);

@@ -90,7 +90,7 @@ export const ANTHROPIC_PRICES: Record<string, AnthropicPrice> = {
   "claude-opus-5-5": {
     input: 4,
     output: 20,
-    cacheRead: 0.2,
+    cacheRead: 0.4,
     cacheWrite5m: 5,
     cacheWrite1h: 8,
   },

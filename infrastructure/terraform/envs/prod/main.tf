@@ -4,7 +4,8 @@
 locals {
   environment = "prod"
 
-  # One label deep so Universal SSL covers them. `www` redirects to the apex (envs/global).
+  # One label deep so Universal SSL covers them. The web Worker redirects `www` to the apex
+  # (apps/web/src/server.ts).
   hostnames = {
     web = "rhumbatron.com"
     api = "api.rhumbatron.com"
@@ -22,9 +23,8 @@ locals {
   # again: that adds the EVENT_ROUTER nudge binding and moves migrations to steady state v1 -> v1.
   bootstrap = false
 
-  # false until the legacy apex record is gone (ADR 0017 cutover). A Worker custom domain cannot
-  # take over a hostname that still has its own DNS record, so the web Worker gets the apex only
-  # after the cutover. The API on api.rhumbatron.com works before that.
+  # The web Worker holds the apex as a Worker custom domain (ADR 0017). A Worker custom domain
+  # cannot take a hostname that has its own DNS record, so the zone has no other apex record.
   attach_apex = true
 }
 
@@ -595,8 +595,8 @@ module "indexer_worker" {
 }
 
 # Sandbox Worker (ADR 0012): hosts the Sandbox container class through the temporary adapter.
-# Caps: 1 instance, sleeps after 2 minutes idle (in code), 15-hour monthly meter in this
-# environment's D1 (local.caps, ADR 0017).
+# Caps: 1 instance, sleeps after 2 minutes idle (in code), 20-hour (72,000 s) monthly meter in
+# this environment's D1 (local.caps.sandbox_monthly_seconds, ADR 0017).
 locals {
   sandbox_worker = {
     script_name         = "rhumbatron-sandbox-${local.environment}"
@@ -669,9 +669,9 @@ locals {
   apps = {
     domain = var.zone_name
 
-    # Off until the owner accepts the routing layout (ADR 0020, "Routing"). Cloudflare runs a
-    # Workers route before a Worker custom domain on the same hostname, so `*.rhumbatron.com/*`
-    # alone would capture api, www, and docs. With routing on, Terraform adds the proxied
+    # App routing (ADR 0020, "Routing"). Cloudflare runs a Workers route before a Worker custom
+    # domain on the same hostname, so `*.rhumbatron.com/*` alone would capture api, www, and docs.
+    # With routing on, Terraform adds the proxied
     # wildcard record, the wildcard route, one route without a Worker per custom-domain host (it
     # negates the wildcard there), and APPS_DOMAIN on the API (the "Live at" line).
     routing = true

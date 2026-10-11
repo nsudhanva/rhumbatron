@@ -12,6 +12,7 @@ import {
   releaseRecovery,
   restoreAfterBudgetRaise,
   TERMINAL_CHANGE_STATUSES,
+  verificationDeadEnd,
   verificationHalt,
 } from "./change-status.ts";
 
@@ -60,7 +61,12 @@ describe("restoreAfterBudgetRaise", () => {
       t("c", "blocked", ["b"]),
       t("d", "blocked", ["c"]),
     ];
-    expect(restoreAfterBudgetRaise(g)).toEqual({ ready: ["b"], pending: ["c", "d"] });
+    expect(restoreAfterBudgetRaise(g)).toEqual({
+      ready: ["b"],
+      pending: ["c", "d"],
+      // Runs that hit the old budget no longer count against the attempt limit.
+      newAttemptWindow: ["b"],
+    });
   });
 
   it("keeps Tasks below a failed or dead-lettered Task blocked", () => {
@@ -72,14 +78,14 @@ describe("restoreAfterBudgetRaise", () => {
       t("s", "blocked", [], "daily_model_calls"),
       t("z", "blocked", ["s", "a"]),
     ];
-    expect(restoreAfterBudgetRaise(g)).toEqual({ ready: ["s"], pending: [] });
+    expect(restoreAfterBudgetRaise(g)).toEqual({ ready: ["s"], pending: [], newAttemptWindow: [] });
   });
 
   it("restores nothing that is not blocked, and is stable on a repeat", () => {
     const g = [t("a", "running"), t("b", "pending", ["a"]), t("c", "cancelled")];
-    expect(restoreAfterBudgetRaise(g)).toEqual({ ready: [], pending: [] });
+    expect(restoreAfterBudgetRaise(g)).toEqual({ ready: [], pending: [], newAttemptWindow: [] });
     const once = [t("a", "completed"), t("b", "ready", ["a"]), t("c", "pending", ["b"])];
-    expect(restoreAfterBudgetRaise(once)).toEqual({ ready: [], pending: [] });
+    expect(restoreAfterBudgetRaise(once)).toEqual({ ready: [], pending: [], newAttemptWindow: [] });
   });
 });
 
@@ -152,5 +158,36 @@ describe("verificationHalt (HOM-204)", () => {
       expect(verificationHalt("verifying", status)).toBeNull();
       expect(verificationHalt("running", status)).toBeNull();
     }
+  });
+});
+
+describe("verificationDeadEnd: a Change with no Candidate left that can ship", () => {
+  const c = (status: string, statusReason: string | null = null, baseGeneration = 1) => ({
+    status,
+    statusReason,
+    baseGeneration,
+  });
+  const failedUnit = "Required checks not satisfied: unit (failed)";
+
+  it("ends when every Candidate on the newest base failed its checks", () => {
+    const reason = verificationDeadEnd([c("rejected", failedUnit)]);
+    expect(reason).toContain(failedUnit);
+    expect(reason).toMatch(/Submit the request again\.$/);
+    expect(verificationDeadEnd([c("stale", null, 1), c("rejected", failedUnit, 2)])).not.toBeNull();
+  });
+
+  it("waits while a Candidate can still ship or a recovery is coming", () => {
+    for (const live of ["composing", "composed", "verifying", "verified", "promoted"]) {
+      expect(verificationDeadEnd([c("rejected", failedUnit), c(live)])).toBeNull();
+      // A live Candidate on an older base still counts: never end a Change that can ship.
+      expect(verificationDeadEnd([c(live, null, 1), c("rejected", failedUnit, 2)])).toBeNull();
+    }
+    expect(verificationDeadEnd([])).toBeNull();
+    // Stale on the newest base: its recompose follows.
+    expect(verificationDeadEnd([c("rejected", failedUnit), c("stale")])).toBeNull();
+    // Source conflicts re-run on the current files (rebase.ts); a cancel ends the Change itself.
+    expect(verificationDeadEnd([c("rejected", "file_conflict: cs_x does not merge")])).toBeNull();
+    expect(verificationDeadEnd([c("rejected", "source_conflict: cs_x does not merge")])).toBeNull();
+    expect(verificationDeadEnd([c("rejected", "change cancelled")])).toBeNull();
   });
 });

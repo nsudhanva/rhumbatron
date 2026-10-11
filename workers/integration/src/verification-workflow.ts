@@ -27,13 +27,14 @@ import {
   type VerificationPlan,
 } from "@rhumbatron/protocol";
 import {
+  ACCEPTANCE_SOURCE_CAP,
   type AcceptanceSource,
   acceptanceOutcome,
   acceptanceReport,
+  acceptanceSource as buildAcceptanceSource,
   changeModelSpend,
+  composedFileOrder,
   judgeAcceptance,
-  sourceFromFiles,
-  sourceFromPatch,
   takeDailyCall,
 } from "./acceptance-check.ts";
 import {
@@ -49,7 +50,6 @@ import {
   type CheckOutcome,
   classifyCheck,
   classifyContract,
-  DEFAULT_POLICY,
   isAllowedCheckCommand,
   orderChangeSets,
   procedureGap,
@@ -76,11 +76,13 @@ import {
   prepareSelection,
   runIntegrationJudge,
 } from "./candidate-selection.ts";
-import { CHANGE_CANCELLED_REASON, verificationHalt } from "./change-status.ts";
+import { releaseRequestScope } from "./change-commands.ts";
+import { CHANGE_CANCELLED_REASON, verificationDeadEnd, verificationHalt } from "./change-status.ts";
 import { classifyBrowser, classifySecurity } from "./check-semantics.ts";
 import { storeTreeCode, walkTree } from "./code-store.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
+import { policyForRun } from "./policy.ts";
 import { runPreviewSmoke } from "./preview-smoke.ts";
 import { promoteCandidate } from "./promotion.ts";
 import { markCandidateStale, recomposeQuietly } from "./recompose.ts";
@@ -105,6 +107,8 @@ import {
  */
 
 export type CandidateVerificationParams = { candidateId: string };
+
+type PolicyOf = ReturnType<typeof policyForRun>;
 
 const ACTOR = { kind: "system", id: "candidate-verification" } as const;
 /** Policy `autoPromoteRiskTiers` promotes as the system, never as a person (section 53). */
@@ -165,6 +169,67 @@ async function sha256(text: string) {
   return `sha256:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
+/**
+ * Ends a `verifying` Change as `failed` when none of its Candidates can ship any more
+ * (`verificationDeadEnd`): the reason goes to `blocked_reason`, `change.failed` records it, and the
+ * request scope is released. Idempotent: the update is conditional, the event ID is stable.
+ */
+async function endWithoutShippableCandidate(env: Env, candidateId: string): Promise<boolean> {
+  const head = await env.DB.prepare(
+    `SELECT ch.id AS change_id, ch.project_id, ch.base_generation, p.org_id, p.slug
+     FROM candidates c JOIN changes ch ON ch.id = c.change_id JOIN projects p ON p.id = ch.project_id
+     WHERE c.id = ?`,
+  )
+    .bind(candidateId)
+    .first<{
+      change_id: string;
+      project_id: string;
+      base_generation: number;
+      org_id: string;
+      slug: string;
+    }>();
+  if (!head) return false;
+  const rows = await env.DB.prepare(
+    "SELECT status, status_reason, base_generation FROM candidates WHERE change_id = ?",
+  )
+    .bind(head.change_id)
+    .all<{ status: string; status_reason: string | null; base_generation: number }>();
+  const reason = verificationDeadEnd(
+    (rows.results ?? []).map((r) => ({
+      status: r.status,
+      statusReason: r.status_reason,
+      baseGeneration: r.base_generation,
+    })),
+  );
+  if (!reason) return false;
+  const [, after] = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE changes SET status = 'failed', blocked_reason = ?, updated_at = ?
+       WHERE id = ? AND status = 'verifying'`,
+    ).bind(reason, new Date().toISOString(), head.change_id),
+    env.DB.prepare("SELECT status, blocked_reason FROM changes WHERE id = ?").bind(head.change_id),
+  ]);
+  const row = after?.results?.[0] as { status: string; blocked_reason: string | null } | undefined;
+  if (row?.status !== "failed" || row.blocked_reason !== reason) return false;
+  const ctx: ChangeContext = {
+    projectId: head.project_id,
+    orgId: head.org_id,
+    projectSlug: head.slug,
+    changeId: head.change_id,
+    baseGeneration: head.base_generation,
+  };
+  await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+    await changeEvent(
+      ctx,
+      "change.failed",
+      { status: "failed", phase: "verification", reason },
+      { key: "verification", actor: ACTOR },
+    ),
+  ]);
+  await releaseRequestScope(env, head.project_id, head.change_id);
+  return true;
+}
+
 export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   Env,
   CandidateVerificationParams
@@ -174,7 +239,9 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     step: WorkflowStep,
   ) {
     const { candidateId } = event.payload;
-    const result = await this.verify(candidateId, step);
+    // The Project's stored policy (section 53), read once in this run.
+    const policyOf = policyForRun(this.env, step);
+    const result = await this.verify(candidateId, step, policyOf);
     // Only a settled Candidate (verified or rejected by its own checks) takes part in selection.
     // Stale, halted, cancelled, and missing Candidates leave the group to the others.
     const settled =
@@ -183,7 +250,15 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         result.status === "rejected" &&
         !("reason" in result && result.reason === "change_cancelled"));
     if (!settled) return result;
-    return this.settleSiblings(step, candidateId, result);
+    const selected = await this.settleSiblings(step, candidateId, result, policyOf);
+    // A Change with no Candidate left that can ship ends here, not in `verifying` forever.
+    if (!("promotable" in result && result.promotable === true)) {
+      const ended = await step.do("end change without a shippable candidate", () =>
+        endWithoutShippableCandidate(this.env, candidateId),
+      );
+      return { ...selected, changeEnded: ended };
+    }
+    return selected;
   }
 
   /**
@@ -196,13 +271,14 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     step: WorkflowStep,
     candidateId: string,
     result: R,
+    policyOf: PolicyOf,
   ) {
     const prep = await step.do("prepare selection", () =>
       prepareSelection(this.env.DB, candidateId),
     );
     if (prep.kind === "single") {
       return "promotable" in result && result.promotable === true
-        ? { ...result, ...(await this.promoteWinner(step, candidateId)) }
+        ? { ...result, ...(await this.promoteWinner(step, candidateId, policyOf)) }
         : result;
     }
     if (prep.kind === "waiting") return { ...result, selection: "waiting", pending: prep.pending };
@@ -224,7 +300,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     return {
       ...result,
       selection: selected,
-      ...(await this.promoteWinner(step, selected.winner)),
+      ...(await this.promoteWinner(step, selected.winner, policyOf)),
     };
   }
 
@@ -246,7 +322,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     );
   }
 
-  private async verify(candidateId: string, step: WorkflowStep) {
+  private async verify(candidateId: string, step: WorkflowStep, policyOf: PolicyOf) {
     // Step 1: confirm the Candidate and its base generation (section 21.2). Retries cover a
     // promotion whose source sync has not landed yet (see below).
     const loaded = await step.do(
@@ -436,8 +512,9 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
               : c,
           )
         : parsed.composable;
+    const policy = await policyOf(ctx.projectId);
     const compatibility = checkCompatibility(ctx.baseGeneration, composable, {
-      protectedResources: DEFAULT_POLICY.protectedResources,
+      protectedResources: policy.protectedResources,
     });
     if (!compatibility.ok && compatibility.kind !== "file_conflict") {
       await step.do("record incompatibility", async () =>
@@ -575,7 +652,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
           const built: VerificationPlan = buildVerificationPlan({
             candidateId,
             riskTier: loaded.riskTier,
-            policy: DEFAULT_POLICY,
+            policy,
             ...scope,
             // App provisioning is automatic with APPS. A missing row is a pending app,
             // not permission to promote without runtime Evidence. Removed apps stay disabled.
@@ -880,7 +957,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
    * Unchanged by selection: policy `autoPromoteRiskTiers`, the approval gate, and the
    * compare-and-swap decide (section 21.1 steps 9-11).
    */
-  private async promoteWinner(step: WorkflowStep, candidateId: string) {
+  private async promoteWinner(step: WorkflowStep, candidateId: string, policyOf: PolicyOf) {
     const winner = await step.do(`load winner ${candidateId}`, async () => {
       const row = await this.env.DB.prepare(
         `SELECT c.base_generation, c.plan_json, ch.project_id, ch.id AS change_id
@@ -919,6 +996,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       return generation;
     });
     if (moved !== null) return { status: "stale", canonicalGeneration: moved };
+    const policy = await policyOf(ctx.projectId);
 
     const decision = await step.do("settle change", async () => {
       // ADR 0026: acceptance gates auto-promotion, not promotability. A shortfall or a gap holds
@@ -939,7 +1017,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         promotable: true,
         plan: { humanApprovalRequired: plan.humanApprovalRequired },
         riskTier: riskTier === null ? null : RiskTier.catch("medium").parse(riskTier),
-        policy: DEFAULT_POLICY,
+        policy,
       });
       if (
         decided.kind === "manual" &&
@@ -1122,10 +1200,11 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   }
 
   /**
-   * Acceptance check (ADR 0026): one Haiku call over the Change criteria and the Candidate patch,
-   * Sonnet once on invalid output. Code validates every citation. No Sandbox and no browser. A
-   * Candidate whose earlier check already failed is not judged: it cannot ship, so no model call
-   * is spent. A refused or failed call is a gap (`not_checked`), never a pass.
+   * Acceptance check (ADR 0026): one Haiku call over the Change criteria, the Candidate patch, and
+   * the relevant composed files, Sonnet once on invalid output. Code validates every citation. No
+   * Sandbox and no browser. A Candidate whose earlier check already failed is not judged: it
+   * cannot ship, so no model call is spent. A refused or failed call is a gap (`not_checked`),
+   * never a pass.
    */
   private async runAcceptance(
     ctx: ChangeContext,
@@ -1180,8 +1259,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       return null;
     }
     const read = await this.acceptanceSource(ctx.projectId, candidateId, source);
-    if (!read || read.files.length === 0) {
-      await gap("No Candidate patch or changed file to read; acceptance not checked.");
+    if (read.files.length === 0) {
+      await gap("No Candidate patch or composed file to read; acceptance not checked.");
       return null;
     }
     const judged = await judgeAcceptance(criteria, read, async (req) => {
@@ -1193,9 +1272,9 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     const costUsd = judged.calls.reduce((sum, call) => sum + call.costUsd, 0);
     const report = {
       source: {
-        kind: read.kind,
         truncated: read.truncated,
-        files: read.files.map((f) => f.path),
+        patch: read.files.filter((f) => f.kind === "patch").map((f) => f.path),
+        files: read.files.filter((f) => f.kind === "file").map((f) => f.path),
       },
       calls: judged.calls,
     };
@@ -1235,38 +1314,53 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   }
 
   /**
-   * What the acceptance check reads: the Candidate patch stored at composition, when it belongs to
-   * this composed commit; otherwise the changed files of the composed tree, read from the
-   * Candidate fork (both capped at ACCEPTANCE_SOURCE_CAP).
+   * What the acceptance check reads: the Candidate patch stored at composition (when it belongs to
+   * this composed commit), then the full text of the relevant files of the composed tree, read
+   * from the Candidate fork (`composedFileOrder`; all under ACCEPTANCE_SOURCE_CAP). A criterion
+   * that code already in the base satisfies can then be cited from the composed file. When the
+   * fork cannot be read, the patch alone is the source.
    */
   private async acceptanceSource(
     projectId: string,
     candidateId: string,
     source: { fork: string; commit: string; tree: string; files: string[] },
-  ): Promise<AcceptanceSource | null> {
-    const patch = await this.env.EVIDENCE.get(candidatePatchKey(projectId, candidateId));
-    if (patch && (patch.customMetadata?.head ?? source.commit) === source.commit) {
-      return sourceFromPatch(await patch.text(), patch.customMetadata?.truncated === "true");
-    }
+  ): Promise<AcceptanceSource> {
+    const object = await this.env.EVIDENCE.get(candidatePatchKey(projectId, candidateId));
+    const patch =
+      object && (object.customMetadata?.head ?? source.commit) === source.commit
+        ? { text: await object.text(), truncated: object.customMetadata?.truncated === "true" }
+        : null;
+    const composed: { path: string; text: string }[] = [];
     try {
       using repo = await this.env.ARTIFACTS.get(source.fork);
-      const changed = new Set(source.files);
-      const entries = (await walkTree(repo, source.tree)).filter((e) => changed.has(e.path));
-      const files: { path: string; text: string }[] = [];
-      let bytes = 0;
-      for (const entry of entries) {
-        if (bytes >= 60_000) break;
-        const blob = await repo.readBlob(entry.blob);
-        if (!blob || blob.size > 60_000) continue;
-        const text = new TextDecoder().decode(await blob.arrayBuffer());
-        if (text.includes("\u0000")) continue;
-        files.push({ path: entry.path, text });
-        bytes += text.length;
+      const entries = await walkTree(repo, source.tree);
+      const blobs = new Map(entries.map((e) => [e.path, e.blob]));
+      const texts = new Map<string, string | null>();
+      const read = async (path: string) => {
+        if (texts.has(path)) return texts.get(path) ?? null;
+        const sha = blobs.get(path);
+        const blob = sha ? await repo.readBlob(sha) : null;
+        const text =
+          blob && blob.size <= ACCEPTANCE_SOURCE_CAP
+            ? new TextDecoder().decode(await blob.arrayBuffer())
+            : null;
+        const usable = text !== null && !text.includes("\u0000") ? text : null;
+        texts.set(path, usable);
+        return usable;
+      };
+      const indexHtml = blobs.has("public/index.html") ? await read("public/index.html") : null;
+      let room = ACCEPTANCE_SOURCE_CAP - Math.min(patch?.text.length ?? 0, ACCEPTANCE_SOURCE_CAP);
+      for (const path of composedFileOrder([...blobs.keys()], source.files, indexHtml)) {
+        if (room <= 0) break;
+        const text = await read(path);
+        if (text === null) continue;
+        composed.push({ path, text });
+        room -= text.length + path.length;
       }
-      return sourceFromFiles(files);
     } catch {
-      return null;
+      // The fork is unreadable: judge the patch alone.
     }
+    return buildAcceptanceSource(patch, composed);
   }
 
   /** Diffs the route table against the base and records contract Evidence (section 34.1). */

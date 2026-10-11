@@ -29,6 +29,27 @@ export function testFiles(files: Record<string, string>) {
 }
 
 /**
+ * Runtime features a test can use under `bun test` that the Dynamic Worker does not have: the
+ * project files on disk, the test file's own path, Bun globals, and child processes. A Dynamic
+ * Worker run of such a test fails for the runner, not for the code, so the check is unsupported
+ * there and the Sandbox runs the real `bun test` (a false failure would reject a good Candidate).
+ */
+const SANDBOX_ONLY: readonly [RegExp, string][] = [
+  [/\bimport\.meta\.(dir|dirname|path|filename|file|require)\b/, "import.meta file paths"],
+  [/\b__dirname\b|\b__filename\b/, "__dirname"],
+  [/\bBun\.[A-Za-z]/, "Bun globals"],
+  [/\bprocess\.cwd\(/, "process.cwd()"],
+  [/["'](?:node:)?(?:fs|fs\/promises|child_process)["']/, "the file system or child processes"],
+];
+
+/** The Sandbox-only runtime features the given test sources use; empty when none. */
+export function sandboxOnlyFeatures(sources: readonly string[]): string[] {
+  return SANDBOX_ONLY.filter(([pattern]) => sources.some((source) => pattern.test(source))).map(
+    ([, name]) => name,
+  );
+}
+
+/**
  * Support the fixture's CONTRACT_ROOT imports without giving a script a filesystem. Only literal
  * `${root}/...` imports are rewritten; other dynamic paths fail closed in the Dynamic Worker.
  */

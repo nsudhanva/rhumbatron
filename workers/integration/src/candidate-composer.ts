@@ -18,7 +18,10 @@ import { nothingSelected } from "./request-policy.ts";
  * workflow loads rows, these functions decide order, verification scope, and check outcomes.
  */
 
-/** Default Project policy (section 53) until Project policies are stored. */
+/**
+ * The policy of a Project without a stored `project_policies` row (section 53). It protects no
+ * resource: protected resources are Project-specific and come only from the stored row.
+ */
 export const DEFAULT_POLICY: ProjectPolicy = {
   version: "policy-1",
   maxCostUsdPerChange: 3,
@@ -26,7 +29,7 @@ export const DEFAULT_POLICY: ProjectPolicy = {
   maxActiveSandboxes: 4,
   maxCandidates: 3,
   humanGateRiskTiers: ["high", "critical"],
-  protectedResources: ["cart", "checkout", "identity.auth"],
+  protectedResources: [],
   networkPolicy: "restricted",
   autoPromoteRiskTiers: ["low"],
   requiredChecksByRisk: {

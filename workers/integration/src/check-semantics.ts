@@ -104,8 +104,9 @@ export const BROWSER_SESSION_MS = 55_000;
 /** Section 44: max full browser verification runs per Candidate. */
 export const MAX_BROWSER_RUNS_PER_CANDIDATE = 2;
 /**
- * Daily guard under the 600 s Browser Run free allowance (section 7.3). Fallback only: each
- * environment sets its share with the `BROWSER_DAILY_SECONDS` binding (ADR 0017: 250 s each).
+ * Daily Browser Run guard when the `BROWSER_DAILY_SECONDS` binding is absent or invalid: a safe
+ * value below prod's. Prod sets the binding from Terraform `browser_daily_seconds = 960`
+ * (envs/prod, ADR 0017: 80 % of the included 10 browser hours per month).
  */
 export const BROWSER_DAILY_SECONDS = 500;
 /** Seconds reserved before a session opens; settled to the real duration after it closes. */

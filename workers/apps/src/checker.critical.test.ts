@@ -112,6 +112,26 @@ describe("check orchestration", () => {
     expect((await runAppCheck("build", {}, deps)).coverage).toBe("not_checked");
   });
 
+  it("leaves tests that read files or use Bun globals to the Sandbox, never a false failure", async () => {
+    const deps = runtime(bad);
+    for (const source of [
+      'readFileSync(join(import.meta.dir, "..", "public", "index.html"), "utf8")',
+      'import { readFile } from "node:fs/promises";',
+      'const html = await Bun.file("public/index.html").text();',
+      'path.resolve(__dirname, "../public")',
+      'spawnSync("bun", ["run", "build"]); import { spawnSync } from "child_process";',
+    ]) {
+      expect(await runAppCheck("unit", { "test/a.test.ts": source }, deps)).toMatchObject({
+        status: "error",
+        coverage: "not_checked",
+        supported: false,
+      });
+    }
+    expect(deps.bundle).not.toHaveBeenCalled();
+    const plain = 'import { createApp } from "../src/app.ts"; expect(await res.json()).toBe(1);';
+    expect((await runAppCheck("unit", { "test/a.test.ts": plain }, deps)).supported).toBe(true);
+  });
+
   it("runs a contract script when present and otherwise reads the Hono factory", async () => {
     const deps = runtime({ routes: ["GET /api/cart"] });
     expect(

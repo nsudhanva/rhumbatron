@@ -251,7 +251,7 @@ export async function cleanupProject(env: CleanupEnv, projectId: string): Promis
   // The API purged these when it archived the Project. Repeating it covers any other archive path.
   await purger(env.PROJECT_ROOT, projectId).purge(projectId);
   await purger(env.PROJECT_VIEW, projectId).purge(projectId);
-  // Live apps (ADR 0020): the app host answers 410 at once; its bundles go with the prefixes below.
+  // Live apps (ADR 0020): the app host answers 410 within the router's 10 s pointer cache; its bundles go with the prefixes below.
   await env.DB.prepare(
     "UPDATE app_deployments SET status = 'removed', updated_at = ? WHERE project_id = ? AND status != 'removed'",
   )

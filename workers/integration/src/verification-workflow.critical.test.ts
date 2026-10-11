@@ -155,6 +155,7 @@ function harness(
     PROJECT_ROOT: {
       idFromName: (id: string) => id,
       get: () => ({
+        release: async () => {},
         getCanonical: async () => ({
           generation: 0,
           treeSha: "1".repeat(40),
@@ -235,6 +236,20 @@ describe("required preview smoke before promotion", () => {
           payload: expect.objectContaining({
             reason: "Preview check failed: GET /api/recipes returned 500.",
           }),
+        }),
+      ]);
+      // Its only Candidate cannot ship: the Change ends instead of staying `verifying`.
+      expect(
+        h.db.prepare("SELECT status, blocked_reason FROM changes WHERE id = ?").get("chg_1"),
+      ).toEqual({
+        status: "failed",
+        blocked_reason:
+          "No Candidate passed its required checks: Preview check failed: GET /api/recipes returned 500. Submit the request again.",
+      });
+      expect(appendChangeEvents).toHaveBeenCalledWith(undefined, expect.anything(), [
+        expect.objectContaining({
+          eventType: "change.failed",
+          payload: expect.objectContaining({ phase: "verification" }),
         }),
       ]);
     } finally {

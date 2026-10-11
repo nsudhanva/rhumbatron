@@ -2,6 +2,7 @@ import {
   contractProgram,
   contractScript,
   harnessModuleName,
+  sandboxOnlyFeatures,
   testFiles,
   unitProgram,
 } from "./checker-program.ts";
@@ -63,6 +64,10 @@ return Response.json({ loaded: true }); } };`,
     if (kind === "unit") {
       const reports: unknown[] = [];
       const paths = testFiles(files);
+      const needs = sandboxOnlyFeatures(paths.map((path) => files[path] ?? ""));
+      if (needs.length > 0) {
+        return checkGap(kind, `Tests use ${needs.join(", ")}; the project runner runs them.`);
+      }
       const virtualModules = {
         [harnessModuleName]: testHarnessSource(),
         "bun:test": `export { describe, it, test, expect, beforeEach, afterEach } from ${JSON.stringify(harnessModuleName)};`,
