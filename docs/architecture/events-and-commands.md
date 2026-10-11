@@ -47,11 +47,11 @@ flowchart LR
 
 Rules in the code:
 
-- There are 8 streams per environment, named `rhumbatron_events_00_dev` through `rhumbatron_events_07_dev` (and `_prod`). `AGENTS.md` uses hyphens. K2 names allow only letters, digits, and underscores (ADR 0006).
+- There are 8 streams, named `rhumbatron_events_00_prod` through `rhumbatron_events_07_prod`. `AGENTS.md` uses hyphens. K2 names allow only letters, digits, and underscores (ADR 0006).
 - Retention is 7 days (`retention_seconds = 604800`).
 - One project always maps to one stream, so its Events stay in order on that stream.
 - The nudge is best effort. The cron sweep is the backstop. The cron visits one stream per minute, so each stream gets a sweep every 8 minutes.
-- In prod, a Terraform precondition fails the plan if the account would have more than 20 K2 streams.
+- A Terraform precondition fails the plan if the account would have more than 20 K2 streams.
 
 ### Outbox row states
 

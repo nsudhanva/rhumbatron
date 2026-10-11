@@ -15,7 +15,7 @@ Main source files:
 AgentDO is one durable logical Agent.
 It extends the Agents SDK `Agent` class and implements the `AgentRuntime` interface (`start`, `resume`, `cancel`, `getState`).
 Pi types stay inside AgentDO and `workers/agents/src/models.ts` (section 25).
-There is one Agent per Task today.
+There is one Agent per Task.
 The Agent ID is `agt_<task>`.
 
 AgentDO stores its own run rows in DO SQLite (`agent_runs`, `run_tool_logs`).
@@ -97,7 +97,7 @@ The command tool refuses shell metacharacters.
 
 ## Model routing
 
-The code keeps the tier names `haiku`, `sonnet`, and `opus` from `AGENTS.md`.
+The code uses the tier names `haiku`, `sonnet`, and `opus` from `AGENTS.md`.
 Every tier calls Anthropic Claude through the AI Gateway (ADR 0021).
 Opus is off by default: the opus tier runs on Sonnet unless `ALLOW_OPUS` is `"true"`.
 
@@ -165,7 +165,7 @@ Two call paths use the same gateway, header, prices, and meter:
 - Pi agent runs (`workers/agents/src/models.ts`): Pi's Anthropic Messages API. Pi puts `cache_control` on the system prompt, the tool definitions, and the latest message, and prices each response from its usage fields.
 - `complete()` (`packages/model-router/src/gateway-client.ts`) for the Root Planner, conflict review, and context compaction, always through `meteredComplete()`. It maps function tools to Anthropic tools, caches the system prompt, and replays a whole assistant turn, thinking blocks included, on a follow-up call.
 
-Cost per call is exact: uncached input, output with thinking, cache reads, and cache writes at the ADR 0021 prices.
+Cost per call is exact: uncached input, output with thinking, cache reads, and cache writes at Anthropic list prices (`ANTHROPIC_PRICES` in `packages/model-router/src/models.ts`).
 The monthly budget is `ANTHROPIC_MONTHLY_BUDGET_USD`: $10 in prod.
 Each call reserves an estimate on the D1 meter (`usage_counters`, `anthropic-usd-micro` per `YYYY-MM`) with one conditional statement, then settles to its exact cost.
 A refused reservation, a gateway spend-limit 429, or an Anthropic billing error is `spend_limited`: a budget stop, never a retry, and never another provider.
@@ -200,7 +200,7 @@ Other rules:
 
 - A transport failure (`rate_limited`, `timeout`, `transient`) retries once at the same tier. A second one in a row fails the Task.
 - `budget_exhausted` and `spend_limited` stop at once. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit.
-- `replan` has no automatic re-plan today. It is a budget stop with limit `max_attempts_per_tier`. The Task becomes `blocked`, and the Change becomes `budget_blocked`.
+- `replan` is a budget stop with limit `max_attempts_per_tier`. No automatic re-plan runs. The Task becomes `blocked`, and the Change becomes `budget_blocked`.
 - `limitAttempts` also caps attempts at 2 per tier (section 44) and counts every earlier run at that tier.
 - When a Task fails or stops, its pending dependents become `blocked`.
 - An escalation records `agent.escalated`. Every retry gets a fresh Pi session (section 23.3).

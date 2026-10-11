@@ -56,7 +56,7 @@ Notes:
 - The routing rules send the Root Planner to the `opus` tier (`taskKind = plan`, `complexity = large`). The prompt asks for 2 to 8 Tasks. The schema accepts 1 to 12 (`MAX_TASKS_PER_CHANGE`).
 - The Work Graph JSON goes to R2 at `work-graphs/<project>/<change>.json`.
 - Change events go to the ResourceShardDO that owns `change:<id>`. This keeps ProjectRootDO cold (section 13.1).
-- The API updates ProjectViewDO directly with the new Change. No code emits `change.created` today.
+- The API updates ProjectViewDO directly with the new Change. Only an owner override emits `change.created`.
 
 ## Part 2: from a wake to a published ChangeSet
 
@@ -140,12 +140,13 @@ sequenceDiagram
   Root->>Root: generation + 1 and canonical.advanced in one transaction
   INT->>Art: fast-forward canonical main to the composed commit
   INT->>RW: startRelease (Projects with a release target only)
-  RW->>RW: poll Workers Builds, confirm deployment, smoke check
+  RW->>RW: move the live app pointer, or poll Workers Builds, then smoke check
 ```
 
 Notes:
 
 - Promotion is a human action in the UI, except under policy `autoPromoteRiskTiers`. Auto-promotion applies when the verified Candidate needs no human approval and `autoPromoteRiskTiers` lists the Change risk tier (`low` in `policy-1`). Then the CandidateVerificationWorkflow calls the same `promoteCandidate` path with actor `system:auto-promotion`. `canonical.promotion.requested` then records `trigger: "auto"`. All section 36 preconditions still apply. A Candidate that needs approval never promotes automatically (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
+- A Project has a release target when it has a live app or a `release_targets` row. See [Live apps](live-apps.md).
 - The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a release target, else `completed`. The release then ends the Change as `completed` (deployed or superseded) or `failed`.
 - Every end after promotion records `change.completed` or `change.failed`. `build.started` records `releasing`. These Events move ProjectViewDO out of `promoting` (section 13.3).
 - A Change still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change. The integration Worker then marks a queued or building release `failed`. It records a release that never started as a `failed` release row. Then it fails the Change. If the Project has no release target, the Worker completes the Change instead. The reason is on the release row and in the Event. The generation stays promoted. The next promotion releases as usual.
@@ -164,11 +165,15 @@ stateDiagram-v2
   created --> compiling: ChangeWorkflow
   compiling --> running: Work Graph stored
   compiling --> failed: planner failed
+  compiling --> not_selected: lost a request conflict
+  compiling --> awaiting_owner: conflict needs the owner
   running --> verifying: last Task completed
   running --> budget_blocked: budget or limit stop
   budget_blocked --> running: person raises the budget
   verifying --> awaiting_approval: verified Candidate needs approval
   awaiting_approval --> verifying: no verified Candidate left
+  verifying --> running: merge conflict, Tasks re-run on the new base
+  verifying --> blocked: second merge conflict
   verifying --> promoting: promotion requested
   awaiting_approval --> promoting: promotion requested
   promoting --> verifying: compare-and-swap refused
@@ -187,6 +192,7 @@ stateDiagram-v2
   cancelled --> [*]
 ```
 
+A Candidate that fails on a merge conflict makes the Change re-run the conflicting Tasks on the new base (`workers/integration/src/rebase.ts`). After two such re-runs the Change becomes `blocked` with the reason "The request could not be merged with newer changes twice. Submit it again."
 The pure rules are in `workers/integration/src/change-status.ts`.
 A refused compare-and-swap returns the Change to its status before `promoting`.
 A verified Candidate can also promote from `running` or `budget_blocked`.

@@ -1,7 +1,6 @@
 # Protocols
 
-The Zod schemas in `packages/protocol/src` are the protocol source of truth. No separate protocol
-documents exist yet.
+The Zod schemas in `packages/protocol/src` are the protocol source of truth.
 
 | File | Content |
 |---|---|
@@ -12,11 +11,14 @@ documents exist yet.
 | `conflict.ts` | Intent, Challenge, and conflict reports (sections 26 and 32). |
 | `candidate.ts` | Candidate, Evidence, Verification Plan, approval, and promotion (sections 34 and 36). |
 | `workspace.ts`, `context.ts` | Workspace manifest and Context Packet (section 27). |
+| `common.ts`, `model.ts` | Risk, complexity, and model tiers, Canonical Generation, route requests, route decisions, and Decision Receipts (section 23). |
 | `release.ts`, `api.ts` | Release records, API errors, and health responses. |
+| `app.ts`, `code.ts`, `code-edit.ts` | Live app deployments and preview hosts, the code store keys, and human code edits. |
+| `activity.ts`, `suggestions.ts` | The Project event feed and the goal suggestion pills. |
 
 ## Shared Projects
 
-An owner shares a Project with a collaborator by email. The design is in [phase-17a-shared-projects.md](../plans/phase-17a-shared-projects.md). The routes are in `workers/api/src/members.ts`. All routes need a signed-in user. The API never reads a role or rank from the client.
+An owner shares a Project with a collaborator by email. The routes are in `workers/api/src/members.ts`. All routes need a signed-in user. The API never reads a role or rank from the client.
 
 The owner has rank 0. A collaborator has rank 10. The `priority_wins` policy uses the rank to decide between two conflicting requests.
 
@@ -51,7 +53,7 @@ Access to a Project does not give permission for each action. A collaborator can
 - Provision the Project, run checks, and remove the Project.
 - Retry or dismiss stopped work (dead letters).
 
-### New fields on existing responses
+### Fields on Project and Change responses
 
 | Response | Field | Meaning |
 |---|---|---|
@@ -62,7 +64,7 @@ Access to a Project does not give permission for each action. A collaborator can
 
 `POST /v1/projects/:projectId/changes` makes the `clientRequestId` unique for each requester. Two users can send the same `clientRequestId` without a collision.
 
-### New Change statuses
+### Change statuses for requests
 
 | Status | Meaning |
 |---|---|

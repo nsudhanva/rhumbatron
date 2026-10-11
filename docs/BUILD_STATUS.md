@@ -1,54 +1,51 @@
 # Build Status
 
 ## Current phase
-Phases 0 through 13 and 16 are complete. Prod serves each Project as a live app at `<slug>.rhumbatron.com`. Models run on Anthropic Claude (ADR 0021).
+Prod serves each Project as a live app at `<slug>.rhumbatron.com`. Models run on Anthropic Claude through AI Gateway.
 
 ## Completed
-- P0 through P6: Monorepo skeleton, base Cloudflare infrastructure, Workers, Durable Objects, D1, K2 event plane, workflows, and agent runtime with AI Gateway.
-- P7: Exact retrieval Context Packets, indexer, stored Product Graph, Vectorize retrieval, and Haiku retry-log compaction (deployed).
-- P8: Artifacts canonical source, workspace forks, workspace manifest per run (P8-03), and capped Sandbox Worker.
-- P9: Intents, Challenges, deterministic semantic conflict detection, model conflict review (Sonnet and Opus escalation), and Candidate forks.
-- P10: Sandbox Candidate composition and verification (build, unit, contract, Cart invariant, p95, security), coverage states, D1 and R2 Evidence.
-- P11-01 through P11-10: Approval policy and dialog, promotion preconditions, ProjectRootDO compare-and-swap, `canonical.advanced`, and stale-promotion checks. The release path through Workers Builds is built and applied (ADR 0018).
-- P12: All UI pages, Flight Control (`/changes/<id>/flight`), and notification bell.
-- P13: Dead-letter consumer with Retry and Dismiss, section 44 limits, advisory Claims, smoke checks (`bun run smoke:prod`), and cleanup (`bun run cleanup:projects`).
-- P14: `.github/workflows/ci.yml` (checks only; no deploy credentials). The project has no other CI/CD by choice.
-- Production: Terraform deploys `https://rhumbatron.com` from `envs/prod` (ADR 0017). `www` redirects to the apex. Sign-in uses the Clerk production instance. Smoke: `bun run smoke:prod`.
-- Runaway-billing guards (ADR 0019): Durable Object alarm caps, causal wakeup caps, and account budget alerts at 10, 25, and 100 USD.
-- P16, live apps (ADR 0020): each prod Project is a Dynamic Worker app at `<slug>.rhumbatron.com`. A Candidate gets a preview at `<id>--<slug>`. Promotion moves the live pointer and runs a smoke check. Rollback adds a version. Every version keeps a host `v0000001--<slug>`. The Code page shows files, diffs and history, and a human edit becomes a checked Change. The "Remove app" action answers 410. `bun run e2e` covers all of it.
-- Models: Anthropic Claude through AI Gateway (ADR 0021). Haiku and Sonnet. Opus runs on Sonnet unless `ALLOW_OPUS` is true.
-- P17a (Linear HOM-231 through HOM-240): per-Project sharing with verified-email invitations, owner-only actions, one Change per request, serialized scope registration in ProjectRootDO, criteria-level Sonnet review, `priority_wins`, owner override as a linked Change, the recompose guard, not-selected notifications, rebase by re-run after a merge conflict, and a required preview smoke check before promotion.
-- Milestone (P17a, prod, 2026-10-10): two accounts sent requests to one shared Project at the same time. Rhumbatron shipped the compatible requests, did not select the conflicting one, and shipped it after the owner override. A designer and a frontend developer then built a recipe app together.
-- Milestone (P16, prod): an agent-driven Change on Acme Live (`https://acme-live.rhumbatron.com`) added `GET /api/health`. Two Tasks ran on Claude. The Candidate passed its checks, got a preview, promoted automatically and went live in under 3 minutes. Model cost was 0.005 USD.
-- Milestone: A real model-driven Change ran end to end. The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD.
+- Monorepo, Terraform roots (`bootstrap`, `envs/global`, `envs/prod`), and R2 remote state.
+- Workers: web, api, coordinator, event-router, integration, agents, indexer, sandbox, apps, and the docs site.
+- Durable Objects (`ProjectRootDO`, `ResourceShardDO`, `ProjectViewDO`, `AgentDO`), D1, transactional outbox, K2 (8 streams, 4 subscriptions), Queues, and 3 Workflows.
+- Agent runtime: Pi harness behind `AgentRuntime`, model routing, Decision Receipts, escalation, and per-Task budgets.
+- Context Packets with exact retrieval, indexer, Product Graph, Vectorize retrieval, and Haiku compaction of retry logs.
+- Artifacts source, Workspace forks, stacked workspaces, and the capped Sandbox Worker.
+- Intents, Challenges, advisory Claims, deterministic conflict detection, Sonnet conflict review, and Candidate forks.
+- Candidate composition and verification (build, unit, contract, protected invariants, p95, security, browser, preview smoke), coverage states, and D1 and R2 Evidence.
+- Approval policy, promotion preconditions, `ProjectRootDO` compare-and-swap, and `canonical.advanced`.
+- Live apps (ADR 0020): previews, production pointer, release smoke check, version hosts, rollback, and app removal.
+- Shared Projects (ADR 0023): invitations, owner and collaborator roles, cross-request check, `priority_wins`, and owner override.
+- Project deletion for the owner and Leave project for a collaborator.
+- UI pages, Flight Control (`/changes/<id>/flight`), and the notification bell.
+- Dead-letter consumer with Retry and Dismiss, section 44 limits, and runaway-billing guards (ADR 0019).
+- Authentication with the Clerk production instance (ADR 0002).
+- Checks and scripts: `bun run check`, `bun run smoke:prod`, `bun run e2e`, `bun run cleanup:projects`, and `bun run cost:report`.
+- CI: `.github/workflows/ci.yml` runs checks only and holds no deploy credentials.
 
 ## Active
-- P17a-11 to P17a-13 (HOM-241 to HOM-243): "Delete project" for the owner and "Leave project" for a collaborator in the web app. A project delete removes all project data. Then remove all existing Projects on prod.
+- None.
 
 ## Blocked
 - None.
 
 ## Cost
 - Workers Paid account shared with other projects. Rhumbatron stays within free and included limits.
-- Sandbox: 1 instance. Agent Workspaces and Candidate checks sleep after 2 idle minutes. The hard cap is 15 hours per month in prod.
-- Browser Run: Capped at 250 seconds per day.
-- Anthropic: code budget of 10 USD per month in prod. Model work stops at the budget (ADR 0021).
-- Live apps: 60 app builds per day; preview bundles expire after 7 days.
+- Sandbox: 1 instance. Agent Workspaces and Candidate checks sleep after 2 idle minutes. The hard cap is 15 hours per month.
+- Browser Run: 250 seconds per day.
+- Anthropic: code budget of 10 USD per month. Model work stops at the budget (ADR 0021).
+- Live apps: 60 app builds per day. Preview bundles expire after 7 days.
 - Account budget alerts: 10, 25, and 100 USD (ADR 0019).
-- Prod is the only remote environment (ADR 0024).
 - Pause switch: `locals.paused` in `infrastructure/terraform/envs/prod/main.tf`.
-- Cost reporting: `bun run cost:report`.
+- Cost report: `bun run cost:report`.
 
 ## Decisions
+- Prod is the only remote environment. Local work uses `wrangler dev`.
 - Terraform owns remote control-plane changes. Never `wrangler deploy`.
 - Deployment sequence: `bun run cf:bundle`, `bun run tf:plan:prod`, `bun run tf:apply:prod`, and `bun run tf:drift:prod`.
 - Artifacts is canonical source for managed Projects (ADR 0010).
-- Release via Workers Builds: Promotion pushes to Artifacts, and ReleaseWorkflow observes the build (ADR 0018).
-- Sharing is per Project, not Clerk Organizations. The owner has priority; a conflict is decided by `priority_wins` and the owner can override (ADR 0023).
-- CI runs checks only and needs no credentials. Deployment stays local through Terraform.
+- Models: Anthropic Claude Haiku 5.5 and Sonnet 5.5. The opus tier runs on Sonnet 5.5 unless `ALLOW_OPUS` is `true` (ADR 0021). Workers AI Clef-flash makes cheap bounded decisions.
+- Sharing is per Project. The owner has priority. `priority_wins` decides a conflict, and the owner can override it (ADR 0023).
+- CI runs checks only. Deployment runs locally through Terraform.
 
 ## Next
-- Member focus areas (for example, design or frontend only) with priority by area.
-- Clef-flash as the first pass of the cross-request check, before the Sonnet review.
-- Protected obligation tests: a later Change must not weaken tests that an app promises to keep.
-- WAF and rate limits on the public command endpoints (AGENTS.md section 40.4).
+- Open issues of the Linear project `Rhumbatron`.

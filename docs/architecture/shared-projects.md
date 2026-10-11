@@ -2,8 +2,6 @@
 
 This page explains how several people use one Project at the same time.
 It covers membership, the check that compares simultaneous requests, the `priority_wins` policy, and the owner override.
-The plan is `docs/plans/phase-17a-shared-projects.md`.
-This page describes the code.
 
 Main source files:
 
@@ -25,7 +23,7 @@ Rhumbatron does not use Clerk Organizations for sharing.
 
 | Role | Rank | How the user gets it |
 |---|---|---|
-| `owner` | 0 | The migration backfills one row for the owner of each existing Project. A partial unique index allows one owner for each Project. |
+| `owner` | 0 | Project creation inserts the owner row. A partial unique index allows one owner for each Project. |
 | `collaborator` | 10 | The user accepts an invitation. |
 
 The API never reads a role or a rank from the client.
@@ -226,7 +224,7 @@ The workflow excludes the criteria that the review cited for the later Change.
 It also excludes the criteria that depend on a cited one (`losingCriterionIds`).
 The review lists them in `dependentOnConflict`, and code checks each entry like a citation.
 A deterministic rule adds a criterion that names the losing layout, for example "card" or "grid", when the winner does not.
-Example from prod: "Each card shows the recipe title" depends on "renders as a grid of cards", so it loses with it.
+Example: "Each card shows the recipe title" depends on "renders as a grid of cards", so it loses with it.
 Then the workflow checks what remains.
 
 `nothingSelected` returns true when every remaining criterion only restates the quality gate.
@@ -290,24 +288,20 @@ The overlap pass then finds no overlap, and no model reads the pair.
 Both Changes ship in sequence, and the later one wins (last one wins).
 The tests of the earlier Change usually fail on the later tree and stop it.
 An agent can edit those tests.
-Tests outside the source that agents can edit are not built yet.
+No check protects tests that agents can edit.
 Report such a miss as an incident.
-Plan section 3 has the details.
 
-## Example from production
+## Example
 
-On 2026-10-10 the Project `Birthday Weekend` (`bday-nncq6`) ran this case on prod.
-Alice is the owner.
-Her display name in the record is `Smoke Prod`.
-Bob is a collaborator.
+Alice owns a Project, and Bob is a collaborator.
 
-1. Alice asked: "Change the page background to dark navy with white text." She also asked for an "N left" count.
-2. Bob asked: "Change the page background to light yellow." He also asked for a Clear completed button.
-3. The two background requests overlapped, so the Sonnet review ran.
-4. The Sonnet review returned `conflicting` and cited two criteria: "The home page background renders as light yellow" (Bob) and the criterion that the page "renders with a dark navy background and white text" (Alice).
-5. Both citations were valid. The ranks were 0 and 10, so `priority_wins` chose Alice.
-6. Bob's request became `not_selected` with the reason: "Not selected: it conflicts with Smoke Prod's request ..., which has higher priority (owner)."
+1. Alice asks: "Change the page background to dark navy with white text." She also asks for an "N left" count.
+2. Bob asks: "Change the page background to light yellow." He also asks for a Clear completed button.
+3. The two background requests overlap, so the Sonnet review runs.
+4. The Sonnet review returns `conflicting` and cites two criteria: "The home page background renders as light yellow" (Bob) and the criterion that the page "renders with a dark navy background and white text" (Alice).
+5. Both citations are valid. The ranks are 0 and 10, so `priority_wins` chooses Alice.
+6. Bob's request becomes `not_selected` with the reason: "Not selected: it conflicts with Alice's request ..., which has higher priority (owner)."
 
-The "N left" count and the Clear completed button did not overlap with each other or with the background requests.
-They built in parallel and were not affected.
-The owner could now press `Use this instead` on Bob's request to replace Alice's.
+The "N left" count and the Clear completed button do not overlap with each other or with the background requests.
+They build in parallel and are not affected.
+The owner can press `Use this instead` on Bob's request to replace Alice's.

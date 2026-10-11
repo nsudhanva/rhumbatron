@@ -1,8 +1,8 @@
 # Rhumbatron architecture guide
 
 This guide uses diagrams to explain how Rhumbatron works.
-Each diagram matches the code at the time of writing.
-When the code and `AGENTS.md` differ, this guide describes the code and records the difference.
+Each diagram matches the code.
+This guide describes the code. It records each difference from `AGENTS.md`.
 
 ## Product summary
 
@@ -16,8 +16,8 @@ A Verification Workflow runs executable checks on each Candidate.
 Only `checked_supported` Evidence with status `pass` can satisfy a required check.
 A human approves a gated Candidate.
 ProjectRootDO then advances the Canonical Generation with compare-and-swap.
-The release moves the live app pointer in prod (ADR 0020).
-A Release Workflow observes the deployment.
+The release moves the live app pointer (ADR 0020).
+A Release Workflow runs the release and its smoke check.
 
 > Many Agents can propose many futures. Only verified evidence can advance the Canonical State.
 
@@ -77,14 +77,14 @@ flowchart LR
 
 Differences from `AGENTS.md`:
 
-- The KV namespace `rhumbatron-config-<env>` (binding `CONFIG` on the integration Worker) holds only a 5-minute snapshot of the Project policy. D1 `project_policies` is the source of truth. No API writes it yet, so a Project without a row uses the default policy. Only promotion and approval read the policy. Candidate verification still plans with the default policy.
+- The KV namespace `rhumbatron-config-<env>` (binding `CONFIG` on the integration Worker) holds only a 5-minute snapshot of the Project policy. D1 `project_policies` is the source of truth. No API writes it, so a Project without a row uses the default policy. Promotion and approval read the policy. Candidate verification plans with the default policy.
 - No OpenTelemetry tracing is configured. Durable Object Workers set `traces.enabled = false`.
 
 ## Deployables map
 
 There are nine Rhumbatron Workers plus one release target Worker for the Acme Shop demo.
-`rhumbatron-apps` runs live apps and exists in prod only (ADR 0020). The docs site is a tenth, assets-only Worker in prod.
-Each Worker is named `rhumbatron-<component>-<env>`, where `<env>` is `prod` (ADR 0024).
+`rhumbatron-apps` runs live apps (ADR 0020). The docs site is a tenth, assets-only Worker.
+Each Worker is named `rhumbatron-<component>-<env>`, where `<env>` is `prod`.
 
 The first diagram shows how the Workers call each other.
 Solid arrows are service bindings or cross-script Durable Object bindings.
@@ -162,8 +162,8 @@ flowchart TB
 
 Notes:
 
-- `AGENTS.md` section 12 lists seven deployables. The code adds `rhumbatron-sandbox` because the provider cannot attach a container to a DO class in another Worker (ADR 0012).
-- The release Worker is in Terraform (`cloudflare_worker.acme_shop`). Live apps replace the Workers Builds path on prod (ADR 0018, ADR 0020).
+- `AGENTS.md` section 12 lists seven deployables. The code adds `rhumbatron-sandbox`, because the provider cannot attach a container to a DO class in another Worker (ADR 0012), and `rhumbatron-apps` (ADR 0020).
+- The release Worker is in Terraform (`cloudflare_worker.acme_shop`). Workers Builds deploys it after a promotion. A Project with a live app releases through the apps Worker (ADR 0020).
 
 ## Reading order
 
@@ -185,10 +185,11 @@ flowchart LR
 4. [Source and verification](source-and-verification.md): Artifacts repos and forks, the Sandbox, checks, coverage, and promotion.
 5. [Infrastructure and cost](infrastructure-and-cost.md): Terraform roots, adapters, state, cost guards, and the pause switch.
 6. [Shared Projects and simultaneous requests](shared-projects.md): membership, owner and collaborator roles, and how Rhumbatron compares requests that run at the same time.
+7. [Live apps](live-apps.md): app hosts, the apps Worker, previews, the production pointer, rollback, and removal.
 
 Related documents:
 
-- [Tech stack](tech-stack.md): every technology in use today, what it does, and where it differs from `AGENTS.md`.
+- [Tech stack](tech-stack.md): every technology in use, what it does, and where it differs from `AGENTS.md`.
 - `AGENTS.md`: the authoritative build plan.
 - `docs/adr/`: one record per architecture decision. This guide cites ADRs by number.
 - `docs/BUILD_STATUS.md`: current phase, blockers, and caps.

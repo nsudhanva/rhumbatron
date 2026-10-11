@@ -4,17 +4,15 @@
 
 Many agents can propose many futures of one codebase. Only verified evidence can advance the canonical state.
 
-`AGENTS.md` is the authoritative build plan. `docs/BUILD_STATUS.md` tracks progress. `docs/demo/runbook.md` is the demo sequence. [docs/architecture/README.md](docs/architecture/README.md) explains the architecture. [docs/operations/README.md](docs/operations/README.md) lists the runbooks.
+`AGENTS.md` is the authoritative build plan. `docs/BUILD_STATUS.md` states the current phase and caps. `docs/demo/runbook.md` is the demo sequence. [docs/architecture/README.md](docs/architecture/README.md) explains the architecture. [docs/operations/README.md](docs/operations/README.md) lists the runbooks.
 
 ## Live Status
 
 | Environment | Web | API | Sign-in |
 |---|---|---|---|
-| prod | `https://rhumbatron.com` (`www` redirects to the apex) | `https://api.rhumbatron.com` | Clerk production instance. Email and password only. Google is off until an OAuth client exists. |
+| prod | `https://rhumbatron.com` (`www` redirects to the apex) | `https://api.rhumbatron.com` | Clerk production instance. |
 
-Prod is the only remote environment. Terraform deploys it (`envs/prod`, ADR 0017, ADR 0024). Local work uses `wrangler dev`.
-
-A real model-driven Change ran end to end. The Root Planner and four agents built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD. That run used Gemini on Vertex AI. Anthropic has replaced it (ADR 0021).
+Prod is the only remote environment. Terraform deploys it (`envs/prod`, ADR 0017). Local work uses `wrangler dev`. Each Project is a live app at `https://<slug>.rhumbatron.com` (ADR 0020).
 
 ## Architecture
 
@@ -38,7 +36,7 @@ flowchart LR
 
 A user submits a goal for a Project. The Root Planner compiles it into a Work Graph of Tasks (`ChangeWorkflow`). The Causal Router wakes only the agents whose Tasks are ready.
 
-Each agent is an `AgentDO` with the Pi harness, and it calls models through AI Gateway. The agent declares a typed Intent, works in an Artifacts Workspace inside a capped Sandbox, and publishes a ChangeSet.
+Each agent is an `AgentDO` with the Pi harness. It calls Anthropic Claude models through AI Gateway (ADR 0021). The agent declares a typed Intent, works in an Artifacts Workspace inside a capped Sandbox, and publishes a ChangeSet.
 
 Durable Objects hold authoritative state:
 - `ProjectRootDO`: Holds Canonical Generation and compare-and-swap promotion.
@@ -47,7 +45,7 @@ Durable Objects hold authoritative state:
 
 Every mutation writes a transactional outbox row, and the outbox publisher sends it to K2. The event router projects Events into the live view and archives them to R2.
 
-A deterministic detector checks Intents on semantic resources. Sonnet reviews ambiguous overlaps and can escalate to Opus. Conflicting paths fork into Candidates.
+A deterministic detector checks Intents on semantic resources. Sonnet reviews ambiguous overlaps. The review escalates to Opus only when `ALLOW_OPUS` is `true`. Otherwise Sonnet runs the Opus tier. Conflicting paths fork into Candidates.
 
 The integration Worker composes each Candidate and verifies it in the Sandbox (build, unit, contract, Cart invariant, p95, security). It records verification Evidence in D1 and R2.
 
@@ -67,7 +65,7 @@ Reliability safeguards:
 - `/changes/<id>/flight`: Flight Control (execution DAG, agent swimlanes, workspace lanes, codebase heatmap, candidate arena, preview wall, evidence explorer, decisions, events, time machine, command palette Cmd+K).
 - `/candidates/<id>`: Candidate verification evidence, approval, promotion.
 - `/compare/<changeId>`: Candidate comparison matrix.
-- `/projects/<id>/{agents,events,verification,workspace,costs,graph}`: Dedicated project management and monitoring views.
+- `/projects/<id>/{agents,events,verification,workspace,costs,graph,code,versions}`: Dedicated project management and monitoring views.
 
 ## Prerequisites
 
@@ -108,10 +106,10 @@ apps/web                 TanStack Start UI (rhumbatron.com)
 workers/<name>           One Cloudflare Worker per directory, each with its own wrangler.jsonc
 packages/                Shared logic: protocol (Zod schemas), evidence, conflict, model-router, ...
 containers/coding-agent  Sandbox image
-fixtures/                Demo Project source (Acme Shop) and its Wishlist designs
+fixtures/                Acme Shop source and the Wishlist designs for the demo
 infrastructure/terraform Bootstrap, env roots (global, prod), modules
 migrations/d1            D1 SQL migrations (applied by Terraform)
-docs/                    ADRs, protocols, operations, demo, build status
+docs/                    Architecture, ADRs, protocols, operations, demo, plans, build status
 scripts/                 Bundle, checks, smoke, cleanup, cost report
 ```
 
@@ -135,13 +133,13 @@ scripts/                 Bundle, checks, smoke, cleanup, cost report
 | `bun run tf:drift` / `tf:drift:prod` | Post-apply plan that must show zero changes (`global` and `prod`). |
 | `bun run smoke:prod` | Remote smoke check. Public checks always run; the signed-in flow runs when `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` are set. |
 | `bun run smoke:models` | Anthropic through AI Gateway: workspace header, one tool call per tier, one prompt cache hit (under 1 cent). |
-| `bun run smoke:release` | Read-only check of the latest Acme Shop Live release. |
+| `bun run smoke:release` | Read-only check of the latest release of the Acme Shop release target. |
 | `bun run cleanup:projects` | Archive smoke-test Projects on prod (`--dry-run` lists them only). Needs `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` for the prod Clerk instance. |
 | `bun run cost:report` | Read-only report of usage, caps, and leftover resources (`--alerts-only`). |
 
 ## Deployment
 
-Terraform is the only way to change Cloudflare control-plane configuration. Never run `wrangler deploy`, make manual dashboard edits, or issue direct REST writes (one documented exception: ADR 0014).
+Terraform is the only way to change Cloudflare control-plane configuration. Never run `wrangler deploy`, make manual dashboard edits, or issue direct REST writes (ADR 0014 documents the one exception).
 
 Deployment sequence:
 
@@ -162,11 +160,11 @@ Cost controls ([docs/operations/costs.md](docs/operations/costs.md)):
 - Claude (Anthropic): code stops model work at 10 USD per calendar month in prod (ADR 0021).
 - Account budget alerts at 10, 25, and 100 USD (ADR 0019, `envs/global`).
 - Pause switch: `locals.paused` in `infrastructure/terraform/envs/prod/main.tf` ([pause-resume.md](docs/operations/pause-resume.md)).
-- Live apps on Dynamic Workers release every Project on prod (ADR 0020). The Workers Builds release path is described in [release.md](docs/operations/release.md).
+- Live apps on Dynamic Workers release every Project (ADR 0020). A Project with a release target releases through Workers Builds ([release.md](docs/operations/release.md)).
 
 ## CI
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main`. It runs install, lint, typecheck, critical tests, build, Worker bundles, and Terraform `fmt -check` and `validate` with `-backend=false`. It requires no secrets and does not deploy. The project has no other CI/CD by choice. Deploys run locally through Terraform.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`. It runs install, lint, binding drift check, typecheck, critical tests, build, Worker bundles, and Terraform `fmt -check` and `validate` with `-backend=false`. It requires no secrets and does not deploy. Deploys run locally through Terraform.
 
 ## Git hooks
 

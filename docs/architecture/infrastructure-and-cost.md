@@ -7,14 +7,14 @@ Main source files:
 - `infrastructure/terraform/bootstrap`, `envs/global`, `envs/prod`, `modules/*`
 - `scripts/tf.ts`, `scripts/build-workers.ts`, and the adapter scripts in `scripts/`
 - `workers/coordinator/src/alarm-guard.ts`, `workers/event-router/src/causal.ts`, `workers/agents/src/limits.ts`
-- ADR 0004 (bootstrap credentials), 0005 (DO Workers), 0006 (K2 adapter), 0012 (Sandbox Worker), 0017 (prod), 0019 (billing guards), 0024 (prod only)
+- ADR 0004 (bootstrap credentials), 0005 (DO Workers), 0006 (K2 adapter), 0012 (Sandbox Worker), 0017 (prod), 0019 (billing guards)
 
 ## Terraform roots and state
 
 There are three roots.
 `bootstrap` creates only the state bucket.
 `global` owns account-wide and zone-wide singletons.
-`prod` owns the one full environment (ADR 0024).
+`prod` owns the one full environment.
 All three keep state in one R2 bucket, with one key per root.
 
 ```mermaid
@@ -35,7 +35,6 @@ flowchart TB
 Rules:
 
 - The backend is the S3 backend on R2 with `use_lockfile = true`.
-- The first bootstrap apply used local state. The state then moved to R2 with `terraform init -migrate-state` (section 11.2).
 - `scripts/tf.ts` loads secrets from the macOS Keychain for the one root that needs them. Values already in the environment take precedence.
 - Provider: `cloudflare/cloudflare ~> 5.27`. Terraform `>= 1.16.0`.
 - The zone `rhumbatron.com` is a data source. No plan can delete the domain.
@@ -54,7 +53,7 @@ flowchart LR
   WK["modules/worker<br/>api, web, event-router,<br/>integration, indexer"]
   DW["modules/durable-worker<br/>coordinator, agents"]
   DIRECT["Direct resources:<br/>3 cloudflare_workflow,<br/>6 cloudflare_queue_consumer,<br/>cloudflare_worker acme_shop"]
-  PH["modules/code-storage,<br/>modules/observability<br/>(placeholders)"]
+  PH["modules/code-storage,<br/>modules/observability<br/>(no resources)"]
   GLOB --> DNS
   GLOB --> SEC
   ENV --> DNS
@@ -74,10 +73,10 @@ Two Worker modules exist (ADR 0005):
 
 Prod has Clerk DNS records, a Clerk key check, and a K2 account-limit precondition.
 
-### Temporary adapters
+### Adapters
 
-Provider 5.27 has no resource for K2 streams, Vectorize indexes, a container on a DO class, D1 schema migrations, or billing budget alerts.
-Section 11.4 allows a `terraform_data` adapter as the last option.
+Provider 5.27 has no resource for K2 streams, Vectorize indexes, a container on a DO class, the apps Worker, D1 schema migrations, or billing budget alerts.
+A `terraform_data` adapter covers each one (AGENTS.md section 11.4).
 Each adapter runs a Bun script, and only `terraform apply` can run it.
 The shared API helper refuses to run unless `RHUMBATRON_INVOKED_BY=terraform`.
 
@@ -86,11 +85,13 @@ flowchart LR
   APPLY["terraform apply"] --> K2D["terraform_data.k2_streams"]
   APPLY --> VEC["terraform_data.vectorize_index<br/>(+ teardown on destroy)"]
   APPLY --> SBX["terraform_data.sandbox_worker<br/>(+ teardown on destroy)"]
+  APPLY --> APPSW["terraform_data.apps_worker<br/>(+ teardown on destroy)"]
   APPLY --> MIG["terraform_data.d1_migrations"]
   APPLY --> BUD["terraform_data.budget_alerts<br/>(global root)"]
   K2D --> S1["scripts/k2-sync.ts<br/>8 streams, 4 subscriptions"]
   VEC --> S2["scripts/vectorize-sync.ts<br/>384 dims, cosine"]
   SBX --> S3["scripts/sandbox-deploy.ts<br/>Worker + container app"]
+  APPSW --> S6["scripts/apps-deploy.ts<br/>apps Worker"]
   MIG --> S4["scripts/d1-migrate.ts<br/>unapplied files only"]
   BUD --> S5["scripts/budget-alerts.ts<br/>$10, $25, $100"]
   READ["data.external k2_streams<br/>scripts/k2-read.ts"] -->|"stream IDs"| BIND["EVENTS_NN bindings,<br/>K2_STREAM_IDS"]
@@ -102,7 +103,7 @@ A teardown runs only on a real destroy, so a config change never deletes a live 
 
 ### Deployment loop
 
-There is no deploy CI. `.github/workflows/ci.yml` runs checks only.
+Deployment runs on a developer machine. `.github/workflows/ci.yml` runs checks only.
 The project never uses `wrangler deploy`.
 
 ```mermaid
@@ -163,13 +164,13 @@ A budget limit stops the work. The Task becomes `blocked`, and the Change become
 
 ### Caps
 
-Prod is the only consumer (ADR 0024). The prod caps are Anthropic 10 USD per calendar month, Sandbox
+The prod caps are Anthropic 10 USD per calendar month, Sandbox
 15 hours per month, and Browser Run 250 seconds per day. The Worker reads each cap from a binding and
 meters it in the prod D1 database.
 
 ## Pause switch
 
-Prod has `locals.paused` in `envs/prod/main.tf`.
+`envs/prod/main.tf` has `locals.paused`.
 To pause, set it to `true`.
 Then plan and apply.
 All data stays.

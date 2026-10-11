@@ -13,8 +13,8 @@ Main source files:
 ## Artifacts repositories
 
 Cloudflare Artifacts is the canonical source store (ADR 0010).
-Each environment has one namespace: `rhumbatron-projects-<env>`.
-The namespace is created on first use. No Terraform resource exists for it.
+The namespace is `rhumbatron-projects-<env>`, where `<env>` is `prod`.
+The code creates the namespace on first use. Terraform has no resource for it.
 
 ```mermaid
 flowchart TB
@@ -40,7 +40,7 @@ Rules:
 - Cleanup never lists the namespace. It deletes only names it derives from one Project's rows, so it cannot reach another Project.
 - Every git access uses a short-lived repo token (600 s). The code revokes the token after use.
 - Provisioning stores a file index at `source/<project>/<tree>/index.json` in R2. Agents read that index instead of walking the repo.
-- The same step fills the code store (P16-16). `source/<project>/<tree>/code.json` maps paths to Git blob IDs. The step copies each blob once to `source/<project>/blobs/<blob>`. A promotion copies only the blobs that its previous tree did not have. The code store lists files over 1 MB but does not copy them.
+- The same step fills the code store. `source/<project>/<tree>/code.json` maps paths to Git blob IDs. The step copies each blob once to `source/<project>/blobs/<blob>`. A promotion copies only the blobs that its previous tree did not have. The code store lists files over 1 MB but does not copy them.
 - The code view uses stored patches. An Agent publish stores the `git diff` of its own work at `source/<project>/patches/changesets/<cs>.patch` and sets `patchRef`. A Candidate composition stores the Candidate-vs-base diff at `source/<project>/patches/candidates/<cand>.patch`. Each patch stops at 512 KB, at a line boundary. R2 metadata records `truncated` and the full size.
 - All of these objects are under `source/<project>/`. No lifecycle rule expires them, and archive cleanup removes them. Archive cleanup also removes `context/`, `evidence/`, `work-graphs/`, `workspace/`, `apps/`, and `app-previews/` objects of the Project, the D1 content rows, and the Durable Object storage of its shards and agents (see `docs/operations/cleanup.md`).
 - A new Project starts at Canonical Generation 0. `AGENTS.md` shows `S1841` for the demo. The code starts at `S0`.
@@ -82,7 +82,7 @@ Notes:
 The `Sandbox` class is in `rhumbatron-sandbox` (ADR 0012).
 There is one Sandbox per Project, with the ID `proj-<uuid>`.
 Agent runs and Candidate checks use separate directories in it.
-The container application allows one instance per environment.
+The container application allows one instance.
 
 ```mermaid
 sequenceDiagram
@@ -106,7 +106,7 @@ sequenceDiagram
   A->>Art: revoke token
   A->>D1: settle: wall time + 600 s sleep tail
   A->>SBX: remove the run directory
-  Note over SBX: Sleeps after 10 idle minutes (agents) or 2 (Candidate checks)
+  Note over SBX: Sleeps after 2 idle minutes
 ```
 
 | Guard | Agent workspace | Candidate checks |
@@ -158,7 +158,7 @@ That is a gap, never a pass (section 34.4.1).
 
 `buildVerificationPlan` picks checks from the policy tier and from what the ChangeSets touch.
 Verification plans with `DEFAULT_POLICY` (`policy-1`) in `workers/integration/src/candidate-composer.ts`.
-D1 `project_policies` (migration 0017) stores a per-Project policy, but only promotion and approval read it.
+D1 `project_policies` (migration 0017) can store a per-Project policy. Promotion and approval read it. Verification does not.
 
 ```mermaid
 flowchart LR
@@ -181,6 +181,10 @@ flowchart LR
 | `performance` | performance | `bun run bench`, expects metric `p95Ms` below 200 | 120 s |
 | `security` | security | `bun test --test-name-pattern authorization` | 180 s |
 | `browser` | browser | Section 35 Wishlist flow, or a cart flow, in one Browser Run session | 90 s |
+
+The policy check `targeted` runs the `unit` check. Every plan has `build` and `unit`.
+An invariant that keeps existing endpoint behavior adds `contract` and `unit`. Another app-behavior invariant adds `unit`. An invariant that no test can prove becomes a required procedure check, and it stays a visible gap.
+A Project with a live app also gets `contract` and a `preview-smoke` check (kind `smoke`, 30 s). The smoke check publishes the Candidate preview and runs the release probes against it.
 
 The browser check opens the composed app through request interception.
 The preview host has no public URL.
