@@ -2,7 +2,10 @@ import { Button, buttonVariants, cn, Popover } from "@cloudflare/kumo";
 import {
   ArrowLineUp,
   ArrowsSplit,
+  Bell,
   CheckSquare,
+  CloudCheck,
+  CloudWarning,
   GitMerge,
   type Icon,
   Prohibit,
@@ -43,6 +46,8 @@ const ICONS: Record<NotificationKind, Icon> = {
   conflict_open: ArrowsSplit,
   change_completed: CheckSquare,
   promoted: GitMerge,
+  release_failed: CloudWarning,
+  release_deployed: CloudCheck,
   request_not_selected: XSquare,
   request_awaiting_owner: UserCheck,
 };
@@ -185,7 +190,8 @@ function Group({
 Group.displayName = "NotificationGroup";
 
 function Row({ item, onOpen }: { item: AppNotification; onOpen: (item: AppNotification) => void }) {
-  const IconComponent = ICONS[item.kind];
+  // A kind newer than this build (the API ships first) falls back to a plain bell, never a crash.
+  const IconComponent = ICONS[item.kind] ?? Bell;
   const action = ACTIONS[item.kind];
   // `href` is an app path from the API; the router resolves it at runtime.
   const to = item.href as "/";

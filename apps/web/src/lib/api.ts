@@ -1103,6 +1103,8 @@ export type NotificationKind =
   | "conflict_open"
   | "change_completed"
   | "promoted"
+  | "release_failed"
+  | "release_deployed"
   | "request_not_selected"
   | "request_awaiting_owner";
 
