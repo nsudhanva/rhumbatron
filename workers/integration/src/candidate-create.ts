@@ -52,8 +52,16 @@ export type ProposedChangeSet = {
   stackedOn?: readonly string[];
 };
 
-/** An open conflict whose recommended action is `fork_candidates`: the Task IDs of each side. */
-export type ForkConflict = { id: string; sides: readonly [readonly string[], readonly string[]] };
+/**
+ * An open conflict whose recommended action is `fork_candidates`: the Task IDs of each side.
+ * `fork_required` means the review asked for more evidence (`needs_more_evidence`), not that the
+ * two sides are incompatible; `confirmed` means they are. Absent reads as `confirmed`.
+ */
+export type ForkConflict = {
+  id: string;
+  sides: readonly [readonly string[], readonly string[]];
+  state?: "confirmed" | "fork_required";
+};
 
 /** A ChangeSet left out of every Candidate this round, and why. */
 export type DeferredChangeSet = { id: string; reason: string };
@@ -124,9 +132,13 @@ function lineages(
  *    - lineage meets a side of a further counting conflict: deferred (rule 4);
  *    - lineage meets no side: shared, in both Candidates.
  *    Each axis side with at least one ChangeSet left gives one Candidate: shared plus that side.
- *    Two Candidates at most, within MAX_CANDIDATES.
- * 4. A further counting conflict is not paired: a third design would exceed the limit, so its
- *    ChangeSets, and every ChangeSet stacked on or dependent on them, wait for a later round.
+ * 4. Combined Candidate (ADR 0026): when the axis conflict is `fork_required` (the review asked
+ *    for more evidence) and both sides have ChangeSets, a third Candidate holds shared plus both
+ *    sides plus the ChangeSets whose lineage meets both sides. It gives the evidence the review
+ *    asked for: whether the two sides work together. A `confirmed` conflict keeps two Candidates,
+ *    and a ChangeSet that needs both of its sides is deferred.
+ * 5. A further counting conflict is not paired: a further design would exceed MAX_CANDIDATES, so
+ *    its ChangeSets, and every ChangeSet stacked on or dependent on them, wait for a later round.
  */
 export function planCandidateSets(
   proposed: readonly ProposedChangeSet[],
@@ -140,7 +152,12 @@ export function planCandidateSets(
       .map((c) => c.id)
       .sort();
   const counting = forkConflicts
-    .map((f) => ({ id: f.id, a: onSide(f.sides[0]), b: onSide(f.sides[1]) }))
+    .map((f) => ({
+      id: f.id,
+      a: onSide(f.sides[0]),
+      b: onSide(f.sides[1]),
+      combine: f.state === "fork_required",
+    }))
     .filter((f) => f.a.length > 0 && f.b.length > 0);
   const axis = counting[0];
   if (!axis) return { sets: [all], forkConflictId: null, deferred: [] };
@@ -159,16 +176,20 @@ export function planCandidateSets(
   const shared: string[] = [];
   const own: [string[], string[]] = [[], []];
   const deferred: DeferredChangeSet[] = [];
+  /** Lineage meets both axis sides: only a combined Candidate can include it. */
+  const both: DeferredChangeSet[] = [];
   for (const id of all) {
     const line = [...(lineage.get(id) ?? [id])].sort();
     const inA = line.filter((x) => sideA.has(x));
     const inB = line.filter((x) => sideB.has(x));
     const waiting = line.filter((x) => later.has(x));
     if (inA.length > 0 && inB.length > 0) {
-      deferred.push({
+      const entry = {
         id,
         reason: `requires both sides of fork conflict ${axis.id} (${inA.join(", ")} and ${inB.join(", ")}); no Candidate of the fork can include it`,
-      });
+      };
+      if (axis.combine && waiting.length === 0) both.push(entry);
+      else deferred.push(entry);
     } else if (waiting.length > 0) {
       const first = waiting[0] as string;
       deferred.push({
@@ -184,6 +205,12 @@ export function planCandidateSets(
   }
 
   const sides = own.filter((side) => side.length > 0).map((side) => [...shared, ...side].sort());
+  if (axis.combine && own[0].length > 0 && own[1].length > 0) {
+    sides.push([...shared, ...own[0], ...own[1], ...both.map((b) => b.id)].sort());
+  } else if (both.length > 0) {
+    deferred.push(...both);
+    deferred.sort((x, y) => x.id.localeCompare(y.id));
+  }
   const sets = sides.filter((s, i) => sides.findIndex((t) => t.join() === s.join()) === i);
   return { sets: sets.slice(0, MAX_CANDIDATES), forkConflictId: axis.id, deferred };
 }
@@ -269,20 +296,24 @@ async function loadProposed(env: Env, changeId: string): Promise<ProposedChangeS
 /** Open conflicts that call for competing Candidates, oldest first. */
 async function loadForkConflicts(env: Env, changeId: string): Promise<ForkConflict[]> {
   const rows = await env.DB.prepare(
-    `SELECT id, intents_json FROM conflicts
+    `SELECT id, state, intents_json FROM conflicts
      WHERE change_id = ? AND state IN ('confirmed', 'fork_required')
        AND recommended_action = 'fork_candidates'
      ORDER BY created_at, id`,
   )
     .bind(changeId)
-    .all<{ id: string; intents_json: string }>();
+    .all<{ id: string; state: string; intents_json: string }>();
   const out: ForkConflict[] = [];
   for (const row of rows.results ?? []) {
     const sides = JSON.parse(row.intents_json) as { taskId?: unknown }[];
     const a = sides[0]?.taskId;
     const b = sides[1]?.taskId;
     if (typeof a === "string" && typeof b === "string" && a !== b) {
-      out.push({ id: row.id, sides: [[a], [b]] });
+      out.push({
+        id: row.id,
+        sides: [[a], [b]],
+        state: row.state === "fork_required" ? "fork_required" : "confirmed",
+      });
     }
   }
   return out;

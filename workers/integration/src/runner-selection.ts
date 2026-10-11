@@ -11,7 +11,7 @@ export type CheckRunner = "dynamic-worker" | "sandbox";
  *
  * Performance (benchmarks), Browser (sessions), Security (pattern-matched tests),
  * and Cart invariants (specific invariant test file) require Sandbox execution.
- * When the APPS service binding is absent (dev environment), all checks use Sandbox.
+ * When the APPS service binding is absent (local development or a test), all checks use Sandbox.
  */
 export function isAppCheckerEligible(
   check: Pick<VerificationCheck, "kind" | "checkId">,
@@ -133,7 +133,7 @@ export function evaluateContractAppCheck(
 /**
  * Determines whether any check in the verification plan requires Sandbox container execution.
  * Returns true if:
- * - Any check is not eligible for AppChecker (performance, security, browser, cart invariant, dev)
+ * - Any check is not eligible for AppChecker (performance, security, browser, cart invariant, no APPS binding)
  * - Any eligible check returned supported: false (fallback needed)
  */
 export function planNeedsSandbox(
@@ -142,6 +142,8 @@ export function planNeedsSandbox(
   appCheckResults?: ReadonlyMap<string, AppCheckResult>,
 ): boolean {
   for (const check of checks) {
+    // The acceptance check is a model call in the integration Worker: no Sandbox.
+    if (check.kind === "acceptance") continue;
     if (!isAppCheckerEligible(check, hasAppsBinding)) {
       return true;
     }

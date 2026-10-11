@@ -111,6 +111,36 @@ describe("planCandidateSets", () => {
     expect(plan.deferred[0]?.reason).toContain("cs_t3_1");
   });
 
+  // ADR 0026: a review that asked for more evidence (fork_required) also gets the combination.
+  it("adds a combined Candidate for fork_required and keeps two for a confirmed conflict", () => {
+    const edges = [
+      { task_id: "tsk_t4", depends_on_task_id: "tsk_t2" },
+      { task_id: "tsk_t4", depends_on_task_id: "tsk_t3" },
+    ];
+    const open: ForkConflict[] = [
+      { id: "cf_1", sides: [["tsk_t2"], ["tsk_t3"]], state: "fork_required" },
+    ];
+    const plan = planCandidateSets(proposed, open, edges);
+    expect(plan.sets).toEqual([
+      ["cs_t1_1", "cs_t2_1"],
+      ["cs_t1_1", "cs_t3_1"],
+      ["cs_t1_1", "cs_t2_1", "cs_t3_1", "cs_t4_1"],
+    ]);
+    expect(plan.deferred).toEqual([]);
+    expect(plan.sets.length).toBeLessThanOrEqual(MAX_CANDIDATES);
+
+    const confirmed = planCandidateSets(
+      proposed,
+      [{ ...open[0], state: "confirmed" } as ForkConflict],
+      edges,
+    );
+    expect(confirmed.sets).toEqual([
+      ["cs_t1_1", "cs_t2_1"],
+      ["cs_t1_1", "cs_t3_1"],
+    ]);
+    expect(confirmed.deferred.map((d) => d.id)).toEqual(["cs_t4_1"]);
+  });
+
   it("follows transitive Task dependencies through a Task without a ChangeSet", () => {
     const edges = [
       { task_id: "tsk_t4", depends_on_task_id: "tsk_bridge" },

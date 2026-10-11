@@ -11,6 +11,7 @@ import {
   type ProjectPolicy,
   type VerificationCheck,
 } from "@rhumbatron/protocol";
+import { nothingSelected } from "./request-policy.ts";
 
 /**
  * Deterministic Candidate composition inputs (AGENTS.md sections 33, 34, 53). No I/O here: the
@@ -138,6 +139,28 @@ export type ChangeFacts = {
 
 const UI_FILE = /(^|\/)public\/|\.(tsx|jsx|html|css)$/;
 const KEEP_UNCHANGED = /\b(unchanged|must remain|must not change)\b/i;
+const LATENCY_CRITERION = /\bp9[59]\b|\blatency\b/i;
+
+/**
+ * Criteria the acceptance check judges. A criterion that only restates the quality gate ("typecheck
+ * and tests pass"), a latency limit (the performance check measures it), or kept behavior (the
+ * invariant checks prove it) cannot be shown by quoting the patch, so it is left out.
+ */
+export function acceptanceCriteriaToJudge(criteria: readonly string[]): string[] {
+  return [
+    ...new Set(
+      criteria
+        .map((text) => text.trim())
+        .filter(
+          (text) =>
+            text.length > 0 &&
+            !nothingSelected([{ id: "c", text }]) &&
+            !LATENCY_CRITERION.test(text) &&
+            !KEEP_UNCHANGED.test(text),
+        ),
+    ),
+  ];
+}
 
 /** Verification scope from the Change and its ChangeSets (section 34.1: risk-based, not all). */
 export function verificationTouches(facts: ChangeFacts) {
@@ -162,6 +185,7 @@ export function verificationTouches(facts: ChangeFacts) {
       ui: facts.files.some((f) => UI_FILE.test(f)),
     },
     ...(p95 ? { p95BudgetMs: Number(p95) } : {}),
+    acceptanceCriteria: acceptanceCriteriaToJudge(facts.acceptanceCriteria),
   };
 }
 

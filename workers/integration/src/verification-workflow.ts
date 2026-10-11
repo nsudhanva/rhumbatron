@@ -8,9 +8,17 @@ import {
   gateRequiredChecks,
 } from "@rhumbatron/evidence";
 import {
+  anthropicMonthlyBudgetUsd,
+  type CompletionRequest,
+  ModelCallError,
+  meteredComplete,
+  opusAllowed,
+} from "@rhumbatron/model-router";
+import {
   type AppCheckResult,
   ChangeSetIntent,
   CodeManifest,
+  candidatePatchKey,
   codeManifestKey,
   type EventEnvelope,
   type EvidenceRecord,
@@ -19,6 +27,16 @@ import {
   type VerificationPlan,
 } from "@rhumbatron/protocol";
 import {
+  type AcceptanceSource,
+  acceptanceOutcome,
+  acceptanceReport,
+  changeModelSpend,
+  judgeAcceptance,
+  sourceFromFiles,
+  sourceFromPatch,
+  takeDailyCall,
+} from "./acceptance-check.ts";
+import {
   canonicalCommitOf,
   type PreviewOutcome,
   productionRow,
@@ -26,6 +44,7 @@ import {
 } from "./app-release.ts";
 import { runBrowserCheck } from "./browser-check.ts";
 import {
+  acceptanceCriteriaToJudge,
   type ChangeSetRow,
   type CheckOutcome,
   classifyCheck,
@@ -49,9 +68,17 @@ import {
   runContractCheck,
   settleSandbox,
 } from "./candidate-sandbox.ts";
+import {
+  applySelection,
+  groupSize,
+  holdForAcceptance,
+  type JudgeRun,
+  prepareSelection,
+  runIntegrationJudge,
+} from "./candidate-selection.ts";
 import { CHANGE_CANCELLED_REASON, verificationHalt } from "./change-status.ts";
 import { classifyBrowser, classifySecurity } from "./check-semantics.ts";
-import { storeTreeCode } from "./code-store.ts";
+import { storeTreeCode, walkTree } from "./code-store.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
 import { runPreviewSmoke } from "./preview-smoke.ts";
@@ -69,7 +96,12 @@ import {
  * (instance ID = Candidate ID). It composes the Candidate's ChangeSets on its base commit in an
  * Artifacts fork, runs the Verification Plan in the Project Sandbox, stores Evidence in D1 and R2,
  * and gates the required checks. Every step is idempotent: IDs, R2 keys, and commits are stable.
- * No model calls. Only `checked_supported` + `pass` satisfies a required check.
+ * Only `checked_supported` + `pass` satisfies a required check. Model calls: the acceptance check
+ * (Haiku, Sonnet once on invalid output) and, on a tie between siblings, the Integration Judge.
+ *
+ * Sibling Candidates (same Change, same base) do not race (ADR 0026): after its gate, a run selects
+ * only when no sibling is still composing or verifying; exactly one run claims the selection, and
+ * only the winner takes the promotion path.
  */
 
 export type CandidateVerificationParams = { candidateId: string };
@@ -142,7 +174,79 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     step: WorkflowStep,
   ) {
     const { candidateId } = event.payload;
+    const result = await this.verify(candidateId, step);
+    // Only a settled Candidate (verified or rejected by its own checks) takes part in selection.
+    // Stale, halted, cancelled, and missing Candidates leave the group to the others.
+    const settled =
+      "promotable" in result ||
+      ("status" in result &&
+        result.status === "rejected" &&
+        !("reason" in result && result.reason === "change_cancelled"));
+    if (!settled) return result;
+    return this.settleSiblings(step, candidateId, result);
+  }
 
+  /**
+   * After the gate (ADR 0026): a Candidate without siblings promotes alone. With siblings, the run
+   * waits for none of them: when one is still composing or verifying, it ends, and the last run to
+   * settle claims the selection. The claimant selects the winner (a model call only on a tie) and
+   * sends only the winner down the promotion path.
+   */
+  private async settleSiblings<R extends object>(
+    step: WorkflowStep,
+    candidateId: string,
+    result: R,
+  ) {
+    const prep = await step.do("prepare selection", () =>
+      prepareSelection(this.env.DB, candidateId),
+    );
+    if (prep.kind === "single") {
+      return "promotable" in result && result.promotable === true
+        ? { ...result, ...(await this.promoteWinner(step, candidateId)) }
+        : result;
+    }
+    if (prep.kind === "waiting") return { ...result, selection: "waiting", pending: prep.pending };
+    if (prep.kind === "not_mine") return { ...result, selection: "not_mine" };
+    let judged: JudgeRun | null = null;
+    const judge = prep.judge;
+    if (prep.ranking.kind === "tie" && judge) {
+      judged = await step.do(
+        "integration judge",
+        { retries: { limit: 1, delay: "10 seconds", backoff: "constant" }, timeout: "3 minutes" },
+        () =>
+          runIntegrationJudge(this.env.DB, prep.ctx.changeId, judge, (req) =>
+            this.complete(req, prep.ctx.changeId),
+          ),
+      );
+    }
+    const selected = await step.do("apply selection", () => applySelection(this.env, prep, judged));
+    if (!selected.winner) return { ...result, selection: selected };
+    return {
+      ...result,
+      selection: selected,
+      ...(await this.promoteWinner(step, selected.winner)),
+    };
+  }
+
+  /** Anthropic call admitted by the monthly budget (ADR 0021), tagged with the Change. */
+  private complete(req: CompletionRequest, changeId: string) {
+    return meteredComplete(
+      {
+        db: this.env.DB,
+        budgetUsd: anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD),
+      },
+      {
+        accountId: this.env.AI_ACCOUNT_ID,
+        gatewayId: this.env.AI_GATEWAY_ID,
+        apiKey: this.env.ANTHROPIC_API_KEY,
+        workspaceId: this.env.ANTHROPIC_WORKSPACE_ID,
+        allowOpus: opusAllowed(this.env.ALLOW_OPUS),
+      },
+      { ...req, metadata: { ...req.metadata, changeId } },
+    );
+  }
+
+  private async verify(candidateId: string, step: WorkflowStep) {
     // Step 1: confirm the Candidate and its base generation (section 21.2). Retries cover a
     // promotion whose source sync has not landed yet (see below).
     const loaded = await step.do(
@@ -567,6 +671,15 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
                   );
                   if (tried.handled) return null;
                 }
+                if (check.kind === "acceptance") {
+                  return this.runAcceptance(
+                    ctx,
+                    candidateId,
+                    { fork, commit, tree, files: sources.flatMap((s) => s.files) },
+                    acceptanceCriteriaToJudge(loaded.acceptanceCriteria),
+                    check,
+                  );
+                }
                 return check.kind === "contract"
                   ? this.runContract(ctx, candidateId, { commit, baseCommit }, declared, check)
                   : check.kind === "browser"
@@ -734,8 +847,13 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
             { key: candidateId, actor: ACTOR },
           ),
         ];
-        // Section 36 rule 4: a gated Candidate waits for a human decision before promotion.
-        if (gate.promotable && verificationPlan.humanApprovalRequired) {
+        // Section 36 rule 4: a gated Candidate waits for a human decision before promotion. With
+        // siblings, selection requests the approval for the winner only (ADR 0026).
+        if (
+          gate.promotable &&
+          verificationPlan.humanApprovalRequired &&
+          (await groupSize(this.env.DB, candidateId)) <= 1
+        ) {
           events.push(
             await changeEvent(
               ctx,
@@ -754,8 +872,39 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       }),
     );
     if (isHalt(gateStep)) return await stop(gateStep);
-    const gated = gateStep;
-    if (!gated.promotable) return gated;
+    return gateStep;
+  }
+
+  /**
+   * The promotion path of one Candidate: the selection winner, or a Candidate without siblings.
+   * Unchanged by selection: policy `autoPromoteRiskTiers`, the approval gate, and the
+   * compare-and-swap decide (section 21.1 steps 9-11).
+   */
+  private async promoteWinner(step: WorkflowStep, candidateId: string) {
+    const winner = await step.do(`load winner ${candidateId}`, async () => {
+      const row = await this.env.DB.prepare(
+        `SELECT c.base_generation, c.plan_json, ch.project_id, ch.id AS change_id
+         FROM candidates c JOIN changes ch ON ch.id = c.change_id WHERE c.id = ?`,
+      )
+        .bind(candidateId)
+        .first<{
+          base_generation: number;
+          plan_json: string | null;
+          project_id: string;
+          change_id: string;
+        }>();
+      if (!row) return null;
+      const plan = row.plan_json ? (JSON.parse(row.plan_json) as VerificationPlan) : null;
+      return {
+        projectId: row.project_id,
+        changeId: row.change_id,
+        baseGeneration: row.base_generation,
+        humanApprovalRequired: plan?.humanApprovalRequired ?? true,
+      };
+    });
+    if (!winner) return { promotion: "missing" };
+    const ctx = winner;
+    const plan = { humanApprovalRequired: winner.humanApprovalRequired };
 
     // After the gate (section 21.1 steps 9-11): a gated Candidate waits for a person; a Candidate
     // that policy `autoPromoteRiskTiers` allows promotes through the same path as a manual promote.
@@ -769,9 +918,13 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       await markCandidateStale(this.env, candidateId, generation);
       return generation;
     });
-    if (moved !== null) return { ...gated, status: "stale", canonicalGeneration: moved };
+    if (moved !== null) return { status: "stale", canonicalGeneration: moved };
 
     const decision = await step.do("settle change", async () => {
+      // ADR 0026: acceptance gates auto-promotion, not promotability. A shortfall or a gap holds
+      // the Candidate for a person, whatever the risk tier.
+      const held = await holdForAcceptance(this.env, candidateId);
+      if (held) return { kind: "manual" as const, reason: "acceptance_incomplete" as const };
       const [change, candidate] = await Promise.all([
         this.env.DB.prepare("SELECT risk_tier FROM changes WHERE id = ?")
           .bind(ctx.changeId)
@@ -802,7 +955,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       }
       return decided;
     });
-    if (decision.kind !== "auto_promote") return { ...gated, promotion: decision.reason };
+    if (decision.kind !== "auto_promote") return { promotion: decision.reason };
     try {
       // Every section 36 precondition is re-checked from authoritative rows inside; a CAS failure
       // marks the Candidate stale. A retried step returns `alreadyPromoted`, never a second advance.
@@ -816,7 +969,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
             actor: AUTO_PROMOTION_ACTOR,
           }),
       );
-      return { ...gated, promotion: outcome.status };
+      return { promotion: outcome.status };
     } catch (error) {
       // The Candidate stays verified; a person can still promote it.
       console.error(
@@ -826,7 +979,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
           message: String(error).slice(0, 200),
         }),
       );
-      return { ...gated, promotion: "auto_failed" };
+      return { promotion: "auto_failed" };
     }
   }
 
@@ -966,6 +1119,154 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       runner: "dynamic-worker",
     });
     return { handled: true };
+  }
+
+  /**
+   * Acceptance check (ADR 0026): one Haiku call over the Change criteria and the Candidate patch,
+   * Sonnet once on invalid output. Code validates every citation. No Sandbox and no browser. A
+   * Candidate whose earlier check already failed is not judged: it cannot ship, so no model call
+   * is spent. A refused or failed call is a gap (`not_checked`), never a pass.
+   */
+  private async runAcceptance(
+    ctx: ChangeContext,
+    candidateId: string,
+    source: { fork: string; commit: string; tree: string; files: string[] },
+    criteria: string[],
+    check: VerificationCheck,
+  ): Promise<null> {
+    const startedAt = new Date().toISOString();
+    const sourceRefs = [`artifacts://${source.fork}@${source.commit}`];
+    const gap = (summary: string, metrics?: Record<string, number>) =>
+      this.recordEvidence(ctx, candidateId, {
+        checkId: check.checkId,
+        kind: check.kind,
+        outcome: {
+          status: "error",
+          coverage: "not_checked",
+          summary,
+          ...(metrics ? { metrics } : {}),
+        },
+        startedAt,
+        output: summary,
+        sourceRefs,
+      });
+    const failed = await this.env.DB.prepare(
+      `SELECT check_id FROM evidence_index WHERE candidate_id = ? AND check_id != ?
+         AND (status != 'pass' OR coverage != 'checked_supported') ORDER BY check_id LIMIT 1`,
+    )
+      .bind(candidateId, check.checkId)
+      .first<{ check_id: string }>();
+    if (failed) {
+      const summary = `Not run: ${failed.check_id} has no passing result, so this Candidate cannot ship.`;
+      await this.recordEvidence(ctx, candidateId, {
+        checkId: check.checkId,
+        kind: check.kind,
+        outcome: { status: "skipped", coverage: "not_checked", summary },
+        startedAt,
+        output: summary,
+        sourceRefs,
+      });
+      return null;
+    }
+    if (criteria.length === 0) {
+      await gap("No acceptance criteria to judge.");
+      return null;
+    }
+    const spend = await changeModelSpend(this.env.DB, ctx.changeId);
+    if (spend.spentUsd >= spend.budgetUsd) {
+      await gap(
+        `Change budget reached ($${spend.spentUsd.toFixed(2)} of $${spend.budgetUsd.toFixed(2)}); acceptance not checked.`,
+      );
+      return null;
+    }
+    const read = await this.acceptanceSource(ctx.projectId, candidateId, source);
+    if (!read || read.files.length === 0) {
+      await gap("No Candidate patch or changed file to read; acceptance not checked.");
+      return null;
+    }
+    const judged = await judgeAcceptance(criteria, read, async (req) => {
+      if (!(await takeDailyCall(this.env.DB))) {
+        throw new ModelCallError("spend_limited", "daily model call cap reached", null);
+      }
+      return this.complete(req, ctx.changeId);
+    });
+    const costUsd = judged.calls.reduce((sum, call) => sum + call.costUsd, 0);
+    const report = {
+      source: {
+        kind: read.kind,
+        truncated: read.truncated,
+        files: read.files.map((f) => f.path),
+      },
+      calls: judged.calls,
+    };
+    if (judged.kind === "error") {
+      await this.recordEvidence(ctx, candidateId, {
+        checkId: check.checkId,
+        kind: check.kind,
+        outcome: {
+          status: "error",
+          coverage: "not_checked",
+          summary: `No result: ${judged.reason}. A gap, never a pass.`,
+          metrics: { costUsd },
+        },
+        startedAt,
+        output: judged.reason,
+        sourceRefs,
+        report,
+      });
+      return null;
+    }
+    const outcome = acceptanceOutcome(judged.results);
+    await this.env.DB.prepare(
+      "UPDATE candidates SET acceptance_json = ?, updated_at = ? WHERE id = ?",
+    )
+      .bind(JSON.stringify(judged.results), new Date().toISOString(), candidateId)
+      .run();
+    await this.recordEvidence(ctx, candidateId, {
+      checkId: check.checkId,
+      kind: check.kind,
+      outcome: { ...outcome, metrics: { ...outcome.metrics, costUsd } },
+      startedAt,
+      output: acceptanceReport(judged.results),
+      sourceRefs: [...sourceRefs, candidatePatchKey(ctx.projectId, candidateId)],
+      report: { ...report, acceptance: judged.results },
+    });
+    return null;
+  }
+
+  /**
+   * What the acceptance check reads: the Candidate patch stored at composition, when it belongs to
+   * this composed commit; otherwise the changed files of the composed tree, read from the
+   * Candidate fork (both capped at ACCEPTANCE_SOURCE_CAP).
+   */
+  private async acceptanceSource(
+    projectId: string,
+    candidateId: string,
+    source: { fork: string; commit: string; tree: string; files: string[] },
+  ): Promise<AcceptanceSource | null> {
+    const patch = await this.env.EVIDENCE.get(candidatePatchKey(projectId, candidateId));
+    if (patch && (patch.customMetadata?.head ?? source.commit) === source.commit) {
+      return sourceFromPatch(await patch.text(), patch.customMetadata?.truncated === "true");
+    }
+    try {
+      using repo = await this.env.ARTIFACTS.get(source.fork);
+      const changed = new Set(source.files);
+      const entries = (await walkTree(repo, source.tree)).filter((e) => changed.has(e.path));
+      const files: { path: string; text: string }[] = [];
+      let bytes = 0;
+      for (const entry of entries) {
+        if (bytes >= 60_000) break;
+        const blob = await repo.readBlob(entry.blob);
+        if (!blob || blob.size > 60_000) continue;
+        const text = new TextDecoder().decode(await blob.arrayBuffer());
+        if (text.includes("\u0000")) continue;
+        files.push({ path: entry.path, text });
+        bytes += text.length;
+      }
+      return sourceFromFiles(files);
+    } catch {
+      return null;
+    }
   }
 
   /** Diffs the route table against the base and records contract Evidence (section 34.1). */

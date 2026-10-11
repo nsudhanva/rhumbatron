@@ -31,7 +31,16 @@ export type BuildVerificationPlanInput = {
   p95BudgetMs?: number;
   /** APPS is available and the Project has an app, including its pending first deployment. */
   liveAppEnabled?: boolean;
+  /**
+   * Change acceptance criteria the acceptance check judges against the Candidate patch. The check
+   * is optional for the gate; selection and auto-promotion read it (ADR 0026). The caller
+   * leaves out criteria that other checks already cover (quality gate, latency, kept behavior).
+   */
+  acceptanceCriteria?: readonly string[];
 };
+
+/** One Haiku call, one Sonnet retry on invalid output, plus Evidence upload. */
+export const ACCEPTANCE_CHECK_TIMEOUT_MS = 180_000;
 
 const TIERS: readonly RiskTier[] = ["low", "medium", "high", "critical"];
 const MINIMUM_CHECKS: readonly PolicyCheck[] = ["build", "targeted"];
@@ -273,6 +282,24 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
       required: true,
       expected: { kind: "procedure", description: "Every flow step passes (k/N with k = N)" },
       evidenceOutput: ["report.json", "stdout.txt", "screenshot-<n>.png"],
+    });
+  }
+
+  const criteria = input.acceptanceCriteria ?? [];
+  if (criteria.length > 0) {
+    checks.push({
+      checkId: "acceptance",
+      kind: "acceptance",
+      // Not a gate: a shortfall ranks the Candidate lower and stops auto-promotion (ADR 0026).
+      reason: `Does the Candidate do what the Change asked: ${criteria.length} acceptance criteria.`,
+      procedure:
+        "Give the Change acceptance criteria and the Candidate patch to Haiku (Sonnet once when " +
+        "the output is invalid). Each criterion is met, not_met, or unclear; a met criterion " +
+        "cites a path and a quote that code finds in the patch or the composed file.",
+      timeoutMs: ACCEPTANCE_CHECK_TIMEOUT_MS,
+      required: false,
+      expected: { kind: "procedure", description: "Every criterion is met with a valid citation" },
+      evidenceOutput: ["report.json", "stdout.txt"],
     });
   }
 

@@ -65,6 +65,8 @@ export const VerificationCheckKind = z.enum([
   "protected-invariant",
   "static-analysis",
   "smoke",
+  /** The composed patch meets every acceptance criterion of the Change, with cited quotes. */
+  "acceptance",
 ]);
 export type VerificationCheckKind = z.infer<typeof VerificationCheckKind>;
 
@@ -144,6 +146,41 @@ export const CandidateStatus = z.enum([
 ]);
 export type CandidateStatus = z.infer<typeof CandidateStatus>;
 
+/** Result of the acceptance check for one criterion (`candidates.acceptance_json`). */
+export const AcceptanceCitation = z.object({ path: z.string(), quote: z.string() });
+export type AcceptanceCitation = z.infer<typeof AcceptanceCitation>;
+
+export const AcceptanceStatus = z.enum(["met", "not_met", "unclear"]);
+export type AcceptanceStatus = z.infer<typeof AcceptanceStatus>;
+
+/**
+ * One criterion as the acceptance check judged it. `met` always carries at least one citation that
+ * application code found in the Candidate patch or composed files; a `met` claim without a valid
+ * citation is stored as `unclear`.
+ */
+export const AcceptanceResult = z.object({
+  criterion: z.string(),
+  status: AcceptanceStatus,
+  citations: z.array(AcceptanceCitation),
+});
+export type AcceptanceResult = z.infer<typeof AcceptanceResult>;
+
+/** Sibling selection outcome for one Candidate (`candidates.selection_json`, ADR 0026). */
+export const CandidateSelectionView = z.object({
+  winnerCandidateId: z.string(),
+  reason: z.string(),
+});
+export type CandidateSelectionView = z.infer<typeof CandidateSelectionView>;
+
+/** Closed verdict vocabulary of the Integration Judge (AGENTS.md section 22.5). */
+export const JudgeVerdict = z.enum([
+  "prefer_candidate",
+  "reject_candidate",
+  "needs_more_evidence",
+  "escalate_to_human",
+]);
+export type JudgeVerdict = z.infer<typeof JudgeVerdict>;
+
 /** Section 15.5. */
 export const Candidate = z.object({
   id: Id,
@@ -205,6 +242,8 @@ export const PromotionBlockView = z.object({
     "approval_rejected",
     "policy_mismatch",
     "artifact_missing",
+    /** A sibling Candidate on the same base is still verifying; selection has not run yet. */
+    "selection_pending",
   ]),
   detail: z.string(),
 });

@@ -89,6 +89,7 @@ Every Project with a live app has a required `preview-smoke` check (kind `smoke`
 The check runs the release probes on the exact preview host through `AppBuilder.probe`.
 It does not touch production or the production data store.
 A preview that is missing or failed is a gap, and the Candidate cannot promote.
+Sibling Candidates of one Change each get a preview. Only the selection winner promotes and releases (ADR 0026).
 
 ## Promotion and release
 

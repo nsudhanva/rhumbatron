@@ -130,7 +130,8 @@ export type PromotionBlock =
   | { kind: "approval_pending" }
   | { kind: "approval_rejected" }
   | { kind: "policy_mismatch"; planPolicyVersion: string; activePolicyVersion: string }
-  | { kind: "artifact_missing" };
+  | { kind: "artifact_missing" }
+  | { kind: "selection_pending"; pendingCandidateIds: string[] };
 
 /** Authoritative facts gathered before the compare-and-swap. Never the cached gate score. */
 export type PromotionFacts = {
@@ -150,6 +151,11 @@ export type PromotionFacts = {
   canonical: { generation: number; policyVersion: string };
   /** The composed commit still exists in the Candidate fork with the recorded tree. */
   artifactPresent: boolean;
+  /**
+   * Sibling Candidates (same Change, same base) still composing or verifying (ADR 0026). Until they
+   * settle, no Candidate of the group is the winner. Absent means none.
+   */
+  pendingSiblingIds?: readonly string[];
 };
 
 export type PromotionCheck =
@@ -204,6 +210,9 @@ export function checkPromotion(facts: PromotionFacts): PromotionCheck {
     });
   }
   if (!facts.artifactPresent || !candidate.composedTree) blocks.push({ kind: "artifact_missing" });
+  if (facts.pendingSiblingIds && facts.pendingSiblingIds.length > 0) {
+    blocks.push({ kind: "selection_pending", pendingCandidateIds: [...facts.pendingSiblingIds] });
+  }
 
   if (blocks.length > 0) return { ok: false, blocks };
   const requiredEvidenceIds = requiredChecks(plan).map((checkId) => {

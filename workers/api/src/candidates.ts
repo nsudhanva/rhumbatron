@@ -1,9 +1,11 @@
 import { createClerkClient } from "@clerk/backend";
 import {
+  AcceptanceResult,
   ApprovalOutcome,
   ApprovalRequest,
   ApprovalView,
   apiData,
+  CandidateSelectionView,
   EvidenceRecord,
   PromotionOutcome,
   ReleaseView,
@@ -12,6 +14,7 @@ import {
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
+import { readGate } from "./candidate-read.ts";
 import { errorBody, fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
 
@@ -91,6 +94,10 @@ const CandidateView = z.object({
   promotedGeneration: z.number().int().nullable(),
   /** Release of the promoted generation (ADR 0020). Null until promotion starts one. */
   release: ReleaseView.nullable(),
+  /** Acceptance check result per criterion (ADR 0026). Null until the check judged the patch. */
+  acceptance: z.array(AcceptanceResult).nullable(),
+  /** Sibling selection: the winner of this Candidate's group and why. Null without a winner. */
+  selection: CandidateSelectionView.nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -111,6 +118,8 @@ type CandidateRow = {
   score_json: string | null;
   base_tree: string | null;
   promoted_generation: number | null;
+  acceptance_json: string | null;
+  selection_json: string | null;
   created_at: string;
   updated_at: string;
   approval_id: string | null;
@@ -136,7 +145,8 @@ type CandidateRow = {
 
 const CANDIDATE_COLUMNS = `c.id, c.change_id, ch.project_id, c.status, c.status_reason, c.base_generation,
   c.artifact_ref, c.composed_commit, c.composed_tree, c.change_set_ids_json, c.plan_json,
-  c.score_json, c.base_tree, c.promoted_generation, c.created_at, c.updated_at,
+  c.score_json, c.base_tree, c.promoted_generation, c.acceptance_json, c.selection_json,
+  c.created_at, c.updated_at,
   a.id AS approval_id, a.decision AS approval_decision, a.approver_user_id AS approval_user_id,
   a.candidate_tree AS approval_tree, a.policy_version AS approval_policy,
   a.reason AS approval_reason, a.created_at AS approval_at, u.email AS approval_email,
@@ -171,6 +181,36 @@ function releaseOf(row: CandidateRow): ReleaseView | null {
   };
 }
 
+function parseJson(text: string | null): unknown {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/** Stored acceptance results; anything that does not parse reads as "not judged". */
+function acceptanceOf(row: CandidateRow): CandidateView["acceptance"] {
+  const parsed = z.array(AcceptanceResult).safeParse(parseJson(row.acceptance_json));
+  return parsed.success ? parsed.data : null;
+}
+
+/** Only a decided selection with a winner is shown; a claim or an escalation reads as null. */
+function selectionOf(row: CandidateRow): CandidateView["selection"] {
+  const parsed = z
+    .object({
+      status: z.string(),
+      winnerCandidateId: z.string().nullable().optional(),
+      reason: z.string().optional(),
+    })
+    .safeParse(parseJson(row.selection_json));
+  if (!parsed.success || parsed.data.status !== "decided" || !parsed.data.winnerCandidateId) {
+    return null;
+  }
+  return { winnerCandidateId: parsed.data.winnerCandidateId, reason: parsed.data.reason ?? "" };
+}
+
 function toView(row: CandidateRow): CandidateView {
   const plan = row.plan_json ? (JSON.parse(row.plan_json) as VerificationPlan) : null;
   return {
@@ -185,7 +225,7 @@ function toView(row: CandidateRow): CandidateView {
     composedTree: row.composed_tree,
     changeSetIds: JSON.parse(row.change_set_ids_json) as string[],
     plan,
-    gate: row.score_json ? (JSON.parse(row.score_json) as CandidateView["gate"]) : null,
+    gate: readGate(row.score_json),
     // The plan already includes the policy's gated risk tiers (packages/evidence plan.ts).
     approvalRequired: plan?.humanApprovalRequired ?? false,
     approval:
@@ -206,6 +246,8 @@ function toView(row: CandidateRow): CandidateView {
     baseTree: row.base_tree,
     promotedGeneration: row.promoted_generation,
     release: releaseOf(row),
+    acceptance: acceptanceOf(row),
+    selection: selectionOf(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

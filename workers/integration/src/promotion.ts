@@ -19,6 +19,7 @@ import {
 } from "@rhumbatron/protocol";
 import { hasLiveApp } from "./app-release.ts";
 import { candidateFork } from "./candidate-sandbox.ts";
+import { pendingSiblings } from "./candidate-selection.ts";
 import { syncCanonicalSource } from "./canonical-source.ts";
 import { releaseRequestScope } from "./change-commands.ts";
 import { changeAfterPromotion, PROMOTABLE_FROM } from "./change-status.ts";
@@ -160,6 +161,11 @@ function blockView(block: PromotionBlock): PromotionBlockView {
       return {
         kind: block.kind,
         detail: "The composed commit is missing from the Candidate fork.",
+      };
+    case "selection_pending":
+      return {
+        kind: block.kind,
+        detail: `Sibling Candidates are still verifying (${block.pendingCandidateIds.join(", ")}); the winner is selected when they finish.`,
       };
   }
 }
@@ -372,7 +378,7 @@ export async function promoteCandidate(
   }
 
   const root = projectRoot(env, row.project_id);
-  const [canonical, evidence, approval, present, policy] = await Promise.all([
+  const [canonical, evidence, approval, present, policy, pendingSiblingIds] = await Promise.all([
     root.getCanonical(),
     env.DB.prepare("SELECT * FROM evidence_index WHERE candidate_id = ?")
       .bind(row.id)
@@ -381,6 +387,8 @@ export async function promoteCandidate(
     artifactPresent(env, row),
     // Stored policy through the KV snapshot; DEFAULT_POLICY without a row. It can only add a gate.
     loadProjectPolicy(env, row.project_id),
+    // ADR 0026: no Candidate is the winner while a sibling on the same base still verifies.
+    pendingSiblings(env.DB, row.id),
   ]);
   if (!canonical || canonical.artifactRef === "unassigned") {
     throw new Error(`Project ${row.project_id} has no canonical source`);
@@ -405,6 +413,7 @@ export async function promoteCandidate(
     approval: approval ? toApprovalRecord(approval) : null,
     canonical: { generation: canonical.generation, policyVersion: canonical.policyVersion },
     artifactPresent: present,
+    pendingSiblingIds,
   });
 
   if (!check.ok) {

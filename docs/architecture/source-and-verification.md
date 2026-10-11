@@ -1,12 +1,13 @@
 # Source and verification
 
-This page explains where Project source lives, how agents and Candidates get isolated copies, how the Sandbox runs code, how checks become Evidence, and what promotion requires.
+This page explains where Project source lives, how agents and Candidates get isolated copies, how the Sandbox runs code, how checks become Evidence, how one Candidate is selected among siblings, and what promotion requires.
 
 Main source files:
 
 - `workers/integration/src/provision.ts`, `canonical-source.ts`, `repo-names.ts`, `project-cleanup.ts`
 - `workers/agents/src/workspace.ts`, `stack.ts`
-- `workers/integration/src/verification-workflow.ts`, `candidate-sandbox.ts`, `browser-check.ts`
+- `workers/integration/src/verification-workflow.ts`, `candidate-sandbox.ts`, `browser-check.ts`, `runner-selection.ts`
+- `workers/integration/src/candidate-create.ts` (fork rule), `acceptance-check.ts`, `candidate-selection.ts`
 - `packages/evidence/src`: `plan.ts`, `gate.ts`, `promotion.ts`, `compatibility.ts`
 - `workers/coordinator/src/promotion-cas.ts`, `project-root-do.ts`
 
@@ -126,8 +127,9 @@ The Sandbox never receives Terraform, Cloudflare API, or model credentials.
 ## Verification workflow
 
 CandidateVerificationWorkflow has one instance per Candidate.
-It makes no model call.
 Every step is idempotent, and every check is its own step with its own timeout.
+It makes model calls in two places only: the acceptance check (Haiku, and Sonnet once when the Haiku output is invalid) and the Integration Judge on a tie between sibling Candidates (one Sonnet call).
+Both calls go through the metered gateway, the daily call cap, and the Change budget.
 
 ```mermaid
 flowchart TB
@@ -144,15 +146,27 @@ flowchart TB
   CM -->|"merge conflict"| RJ
   CM -->|"merged"| PL["Build Verification Plan,<br/>status verifying, candidate.composed"]
   PL --> CK["One step per check:<br/>Evidence to D1 and R2"]
-  CK --> GT{"gateRequiredChecks"}
-  GT -->|"promotable"| VF["verified, plus approval.requested<br/>when a human gate applies"]
+  CK --> AC["acceptance: criteria vs patch,<br/>citations checked in code"]
+  AC --> GT{"gateRequiredChecks"}
+  GT -->|"promotable"| VF["verified"]
   GT -->|"gaps"| RJ
-  VF --> SET["Settle Sandbox meter"]
-  RJ --> SET
+  VF --> SEL["Sibling selection<br/>(see below)"]
+  RJ --> SEL
 ```
 
 A check that throws or times out records an `error` with coverage `not_checked`.
 That is a gap, never a pass (section 34.4.1).
+The Sandbox meter settles after the last Sandbox check, before preview publication and the gate.
+
+### Where checks run
+
+`build`, `unit`, and `contract` run in a Dynamic Worker through the `APPS.check` RPC when the integration Worker has the `APPS` binding (`isAppCheckerEligible` in `runner-selection.ts`).
+The AppChecker reads the composed tree from the R2 code store. Each check has at most 30 s, no network, and no binding.
+When AppChecker answers `supported: false` (for example no code store, a bundler error, or a deadline), the check runs in the Sandbox instead.
+A completed Dynamic Worker failure is final. It never falls back to the Sandbox for a second try.
+`protected-invariant-cart`, `performance`, `security`, and `browser` always run in the Sandbox.
+`acceptance` and `preview-smoke` use no Sandbox.
+The Evidence summary of a check that ran in a Dynamic Worker or the Sandbox ends with `(runner: dynamic-worker)` or `(runner: sandbox)`.
 
 ### Which checks run
 
@@ -174,17 +188,20 @@ flowchart LR
 
 | Check ID | Kind | Command or procedure | Timeout |
 |---|---|---|---|
-| `build` | build | `bun run typecheck` | 120 s |
-| `unit` | unit | `bun test` | 180 s |
-| `contract` | contract | Diff the route table (`bun run contract`) against declared contract changes | 120 s |
+| `build` | build | Dynamic Worker: bundle the app with `@cloudflare/worker-bundler` and load it. Sandbox fallback: `bun run typecheck` | 120 s (30 s in the Dynamic Worker) |
+| `unit` | unit | Dynamic Worker: the project tests. Sandbox fallback: `bun test` | 180 s (30 s in the Dynamic Worker) |
+| `contract` | contract | Diff the route table of the base and the Candidate against declared contract changes. Dynamic Worker extraction, Sandbox fallback `bun run contract` | 120 s (30 s in the Dynamic Worker) |
 | `protected-invariant-cart` | protected-invariant | `bun test test/cart.invariant.test.ts` | 120 s |
 | `performance` | performance | `bun run bench`, expects metric `p95Ms` below 200 | 120 s |
 | `security` | security | `bun test --test-name-pattern authorization` | 180 s |
 | `browser` | browser | Section 35 Wishlist flow, or a cart flow, in one Browser Run session | 90 s |
+| `acceptance` | acceptance | Optional. Haiku judges each acceptance criterion against the Candidate patch; code validates every citation | 180 s |
+| `preview-smoke` | smoke | Publish the Candidate preview and run the release probes against it | 30 s |
 
 The policy check `targeted` runs the `unit` check. Every plan has `build` and `unit`.
 An invariant that keeps existing endpoint behavior adds `contract` and `unit`. Another app-behavior invariant adds `unit`. An invariant that no test can prove becomes a required procedure check, and it stays a visible gap.
-A Project with a live app also gets `contract` and a `preview-smoke` check (kind `smoke`, 30 s). The smoke check publishes the Candidate preview and runs the release probes against it.
+A Project with a live app also gets `contract` and a `preview-smoke` check. The smoke check publishes the Candidate preview and runs the release probes against it.
+A Change with acceptance criteria gets the optional `acceptance` check (see below).
 
 The browser check opens the composed app through request interception.
 The preview host has no public URL.
@@ -193,6 +210,58 @@ One session lasts at most 55 s. A Candidate gets at most 2 browser runs.
 
 The policy does not list the `critical` risk tier, so a `critical` Change uses the strictest listed tier.
 A gap in policy never lowers verification.
+
+### Acceptance check
+
+The acceptance check tests what the person asked for. Every Candidate of a Change that has acceptance criteria gets it.
+It is not a gate check: it does not make a Candidate unpromotable and does not reject it. It ranks sibling Candidates, and it gates auto-promotion.
+A failing required executable check (`build`, `unit`, `contract`, `preview-smoke`, and the others in the table) still makes a Candidate unpromotable.
+
+- Criteria: the Change acceptance criteria, without the ones other checks cover (`acceptanceCriteriaToJudge` in `candidate-composer.ts`): a criterion that only restates the quality gate ("typecheck and tests pass"), a latency limit (the `performance` check), or kept behavior ("unchanged", the invariant checks). With none left, the plan has no `acceptance` check.
+- Input: the Candidate patch that composition stored at `source/<project>/patches/candidates/<cand>.patch`. Without a patch for the composed commit, the changed files of the composed tree, read from the Candidate fork. Both are capped at about 60 KB.
+- Model: one Haiku call with the tool `record_acceptance`. Each criterion is `met`, `not_met`, or `unclear`. A `met` cites `{path, quote}`. When the output is not one result per criterion, one Sonnet call follows. No browser session runs.
+- Citations: code keeps a citation only when the path is a file the model received and the quote (at least 8 characters, whitespace collapsed) occurs in its added or context lines. A removed line proves nothing. A `met` with no valid citation counts as `unclear` (section 34.4.2).
+- Evidence: `pass` with `checked_supported` only when every criterion is `met`. Otherwise `fail` with `checked_supported` and a summary such as "2 of 3 criteria met; not met: calendar view". A model error, a refused call (Change budget, daily call cap, monthly budget), or no readable source is `error` with `not_checked`: a gap.
+- A Candidate whose earlier check has no passing result cannot ship, so the check records `skipped` (`not_checked`) and spends no model call.
+- Auto-promotion: a selected Candidate auto-promotes (when policy allows) only when its acceptance Evidence is `pass` with `checked_supported`. With a criterion not met or unclear, or with a gap, `holdForAcceptance` (`candidate-selection.ts`) adds the human gate to its plan, sets its status reason, moves the Change to `awaiting_approval`, and records `approval.requested` with the reason, for example "Best candidate meets 2 of 3 criteria; not met: calendar view. Approve to ship it or cancel the change." A person approves and promotes it through the normal path, or cancels the Change.
+- Storage: per-criterion results in `candidates.acceptance_json` and in the R2 report; `criteriaMet`, `criteriaTotal`, and `costUsd` in `metrics_json`. The cost counts against the Change budget.
+
+## Sibling Candidates and selection
+
+The fork rule (`planCandidateSets`) can give one Change several Candidates on the same base generation.
+These Candidates are siblings. Their verification workflows run in parallel, and none of them promotes on its own (ADR 0026).
+
+```mermaid
+flowchart TB
+  G["Candidate gated:<br/>verified or rejected"] --> S{"Siblings on<br/>the same base?"}
+  S -->|"no"| P["Promotion path"]
+  S -->|"yes"| W{"Any sibling still<br/>composing or verifying?"}
+  W -->|"yes"| END["Run ends; the last sibling selects"]
+  W -->|"no"| CL{"Claim: UPDATE anchor<br/>selection_json from NULL"}
+  CL -->|"another run holds it"| END
+  CL -->|"claimed"| R["Rank the group"]
+  R -->|"one best"| A["Apply: losers rejected,<br/>Decision Receipt, candidate.selected"]
+  R -->|"tie"| J["Integration Judge<br/>(one Sonnet call)"]
+  R -->|"none promotable"| A
+  J --> A
+  A -->|"winner"| P
+  A -->|"no valid preference"| H["Change awaiting_approval:<br/>a person picks"]
+```
+
+Fork rule:
+
+- No counting fork conflict: one Candidate from every proposed ChangeSet.
+- A fork conflict whose state is `confirmed`: one Candidate per side, each with the shared ChangeSets.
+- A fork conflict whose state is `fork_required` (the conflict review said `needs_more_evidence`): the two side Candidates plus a combined Candidate (shared, both sides, and the ChangeSets that need both sides), within `MAX_CANDIDATES` (3). The combined Candidate is the evidence the review asked for: whether the sides work together.
+
+Selection:
+
+- The anchor is the earliest Candidate of the group (`created_at`, then ID). One conditional `UPDATE candidates SET selection_json = ... WHERE selection_json IS NULL` on the anchor claims the selection. A retry by the claimant proceeds. Every other run stops.
+- Order: only promotable Candidates (every required check passed); then most acceptance criteria met; then fewer gaps and optional failures; then more passing checks.
+- A tie goes to the Integration Judge (section 22.5). It reads only the Evidence snapshot of the tied Candidates (Evidence summaries and acceptance results) and fetches nothing. Its verdict is closed: `prefer_candidate` (with a Candidate ID), `reject_candidate`, `needs_more_evidence`, or `escalate_to_human`. Code validates the cited Evidence IDs. Only a valid `prefer_candidate` picks a winner. Anything else moves the Change to `awaiting_approval`, and a person promotes one Candidate.
+- Each verified loser becomes `rejected` with a reason such as "Lost to cand_x: met 3 of 3 criteria, this met 2 of 3." Every Candidate of the group stores the outcome in `selection_json`. The decision is a Decision Receipt (`CANDIDATE_SELECTION`) and the Event `candidate.selected`.
+- Only the winner takes the promotion path: the acceptance hold, policy `autoPromoteRiskTiers`, the approval gate (`approval.requested` for a gated winner), and the compare-and-swap. A Candidate without siblings takes the same path.
+- A manual promotion is blocked (`selection_pending`) while a sibling still composes or verifies.
 
 ## Coverage states and the gate
 
@@ -219,7 +288,7 @@ flowchart TB
 
 On a tie in completion time, a non-passing record wins.
 The UI shows every gap. It never shows a gap as green.
-Model findings (conflict reviews) must cite valid Context Packet item IDs. A finding with a bad citation is `unsupported` and cannot change state.
+Model findings must cite what the model received: conflict reviews cite Context Packet item IDs, the acceptance check cites quotes of the patch, and the Integration Judge cites Evidence IDs. A finding with a bad citation is `unsupported` and cannot change state.
 
 ## Promotion preconditions
 
@@ -229,7 +298,9 @@ ProjectRootDO then checks preconditions 6 and 7 and the policy version inside it
 
 ```mermaid
 flowchart TB
-  REQ["POST /v1/candidates/:id/promote"] --> P1{"Candidate verified<br/>and base = canonical?"}
+  REQ["POST /v1/candidates/:id/promote"] --> P0{"Sibling still<br/>verifying?"}
+  P0 -->|"yes"| BLK
+  P0 -->|"no"| P1{"Candidate verified<br/>and base = canonical?"}
   P1 -->|"base behind"| STALE["mark stale"]
   P1 -->|"not verified"| BLK["blocked: list every block"]
   P1 -->|"yes"| P2{"Plan present and<br/>every required check passes?"}
