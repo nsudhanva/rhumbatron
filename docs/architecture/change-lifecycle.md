@@ -63,6 +63,7 @@ sequenceDiagram
 Notes:
 
 - The routing rules send the Root Planner to the `opus` tier (`taskKind = plan`, `complexity = large`). The prompt asks for 2 to 8 Tasks. The schema accepts 1 to 12 (`MAX_TASKS_PER_CHANGE`).
+- A UI Task that calls routes another Task of the plan defines must depend on that Task. The prompt states the rule, and `parsePlan` (`workers/integration/src/root-planner.ts`) repairs a plan without a model call: a UI Task and an API Task on the same area (first resource segment, `todos` in `todos:ui` and `todos:api`) with no dependency path between them get the edge UI → API. The UI agent then runs on a stacked workspace with the real API.
 - The Work Graph JSON goes to R2 at `work-graphs/<project>/<change>.json`.
 - Change events go to the ResourceShardDO that owns `change:<id>`. This keeps ProjectRootDO cold (section 13.1).
 - The API updates ProjectViewDO directly with the new Change.
@@ -119,7 +120,7 @@ Notes:
 ## Part 3: from Candidates to a release
 
 The causal router turns `verification.started` into one `candidate.create` command.
-The integration Worker applies the fork rule and starts one CandidateVerificationWorkflow per Candidate.
+The integration Worker applies the integrate rule, then the fork rule, and starts one CandidateVerificationWorkflow per Candidate.
 When a Change has sibling Candidates on one base, the last one to settle selects the winner (ADR 0026).
 Policy or a person promotes the winner. ProjectRootDO runs the compare-and-swap.
 
@@ -160,6 +161,7 @@ sequenceDiagram
 
 Notes:
 
+- Integrate before fork: a `confirmed` or `fork_required` conflict between two Tasks on different semantic resources (an API and its UI) creates no Candidate. The dependent Task gets a dependency edge and re-runs once on a stacked workspace with the other Task's ChangeSet, and the Change returns to `running`. The re-run's completion records `verification.started` again, and one Candidate holds both ChangeSets. See [Source and verification](source-and-verification.md#sibling-candidates-and-selection).
 - Siblings never race. A verified Candidate does not promote while a sibling on the same base still composes or verifies. The last run to settle claims the selection with one conditional D1 update and ranks the group: promotable first, then most acceptance criteria met, then fewer gaps, then more passing checks. A tie goes to the Integration Judge (one Sonnet call over the Evidence). Without a valid preference the Change is `awaiting_approval` and a person picks. Losers become `rejected` with the comparison as the reason. A winner that does not meet every acceptance criterion, or has no acceptance result, never auto-promotes: the Change is `awaiting_approval` with the reason, and a person approves and promotes it or cancels the Change. See [Source and verification](source-and-verification.md#sibling-candidates-and-selection).
 - Promotion is a human action in the UI, except under policy `autoPromoteRiskTiers`. Auto-promotion applies when the verified Candidate needs no human approval and `autoPromoteRiskTiers` lists the Change risk tier (`low` in `policy-1`). Then the CandidateVerificationWorkflow calls the same `promoteCandidate` path with actor `system:auto-promotion`. `canonical.promotion.requested` then records `trigger: "auto"`. All section 36 preconditions still apply. A Candidate that needs approval never promotes automatically (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
 - Only a Project with a live app releases. See [Live apps](live-apps.md).
@@ -191,6 +193,7 @@ stateDiagram-v2
   verifying --> awaiting_approval: verified Candidate needs approval
   awaiting_approval --> verifying: no verified Candidate left
   verifying --> running: merge conflict, Tasks re-run on the new base
+  verifying --> running: complementary Tasks integrate, the dependent Task re-runs
   verifying --> blocked: second merge conflict
   verifying --> promoting: promotion requested
   awaiting_approval --> promoting: promotion requested

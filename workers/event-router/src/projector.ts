@@ -67,6 +67,8 @@ const CHANGE_STATUS: StatusMap = {
   "change.created": "created",
   "change.compiled": "running",
   "verification.started": "verifying",
+  // Complementary Tasks integrate: the dependent Task re-runs before any Candidate composes.
+  "conflict.integrated": "running",
   // The D1 row is authoritative (integration change-status.ts); these mirror its unambiguous steps.
   "approval.requested": "awaiting_approval",
   "canonical.promotion.requested": "promoting",

@@ -9,12 +9,15 @@ import {
   RelativeResource,
 } from "@rhumbatron/protocol";
 import {
+  declaresNoChange,
   findHttpRoute,
+  findHttpRoutes,
   kindFromText,
   modelFromText,
   normalizeEntity,
   normalizeResource,
   normalizeTarget,
+  withoutRoutes,
 } from "./normalize.ts";
 
 /** The agent's `complete_task` arguments (workers/agents/src/task-tools.ts `IntentArgs`). */
@@ -56,11 +59,16 @@ function firstBraceGroup(text: string): string | undefined {
 const clip = (text: string, max: number) => text.trim().slice(0, max);
 
 /**
- * Target: the first HTTP route (`POST /v1/wishlists/:id`), else the first backticked token, else
- * the first dotted event type (`wishlist.shared`), else the whole text. Kind: the earliest change
- * verb, default `modify`. Shape: the first balanced `{...}` group outside the route, if any.
+ * Null when the line declares no change of its own (`declaresNoChange`: "None", or a Task that
+ * only uses or calls routes); `consumedRoutes` keeps those routes. Otherwise: Target: the first
+ * HTTP route (`POST /v1/wishlists/:id`), else the first backticked token, else the first dotted
+ * event type (`wishlist.shared`), else the whole text. Kind: the earliest change verb outside the
+ * routes, default `modify`; HTTP method names are never verbs, so `DELETE /api/todos/:id -> {ok}`
+ * is a `modify` of that route and only wording like "Removes DELETE /api/todos/:id" is `remove`.
+ * Shape: the first balanced `{...}` group outside the route, if any.
  */
-export function parseContractChange(text: string): ContractChange {
+export function parseContractChange(text: string): ContractChange | null {
+  if (declaresNoChange(text)) return null;
   const route = findHttpRoute(text);
   const rest = route ? text.replace(route.match, " ") : text;
   const target =
@@ -71,10 +79,19 @@ export function parseContractChange(text: string): ContractChange {
   const shape = firstBraceGroup(rest.replace(BACKTICK, " "));
   return {
     target: clip(target, 300) || "unknown",
-    kind: kindFromText(rest),
+    kind: kindFromText(withoutRoutes(text)),
     ...(shape === undefined ? {} : { shape: clip(shape, 2000) }),
     description: clip(text, 2000),
   };
+}
+
+/** Normalized routes of the contract lines that declare no change: what the Task uses. */
+function consumedRoutes(lines: readonly string[]): string[] {
+  return [
+    ...new Set(
+      lines.filter(declaresNoChange).flatMap((line) => findHttpRoutes(line).map((r) => r.route)),
+    ),
+  ].slice(0, 20);
 }
 
 /**
@@ -106,10 +123,13 @@ export function parseDataChange(
 /**
  * Builds a validated Intent from an agent declaration. Resources are normalized to plan-relative
  * keys and invalid keys are dropped. When a data change names no storage model, the model named
- * by the summary and assumptions (if exactly one) applies. Throws when the result is invalid.
+ * by the summary and assumptions (if exactly one) applies. Contract lines that declare no change
+ * are not contract changes; their routes become `consumedContracts`. Throws when the result is
+ * invalid.
  */
 export function intentFromDeclaration(declared: DeclaredIntent, meta: IntentMeta): Intent {
   const intentModel = modelFromText([declared.summary, ...declared.assumptions].join(". "));
+  const consumed = consumedRoutes(declared.expectedContractChanges.slice(0, 20));
   const resources = [
     ...new Set(
       declared.semanticResources
@@ -129,11 +149,15 @@ export function intentFromDeclaration(declared: DeclaredIntent, meta: IntentMeta
       .map((s) => clip(s, 300))
       .filter(Boolean)
       .slice(0, 50),
-    expectedContractChanges: declared.expectedContractChanges.slice(0, 20).map(parseContractChange),
+    expectedContractChanges: declared.expectedContractChanges
+      .slice(0, 20)
+      .map(parseContractChange)
+      .filter((c): c is ContractChange => c !== null),
     expectedDataChanges: declared.expectedDataChanges
       .slice(0, 20)
       .map((d) => parseDataChange(d, intentModel)),
     expectedSideEffects: (declared.expectedSideEffects ?? []).slice(0, 20).map((s) => clip(s, 500)),
     assumptions: declared.assumptions.slice(0, 20).map((a) => clip(a, 500)),
+    ...(consumed.length > 0 ? { consumedContracts: consumed } : {}),
   });
 }

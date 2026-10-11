@@ -132,6 +132,7 @@ export const MARKER_EVENT_TYPES = new Set([
   "change.compiled",
   "change.cancelled",
   "conflict.reviewed",
+  "conflict.integrated",
   "challenge.created",
   "challenge.resolved",
   "approval.requested",
@@ -177,6 +178,8 @@ function markerOf(event: FeedEvent, change: ChangeSummary | undefined): Timeline
     case "conflict.reviewed":
     case "challenge.created":
       return { ...base, kind: "conflict", label: "Conflict" };
+    case "conflict.integrated":
+      return { ...base, kind: "conflict", label: "Integrated" };
     case "approval.requested":
       return { ...base, kind: "approval", label: "Approval" };
     case "verification.completed":

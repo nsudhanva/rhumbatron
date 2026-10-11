@@ -176,7 +176,7 @@ export async function requestCandidateRebase(
       ...taskIds.map((id) =>
         env.DB.prepare(`UPDATE tasks SET status = ?, assigned_agent_id = NULL,
         wake_sent_at = NULL, attempts_reset_at = ?, blocked_limit = NULL, blocked_reason = NULL,
-        route_json = json_set(COALESCE(route_json, '{}'), '$.rebase', json(?)), updated_at = ?
+        route_json = json_set(json_remove(COALESCE(route_json, '{}'), '$.integrate'), '$.rebase', json(?)), updated_at = ?
         WHERE id = ? AND change_id = ? AND ${requested}`).bind(
           dependencies.some((e) => e.task_id === id && affected.has(e.depends_on_task_id))
             ? "pending"

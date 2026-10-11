@@ -33,6 +33,11 @@ export const EVENT_TYPES = [
   "challenge.resolved",
   /** A model review (Sonnet, then Opus on escalation) of one semantic conflict (P9-05, P9-06). */
   "conflict.reviewed",
+  /**
+   * A fork conflict between complementary Tasks (different semantic resources) became a Work Graph
+   * edge: the dependent Task re-runs on the other Task's ChangeSet instead of a Candidate fork.
+   */
+  "conflict.integrated",
   "changeset.proposed",
   "changeset.accepted",
   "changeset.rejected",

@@ -16,6 +16,7 @@ import {
   MAX_CANDIDATES,
   planCandidateSets,
 } from "./candidate-create.ts";
+import { pickIntegration } from "./integrate.ts";
 
 const CHANGE = "chg_test-1";
 
@@ -237,17 +238,25 @@ type CandidateRow = { id: string; change_id: string; change_set_ids_json: string
 /** Minimal D1, ProjectRootDO, ResourceShardDO, and Workflow stand-ins, answering by SQL shape. */
 function fakeEnv(input: {
   changeSets: { id: string; taskId: string; stackedOn?: string[] }[];
-  conflicts?: { id: string; taskIds: [string, string] }[];
+  conflicts?: {
+    id: string;
+    taskIds: [string, string];
+    integrate?: { dependentTaskId: string; dependsOnTaskId: string };
+  }[];
   taskDependencies?: TaskEdge[];
   status?: string;
 }) {
   const candidates: CandidateRow[] = [];
+  const batches: { sql: string; args: unknown[] }[][] = [];
   const workflows = new Set<string>();
   const events: string[] = [];
   const payloads: Record<string, unknown>[] = [];
   const statement = (sql: string, args: unknown[] = []) => ({
+    sql,
+    args,
     bind: (...next: unknown[]) => statement(sql, next),
     first: async () => {
+      if (sql.includes("FROM conflicts cf JOIN changes ch")) return null;
       if (sql.includes("FROM changes c JOIN projects p")) {
         return {
           id: CHANGE,
@@ -280,11 +289,17 @@ function fakeEnv(input: {
           })),
         };
       }
+      if (sql.includes("'$.dependentTaskId'")) return { results: [] };
       if (sql.includes("FROM conflicts")) {
         return {
           results: (input.conflicts ?? []).map((c) => ({
             id: c.id,
             intents_json: JSON.stringify(c.taskIds.map((taskId) => ({ taskId }))),
+            fork_decision_json: JSON.stringify(
+              c.integrate
+                ? { kind: "integrate", ...c.integrate, reason: "the UI uses the API" }
+                : { kind: "fork" },
+            ),
           })),
         };
       }
@@ -316,7 +331,13 @@ function fakeEnv(input: {
   });
   const namespace = (stub: object) => ({ idFromName: (n: string) => n, get: () => stub });
   const env = {
-    DB: { prepare: (sql: string) => statement(sql) },
+    DB: {
+      prepare: (sql: string) => statement(sql),
+      batch: async (list: { sql: string; args: unknown[] }[]) => {
+        batches.push(list.map((x) => ({ sql: x.sql, args: x.args })));
+        return list.map(() => ({ meta: { changes: 1 } }));
+      },
+    },
     PROJECT_ROOT: namespace({ getCanonical: async () => ({ artifactRef: "artifacts://acme" }) }),
     RESOURCE_SHARD: namespace({
       appendEvents: async (list: { eventId: string; payload: Record<string, unknown> }[]) => {
@@ -338,13 +359,48 @@ function fakeEnv(input: {
       },
     },
   } as unknown as Env;
-  return { env, candidates, workflows, events, payloads };
+  return { env, candidates, workflows, events, payloads, batches };
 }
 
 const ids = (outcome: Awaited<ReturnType<typeof composeChangeCandidates>>) =>
   outcome.status === "composed"
     ? outcome.candidates.map((c) => (c.status === "refused" ? c.reason : c.candidateId))
     : [];
+
+describe("pickIntegration", () => {
+  const proposed = [
+    { id: "cs_t1_1", taskId: "tsk_t1" },
+    { id: "cs_t2_1", taskId: "tsk_t2" },
+    { id: "cs_t3_1", taskId: "tsk_t3" },
+    { id: "cs_t4_1", taskId: "tsk_t4" },
+  ];
+  const conflict = {
+    id: "cfl_1",
+    dependentTaskId: "tsk_t3",
+    dependsOnTaskId: "tsk_t2",
+    reason: "t3 (todos:ui) builds on t2 (todos:api): the UI uses the API",
+  };
+  const edges = [
+    { task_id: "tsk_t2", depends_on_task_id: "tsk_t1" },
+    { task_id: "tsk_t3", depends_on_task_id: "tsk_t1" },
+    { task_id: "tsk_t4", depends_on_task_id: "tsk_t3" },
+  ];
+
+  it("re-runs the dependent Task and every Task built on it, and rejects only their ChangeSets", () => {
+    expect(pickIntegration([conflict], proposed, edges, new Set())).toEqual({
+      ...conflict,
+      rerunTaskIds: ["tsk_t3", "tsk_t4"],
+      rejectedChangeSetIds: ["cs_t3_1", "cs_t4_1"],
+    });
+  });
+
+  it("integrates a pair once, needs both ChangeSets, and never closes a cycle", () => {
+    expect(pickIntegration([conflict], proposed, edges, new Set(["tsk_t2|tsk_t3"]))).toBeNull();
+    expect(pickIntegration([conflict], proposed.slice(0, 2), edges, new Set())).toBeNull();
+    const cycle = [...edges, { task_id: "tsk_t2", depends_on_task_id: "tsk_t4" }];
+    expect(pickIntegration([conflict], proposed, cycle, new Set())).toBeNull();
+  });
+});
 
 describe("composeChangeCandidates", () => {
   const changeSets = [
@@ -471,6 +527,35 @@ describe("composeChangeCandidates", () => {
     const outcome = await createCandidate(fake.env, { changeId: CHANGE, changeSetIds: ["cs_x"] });
     expect(outcome.status === "refused" && outcome.reason).toBe("not_proposed");
     expect(fake.candidates).toHaveLength(0);
+  });
+
+  // Seen on prod: an API and its UI forked into rival Candidates and the API-only one shipped.
+  it("integrates complementary Tasks before composing: no Candidate until the UI re-runs", async () => {
+    const fake = fakeEnv({
+      changeSets: [...changeSets, { id: "cs_t4_1", taskId: "tsk_t4" }],
+      conflicts: [
+        {
+          id: "cfl_1",
+          taskIds: ["tsk_t2", "tsk_t3"],
+          integrate: { dependentTaskId: "tsk_t3", dependsOnTaskId: "tsk_t2" },
+        },
+      ],
+      taskDependencies: [{ task_id: "tsk_t4", depends_on_task_id: "tsk_t3" }],
+    });
+    const outcome = await composeChangeCandidates(fake.env, CHANGE);
+    expect(outcome).toEqual({
+      status: "integrating",
+      conflictId: "cfl_1",
+      rerunTaskIds: ["tsk_t3", "tsk_t4"],
+    });
+    expect(fake.candidates).toHaveLength(0);
+    expect(fake.workflows.size).toBe(0);
+    const [batch] = fake.batches;
+    const sql = (batch ?? []).map((x) => x.sql).join("\n");
+    expect(sql).toContain("INSERT OR IGNORE INTO task_dependencies");
+    expect(sql).toContain("UPDATE changes SET status = 'running'");
+    expect(sql).toContain("'CONFLICT_INTEGRATION'");
+    expect(batch?.[1]?.args.slice(0, 2)).toEqual(["tsk_t3", "tsk_t2"]);
   });
 
   it("composes nothing for a Change that is not verifying", async () => {

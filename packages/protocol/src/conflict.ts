@@ -56,6 +56,11 @@ export const Intent = z.object({
   expectedDataChanges: z.array(DataChange).max(20),
   expectedSideEffects: z.array(z.string().max(500)).max(20),
   assumptions: z.array(z.string().max(500)).max(20),
+  /**
+   * Contract targets the Task uses but does not change, for example `GET /api/todos` called by a
+   * UI. Never compared as a change; they order complementary Tasks (packages/conflict integrate.ts).
+   */
+  consumedContracts: z.array(z.string().min(1).max(300)).max(20).optional(),
   createdAt: Timestamp,
 });
 export type Intent = z.infer<typeof Intent>;

@@ -8,6 +8,8 @@ import {
   escalationReasons,
   type FirstReview,
   forkDecision,
+  type Integration,
+  integrationFor,
   type PriorReview,
   parseReviewOutput,
   REVIEW_MAX_OUTPUT_TOKENS,
@@ -52,6 +54,9 @@ import {
   type ConflictReview,
   INACTIVE_CANDIDATE_STATUSES,
   type IntentSide,
+  integratedPairs,
+  planTasks,
+  proposedResolution,
   readProtectedResources,
 } from "./conflicts.ts";
 
@@ -213,6 +218,7 @@ function challengeFor(
   rationale: string,
   citations: string[],
   action: ConflictAction,
+  integration: Integration | null,
 ): Challenge {
   const [earlier, later] = [...pair].sort((x, y) =>
     x.createdAt === y.createdAt
@@ -237,9 +243,14 @@ function challengeFor(
           : "design_alternative",
     summary: `${loaded.report.resource}: ${rationale}`.slice(0, 2000),
     evidenceRefs: citations.filter((c) => c.length <= 128).slice(0, 20),
-    ...(action === "fork_candidates"
-      ? { proposedResolution: "Fork 2 Candidates and let executable evidence decide." }
-      : {}),
+    ...proposedResolution(
+      action,
+      forkDecision(
+        { ...loaded.report, state: "confirmed", recommendedAction: action },
+        {},
+        integration,
+      ),
+    ),
   };
 }
 
@@ -273,29 +284,67 @@ export async function reviewConflict(
 
   // ChangeSet `cs_<run>` belongs to Intent `int_<run>` (agent-do.ts finishRun).
   const csIds = pair.map((i) => `cs_${i.intentId.slice(4)}`);
-  const [changeRow, changeSets, candidates, otherForks] = await deps.db.batch([
-    deps.db
-      .prepare(
-        "SELECT goal, invariants_json, acceptance_criteria_json, updated_at FROM changes WHERE id = ?",
-      )
-      .bind(ctx.changeId),
-    deps.db
-      .prepare("SELECT id, intent_json FROM changesets WHERE id IN (?, ?) AND change_id = ?")
-      .bind(csIds[0], csIds[1], ctx.changeId),
-    deps.db
-      .prepare(
-        `SELECT COUNT(*) AS n,
+  const [changeRow, changeSets, candidates, otherForks, taskRows, edgeRows, recorded] =
+    await deps.db.batch([
+      deps.db
+        .prepare(
+          "SELECT goal, invariants_json, acceptance_criteria_json, updated_at FROM changes WHERE id = ?",
+        )
+        .bind(ctx.changeId),
+      deps.db
+        .prepare("SELECT id, intent_json FROM changesets WHERE id IN (?, ?) AND change_id = ?")
+        .bind(csIds[0], csIds[1], ctx.changeId),
+      deps.db
+        .prepare(
+          `SELECT COUNT(*) AS n,
            SUM(CASE WHEN status NOT IN (${INACTIVE_CANDIDATE_STATUSES.map(() => "?").join(", ")}) THEN 1 ELSE 0 END) AS active
          FROM candidates WHERE change_id = ?`,
-      )
-      .bind(...INACTIVE_CANDIDATE_STATUSES, ctx.changeId),
-    deps.db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM conflicts WHERE change_id = ? AND id != ?
+        )
+        .bind(...INACTIVE_CANDIDATE_STATUSES, ctx.changeId),
+      deps.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM conflicts WHERE change_id = ? AND id != ?
            AND json_extract(fork_decision_json, '$.kind') = 'fork'`,
-      )
-      .bind(ctx.changeId, conflictId),
-  ]);
+        )
+        .bind(ctx.changeId, conflictId),
+      deps.db
+        .prepare(
+          "SELECT id, task_key, title, semantic_resources_json FROM tasks WHERE change_id = ?",
+        )
+        .bind(ctx.changeId),
+      deps.db
+        .prepare(
+          `SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d
+         JOIN tasks t ON t.id = d.task_id WHERE t.change_id = ?`,
+        )
+        .bind(ctx.changeId),
+      deps.db
+        .prepare(
+          `SELECT fork_decision_json, json_extract(review_json, '$.integrate.token') IS NOT NULL AS integrated
+         FROM conflicts WHERE change_id = ?`,
+        )
+        .bind(ctx.changeId),
+    ]);
+  // Complementary Tasks integrate instead of forking (integrate.ts); the same for every tier.
+  const dependsOn: Record<string, string[]> = {};
+  for (const e of (edgeRows?.results ?? []) as { task_id: string; depends_on_task_id: string }[]) {
+    dependsOn[e.task_id] = [...(dependsOn[e.task_id] ?? []), e.depends_on_task_id];
+  }
+  const integration = integrationFor(
+    pair,
+    planTasks(
+      (taskRows?.results ?? []) as {
+        id: string;
+        task_key: string | null;
+        title: string | null;
+        semantic_resources_json: string | null;
+      }[],
+    ),
+    dependsOn,
+    integratedPairs(
+      (recorded?.results ?? []) as { fork_decision_json: string; integrated: number | null }[],
+    ),
+  );
   const change = changeRow?.results?.[0] as
     | {
         goal: string;
@@ -433,7 +482,7 @@ export async function reviewConflict(
         verdict: null,
         ...usage,
       };
-      await finish(deps, ctx, current, tier, record, null, null);
+      await finish(deps, ctx, current, tier, record, null, null, 0, integration);
       return { kind: "invalid_output" };
     }
 
@@ -468,7 +517,7 @@ export async function reviewConflict(
       effect.applied &&
       effect.state === "confirmed" &&
       current.row.state === "suspected"
-        ? challengeFor(current, pair, rationale, citations, effect.recommendedAction)
+        ? challengeFor(current, pair, rationale, citations, effect.recommendedAction, integration)
         : null;
     // Same rule as declareIntentAndDetect: forks planned by other conflicts hold two slots each.
     const plannedForks = (otherForks?.results?.[0] as { n: number } | undefined)?.n ?? 0;
@@ -482,6 +531,7 @@ export async function reviewConflict(
       deferred ? null : effect,
       challenge,
       activeCandidates,
+      integration,
     );
     return { kind: "reviewed", effect, record };
   };
@@ -527,6 +577,7 @@ async function finish(
   effect: ReviewEffect | null,
   challenge: Challenge | null,
   activeCandidates = 0,
+  integration: Integration | null = null,
 ) {
   const before = current.row.state;
   const state = effect?.state ?? before;
@@ -556,6 +607,7 @@ async function finish(
   const fork = forkDecision(
     { ...current.report, state, recommendedAction: action },
     { activeCandidates },
+    integration,
   );
   const receipt: ConflictReviewReceipt = {
     decisionType: "CONFLICT_REVIEW",

@@ -29,16 +29,45 @@ export function normalizeFile(path: string): string {
 const HTTP_ROUTE = /\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/[^\s,;)]*)/i;
 const PATH_PARAM = /^(:[^/]+|\{[^}]+\}|\[[^\]]+\])$/;
 
-/** Finds the first HTTP route in free text, or null. */
-export function findHttpRoute(text: string): { route: string; match: string } | null {
-  const m = HTTP_ROUTE.exec(text);
-  if (!m?.[1] || !m[2]) return null;
-  const path = m[2].toLowerCase().replace(/\/+$/, "") || "/";
+type HttpRoute = { route: string; match: string };
+
+function routeOf(m: RegExpExecArray | RegExpMatchArray): HttpRoute | null {
+  if (!m[1] || !m[2]) return null;
+  // Sentence punctuation after a path ("... DELETE /api/cards/:id.") is not part of the route.
+  const path =
+    m[2]
+      .toLowerCase()
+      .replace(/[.:]+$/, "")
+      .replace(/\/+$/, "") || "/";
   const normalized = path
     .split("/")
     .map((segment) => (PATH_PARAM.test(segment) ? ":param" : segment))
     .join("/");
   return { route: `${m[1].toUpperCase()} ${normalized}`, match: m[0] };
+}
+
+/** Finds the first HTTP route in free text, or null. */
+export function findHttpRoute(text: string): HttpRoute | null {
+  const m = HTTP_ROUTE.exec(text);
+  return m ? routeOf(m) : null;
+}
+
+/** Every HTTP route in free text, in order. */
+export function findHttpRoutes(text: string): HttpRoute[] {
+  return [...text.matchAll(new RegExp(HTTP_ROUTE.source, "gi"))]
+    .map(routeOf)
+    .filter((r): r is HttpRoute => r !== null);
+}
+
+/** Upper-case HTTP method names. In a contract line they name a route, never a change verb. */
+const METHOD_WORD = /\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b/g;
+
+/**
+ * The text without its HTTP routes and upper-case method names, so `DELETE /api/todos/:id` never
+ * reads as the verb "delete". A lower-case "delete" or "remove" stays a verb.
+ */
+export function withoutRoutes(text: string): string {
+  return text.replace(new RegExp(HTTP_ROUTE.source, "gi"), " ").replace(METHOD_WORD, " ");
 }
 
 /**
@@ -142,18 +171,45 @@ const KIND_PATTERNS: readonly (readonly [ChangeKind, RegExp])[] = [
   ["add", /\b(add(s|ed)?|new|create[sd]?|introduce[sd]?)\b/],
 ];
 
-/**
- * The earliest change verb in the text decides the kind ("Add endpoint to remove items" is `add`).
- * No verb means `modify`: the safe side, because only additive changes can be dismissed.
- */
-export function kindFromText(text: string): ChangeKind {
+/** The kind of the earliest change verb in the text, or null when it names none. */
+function explicitKind(text: string): ChangeKind | null {
   const lower = text.toLowerCase();
   let best: { kind: ChangeKind; index: number } | null = null;
   for (const [kind, pattern] of KIND_PATTERNS) {
     const m = pattern.exec(lower);
     if (m && (best === null || m.index < best.index)) best = { kind, index: m.index };
   }
-  return best?.kind ?? "modify";
+  return best?.kind ?? null;
+}
+
+/**
+ * The earliest change verb in the text decides the kind ("Add endpoint to remove items" is `add`).
+ * No verb means `modify`: the safe side, because only additive changes can be dismissed.
+ */
+export function kindFromText(text: string): ChangeKind {
+  return explicitKind(text) ?? "modify";
+}
+
+/** "None", "No change", "No contract changes", "N/A" at the start of a declaration line. */
+const NO_CHANGE = /^\s*(none|n\/?a|no(ne)?\b[^.;:]*\bchanges?)\b[\s.;:,-]*/i;
+/** Verbs of a Task that only uses a contract another Task owns. */
+const CONSUMES =
+  /\b(uses?|using|consumes?|consuming|calls?|calling|reads?|reading|fetch(es|ing)?|depends? on|relies on|relying on|talks? to|against)\b/i;
+
+/**
+ * True when a contract line declares no change of its own: it says "None" or "No change", or it
+ * only uses, consumes, or calls routes ("None. The UI consumes GET /api/todos and DELETE
+ * /api/todos/:id."). Routes and method names never count as verbs here, and neither does "new"
+ * ("calls the new GET /api/todos").
+ */
+export function declaresNoChange(text: string): boolean {
+  const noChange = NO_CHANGE.exec(text);
+  const rest = withoutRoutes(noChange ? text.slice(noChange[0].length) : text).replace(
+    /\bnew\b/gi,
+    " ",
+  );
+  if (explicitKind(rest) !== null) return false;
+  return noChange !== null || CONSUMES.test(rest);
 }
 
 const STOPWORDS = new Set([

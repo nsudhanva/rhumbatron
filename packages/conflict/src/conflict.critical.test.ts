@@ -2,8 +2,9 @@
 // designs merge silently or forks Candidates for overlaps that only add.
 import type { Intent } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
-import { intentFromDeclaration } from "./declaration.ts";
+import { intentFromDeclaration, parseContractChange } from "./declaration.ts";
 import { detectConflicts, forkDecision } from "./detect.ts";
+import { integrationFor } from "./integrate.ts";
 import { assumptionsContradict, modelFromText } from "./normalize.ts";
 
 const intent = (overrides: Partial<Intent> & Pick<Intent, "intentId" | "taskId">): Intent => ({
@@ -368,5 +369,140 @@ describe("text heuristics", () => {
     expect(modelFromText("immutable ledger")).toBe("append_only");
     expect(modelFromText("normalized table updated in place")).toBe("mutable_table");
     expect(modelFromText("mutable table or event log")).toBe("unspecified");
+  });
+});
+
+// Seen on prod: "DELETE" in a route, or "None", read as a remove verb, raised a hard conflict
+// between an API and the UI that only calls it, and the fork shipped half the feature.
+describe("contract declarations", () => {
+  it("treats HTTP method names as part of the route, never as change verbs", () => {
+    expect(
+      parseContractChange(
+        "None. The UI consumes GET /api/board, POST /api/cards, PATCH /api/cards/:id and DELETE /api/cards/:id.",
+      ),
+    ).toBeNull();
+    expect(parseContractChange("Adds GET /api/todos")).toMatchObject({
+      target: "GET /api/todos",
+      kind: "add",
+    });
+    expect(parseContractChange("Removes DELETE /api/todos/:id")).toMatchObject({
+      target: "DELETE /api/todos/:param",
+      kind: "remove",
+    });
+    const deleteRoute = parseContractChange("DELETE /api/todos/:id -> {ok:true}");
+    expect(deleteRoute).toMatchObject({ target: "DELETE /api/todos/:param", shape: "{ok:true}" });
+    expect(deleteRoute?.kind).not.toBe("remove");
+    expect(parseContractChange("None")).toBeNull();
+    expect(parseContractChange("No contract changes.")).toBeNull();
+    expect(parseContractChange("Calls the new GET /api/todos")).toBeNull();
+    expect(parseContractChange("Drop the route GET /api/legacy")).toMatchObject({ kind: "remove" });
+  });
+
+  it("keeps used routes out of contract changes and never raises a removal for them", () => {
+    const declared = (summary: string, contracts: string[], resource: string) => ({
+      summary,
+      semanticResources: [resource],
+      expectedFiles: [],
+      expectedContractChanges: contracts,
+      expectedDataChanges: [],
+      assumptions: [],
+    });
+    const meta = (id: string) => ({
+      intentId: `int-${id}`,
+      taskId: `task-${id}`,
+      agentId: `agent-${id}`,
+      createdAt: "2026-10-11T00:00:00.000Z",
+    });
+    const api = intentFromDeclaration(
+      declared(
+        "Todo API with storage",
+        ["Adds GET /api/todos", "Adds DELETE /api/todos/:id -> {ok:true}"],
+        "todos:api",
+      ),
+      meta("api"),
+    );
+    const ui = intentFromDeclaration(
+      declared(
+        "Todo home page",
+        ["None. The UI consumes GET /api/todos, POST /api/todos, DELETE /api/todos/:id"],
+        "todos:ui",
+      ),
+      meta("ui"),
+    );
+    expect(ui.expectedContractChanges).toEqual([]);
+    expect(ui.consumedContracts).toEqual([
+      "GET /api/todos",
+      "POST /api/todos",
+      "DELETE /api/todos/:param",
+    ]);
+    expect(detectConflicts([api, ui])).toEqual([]);
+  });
+});
+
+describe("integrationFor", () => {
+  const side = (id: string, overrides: Partial<Intent> = {}) =>
+    intent({ intentId: `int-${id}`, taskId: `task-${id}`, ...overrides });
+  const tasks = (entries: [string, string, string, string[]][]) =>
+    new Map(
+      entries.map(([id, key, title, resources]) => [`task-${id}`, { key, title, resources }]),
+    );
+
+  it("makes the UI Task depend on the API Task of the same plan", () => {
+    const plan = tasks([
+      ["api", "t2", "Todo API with storage", ["todos:api"]],
+      ["ui", "t3", "Todo home page UI", ["todos:ui"]],
+    ]);
+    expect(integrationFor([side("ui"), side("api")], plan, {})).toMatchObject({
+      dependentTaskId: "task-ui",
+      dependsOnTaskId: "task-api",
+    });
+    // Once per Task pair: an integrated pair falls back to the fork rule.
+    expect(
+      integrationFor([side("ui"), side("api")], plan, {}, new Set(["task-api|task-ui"])),
+    ).toBeNull();
+  });
+
+  it("orders two UIs by contract use, else by Task key, and keeps one resource a fork", () => {
+    const plan = tasks([
+      ["cal", "t4", "Calendar view", ["missions:calendar-ui"]],
+      ["kan", "t3", "Kanban board", ["missions:kanban-ui"]],
+    ]);
+    expect(integrationFor([side("kan"), side("cal")], plan, {})).toMatchObject({
+      dependentTaskId: "task-cal",
+      dependsOnTaskId: "task-kan",
+    });
+    const owner = side("cal", {
+      expectedContractChanges: [
+        { target: "GET /api/missions", kind: "add", description: "Adds GET /api/missions" },
+      ],
+    });
+    const user = side("kan", { consumedContracts: ["GET /api/missions"] });
+    expect(integrationFor([owner, user], plan, {})).toMatchObject({
+      dependentTaskId: "task-kan",
+      dependsOnTaskId: "task-cal",
+    });
+    // An existing dependency path decides the order.
+    expect(integrationFor([owner, user], plan, { "task-cal": ["task-kan"] })).toMatchObject({
+      dependentTaskId: "task-cal",
+    });
+    const same = tasks([
+      ["a", "t2", "Relational", ["wishlist:membership"]],
+      ["b", "t3", "Append-only", ["wishlist"]],
+    ]);
+    expect(integrationFor([side("a"), side("b")], same, {})).toBeNull();
+  });
+
+  it("turns a forkable conflict into integrate, without using a Candidate slot", () => {
+    const [report] = detectConflicts([relational, appendOnly]);
+    if (!report) throw new Error("expected a report");
+    const integration = {
+      dependentTaskId: "task-b",
+      dependsOnTaskId: "task-a",
+      reason: "t3 builds on t2",
+    };
+    expect(forkDecision(report, { activeCandidates: 3 }, integration)).toEqual({
+      kind: "integrate",
+      ...integration,
+    });
   });
 });

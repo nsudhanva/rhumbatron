@@ -59,6 +59,8 @@ export function metricFor(event: EventEnvelope): Mapped | null {
       return { name: "claim_contention", result: "contended" };
     case "conflict.reviewed":
       return { name: "conflict_detected", result: text(p, "verdict") ?? "reviewed" };
+    case "conflict.integrated":
+      return { name: "conflict_detected", result: "integrated" };
     case "candidate.forked":
       return { name: "candidate_created", result: text(p, "trigger") ?? "created" };
     case "verification.completed": {

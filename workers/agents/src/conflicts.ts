@@ -6,8 +6,11 @@ import {
   type ForkDecision,
   forkDecision,
   type IntentMeta,
+  integrationFor,
   intentFromDeclaration,
+  type PlanTask,
   type ReviewTier,
+  taskPairKey,
 } from "@rhumbatron/conflict";
 import type { ResourceShardDO } from "@rhumbatron/coordinator";
 import { shardKey } from "@rhumbatron/coordinator/shard-key";
@@ -135,6 +138,7 @@ function challengeFor(
   id: string,
   report: ConflictReport,
   pair: readonly [Intent, Intent],
+  fork: ForkDecision,
 ): Challenge {
   const [earlier, later] = [...pair].sort((x, y) =>
     x.createdAt === y.createdAt
@@ -157,31 +161,69 @@ function challengeFor(
     evidenceRefs: [...new Set(hard.flatMap((s) => s.evidenceRefs))]
       .filter((r) => r.length <= 128)
       .slice(0, 20),
-    ...(report.recommendedAction === "fork_candidates"
-      ? { proposedResolution: "Fork 2 Candidates and let executable evidence decide." }
-      : {}),
+    ...proposedResolution(report.recommendedAction, fork),
   };
 }
 
+/** What a Challenge proposes: integrate complementary Tasks, else fork 2 Candidates. */
+export function proposedResolution(
+  action: ConflictAction,
+  fork: ForkDecision,
+): { proposedResolution?: string } {
+  if (fork.kind === "integrate") {
+    return { proposedResolution: `Integrate, do not fork: ${fork.reason}.`.slice(0, 2000) };
+  }
+  return action === "fork_candidates"
+    ? { proposedResolution: "Fork 2 Candidates and let executable evidence decide." }
+    : {};
+}
+
 /**
- * Pure planning step: detect, review, and keep each suspected or confirmed pair that is not in
- * `done`. `activeCandidates` grows by two for every fork planned here, so the Candidate limit
+ * Task pairs a conflict already integrated (`review_json.integrate` set by the integration
+ * Worker). A second conflict on such a pair is not integrated again.
+ */
+export function integratedPairs(
+  rows: readonly { fork_decision_json: string; integrated?: number | null }[],
+): Set<string> {
+  const pairs = new Set<string>();
+  for (const row of rows) {
+    if (!row.integrated) continue;
+    const fork = JSON.parse(row.fork_decision_json) as ForkDecision;
+    if (fork.kind === "integrate")
+      pairs.add(taskPairKey(fork.dependentTaskId, fork.dependsOnTaskId));
+  }
+  return pairs;
+}
+
+/**
+ * Pure planning step: detect over each Task's latest Intent, review, and keep each suspected or
+ * confirmed pair that is not in `done`. `activeCandidates` grows by two for every fork planned here, so the Candidate limit
  * holds across several conflicts of one Change.
  */
 export async function planConflicts(input: {
   intents: readonly Intent[];
-  tasks: ReadonlyMap<string, { key: string; title: string }>;
+  tasks: ReadonlyMap<string, PlanTask>;
   dependsOn: Readonly<Record<string, readonly string[]>>;
   protectedResources: readonly string[];
   /** Conflict IDs already fully recorded. */
   done: ReadonlySet<string>;
+  /** Task pairs integrated once already (`integratedPairs`). */
+  integrated?: ReadonlySet<string>;
   activeCandidates: number;
   /** Advisory Claim contention of the Change (ADR 0015). A contended pair is at least suspected. */
   contentions?: readonly ClaimContention[];
   review?: ConflictReviewer;
 }): Promise<PlannedConflict[]> {
-  const byId = new Map(input.intents.map((i) => [i.intentId, i]));
-  const reports = detectConflicts(input.intents, {
+  // Only each Task's latest Intent counts: a re-run (rebase or integrate) replaces the earlier
+  // Intent and its rejected ChangeSet, so an old version never opens a new conflict.
+  const latest = new Map<string, Intent>();
+  for (const i of input.intents) {
+    const prev = latest.get(i.taskId);
+    if (!prev || prev.createdAt < i.createdAt) latest.set(i.taskId, i);
+  }
+  const current = [...latest.values()];
+  const byId = new Map(current.map((i) => [i.intentId, i]));
+  const reports = detectConflicts(current, {
     protectedResources: input.protectedResources,
     dependsOn: input.dependsOn,
     includeDismissed: false,
@@ -213,7 +255,11 @@ export async function planConflicts(input: {
       state: review.state,
       recommendedAction: review.recommendedAction,
     };
-    const fork = forkDecision(reviewed, { activeCandidates });
+    const fork = forkDecision(
+      reviewed,
+      { activeCandidates },
+      integrationFor([a, b], input.tasks, input.dependsOn, input.integrated),
+    );
     if (fork.kind === "fork") activeCandidates += 2;
     planned.push({
       id,
@@ -221,10 +267,33 @@ export async function planConflicts(input: {
       review,
       intents: [side(a), side(b)],
       forkDecision: fork,
-      challenge: review.state === "confirmed" ? challengeFor(id, reviewed, [a, b]) : null,
+      challenge: review.state === "confirmed" ? challengeFor(id, reviewed, [a, b], fork) : null,
     });
   }
   return planned;
+}
+
+/** D1 `tasks` rows of one Change as PlanTasks, by Task ID. */
+export function planTasks(
+  rows: readonly {
+    id: string;
+    task_key: string | null;
+    title: string | null;
+    semantic_resources_json: string | null;
+  }[],
+): Map<string, PlanTask> {
+  return new Map(
+    rows.map((t) => {
+      let resources: string[] = [];
+      try {
+        const parsed = JSON.parse(t.semantic_resources_json ?? "[]") as unknown;
+        if (Array.isArray(parsed)) resources = parsed.filter((r) => typeof r === "string");
+      } catch {
+        resources = [];
+      }
+      return [t.id, { key: t.task_key ?? "", title: t.title ?? "", resources }];
+    }),
+  );
 }
 
 const strings = (value: unknown) =>
@@ -272,13 +341,17 @@ export async function declareIntentAndDetect(
   if (!declared.ok) throw new Error(`intent ${intent.intentId}: ${declared.reason}`);
 
   const [tasks, deps, recorded, candidates, policy] = await env.DB.batch([
-    env.DB.prepare("SELECT id, task_key, title FROM tasks WHERE change_id = ?").bind(ctx.changeId),
+    env.DB.prepare(
+      "SELECT id, task_key, title, semantic_resources_json FROM tasks WHERE change_id = ?",
+    ).bind(ctx.changeId),
     env.DB.prepare(
       `SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d
        JOIN tasks t ON t.id = d.task_id WHERE t.change_id = ?`,
     ).bind(ctx.changeId),
     env.DB.prepare(
-      "SELECT id, state, challenge_id, fork_decision_json FROM conflicts WHERE change_id = ?",
+      `SELECT id, state, challenge_id, fork_decision_json,
+         json_extract(review_json, '$.integrate.token') IS NOT NULL AS integrated
+       FROM conflicts WHERE change_id = ?`,
     ).bind(ctx.changeId),
     env.DB.prepare(
       `SELECT COUNT(*) AS n FROM candidates WHERE change_id = ? AND status NOT IN (${INACTIVE_CANDIDATE_STATUSES.map(() => "?").join(", ")})`,
@@ -288,13 +361,13 @@ export async function declareIntentAndDetect(
   const protectedResources = protectedResourcesFrom(
     policy?.results?.[0] as { policy_json: string } | undefined,
   );
-  const taskRows = (tasks?.results ?? []) as {
-    id: string;
-    task_key: string | null;
-    title: string | null;
-  }[];
-  const taskMap = new Map(
-    taskRows.map((t) => [t.id, { key: t.task_key ?? "", title: t.title ?? "" }]),
+  const taskMap = planTasks(
+    (tasks?.results ?? []) as {
+      id: string;
+      task_key: string | null;
+      title: string | null;
+      semantic_resources_json: string | null;
+    }[],
   );
   const dependsOn: Record<string, string[]> = {};
   for (const e of (deps?.results ?? []) as { task_id: string; depends_on_task_id: string }[]) {
@@ -305,6 +378,7 @@ export async function declareIntentAndDetect(
     state: string;
     challenge_id: string | null;
     fork_decision_json: string;
+    integrated: number | null;
   }[];
   // A confirmed row without a Challenge is retried; every other recorded row is done.
   const done = new Set(
@@ -328,6 +402,7 @@ export async function declareIntentAndDetect(
     done,
     activeCandidates: Math.max(active, plannedForks * 2),
     contentions: changeContentions,
+    integrated: integratedPairs(rows),
   });
   if (planned.length === 0) return { intentId: intent.intentId, conflicts: [] };
 

@@ -295,4 +295,5 @@ The ChangeSet records this lineage in `intent_json.changeSet`:
 | `ownFiles` | Files this Task changed on top of its stack |
 
 Because `ws-t3` descends from `ws-t1` and `ws-t2`, Candidate composition merges them as shared history, not as concurrent edits.
+A Task that the integrate rule reopens (`route_json.integrate`, [Source and verification](source-and-verification.md#sibling-candidates-and-selection)) gets the new dependency edge, so its re-run stacks on the other Task's ChangeSet. Its Context Packet tells it to build against that ChangeSet's real routes, field names, and data shapes.
 Conflicting dependency ChangeSets fail the Task at once (`dependency_merge_conflict`). No retry or tier can fix them.

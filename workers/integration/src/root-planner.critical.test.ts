@@ -90,6 +90,49 @@ describe("bootstrap Task for an empty repository", () => {
   });
 });
 
+// Seen on prod: a todo UI planned in parallel with its API guessed the routes and field names.
+describe("UI -> API dependency repair", () => {
+  const titled = (key: string, title: string, resources: string[], dependsOn: string[] = []) => ({
+    ...task(key, dependsOn),
+    title,
+    semanticResources: resources,
+  });
+
+  it("makes a UI Task depend on the API Task of the same area, with no model call", () => {
+    const outcome = parsePlan(
+      plan([
+        titled("t1", "Bootstrap the app", ["app:shell"]),
+        titled("t2", "Todo API with storage", ["todos:api"], ["t1"]),
+        titled("t3", "Todo home page UI", ["todos:ui"], ["t1"]),
+      ]),
+      { emptyRepository: true },
+    );
+    expect(outcome).toMatchObject({ ok: true, order: ["t1", "t2", "t3"], linked: ["t3->t2"] });
+    if (!outcome.ok) throw new Error("expected a plan");
+    expect(outcome.plan.tasks.find((t) => t.key === "t3")?.dependsOn).toEqual(["t1", "t2"]);
+  });
+
+  it("finds the UI by title, keeps existing paths, and ignores other areas", () => {
+    const byTitle = parsePlan(
+      plan([
+        titled("t1", "Missions API", ["missions:api"]),
+        titled("t2", "Calendar page", ["missions:calendar"]),
+        titled("t3", "Cart UI", ["cart:ui"]),
+      ]),
+    );
+    expect(byTitle).toMatchObject({ ok: true, linked: ["t2->t1"] });
+    // A path already exists (t3 -> t2 -> t1): nothing to add.
+    const ordered = parsePlan(
+      plan([
+        titled("t1", "Todo API", ["todos:api"]),
+        titled("t2", "Todo storage", ["todos:storage"], ["t1"]),
+        titled("t3", "Todo UI", ["todos:ui"], ["t2"]),
+      ]),
+    );
+    expect(ordered).toMatchObject({ ok: true, linked: [] });
+  });
+});
+
 describe("planChange", () => {
   it("repairs once with the validation errors, then succeeds", async () => {
     const seen: CompletionRequest[] = [];

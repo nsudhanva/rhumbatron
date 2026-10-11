@@ -150,6 +150,30 @@ const TRANSPORT_OUTCOMES = new Set<string>(["rate_limited", "transient", "timeou
 
 const log = (line: Record<string, unknown>) => console.warn(JSON.stringify(line));
 
+/**
+ * The integrate instruction for a Task the integration Worker reopened (`route_json.integrate`):
+ * it re-runs on a workspace that includes the other Task's ChangeSet. Only for the run window
+ * that the reopen started.
+ */
+function integrateInput(
+  task: Pick<TaskRow, "attempts_reset_at" | "route_json">,
+  stackTasks: ReadonlyMap<string, { key: string; title: string }>,
+): { integrate?: NonNullable<CompileInput["integrate"]> } {
+  if (!task.attempts_reset_at) return {};
+  const marker = (JSON.parse(task.route_json ?? "{}") as { integrate?: unknown }).integrate as
+    | { withTaskId?: unknown; reason?: unknown }
+    | undefined;
+  if (typeof marker?.withTaskId !== "string") return {};
+  const other = stackTasks.get(marker.withTaskId);
+  return {
+    integrate: {
+      withTaskKey: other?.key || marker.withTaskId,
+      withTitle: other?.title ?? "",
+      reason: typeof marker.reason === "string" ? marker.reason : "",
+    },
+  };
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** Prompt tokens assumed when a Pi call is reserved on the monthly meter (ADR 0021). */
@@ -686,6 +710,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
             >,
           }
         : {}),
+      ...integrateInput(task, stackTasks),
       ...(compacted.compaction ? { compaction: compacted.compaction } : {}),
       ...(source ? { repository: { commit: source.commit, files: source.files } } : {}),
       inheritedChangeSets: stack.map((s) => ({

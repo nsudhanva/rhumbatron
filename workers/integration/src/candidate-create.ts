@@ -1,9 +1,16 @@
+import type { ForkDecision } from "@rhumbatron/conflict";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { COMPOSITION_RULES_VERSION } from "@rhumbatron/evidence";
 import { ChangeSetIntent, MAX_TASKS_PER_CHANGE } from "@rhumbatron/protocol";
 import { requestCannotShip } from "./app-release-model.ts";
 import type { TaskEdge } from "./candidate-composer.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
+import {
+  applyIntegration,
+  type IntegrateConflict,
+  loadIntegratedPairs,
+  pickIntegration,
+} from "./integrate.ts";
 import {
   requestWorkflowStart,
   startWorkflowOnce,
@@ -61,6 +68,8 @@ export type ForkConflict = {
   id: string;
   sides: readonly [readonly string[], readonly string[]];
   state?: "confirmed" | "fork_required";
+  /** The recorded fork decision is `integrate` (complementary Tasks, integrate.ts). */
+  integrate?: IntegrateConflict;
 };
 
 /** A ChangeSet left out of every Candidate this round, and why. */
@@ -231,6 +240,8 @@ export type ComposeOutcome =
   | { status: "skipped"; reason: string }
   /** A conflict review is still running; composing now could miss its fork decision. */
   | { status: "waiting"; reason: string }
+  /** Complementary Tasks: the dependent Task re-runs on the other's ChangeSet first (integrate.ts). */
+  | { status: "integrating"; conflictId: string; rerunTaskIds: string[] }
   | {
       status: "composed";
       forkConflictId: string | null;
@@ -296,23 +307,37 @@ async function loadProposed(env: Env, changeId: string): Promise<ProposedChangeS
 /** Open conflicts that call for competing Candidates, oldest first. */
 async function loadForkConflicts(env: Env, changeId: string): Promise<ForkConflict[]> {
   const rows = await env.DB.prepare(
-    `SELECT id, state, intents_json FROM conflicts
+    `SELECT id, state, intents_json, fork_decision_json FROM conflicts
      WHERE change_id = ? AND state IN ('confirmed', 'fork_required')
        AND recommended_action = 'fork_candidates'
      ORDER BY created_at, id`,
   )
     .bind(changeId)
-    .all<{ id: string; state: string; intents_json: string }>();
+    .all<{ id: string; state: string; intents_json: string; fork_decision_json: string }>();
   const out: ForkConflict[] = [];
   for (const row of rows.results ?? []) {
     const sides = JSON.parse(row.intents_json) as { taskId?: unknown }[];
     const a = sides[0]?.taskId;
     const b = sides[1]?.taskId;
     if (typeof a === "string" && typeof b === "string" && a !== b) {
+      const fork = JSON.parse(row.fork_decision_json || "{}") as Partial<ForkDecision>;
       out.push({
         id: row.id,
         sides: [[a], [b]],
         state: row.state === "fork_required" ? "fork_required" : "confirmed",
+        ...(fork.kind === "integrate" &&
+        fork.dependentTaskId &&
+        fork.dependsOnTaskId &&
+        typeof fork.reason === "string"
+          ? {
+              integrate: {
+                id: row.id,
+                dependentTaskId: fork.dependentTaskId,
+                dependsOnTaskId: fork.dependsOnTaskId,
+                reason: fork.reason,
+              },
+            }
+          : {}),
       });
     }
   }
@@ -529,6 +554,23 @@ export async function composeChangeCandidates(
     loadTaskDependencies(env, change.id),
   ]);
   if (proposed.length === 0) return { status: "skipped", reason: "no proposed ChangeSets" };
+  // Complementary Tasks integrate before any Candidate exists; one integration per round.
+  const integrate = forks.flatMap((f) => (f.integrate ? [f.integrate] : []));
+  if (integrate.length > 0) {
+    const integration = pickIntegration(
+      integrate,
+      proposed,
+      edges,
+      await loadIntegratedPairs(env, change.id),
+    );
+    if (integration && (await applyIntegration(env, change.id, integration))) {
+      return {
+        status: "integrating",
+        conflictId: integration.id,
+        rerunTaskIds: integration.rerunTaskIds,
+      };
+    }
+  }
   const plan = planCandidateSets(proposed, forks, edges);
   const candidates: CreateCandidateOutcome[] = [];
   for (const set of plan.sets) {

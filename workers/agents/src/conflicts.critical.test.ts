@@ -25,8 +25,8 @@ const intent = (id: string, taskId: string, model: "mutable_table" | "append_onl
 const a = intent("int-a", "task-a", "mutable_table");
 const b = intent("int-b", "task-b", "append_only");
 const tasks = new Map([
-  ["task-a", { key: "T1", title: "Relational" }],
-  ["task-b", { key: "T2", title: "Append-only" }],
+  ["task-a", { key: "T1", title: "Relational", resources: ["wishlist:membership"] }],
+  ["task-b", { key: "T2", title: "Append-only", resources: ["wishlist:membership"] }],
 ]);
 const plan = (intents: Intent[], done = new Set<string>(), activeCandidates = 0) =>
   planConflicts({
@@ -64,6 +64,45 @@ describe("conflict persistence", () => {
   it("blocks a fork that would pass the Candidate limit", async () => {
     const [conflict] = await plan([a, b], new Set(), 2);
     expect(conflict?.forkDecision).toMatchObject({ kind: "blocked", maxCandidates: 3 });
+  });
+
+  // An API and its UI are two parts of one plan: forking them ships half a feature.
+  it("integrates complementary Tasks instead of forking them, once per Task pair", async () => {
+    const contract = (id: string, taskId: string, text: string): Intent => ({
+      ...intent(id, taskId, "mutable_table"),
+      semanticResources: [],
+      expectedFiles: [],
+      expectedDataChanges: [],
+      expectedContractChanges: [
+        { target: "GET /api/todos", kind: "modify", shape: text, description: text },
+      ],
+    });
+    const api = contract("int-api", "task-api", "{items:Todo[]}");
+    const ui = contract("int-ui", "task-ui", "{todos:Todo[]}");
+    const todoTasks = new Map([
+      ["task-api", { key: "t2", title: "Todo API", resources: ["todos:api"] }],
+      ["task-ui", { key: "t3", title: "Todo page", resources: ["todos:ui"] }],
+    ]);
+    const run = (integrated = new Set<string>()) =>
+      planConflicts({
+        intents: [ui, api],
+        tasks: todoTasks,
+        dependsOn: {},
+        protectedResources: [],
+        done: new Set(),
+        activeCandidates: 0,
+        integrated,
+      });
+    const [conflict] = await run();
+    expect(conflict?.review.state).toBe("confirmed");
+    expect(conflict?.forkDecision).toMatchObject({
+      kind: "integrate",
+      dependentTaskId: "task-ui",
+      dependsOnTaskId: "task-api",
+    });
+    expect(conflict?.challenge?.proposedResolution).toMatch(/^Integrate, do not fork/);
+    const [again] = await run(new Set(["task-api|task-ui"]));
+    expect(again?.forkDecision.kind).toBe("fork");
   });
 });
 

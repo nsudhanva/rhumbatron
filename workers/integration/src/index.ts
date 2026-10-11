@@ -26,6 +26,7 @@ import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { handleFixtureCommand } from "./fixture-changesets.ts";
 import { type HumanEditInput, submitHumanEdit } from "./human-edit.ts";
+import { recoverIntegrations } from "./integrate.ts";
 import { cleanupProject, FORK_RETENTION_DAYS, sweepForks } from "./project-cleanup.ts";
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
@@ -183,6 +184,7 @@ async function handleCommand(
   if (command.data.commandType === "candidate.create") {
     if (!command.data.changeId) return;
     await recoverSourceConflicts(env, command.data.changeId);
+    await recoverIntegrations(env, command.data.changeId);
     // The last delivery composes anyway: a stuck review must not hold the Change forever.
     const result = await composeChangeCandidates(env, command.data.changeId, {
       force: attempts >= MAX_DELIVERIES,

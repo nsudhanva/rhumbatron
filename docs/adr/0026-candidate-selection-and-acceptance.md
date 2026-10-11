@@ -33,6 +33,15 @@ person asked for, so no Evidence showed the loss. See `docs/architecture/source-
   `needs_more_evidence`, not `confirmed`), the fork rule adds a third Candidate with both sides
   and the ChangeSets that need both. It is the evidence the review asked for. A `confirmed`
   conflict keeps two Candidates.
+- Integrate, do not fork, complementary Tasks: a `confirmed` or `fork_required` conflict between
+  two Tasks of one Change on different semantic resources (`todos:api` and `todos:ui`) has the
+  fork decision `integrate`. Each side alone is incomplete, so rival Candidates would ship half
+  the request. Composition makes the dependent Task (the UI, else the Task that uses the other's
+  contract, else the later Task key) depend on the other Task and re-runs it once on a stacked
+  workspace with the other Task's ChangeSet, before any Candidate exists. The decision is recorded
+  in `review_json.integrate` and `fork_decision_json`, the Event `conflict.integrated`, and the
+  Decision Receipt `CONFLICT_INTEGRATION`. Once per Task pair: a later conflict on the pair
+  follows the fork rule. Only Tasks on overlapping resources with incompatible designs fork.
 - Acceptance check: an optional check (kind `acceptance`) for every Candidate of a Change with
   acceptance criteria. One Haiku call judges each criterion against the Candidate patch (Sonnet
   once on invalid output). A `met` cites a path and a quote. Code keeps a citation only when the
@@ -51,6 +60,7 @@ person asked for, so no Evidence showed the loss. See `docs/architecture/source-
 ## Alternatives considered
 | Alternative | Why it lost |
 |---|---|
+| Fork complementary Tasks and let the combined Candidate win | The combined Candidate only exists for `fork_required`, and a UI written against a guessed API fails it; the side Candidates then ship half the request. |
 | Keep first-verified-wins and add only the acceptance check | Two Candidates that each meet some criteria still race; the result depends on timing. |
 | Acceptance as a required gate check | When each fork side implements part of the request and the combined Candidate does not compose, every Candidate is rejected and nothing can ship, even with a person's consent. |
 | A `candidate_selections` table keyed by Change and base | Works, but needs its own cleanup on Project deletion. The anchor row gives the same single claim. |
@@ -67,5 +77,7 @@ person asked for, so no Evidence showed the loss. See `docs/architecture/source-
   sees which criteria are missing and approves the best Candidate or cancels the Change.
 - The acceptance check reads code, not behavior. A quote proves that code for a criterion exists,
   not that it works. The unit, contract, and preview checks keep proving behavior.
+- An integrated pair costs one more agent run for the dependent Task (and the Tasks built on it)
+  before the Change composes, instead of a second Candidate's verification.
 - If the claimant's workflow fails permanently after the claim, no winner is applied
   automatically. The siblings stay verified, and a person can promote one.

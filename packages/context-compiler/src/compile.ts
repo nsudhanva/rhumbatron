@@ -58,6 +58,11 @@ export type CompileInput = {
   }[];
   /** A source conflict reopened this Task on the current canonical files. */
   rebase?: { fromGeneration: number; toGeneration: number };
+  /**
+   * A conflict with a complementary Task reopened this Task on a workspace that includes that
+   * Task's ChangeSet (integrate path, packages/conflict integrate.ts).
+   */
+  integrate?: { withTaskKey: string; withTitle: string; reason: string };
   /** Validated prior-log summary. The source references are required provenance, never trimmed. */
   compaction?: {
     sourceHash: string;
@@ -133,7 +138,7 @@ export function compilePacket(input: CompileInput): ContextPacket {
       sourceVersion: task.updatedAt,
       capturedAt: now,
       title: `Your Task ${task.key} (${task.kind}, risk ${task.riskTier}): ${task.title}`,
-      body: `Objective: ${task.objective}${input.rebase ? `\n\nThe base moved from S${input.rebase.fromGeneration} to S${input.rebase.toGeneration}, and the previous source change could not merge. Read the current files and re-apply your objective while preserving the newer changes.` : ""}\n\nSemantic resources:\n${bullets(task.semanticResources)}\n\nAcceptance criteria:\n${bullets(task.acceptanceCriteria)}`,
+      body: `Objective: ${task.objective}${input.rebase ? `\n\nThe base moved from S${input.rebase.fromGeneration} to S${input.rebase.toGeneration}, and the previous source change could not merge. Read the current files and re-apply your objective while preserving the newer changes.` : ""}${input.integrate ? `\n\nYour previous result did not fit Task ${input.integrate.withTaskKey} (${input.integrate.withTitle}): ${input.integrate.reason}. Your workspace now includes that Task's ChangeSet. Read its files and build against its real routes, field names, and data shapes; do not re-create or change them.` : ""}\n\nSemantic resources:\n${bullets(task.semanticResources)}\n\nAcceptance criteria:\n${bullets(task.acceptanceCriteria)}`,
     },
   ];
   const emptyRepository = !!input.repository && !input.repository.files.includes("package.json");

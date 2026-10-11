@@ -248,6 +248,16 @@ flowchart TB
   A -->|"no valid preference"| H["Change awaiting_approval:<br/>a person picks"]
 ```
 
+Integrate rule (before the fork rule, `workers/integration/src/integrate.ts`):
+
+- Two Tasks of one Change whose planned semantic resources do not overlap (`todos:api` and `todos:ui`, `missions:calendar-ui` and `missions:kanban-ui`) are complementary parts of one plan, never alternatives. A `confirmed` or `fork_required` conflict between them has the fork decision `integrate` (`integrationFor` in `packages/conflict/src/integrate.ts`), at detection and after each model review.
+- Order: an existing dependency path decides. Else the UI Task (a resource ending in `ui`, `-ui`, `frontend`, or `page`, or a title that says UI, page, or frontend) depends on the API Task (a resource ending in `api` or `-api`, or a title that says API). Else the Task whose Intent uses the other's contract (`consumedContracts`) depends on it. Else the higher Task key depends on the lower.
+- Composition applies one integration per round, before any Candidate exists. One D1 transaction resolves the conflict (`review_json.integrate`), adds the edge to `task_dependencies`, rejects the ChangeSets of the dependent Task and the Tasks built on it, resolves their other open conflicts, resets those Tasks to `pending` with a new attempt window, moves the Change from `verifying` to `running`, and records the Decision Receipt `CONFLICT_INTEGRATION`. Then the Event `conflict.integrated`, the Challenge resolution (`upheld`), and the dispatch follow. A lost delivery repeats on the next `candidate.create` (`recoverIntegrations`).
+- The dependent Task re-runs once on a stacked workspace that includes the other Task's ChangeSet, with an instruction to build against its real routes, field names, and data shapes. No Candidate composes until the re-run completes and the Change records `verification.started` again. The Candidate then holds both ChangeSets.
+- Once per Task pair: a later conflict on an integrated pair follows the fork rule. Only Tasks on overlapping semantic resources with incompatible designs are fork alternatives.
+
+Contract declarations: an agent's contract lines become typed contract changes (`parseContractChange` in `packages/conflict/src/declaration.ts`). HTTP method names (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) are part of a route and never change verbs: `DELETE /api/todos/:id -> {ok:true}` changes that route, and only wording such as "Removes DELETE /api/todos/:id" is a removal. A line that says "None" or "No change", or that only uses, consumes, or calls routes, is not a contract change. Its routes become the Intent's `consumedContracts`, which conflict detection never compares.
+
 Fork rule:
 
 - No counting fork conflict: one Candidate from every proposed ChangeSet.

@@ -10,6 +10,7 @@ import type {
   ConflictState,
   Intent,
 } from "@rhumbatron/protocol";
+import type { Integration } from "./integrate.ts";
 import {
   assumptionsContradict,
   incompatibleModels,
@@ -387,6 +388,8 @@ export function detectConflicts(
 
 export type ForkDecision =
   | { kind: "fork"; candidateIntentIds: [string, string]; reason: string }
+  /** Complementary Tasks (integrate.ts): the dependent Task re-runs on the other's ChangeSet. */
+  | ({ kind: "integrate" } & Integration)
   | { kind: "no_fork"; reason: "benign_overlap" | "needs_review" | "already_resolved" }
   | { kind: "blocked"; reason: "candidate_limit"; maxCandidates: number };
 
@@ -394,10 +397,13 @@ export type ForkDecision =
  * Section 32.4: fork only when both approaches are plausible and executable evidence can pick a
  * winner, which the detector expresses as `fork_candidates` on a confirmed conflict. Forking adds
  * two Candidates, so it is blocked when that would pass `maxCandidates` (section 44 default: 3).
+ * A forkable conflict between complementary Tasks (`integration`, from `integrationFor`) is
+ * `integrate` instead: the two sides are parts of one plan, and no Candidate is added.
  */
 export function forkDecision(
   report: ConflictReport,
   limits: { activeCandidates?: number; maxCandidates?: number } = {},
+  integration: Integration | null = null,
 ): ForkDecision {
   const maxCandidates = limits.maxCandidates ?? 3;
   if (report.state === "resolved") return { kind: "no_fork", reason: "already_resolved" };
@@ -406,6 +412,7 @@ export function forkDecision(
     report.recommendedAction === "fork_candidates" &&
     (report.state === "confirmed" || report.state === "fork_required");
   if (!forkable) return { kind: "no_fork", reason: "needs_review" };
+  if (integration) return { kind: "integrate", ...integration };
   if ((limits.activeCandidates ?? 0) + 2 > maxCandidates) {
     return { kind: "blocked", reason: "candidate_limit", maxCandidates };
   }

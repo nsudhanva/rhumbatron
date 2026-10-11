@@ -8,6 +8,7 @@ import {
 import {
   APP_CONVENTIONS,
   checkWorkGraph,
+  type PlannedTask,
   type RouteRequest,
   WorkGraphPlan,
 } from "@rhumbatron/protocol";
@@ -26,6 +27,7 @@ Turn the user's goal into a small dependency graph of Tasks. Rules:
 - 2 to 8 Tasks. Each Task is one bounded unit of work that one agent can finish and verify alone.
 - Keys are t1, t2, ... in order. dependsOn lists keys that must finish first. No cycles.
 - Tasks that do not depend on each other must not list each other, so they can run in parallel.
+- A UI Task that calls routes another Task of this plan defines must depend on that Task, so the UI is written against the real API (for example todos:ui depends on todos:api). Never plan a UI and its API in parallel.
 - semanticResources are colon-separated kebab-case product areas, for example wishlist:membership or cart:totals.
 - Use kind "design" only for decisions other Tasks need first; "test" for verification work; "document" sparingly.
 - acceptanceCriteria are observable results, not activities.
@@ -74,6 +76,61 @@ function checkBootstrap(plan: WorkGraphPlan): string[] {
   return missing.length > 0
     ? [`the repository is empty: ${missing.join(", ")} must depend on the bootstrap Task t1`]
     : [];
+}
+
+const UI_SEGMENT = /(^|-)(ui|frontend|page)$/;
+const API_SEGMENT = /(^|-)api$/;
+const UI_TITLE = /\b(ui|page|frontend)\b/i;
+
+const segments = (resource: string) => resource.toLowerCase().split(":");
+const area = (resource: string) => segments(resource)[0] ?? "";
+const last = (resource: string) => segments(resource).at(-1) ?? "";
+
+/**
+ * Deterministic plan repair, no model call: a UI Task (a resource ending in `ui`, `-ui`,
+ * `frontend`, or `page`, or a title that says UI, page, or frontend) and an API Task (a resource
+ * ending in `api` or `-api`) on the same area (first resource segment, `todos` in `todos:ui`) with
+ * no dependency path between them get the edge UI -> API. Then the UI agent runs after the API
+ * and reads its real routes instead of guessing them. Needs an acyclic graph; returns the added
+ * edges as `ui->api` key pairs.
+ */
+function linkUiToApi(tasks: readonly PlannedTask[]): { tasks: PlannedTask[]; linked: string[] } {
+  const deps = new Map(tasks.map((t) => [t.key, [...t.dependsOn]]));
+  const reaches = (from: string, to: string) => {
+    const seen = new Set<string>();
+    const queue = [...(deps.get(from) ?? [])];
+    while (queue.length > 0) {
+      const next = queue.shift() as string;
+      if (next === to) return true;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push(...(deps.get(next) ?? []));
+    }
+    return false;
+  };
+  const apiAreas = (t: PlannedTask) =>
+    t.semanticResources.filter((r) => API_SEGMENT.test(last(r))).map(area);
+  const uiAreas = (t: PlannedTask) => {
+    if (apiAreas(t).length > 0) return [];
+    const byResource = t.semanticResources.filter((r) => UI_SEGMENT.test(last(r))).map(area);
+    if (byResource.length > 0) return byResource;
+    return UI_TITLE.test(t.title) ? t.semanticResources.map(area) : [];
+  };
+  const linked: string[] = [];
+  for (const ui of tasks) {
+    const areas = new Set(uiAreas(ui));
+    if (areas.size === 0) continue;
+    for (const api of tasks) {
+      if (api.key === ui.key || !apiAreas(api).some((a) => areas.has(a))) continue;
+      if (reaches(ui.key, api.key) || reaches(api.key, ui.key)) continue;
+      deps.get(ui.key)?.push(api.key);
+      linked.push(`${ui.key}->${api.key}`);
+    }
+  }
+  return {
+    tasks: tasks.map((t) => ({ ...t, dependsOn: deps.get(t.key) ?? t.dependsOn })),
+    linked,
+  };
 }
 
 function repositoryLine(files: readonly string[] | null | undefined): string {
@@ -161,7 +218,9 @@ const tool = {
 export function parsePlan(
   args: string | undefined,
   options: { emptyRepository?: boolean } = {},
-): { ok: true; plan: WorkGraphPlan; order: string[] } | { ok: false; errors: string[] } {
+):
+  | { ok: true; plan: WorkGraphPlan; order: string[]; linked: string[] }
+  | { ok: false; errors: string[] } {
   if (!args) return { ok: false, errors: [`no ${SUBMIT_TOOL} call`] };
   let json: unknown;
   try {
@@ -179,12 +238,17 @@ export function parsePlan(
         .map((i) => `${i.path.join(".") || "root"}: ${i.message}`),
     };
   }
-  const graph = checkWorkGraph(parsed.data.tasks);
+  const checked = checkWorkGraph(parsed.data.tasks);
+  if (!checked.ok) return checked;
+  // The repair only adds edges between Tasks with no path between them: still acyclic.
+  const { tasks, linked } = linkUiToApi(parsed.data.tasks);
+  const plan = { ...parsed.data, tasks };
+  const graph = checkWorkGraph(tasks);
   if (!graph.ok) return graph;
-  const bootstrap = options.emptyRepository ? checkBootstrap(parsed.data) : [];
+  const bootstrap = options.emptyRepository ? checkBootstrap(plan) : [];
   return bootstrap.length > 0
     ? { ok: false, errors: bootstrap }
-    : { ok: true, plan: parsed.data, order: graph.order };
+    : { ok: true, plan, order: graph.order, linked };
 }
 
 /** At most two model calls: the plan, then one repair turn with the validation errors. */
@@ -226,6 +290,9 @@ export async function planChange(
     const call = result.toolCalls.find((c) => c.function.name === SUBMIT_TOOL);
     const outcome = parsePlan(call?.function.arguments, { emptyRepository });
     if (outcome.ok) {
+      if (outcome.linked.length > 0) {
+        console.warn(JSON.stringify({ event: "planner.linked_ui_to_api", edges: outcome.linked }));
+      }
       return {
         plan: input.selectedCriteria
           ? { ...outcome.plan, acceptanceCriteria: input.selectedCriteria.map((c) => c.text) }
