@@ -77,7 +77,7 @@ flowchart LR
 
 Differences from `AGENTS.md`:
 
-- The KV namespace `rhumbatron-config-<env>` (binding `CONFIG` on the integration Worker) holds only a 5-minute snapshot of the Project policy. D1 `project_policies` is the source of truth. No API writes it, so a Project without a row uses the default policy. Promotion and approval read the policy. Candidate verification plans with the default policy.
+- The KV namespace `rhumbatron-config-<env>` (binding `CONFIG` on the integration Worker) holds only a 5-minute snapshot of the Project policy. D1 `project_policies` is the source of truth. No API writes it, so a Project without a row uses the default policy. Promotion and approval read the policy. Candidate verification plans with the default policy. Conflict detection, conflict review, and the Product Graph read only the stored row's `protectedResources`; without a row they protect nothing.
 - No OpenTelemetry tracing is configured. Durable Object Workers set `traces.enabled = false`.
 
 ## Deployables map

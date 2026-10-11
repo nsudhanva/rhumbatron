@@ -3,6 +3,7 @@ import {
   ArrowLineUp,
   ArrowsSplit,
   Bell,
+  ChatCircleText,
   CheckSquare,
   CloudCheck,
   CloudWarning,
@@ -49,14 +50,14 @@ const ICONS: Record<NotificationKind, Icon> = {
   release_failed: CloudWarning,
   release_deployed: CloudCheck,
   request_not_selected: XSquare,
-  request_awaiting_owner: UserCheck,
+  request_needs_input: ChatCircleText,
 };
 
 /** Inline action for items whose next step is a decision on another page. */
 const ACTIONS: Partial<Record<NotificationKind, string>> = {
   approval_required: "Review",
   promotion_ready: "Open",
-  request_awaiting_owner: "Choose",
+  request_needs_input: "Answer",
 };
 
 /** The icon is the status here (DESIGN.md 7), paired with the title's words. */
@@ -118,14 +119,11 @@ export default function NotificationInbox({ onClose }: { onClose: () => void }) 
     <div className="grid">
       <div className="flex h-11 items-center gap-2 border-b-2 border-kumo-divider pr-1.5 pl-3">
         <Popover.Title className="type-h6 m-0 grow">Notifications</Popover.Title>
-        <Button
-          size="xs"
-          variant="ghost"
-          disabled={unread === 0 || markRead.isPending}
-          onClick={() => markRead.mutate("all")}
-        >
-          Mark all read
-        </Button>
+        {unread > 0 && (
+          <Button size="xs" variant="ghost" onClick={() => markRead.mutate("all")}>
+            Mark all read
+          </Button>
+        )}
         <Popover.Close
           aria-label="Close notifications"
           title="Close"
@@ -149,7 +147,7 @@ export default function NotificationInbox({ onClose }: { onClose: () => void }) 
           <EmptyState
             className="px-3"
             what="Nothing needs you."
-            how="Approvals, promotions, failed commands, and finished Changes appear here."
+            how="Approvals, questions about your requests, failed commands, and finished Changes appear here."
           />
         ) : (
           <>

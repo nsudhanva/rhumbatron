@@ -254,23 +254,28 @@ function VersionRow({
         )}
       </Td>
       <Td className="text-[13px]">
-        {!canRollBack ? (
+        {/* While a rollback runs, only the clicked row shows its progress; the rest hide. */}
+        {!canRollBack || (busy && !pending) ? (
           <span className="text-kumo-subtle">{EMPTY}</span>
+        ) : pending ? (
+          <span role="status" className="relative z-10">
+            Rolling back to {generation(v.generation)}…
+          </span>
         ) : confirming ? (
           <span className="relative z-10 flex flex-wrap items-center gap-x-3">
             <span>
               Ship {generation(v.generation)}'s code as{" "}
               {nextGeneration === null ? "a new version" : generation(nextGeneration)}?
             </span>
-            <button type="button" className={LINK} disabled={busy} onClick={onConfirm}>
-              {pending ? "Rolling back" : "Roll back"}
+            <button type="button" className={LINK} onClick={onConfirm}>
+              Roll back
             </button>
-            <button type="button" className={LINK} disabled={busy} onClick={onCancel}>
+            <button type="button" className={LINK} onClick={onCancel}>
               Cancel
             </button>
           </span>
         ) : (
-          <button type="button" className={LINK} disabled={busy} onClick={onAsk}>
+          <button type="button" className={LINK} onClick={onAsk}>
             Roll back to {generation(v.generation)}
           </button>
         )}

@@ -1,5 +1,5 @@
 import { Button } from "@cloudflare/kumo";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
   type DeadLetter,
@@ -47,12 +47,24 @@ export function DeadLetters({
     }
   };
   const retry = useMutation({
+    mutationKey: ["dead-letter", "retry"],
     mutationFn: (id: string) => retryDeadLetter({ data: id }),
     onSettled: settle,
   });
   const dismiss = useMutation({
+    mutationKey: ["dead-letter", "dismiss"],
     mutationFn: (id: string) => dismissDeadLetter({ data: id }),
     onSettled: settle,
+  });
+
+  // Rows act independently: each row tracks only its own pending action.
+  const retryingIds = useMutationState({
+    filters: { mutationKey: ["dead-letter", "retry"], status: "pending" },
+    select: (m) => m.state.variables as string,
+  });
+  const dismissingIds = useMutationState({
+    filters: { mutationKey: ["dead-letter", "dismiss"], status: "pending" },
+    select: (m) => m.state.variables as string,
   });
 
   const letters = state.data?.deadLetters ?? [];
@@ -81,9 +93,8 @@ export function DeadLetters({
                 key={letter.id}
                 letter={letter}
                 showChange={!changeId}
-                retrying={retry.isPending && retry.variables === letter.id}
-                dismissing={dismiss.isPending && dismiss.variables === letter.id}
-                busy={retry.isPending || dismiss.isPending}
+                retrying={retryingIds.includes(letter.id)}
+                dismissing={dismissingIds.includes(letter.id)}
                 onRetry={() => retry.mutate(letter.id)}
                 onDismiss={() => dismiss.mutate(letter.id)}
               />
@@ -125,7 +136,6 @@ function DeadLetterRow({
   showChange,
   retrying,
   dismissing,
-  busy,
   onRetry,
   onDismiss,
 }: {
@@ -133,7 +143,6 @@ function DeadLetterRow({
   showChange: boolean;
   retrying: boolean;
   dismissing: boolean;
-  busy: boolean;
   onRetry: () => void;
   onDismiss: () => void;
 }) {
@@ -151,27 +160,30 @@ function DeadLetterRow({
           <span className="opacity-80">failed {letter.deadCount} times</span>
         )}
       </span>
+      {/* While one action runs, only its button shows, with a loader; the other is hidden. */}
       <span className="flex shrink-0 gap-2">
-        <Button
-          size="sm"
-          variant="secondary"
-          className="ring-current"
-          loading={retrying}
-          disabled={busy && !retrying}
-          onClick={onRetry}
-        >
-          Retry
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="ring-current"
-          loading={dismissing}
-          disabled={busy && !dismissing}
-          onClick={onDismiss}
-        >
-          Dismiss
-        </Button>
+        {!dismissing && (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="ring-current"
+            loading={retrying}
+            onClick={onRetry}
+          >
+            Retry
+          </Button>
+        )}
+        {!retrying && (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="ring-current"
+            loading={dismissing}
+            onClick={onDismiss}
+          >
+            Dismiss
+          </Button>
+        )}
       </span>
     </li>
   );

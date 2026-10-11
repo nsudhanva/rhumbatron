@@ -50,9 +50,9 @@ import {
 } from "@rhumbatron/protocol";
 import {
   type ConflictReview,
-  DEFAULT_PROTECTED_RESOURCES,
   INACTIVE_CANDIDATE_STATUSES,
   type IntentSide,
+  readProtectedResources,
 } from "./conflicts.ts";
 
 /**
@@ -93,6 +93,8 @@ export type ReviewDeps = {
   callModel: (req: CompletionRequest) => Promise<CompletionResult>;
   /** ALLOW_OPUS is "true": a Sonnet review can escalate to Opus. */
   allowOpus: boolean;
+  /** Protected resources of the Project's stored policy; read once per review run. */
+  protectedResources: () => Promise<readonly string[]>;
   /** Stores the Context Packet as an Evidence Snapshot (section 27.5). Best effort. */
   storePacket: (key: string, packet: ContextPacket) => Promise<void>;
   metric: (point: AnalyticsEngineDataPoint) => void;
@@ -266,7 +268,8 @@ export async function reviewConflict(
   const b = intents.get(first.report.intentIds[1]);
   if (!a || !b) return [];
   const pair = [a, b] as const;
-  const reasons = escalationReasons(first.report, pair, DEFAULT_PROTECTED_RESOURCES);
+  const protectedResources = await deps.protectedResources();
+  const reasons = escalationReasons(first.report, pair, protectedResources);
 
   // ChangeSet `cs_<run>` belongs to Intent `int_<run>` (agent-do.ts finishRun).
   const csIds = pair.map((i) => `cs_${i.intentId.slice(4)}`);
@@ -348,7 +351,7 @@ export async function reviewConflict(
       },
       report: current.report,
       sides,
-      protectedResources: DEFAULT_PROTECTED_RESOURCES,
+      protectedResources,
       ...(prior ? { prior } : {}),
     });
     const messages = reviewMessages(packet);
@@ -658,9 +661,15 @@ export async function runConflictReviews(env: Env, job: ConflictReviewJob) {
     projectSlug: job.ctx.projectSlug,
     canonicalGeneration: job.ctx.baseGeneration,
   };
+  // One policy read per run, shared by every conflict the run reviews.
+  let guards: Promise<string[]> | undefined;
   const deps: ReviewDeps = {
     db: env.DB,
     now: () => new Date().toISOString(),
+    protectedResources: () => {
+      guards ??= readProtectedResources(env.DB, job.ctx.projectId);
+      return guards;
+    },
     intents: async (changeId) => (await shard().detectionInputs(changeId)).intents,
     createChallenge: async (challenge) =>
       (await shard().createChallenge({ ...scope, challenge })).ok,

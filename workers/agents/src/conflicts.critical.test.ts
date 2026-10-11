@@ -3,7 +3,7 @@
 // `id_reused`, or D1 records the conflict twice.
 import type { Intent } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
-import { conflictId, planConflicts } from "./conflicts.ts";
+import { conflictId, planConflicts, protectedResourcesFrom } from "./conflicts.ts";
 
 const intent = (id: string, taskId: string, model: "mutable_table" | "append_only"): Intent => ({
   intentId: id,
@@ -64,5 +64,32 @@ describe("conflict persistence", () => {
   it("blocks a fork that would pass the Candidate limit", async () => {
     const [conflict] = await plan([a, b], new Set(), 2);
     expect(conflict?.forkDecision).toMatchObject({ kind: "blocked", maxCandidates: 3 });
+  });
+});
+
+// Protected resources come only from the Project's stored policy: no demo default applies to
+// every Project, and a row that does not parse protects nothing rather than guessing.
+describe("protected resources", () => {
+  const policy = {
+    version: "policy-2",
+    maxCostUsdPerChange: 3,
+    maxActiveAgents: 8,
+    maxActiveSandboxes: 4,
+    maxCandidates: 3,
+    humanGateRiskTiers: ["high"],
+    protectedResources: ["billing", "identity.auth"],
+    networkPolicy: "restricted",
+    autoPromoteRiskTiers: ["low"],
+    requiredChecksByRisk: {},
+  };
+
+  it("reads the stored policy list, and is empty without a valid row", () => {
+    expect(protectedResourcesFrom({ policy_json: JSON.stringify(policy) })).toEqual([
+      "billing",
+      "identity.auth",
+    ]);
+    expect(protectedResourcesFrom(null)).toEqual([]);
+    expect(protectedResourcesFrom({ policy_json: "{" })).toEqual([]);
+    expect(protectedResourcesFrom({ policy_json: JSON.stringify({ version: "x" }) })).toEqual([]);
   });
 });

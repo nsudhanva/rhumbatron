@@ -169,6 +169,7 @@ function setup(
       };
     },
     allowOpus,
+    protectedResources: async () => [],
     storePacket: async () => undefined,
     metric: () => undefined,
   };

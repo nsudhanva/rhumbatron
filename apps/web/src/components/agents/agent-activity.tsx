@@ -230,15 +230,11 @@ function PlayerControls({ player, total }: { player: ActivityPlayer; total: numb
       >
         {player.paused ? "Resume" : "Pause"}
       </Button>
-      <Button
-        size="sm"
-        variant="secondary"
-        icon={ArrowCounterClockwise}
-        disabled={total === 0}
-        onClick={player.replay}
-      >
-        Replay
-      </Button>
+      {total > 0 && (
+        <Button size="sm" variant="secondary" icon={ArrowCounterClockwise} onClick={player.replay}>
+          Replay
+        </Button>
+      )}
     </div>
   );
 }

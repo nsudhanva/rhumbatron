@@ -924,74 +924,6 @@ export const getProjectAgents = createServerFn()
   .handler(({ data }) => call<ProjectAgents>(`/v1/projects/${data}/agents`));
 
 /**
- * Product Graph (AGENTS.md 28, 38.3), derived by the API from Task resources, Intents, Task
- * dependencies, ChangeSets, conflicts, policy protected resources, and the stored Product Graph of
- * the indexed canonical tree (P7-04), or the seeded fixture imports before the first index
- * (workers/api product-graph.ts).
- */
-export type ProductGraphEdgeOrigin =
-  | { kind: "fixture_import"; file: string; detail: string }
-  | { kind: "source_import"; file: string; detail: string }
-  | { kind: "task_dependency"; changeId: string; taskKey: string; dependsOnTaskKey: string }
-  | { kind: "shared_task"; changeId: string; taskKey: string; resources: string[] };
-
-export type ProductGraphNode = {
-  id: string;
-  name: string;
-  baseline: boolean;
-  baselineFile: string | null;
-  sourceFiles: string[];
-  sourceResources: string[];
-  protectedResources: string[];
-  touches: {
-    changeId: string;
-    resources: string[];
-    tasks: { id: string; key: string; title: string; kind: string; status: string }[];
-    changeSetCount: number;
-  }[];
-  conflicts: { id: string; changeId: string; resource: string; state: string }[];
-};
-
-export type ProductGraphEdge = {
-  id: string;
-  source: string;
-  target: string;
-  kind: "authorization" | "product_reference" | "state" | "dependency";
-  label: string;
-  changeIds: string[];
-  origins: ProductGraphEdgeOrigin[];
-  moreOrigins: number;
-};
-
-export type ProductGraph = {
-  projectId: string;
-  canonicalGeneration: number | null;
-  policyVersion: string;
-  protectedResources: string[];
-  source:
-    | { kind: "index"; treeSha: string; commit: string | null; builtAt: string; current: boolean }
-    | { kind: "fixture" }
-    | { kind: "none" };
-  fixture: { applied: boolean; source: string; hiddenFiles: string[] };
-  /** Oldest first, newest 20. */
-  changes: { id: string; goal: string; status: string; createdAt: string }[];
-  nodes: ProductGraphNode[];
-  edges: ProductGraphEdge[];
-  counts: {
-    tasks: number;
-    intents: number;
-    dependencies: number;
-    changeSets: number;
-    conflicts: number;
-  };
-  truncated: boolean;
-};
-
-export const getProductGraph = createServerFn()
-  .inputValidator((projectId: string) => projectId)
-  .handler(({ data }) => call<ProductGraph>(`/v1/projects/${data}/product-graph`));
-
-/**
  * Operator actions (AGENTS.md sections 42.7 and 44): commands that failed after their Queue
  * retries, and Tasks or Changes a section 44 limit stopped or delays (workers/api dead-letters.ts).
  */
@@ -1103,7 +1035,8 @@ export type NotificationKind =
   | "release_failed"
   | "release_deployed"
   | "request_not_selected"
-  | "request_awaiting_owner";
+  /** A Change waits for its requester's answer; links to the Change. */
+  | "request_needs_input";
 
 /** `action`: needs a person until its condition clears. `attention`: stopped or rejected work. */
 export type NotificationSeverity = "action" | "attention" | "info";

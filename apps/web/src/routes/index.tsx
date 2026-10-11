@@ -216,13 +216,26 @@ function NewProject() {
       await navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
     },
   });
-  const slugInvalid = slug !== "" && !SLUG.test(slug);
+  // Field errors show after a submit attempt, or as soon as a typed slug has the wrong shape.
+  const [submitted, setSubmitted] = useState(false);
+  const nameError = submitted && !name.trim() ? "Enter a name." : undefined;
+  const slugError =
+    slug === ""
+      ? submitted
+        ? "Enter a slug, for example my-app."
+        : undefined
+      : SLUG.test(slug)
+        ? undefined
+        : "Use lowercase kebab-case, for example my-app";
   return (
     <Section label="New project">
       <form
         className="grid max-w-[760px] gap-4"
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
+          setSubmitted(true);
+          if (create.isPending || !name.trim() || !SLUG.test(slug)) return;
           create.mutate();
         }}
       >
@@ -232,6 +245,7 @@ function NewProject() {
             description="Shown in navigation and breadcrumbs."
             value={name}
             onChange={(e) => setName(e.target.value)}
+            {...(nameError ? { error: nameError } : {})}
             required
           />
           <Input
@@ -240,7 +254,7 @@ function NewProject() {
             description="Lowercase letters, numbers and hyphens. Names the project's resources."
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
-            {...(slugInvalid ? { error: "Use lowercase kebab-case, for example my-app" } : {})}
+            {...(slugError ? { error: slugError } : {})}
             required
           />
         </div>
@@ -248,12 +262,7 @@ function NewProject() {
           <SectionError message={`The project was not created. ${create.error.message}`} />
         )}
         <div>
-          <Button
-            type="submit"
-            variant="primary"
-            loading={create.isPending}
-            disabled={!name.trim() || !SLUG.test(slug)}
-          >
+          <Button type="submit" variant="primary" loading={create.isPending}>
             Create project
           </Button>
         </div>

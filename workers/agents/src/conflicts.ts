@@ -12,12 +12,13 @@ import {
 import type { ResourceShardDO } from "@rhumbatron/coordinator";
 import { shardKey } from "@rhumbatron/coordinator/shard-key";
 import type { ChangeContext } from "@rhumbatron/integration/events";
-import type {
-  Challenge,
-  ConflictAction,
-  ConflictReport,
-  ConflictState,
-  Intent,
+import {
+  type Challenge,
+  type ConflictAction,
+  type ConflictReport,
+  type ConflictState,
+  type Intent,
+  ProjectPolicy,
 } from "@rhumbatron/protocol";
 
 /**
@@ -27,8 +28,34 @@ import type {
  * model call decides a conflict here. The model review runs later (conflict-review.ts).
  */
 
-/** Protected resources until Project policies are stored (section 53 example policy). */
-export const DEFAULT_PROTECTED_RESOURCES = ["cart", "checkout", "identity"];
+/** The stored policy row read for protected resources (D1 `project_policies`, section 53). */
+export const PROTECTED_RESOURCES_SQL =
+  "SELECT policy_json FROM project_policies WHERE project_id = ?";
+
+/**
+ * Protected resources from the Project's stored policy row. No row, or a row that does not parse
+ * as a ProjectPolicy, gives an empty list: nothing is protected rather than a guessed default.
+ */
+export function protectedResourcesFrom(row: { policy_json: string } | null | undefined): string[] {
+  if (!row) return [];
+  let json: unknown;
+  try {
+    json = JSON.parse(row.policy_json);
+  } catch {
+    return [];
+  }
+  const parsed = ProjectPolicy.safeParse(json);
+  return parsed.success ? parsed.data.protectedResources : [];
+}
+
+/** One D1 read: the Project's protected resources (see `protectedResourcesFrom`). */
+export async function readProtectedResources(db: D1Database, projectId: string) {
+  const row = await db
+    .prepare(PROTECTED_RESOURCES_SQL)
+    .bind(projectId)
+    .first<{ policy_json: string }>();
+  return protectedResourcesFrom(row);
+}
 
 /** Candidate statuses that no longer count against `max_candidate_count` (section 44). */
 export const INACTIVE_CANDIDATE_STATUSES = ["rejected", "stale", "promoted"];
@@ -245,7 +272,7 @@ export async function declareIntentAndDetect(
   const declared = await shard.declareIntent({ ...scope, intent }, contentions);
   if (!declared.ok) throw new Error(`intent ${intent.intentId}: ${declared.reason}`);
 
-  const [tasks, deps, recorded, candidates] = await env.DB.batch([
+  const [tasks, deps, recorded, candidates, policy] = await env.DB.batch([
     env.DB.prepare("SELECT id, task_key, title FROM tasks WHERE change_id = ?").bind(ctx.changeId),
     env.DB.prepare(
       `SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d
@@ -257,7 +284,11 @@ export async function declareIntentAndDetect(
     env.DB.prepare(
       `SELECT COUNT(*) AS n FROM candidates WHERE change_id = ? AND status NOT IN (${INACTIVE_CANDIDATE_STATUSES.map(() => "?").join(", ")})`,
     ).bind(ctx.changeId, ...INACTIVE_CANDIDATE_STATUSES),
+    env.DB.prepare(PROTECTED_RESOURCES_SQL).bind(ctx.projectId),
   ]);
+  const protectedResources = protectedResourcesFrom(
+    policy?.results?.[0] as { policy_json: string } | undefined,
+  );
   const taskRows = (tasks?.results ?? []) as {
     id: string;
     task_key: string | null;
@@ -294,7 +325,7 @@ export async function declareIntentAndDetect(
     intents,
     tasks: taskMap,
     dependsOn,
-    protectedResources: DEFAULT_PROTECTED_RESOURCES,
+    protectedResources,
     done,
     activeCandidates: Math.max(active, plannedForks * 2),
     contentions: changeContentions,

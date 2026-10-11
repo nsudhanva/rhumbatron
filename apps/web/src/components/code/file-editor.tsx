@@ -59,12 +59,19 @@ export function FileEditor({
     },
   });
   const stale = save.isError && /changed; reload/i.test(save.error.message);
+  // Save stays enabled; a submit that cannot go through says why, next to the problem.
+  const [attempted, setAttempted] = useState(false);
+  const messageError = attempted && !message.trim() ? "Enter a message for the Change." : undefined;
+  const unchangedError = attempted && unchanged;
 
   return (
     <form
       className="grid gap-4"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
+        setAttempted(true);
+        if (save.isPending || unchanged || tooLarge || !message.trim()) return;
         save.mutate();
       }}
     >
@@ -94,8 +101,12 @@ export function FileEditor({
         value={message}
         maxLength={200}
         onChange={(e) => setMessage(e.target.value)}
+        {...(messageError ? { error: messageError } : {})}
         required
       />
+      {unchangedError && (
+        <SectionError message="Nothing to save: the file matches the live version. Edit it first." />
+      )}
       {tooLarge && (
         <SectionError message="Files over 256 KB cannot be edited here. Shorten the file." />
       )}
@@ -109,12 +120,7 @@ export function FileEditor({
         />
       )}
       <div className="flex flex-wrap gap-2">
-        <Button
-          type="submit"
-          variant="primary"
-          loading={save.isPending}
-          disabled={unchanged || tooLarge || !message.trim()}
-        >
+        <Button type="submit" variant="primary" loading={save.isPending}>
           Save change
         </Button>
         {stale && (
@@ -130,9 +136,11 @@ export function FileEditor({
             Reload file
           </Button>
         )}
-        <Button type="button" variant="secondary" onClick={onCancel} disabled={save.isPending}>
-          Cancel
-        </Button>
+        {!save.isPending && (
+          <Button type="button" variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
       </div>
     </form>
   );

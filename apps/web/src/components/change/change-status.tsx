@@ -14,7 +14,7 @@ const CHANGE_STATUS: Record<string, { family: StatusFamily; label: string }> = {
   compiling: { family: "active", label: "Planning" },
   running: { family: "active", label: "Building" },
   verifying: { family: "active", label: "Checking" },
-  needs_input: { family: "attention", label: "Needs input" },
+  needs_input: { family: "attention", label: "Waiting for an answer" },
   awaiting_approval: { family: "attention", label: "Needs approval" },
   budget_blocked: { family: "danger", label: "Blocked" },
   blocked: { family: "danger", label: "Blocked" },
