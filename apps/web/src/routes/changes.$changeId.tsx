@@ -365,7 +365,8 @@ function ChangeView() {
         live={liveOpen}
         actions={
           <>
-            <CancelChange changeId={data.id} status={data.status} />
+            {/* The API lets the requester or the Project owner cancel; nobody else sees it. */}
+            {canAnswer && <CancelChange changeId={data.id} status={data.status} />}
             <Link
               to="/changes/$changeId/flight"
               params={{ changeId }}
