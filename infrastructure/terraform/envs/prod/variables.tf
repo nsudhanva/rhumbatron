@@ -15,13 +15,13 @@ variable "zone_name" {
 }
 
 variable "clerk_secret_key" {
-  description = "Clerk secret key. Loaded from the Keychain by `bun run tf prod`. Temporarily the dev instance's key until a production instance exists (ADR 0017)."
+  description = "Clerk secret key. Loaded from the Keychain by `bun run tf prod`. Clerk production instance key (ADR 0017)."
   type        = string
   sensitive   = true
 }
 
 variable "clerk_publishable_key" {
-  description = "Clerk publishable key (public), set as a runtime binding on the web Worker. Temporarily the dev instance's pk_test_ key; the `clerk_production_instance` check warns until a pk_live_ key replaces it (ADR 0017)."
+  description = "Clerk publishable key (public), set as a runtime binding on the web Worker. The `clerk_production_instance` check warns when it is not a pk_live_ key (ADR 0017)."
   type        = string
 
   validation {

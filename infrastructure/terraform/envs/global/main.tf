@@ -1,5 +1,5 @@
-# Account-wide and zone-wide singletons. Exactly one state owns these, so dev and prod never
-# fight over the shared rhumbatron.com zone.
+# Account-wide and zone-wide singletons. Exactly one state owns these, so prod's state never
+# fights over the shared rhumbatron.com zone.
 
 module "dns" {
   source     = "../../modules/dns"

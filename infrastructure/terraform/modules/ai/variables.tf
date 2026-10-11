@@ -4,12 +4,12 @@ variable "account_id" {
 }
 
 variable "environment" {
-  description = "Environment name (dev or prod)."
+  description = "Environment name (prod)."
   type        = string
 
   validation {
-    condition     = contains(["dev", "prod"], var.environment)
-    error_message = "environment must be dev or prod."
+    condition     = var.environment == "prod"
+    error_message = "environment must be prod."
   }
 }
 
@@ -26,7 +26,7 @@ variable "max_stored_logs" {
 }
 
 variable "spend_limit_usd" {
-  description = "Gateway spend limit on Anthropic per 30 days. Each environment passes its monthly budget (ADR 0021: dev 15, prod 10)."
+  description = "Gateway spend limit on Anthropic per 30 days. Prod passes its monthly budget (ADR 0021: 10)."
   type        = number
   default     = 10
 }

@@ -1,6 +1,5 @@
-# Prod environment (AGENTS.md section 10, ADR 0017). Mirrors envs/dev resource for resource with
-# `-prod` names and prod hostnames. Dev stays inline in its own root, so its state addresses never
-# move; keep the two files in step by hand when dev gains a resource or binding.
+# Prod environment (AGENTS.md section 10, ADR 0017): the only remote environment. Resources use
+# `-prod` names and prod hostnames.
 
 locals {
   environment = "prod"
@@ -114,7 +113,7 @@ resource "terraform_data" "vectorize_index_teardown" {
 }
 
 # DNS-only records for the Clerk production instance (frontend API, accounts portal, email). Clerk
-# rejects proxied records. Empty until the instance exists (ADR 0017).
+# rejects proxied records (ADR 0017).
 resource "cloudflare_dns_record" "clerk" {
   for_each = var.clerk_dns_records
 
@@ -127,14 +126,14 @@ resource "cloudflare_dns_record" "clerk" {
   comment = "Clerk production instance (managed by Terraform, envs/prod)"
 }
 
-# Per-environment caps (ADR 0017). The approved Sandbox budget (20 h/month: dev 5 h, prod 15 h)
-# and the Browser Run budget (500 s/day, split evenly) are shared between dev and prod; each
-# Worker reads its share from a binding and enforces it on this environment's D1 meter. The Anthropic budget per calendar month
-# (var.anthropic_monthly_budget_usd, ADR 0021) is enforced the same way by every model caller.
+# Prod caps (ADR 0017). The Sandbox budget is 15 h/month and the Browser Run budget is 250 s/day.
+# Each Worker reads its share from a binding and enforces it on this environment's D1 meter. The
+# Anthropic budget per calendar month (var.anthropic_monthly_budget_usd, ADR 0021) is enforced the
+# same way by every model caller.
 locals {
   caps = {
-    sandbox_monthly_seconds = 54000 # 15 h of the 20 h total
-    browser_daily_seconds   = 250   # half of the 500 s guard, under the 600 s free figure
+    sandbox_monthly_seconds = 54000 # 15 h
+    browser_daily_seconds   = 250   # under the 600 s free figure
   }
   cap_bindings = {
     sandbox   = { type = "plain_text", name = "SANDBOX_MONTHLY_SECONDS", text = tostring(local.caps.sandbox_monthly_seconds) }
@@ -143,8 +142,8 @@ locals {
   }
 }
 
-# Prod temporarily uses the Clerk dev instance (ADR 0017). A warning, not an error, so the plan
-# still runs; swap the Keychain items and set clerk_dns_records when the production instance exists.
+# Prod uses the Clerk production instance (ADR 0017). The check warns, not errors, when a
+# development key (pk_test_) is set, so the plan still runs.
 check "clerk_production_instance" {
   assert {
     condition     = startswith(var.clerk_publishable_key, "pk_live_")
@@ -239,9 +238,8 @@ module "web_worker" {
     { type = "plain_text", name = "SERVICE_NAME", text = "rhumbatron-web-${local.environment}" },
     { type = "plain_text", name = "CLERK_SIGN_IN_URL", text = "/sign-in" },
     { type = "plain_text", name = "CLERK_SIGN_UP_URL", text = "/sign-up" },
-    # The bundle inlines the development key at build time. Clerk reads process.env before the
-    # inlined value, so this runtime var selects the instance. Temporarily the dev instance's key
-    # until the production instance exists (ADR 0017; check "clerk_production_instance" warns).
+    # Clerk reads process.env before the key inlined at build time, so this runtime var selects
+    # the instance (ADR 0017; check "clerk_production_instance" warns on a pk_test_ key).
     { type = "plain_text", name = "VITE_CLERK_PUBLISHABLE_KEY", text = var.clerk_publishable_key },
     { type = "secret_text", name = "CLERK_SECRET_KEY", text = var.clerk_secret_key },
     # Server functions call the API over this binding; the browser never calls it directly.
@@ -267,7 +265,7 @@ locals {
   }
   k2_stream_names = [for s in local.k2_config.streams : s.name]
 
-  # K2 beta: 20 streams per account, shared with dev (8) and any other project (ADR 0017).
+  # K2 beta: 20 streams per account, shared with any other project (ADR 0017).
   k2_account_stream_limit = 20
   k2_account_streams      = compact(split(",", data.external.k2_inventory.result.names))
   k2_other_streams        = [for n in local.k2_account_streams : n if !contains(local.k2_stream_names, n)]
@@ -345,7 +343,7 @@ module "coordinator_worker" {
 
   # ADR 0005: a transition from the live tag to the target tag. The first apply creates v1;
   # after it, steady state is v1 -> v1. To add a class later: old_tag = "v1", new_tag = "v2",
-  # new_sqlite_classes = [...], and the same v2 entry in wrangler.jsonc (as in dev).
+  # new_sqlite_classes = [...], and the same v2 entry in wrangler.jsonc.
   migrations = {
     old_tag            = local.bootstrap ? null : "v1"
     new_tag            = "v1"
@@ -466,8 +464,8 @@ module "integration_worker" {
     # Read. Bound on this Worker only; never logged.
     { type = "secret_text", name = "BUILDS_API_TOKEN", text = var.builds_api_token },
     { type = "plain_text", name = "BUILDS_ACCOUNT_ID", text = var.account_id },
-    # Live apps (ADR 0020): bundle builds over RPC to the apps Worker. Prod only; without this
-    # binding (dev) `app.provision` is a no-op.
+    # Live apps (ADR 0020): bundle builds over RPC to the apps Worker. Without this
+    # binding `app.provision` is a no-op.
     { type = "service", name = "APPS", service = local.apps_worker.script_name, entrypoint = "AppBuilder", environment = "production" },
   ]
 
@@ -597,8 +595,8 @@ module "indexer_worker" {
 }
 
 # Sandbox Worker (ADR 0012): hosts the Sandbox container class through the temporary adapter.
-# Caps, per environment: 1 instance, sleeps after 2 minutes idle (in code), 15-hour monthly
-# meter in this environment's D1 (local.caps; dev has the other 5 h of 20, ADR 0017).
+# Caps: 1 instance, sleeps after 2 minutes idle (in code), 15-hour monthly meter in this
+# environment's D1 (local.caps, ADR 0017).
 locals {
   sandbox_worker = {
     script_name         = "rhumbatron-sandbox-${local.environment}"
@@ -664,7 +662,7 @@ resource "terraform_data" "sandbox_worker_teardown" {
   }
 }
 
-# Live apps (Phase 16, ADR 0020). Prod only: dev has no apps Worker, route, or wildcard record.
+# Live apps (Phase 16, ADR 0020).
 # One router Worker serves every Project at <label>.rhumbatron.com through Dynamic Workers. User
 # apps never need Terraform: a deploy is an R2 bundle plus a D1 pointer (runtime data).
 locals {

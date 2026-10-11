@@ -1,4 +1,4 @@
-# Documentation site at docs.rhumbatron.com (apps/docs, Astro Starlight). Prod only; dev has no docs.
+# Documentation site at docs.rhumbatron.com (apps/docs, Astro Starlight).
 # Assets-only Worker: the version has no script, so every request is a static asset request, which
 # is free and unlimited and does not count toward the Workers request quota. Unknown paths get the
 # Starlight 404 page. The bundle comes from `bun run cf:bundle` (manifest key "docs").
