@@ -155,7 +155,7 @@ export type AppBuildResult =
 /** Kinds of checks AppChecker can run in Dynamic Workers. */
 export type AppCheckKind = "build" | "unit" | "contract";
 
-/** RPC input of the apps Worker's AppChecker.check (ADR 0020, docs/plans/checker-integration.md). */
+/** RPC input of the apps Worker's AppChecker.check (ADR 0020). */
 export type AppCheckInput = {
   projectId: string;
   treeSha: string;

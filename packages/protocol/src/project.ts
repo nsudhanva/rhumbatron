@@ -38,7 +38,7 @@ export const Project = z.object({
   status: ProjectStatus,
   canonical: CanonicalRef,
   policies: ProjectPolicies,
-  /** The caller's role, when the route knows the caller (docs/plans/phase-17a-shared-projects.md). */
+  /** The caller's role, when the route knows the caller (docs/architecture/shared-projects.md). */
   role: z.enum(["owner", "collaborator"]).optional(),
 });
 export type Project = z.infer<typeof Project>;
@@ -75,7 +75,7 @@ export const ChangeStatus = z.enum([
   "budget_blocked",
   /** Source could not merge after two bounded rebase reruns. */
   "blocked",
-  /** A conflicting request lost to a higher-priority request (docs/plans/phase-17a-shared-projects.md). */
+  /** A conflicting request lost to a higher-priority request (docs/architecture/shared-projects.md). */
   "not_selected",
   /** A conflicting request waits for the Project owner to decide. */
   "awaiting_owner",

@@ -206,7 +206,7 @@ export class AppBuilder extends WorkerEntrypoint<Env> {
   }
 
   /**
-   * Dynamic Workers checker (docs/plans/checker-integration.md).
+   * Dynamic Workers checker (ADR 0020).
    * Runs build, unit, or contract checks in dynamic workers without starting a Sandbox.
    */
   async check(input: AppCheckInput): Promise<AppCheckResult> {

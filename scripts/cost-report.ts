@@ -370,7 +370,7 @@ await section("apps", async () => {
     [today],
     "prod",
   );
-  // Live app meters alert at 80 % (docs/plans/phase-16-live-apps.md P16-21).
+  // Live app meters alert at 80 % (ADR 0020).
   usage("app builds today", builds?.count ?? 0, APP_BUILDS_PER_DAY, "builds (daily cap)", 0.8);
   const [bundles] = await d1Query<{ versions: number; bytes: number; previews: number }>(
     `SELECT COUNT(*) AS versions, COALESCE(SUM(bytes), 0) AS bytes,

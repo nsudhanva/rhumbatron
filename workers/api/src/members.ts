@@ -6,7 +6,7 @@ import { fail, validate } from "./http.ts";
 import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
 
 /**
- * Shared Projects (docs/plans/phase-17a-shared-projects.md, decisions S-01 to S-04, S-12).
+ * Shared Projects (docs/architecture/shared-projects.md).
  *
  * The owner shares a Project by email. An invitation binds only to a Clerk-verified email of the
  * signed-in user, and the membership binds to the immutable user ID. Rank orders requesters for

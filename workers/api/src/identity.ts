@@ -30,7 +30,7 @@ export async function ensureIdentity(db: D1Database, authSubject: string): Promi
   return { userId, orgId };
 }
 
-/** The caller's role in a Project (docs/plans/phase-17a-shared-projects.md, decision S-04). */
+/** The caller's role in a Project (docs/architecture/shared-projects.md). */
 export type ProjectRole = "owner" | "collaborator";
 
 /**

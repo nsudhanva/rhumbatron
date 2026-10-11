@@ -1305,7 +1305,7 @@ export const getCandidateDiff = createServerFn()
   );
 
 /* --------------------------------------------------------------------------------------------
- * Shared Projects (docs/plans/phase-17a-shared-projects.md section 5).
+ * Shared Projects (docs/architecture/shared-projects.md).
  * ------------------------------------------------------------------------------------------ */
 
 export type ProjectMember = {

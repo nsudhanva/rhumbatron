@@ -1,4 +1,4 @@
-// Shared Project access (docs/plans/phase-17a-shared-projects.md, decisions S-01, S-03, S-04).
+// Shared Project access (docs/architecture/shared-projects.md).
 // A collaborator opens only the Project shared with them, never the owner's other Projects, and
 // is never an owner. A stranger opens nothing. Runs the real migrations and SQL against SQLite.
 import { readdirSync, readFileSync } from "node:fs";
