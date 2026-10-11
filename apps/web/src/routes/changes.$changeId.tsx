@@ -48,11 +48,20 @@ import {
   generation,
   isCompiling,
   isLive,
-  lastActiveTask,
 } from "../lib/format";
 import { deltaTouchesChange, type LiveStatus, useProjectLive } from "../lib/live";
 
-export const Route = createFileRoute("/changes/$changeId")({ component: ChangePage });
+/**
+ * `?task=<taskId>` opens that Task in the inspector. Selection lives in the URL so browser Back
+ * closes it and a link to one Task can be shared.
+ */
+export const Route = createFileRoute("/changes/$changeId")({
+  validateSearch: (search: Record<string, unknown>): { task?: string } =>
+    typeof search.task === "string" && /^tsk_[A-Za-z0-9_-]+$/.test(search.task)
+      ? { task: search.task }
+      : {},
+  component: ChangePage,
+});
 
 /** Safety net while the live socket is down (AGENTS.md section 39). */
 const FALLBACK_POLL_MS = 30_000;
@@ -85,7 +94,14 @@ function ChangePage() {
 
 function ChangeView() {
   const { changeId } = Route.useParams();
-  const [selected, setSelected] = useState<string>();
+  const { task: selected } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  // Each selection is a history entry, so Back returns to the previous selection or none.
+  const setSelected = (taskId: string | undefined) =>
+    void navigate({
+      search: taskId ? { task: taskId } : {},
+      resetScroll: false,
+    });
   const queryClient = useQueryClient();
   const [socket, setSocket] = useState<LiveStatus>("closed");
   // Push replaces polling. The slow poll runs only while the live socket is not open.
@@ -282,7 +298,7 @@ function ChangeView() {
   const requestConflictList = requestConflicts.data ?? [];
   const candidateList = candidates.data ?? [];
   const liveOpen = live && socket === "open";
-  const selectedTask = taskList.find((t) => t.id === selected) ?? lastActiveTask(taskList);
+  const selectedTask = selected ? taskList.find((t) => t.id === selected) : undefined;
   const spend = changeSpend(taskList);
   const compiling = isCompiling(data.status) && taskList.length === 0;
   const canAnswer = data.requester?.isYou === true || isOwner;
@@ -412,7 +428,12 @@ function ChangeView() {
               selectedTask && "shadow-[inset_2px_0_0_var(--color-accent-500)]",
             )}
           >
-            <TaskPanel task={selectedTask} changeSets={taskChangeSets} claims={taskClaims} />
+            <TaskPanel
+              task={selectedTask}
+              changeSets={taskChangeSets}
+              claims={taskClaims}
+              onClose={() => setSelected(undefined)}
+            />
           </div>
         </Section>
       </div>

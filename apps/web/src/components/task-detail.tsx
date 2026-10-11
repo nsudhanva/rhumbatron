@@ -1,3 +1,5 @@
+import { Button } from "@cloudflare/kumo";
+import { X } from "@phosphor-icons/react";
 import type { ChangeSetAttribution, ClaimState, Intent, TaskDetail, TaskRun } from "../lib/api";
 import { formatNumber, formatUsd, latestRun, runDuration, timeAgo } from "../lib/format";
 import { Disclosure } from "./change/disclosure";
@@ -123,18 +125,21 @@ export function TaskPanel({
   task,
   changeSets = [],
   claims = [],
+  onClose,
 }: {
   task: TaskDetail | undefined;
   /** ChangeSets this Task published. */
   changeSets?: ChangeSetAttribution[];
   /** Claims held by this Task's agent. */
   claims?: ClaimState[];
+  /** Clears the selection. */
+  onClose?: () => void;
 }) {
   if (!task) {
     return (
       <EmptyState
         what="No Task selected."
-        how="Select a node in the Work Graph to see what it did."
+        how="Select a Task in the Work Graph to see what it did and what it changed."
       />
     );
   }
@@ -146,6 +151,18 @@ export function TaskPanel({
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-[11px] text-kumo-subtle">{task.key}</span>
           <StatusPill status={task.status} />
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={X}
+              className="ml-auto"
+              onClick={onClose}
+              aria-label="Close Task details"
+            >
+              Close
+            </Button>
+          )}
         </div>
         <h3 className="type-h4">{task.title}</h3>
         <p className="text-[13px] text-pretty">{task.objective}</p>

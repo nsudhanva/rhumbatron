@@ -85,14 +85,16 @@ export function ApprovalDialog({
           <p className="type-kicker text-kumo-accent">
             Human gate · {candidate.plan?.policyVersion ?? "policy"}
           </p>
-          <Dialog.Close
-            aria-label="Close"
-            title="Close"
-            disabled={decide.isPending}
-            className="-mt-1 -mr-1 grid size-7 place-items-center text-kumo-subtle hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-accent-500"
-          >
-            <X size={16} aria-hidden />
-          </Dialog.Close>
+          {/* While a decision is recording, the dialog stays open until the result returns. */}
+          {!decide.isPending && (
+            <Dialog.Close
+              aria-label="Close"
+              title="Close"
+              className="-mt-1 -mr-1 grid size-7 place-items-center text-kumo-subtle hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-accent-500"
+            >
+              <X size={16} aria-hidden />
+            </Dialog.Close>
+          )}
         </div>
         <div className="grid gap-2">
           <Dialog.Title className="type-h4">Approve {label} for promotion</Dialog.Title>
@@ -186,23 +188,26 @@ export function ApprovalDialog({
         )}
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="primary"
-            icon={Check}
-            loading={decide.isPending && decide.variables === "approve"}
-            disabled={decide.isPending}
-            onClick={() => decide.mutate("approve")}
-          >
-            Approve
-          </Button>
-          <Button
-            variant="secondary"
-            loading={decide.isPending && decide.variables === "reject"}
-            disabled={decide.isPending}
-            onClick={() => decide.mutate("reject")}
-          >
-            Reject
-          </Button>
+          {/* While one decision records, only its button shows, with a loader. */}
+          {!(decide.isPending && decide.variables === "reject") && (
+            <Button
+              variant="primary"
+              icon={Check}
+              loading={decide.isPending && decide.variables === "approve"}
+              onClick={() => decide.mutate("approve")}
+            >
+              Approve
+            </Button>
+          )}
+          {!(decide.isPending && decide.variables === "approve") && (
+            <Button
+              variant="secondary"
+              loading={decide.isPending && decide.variables === "reject"}
+              onClick={() => decide.mutate("reject")}
+            >
+              Reject
+            </Button>
+          )}
           <span className="ml-auto truncate text-[12px] text-kumo-subtle">as {approver}</span>
         </div>
       </Dialog>
