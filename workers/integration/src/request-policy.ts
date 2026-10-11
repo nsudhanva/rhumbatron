@@ -269,7 +269,8 @@ export async function reviewRequests(
 const GATE_WORDS = new Set(
   (
     "typecheck type check checks test tests unit contract lint build bun run npm all and or the " +
-    "pass passes passing succeed succeeds green must should still existing are is with no errors"
+    "pass passes passing succeed succeeds green must should still existing are is with no errors " +
+    "script scripts suite suites check"
   ).split(" "),
 );
 const CHECK_WORDS = new Set(["typecheck", "test", "tests", "contract", "lint", "build"]);

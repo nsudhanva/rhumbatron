@@ -6,7 +6,7 @@ import {
   USAGE_COUNTER,
 } from "@rhumbatron/model-router";
 import {
-  AcceptanceCitation,
+  type AcceptanceCitation,
   type AcceptanceResult,
   AcceptanceStatus,
   type ModelTier,
@@ -28,7 +28,7 @@ import type { CheckOutcome } from "./candidate-composer.ts";
 const ACCEPTANCE_SOURCE_CAP = 60_000;
 /** A quote shorter than this proves nothing ("div", "id"). */
 const MIN_QUOTE_CHARS = 8;
-const MAX_OUTPUT_TOKENS = 2_000;
+const MAX_OUTPUT_TOKENS = 6_000;
 
 /** One file the model received: the patch hunks of a changed file, or the composed file text. */
 export type SourceFile = { path: string; text: string };
@@ -113,26 +113,30 @@ export function citationValid(source: AcceptanceSource, citation: AcceptanceCita
   return quote.length >= MIN_QUOTE_CHARS && searchable(source, file).includes(quote);
 }
 
-const ModelOutput = z
-  .object({
-    results: z
-      .array(
-        z
-          .object({
-            criterion: z.number().int().min(1),
-            status: AcceptanceStatus,
-            citations: z.array(AcceptanceCitation).max(5).default([]),
-          })
-          .strict(),
-      )
-      .max(50),
-  })
-  .strict();
+/**
+ * Tool output as the model sends it. Extra fields are ignored and a criterion number sent as text
+ * is read as a number: only the criterion, status and citations decide the result.
+ */
+const ModelOutput = z.object({
+  results: z
+    .array(
+      z.object({
+        criterion: z.coerce.number().int().min(1),
+        status: AcceptanceStatus,
+        citations: z
+          .array(z.object({ path: z.string(), quote: z.string() }))
+          .max(5)
+          .default([]),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
 
 /**
- * Validates the tool output against the criteria and the source. Null when the output is not one
- * result per criterion (then the caller may escalate once). Invalid citations are dropped; a
- * `met` with none left becomes `unclear`.
+ * Validates the tool output against the criteria and the source. Null when the output has no usable
+ * result (then the caller may escalate once). A criterion with no answer is `unclear`. Invalid
+ * citations are dropped; a `met` with none left becomes `unclear`.
  */
 export function validateAcceptance(
   raw: unknown,
@@ -141,14 +145,20 @@ export function validateAcceptance(
 ): AcceptanceResult[] | null {
   const parsed = ModelOutput.safeParse(raw);
   if (!parsed.success) return null;
-  const byNumber = new Map(parsed.data.results.map((r) => [r.criterion, r]));
-  if (byNumber.size !== parsed.data.results.length || byNumber.size !== criteria.length) {
-    return null;
+  const byNumber = new Map<number, (typeof parsed.data.results)[number]>();
+  for (const result of parsed.data.results) {
+    // A number outside the criteria list, or a second answer for one criterion, is not usable.
+    if (result.criterion > criteria.length || byNumber.has(result.criterion)) return null;
+    byNumber.set(result.criterion, result);
   }
   const out: AcceptanceResult[] = [];
   for (const [index, criterion] of criteria.entries()) {
     const result = byNumber.get(index + 1);
-    if (!result) return null;
+    // A criterion the model did not answer is unclear: a gap in the result, never a pass.
+    if (!result) {
+      out.push({ criterion, status: "unclear", citations: [] });
+      continue;
+    }
     const citations = result.citations.filter((c) => citationValid(source, c));
     const status = result.status === "met" && citations.length === 0 ? "unclear" : result.status;
     out.push({ criterion, status, citations: status === "met" ? citations : [] });

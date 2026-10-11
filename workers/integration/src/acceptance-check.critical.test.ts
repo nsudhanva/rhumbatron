@@ -92,11 +92,14 @@ describe("acceptance citations", () => {
     expect(allMet).toMatchObject({ status: "pass", coverage: "checked_supported" });
   });
 
-  it("is invalid when a criterion is missing or repeated", () => {
+  it("reads a missing criterion as unclear and a repeated one as invalid", () => {
     const criteria = ["A", "B"];
     expect(
       validateAcceptance({ results: [{ criterion: 1, status: "not_met" }] }, criteria, source),
-    ).toBeNull();
+    ).toEqual([
+      { criterion: "A", status: "not_met", citations: [] },
+      { criterion: "B", status: "unclear", citations: [] },
+    ]);
     expect(
       validateAcceptance(
         {
