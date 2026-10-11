@@ -129,7 +129,10 @@ export function statusLine({
         family: "danger",
       };
     case "cancelled":
-      return { text: "Cancelled: no further work runs", family: "idle" };
+      return {
+        text: `Cancelled: ${short(change.blockedReason ?? change.outcome?.reason, "no further work runs")}`,
+        family: "idle",
+      };
     case "not_selected":
       return {
         text: `Not built: ${short(change.outcome?.reason, "another request was chosen")}`,
