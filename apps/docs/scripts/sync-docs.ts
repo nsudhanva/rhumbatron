@@ -13,8 +13,8 @@ const docsRoot = join(repoRoot, "docs");
 const outRoot = join(appRoot, "src/content/docs");
 const repoUrl = "https://github.com/nsudhanva/rhumbatron/blob/main";
 
-/** docs/ subfolders published on the site. docs/ux is internal research and stays out. */
-const sections = ["architecture", "operations", "demo", "adr", "plans", "protocols"];
+/** docs/ subfolders published on the site. */
+const sections = ["architecture", "operations", "demo", "adr", "protocols"];
 
 type Page = {
   /** Source path relative to the repository root, for example docs/adr/0001-x.md. */
