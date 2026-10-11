@@ -1,9 +1,10 @@
 /**
  * Archives the smoke-test Projects of the smoke user on dev (AGENTS.md section 43).
- * Usage: bun run cleanup:projects [--dry-run]
+ * Usage: bun run cleanup:projects [--dry-run] [--all]
  *
  * Matches only slugs `smoke-<digits>` and `sandbox-<digits>` (scripts/smoke.ts). Every other
- * Project, such as `acme-shop-demo`, is kept. Archiving goes through `DELETE /v1/projects/:id`,
+ * Project, such as `acme-shop-demo`, is kept. `--all` matches every active Project the smoke user
+ * owns, fixtures included. Archiving goes through `DELETE /v1/projects/:id`,
  * the same path the product uses: the integration Worker then deletes each Project's Artifacts
  * repos and R2 source and context objects. `--dry-run` lists the matches and changes nothing.
  */
@@ -19,6 +20,7 @@ if (!secretKey || !userId) {
   process.exit(2);
 }
 const dryRun = process.argv.includes("--dry-run");
+const all = process.argv.includes("--all");
 
 async function clerk<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`https://api.clerk.com/v1${path}`, {
@@ -46,7 +48,7 @@ async function listActive(): Promise<Summary[]> {
 }
 
 const isSmoke = (p: Summary) =>
-  p.status === "active" && SMOKE_SLUG.test(p.slug) && !NEVER.has(p.slug);
+  p.status === "active" && (all || (SMOKE_SLUG.test(p.slug) && !NEVER.has(p.slug)));
 const line = (p: Summary) => `  ${p.id}  ${p.slug.padEnd(22)} ${p.name.padEnd(16)} ${p.createdAt}`;
 
 let exitCode = 0;
@@ -57,7 +59,7 @@ try {
 
   if (dryRun) {
     console.log(
-      `dry run: ${matches.length} of ${listed.length} listed Projects match ${SMOKE_SLUG}`,
+      `dry run: ${matches.length} of ${listed.length} listed Projects match ${all ? "--all" : SMOKE_SLUG}`,
     );
     for (const p of matches) console.log(line(p));
     console.log(`kept: ${kept.map((p) => p.slug).join(", ") || "none"}`);
