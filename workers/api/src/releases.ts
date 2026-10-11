@@ -12,12 +12,12 @@ import { errorBody, fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
 
 /**
- * Releases of a Project (AGENTS.md sections 21.3, 37, 42.10; ADR 0018). Read-only from D1: the
+ * Releases of a Project (AGENTS.md sections 21.3, 42.10; ADR 0020). Read-only from D1: the
  * integration Worker's ReleaseWorkflow owns every release row. The failure injection route (P13-12)
  * is an RPC to the integration Worker and answers only where the fixture routes answer
  * (FIXTURES_ENABLED, local); elsewhere 404, as if absent.
  *
- * Cost: a read is 2 D1 queries (target by primary key, releases by `idx_releases_project`).
+ * Cost: a read is 1 D1 query (releases by `idx_releases_project`).
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -38,7 +38,6 @@ type Row = {
   generation: number;
   commit_sha: string;
   status: ReleaseView["status"];
-  build_uuid: string | null;
   version_id: string | null;
   started_at: string;
   finished_at: string | null;
@@ -46,9 +45,8 @@ type Row = {
   evidence_id: string | null;
   evidence_r2_key: string | null;
 };
-type TargetRow = { project_id: string; worker_name: string; url: string };
 
-const toView = (row: Row, target: TargetRow | null): ReleaseView => ({
+const toView = (row: Row): ReleaseView => ({
   id: row.id,
   projectId: row.project_id,
   changeId: row.change_id,
@@ -56,10 +54,7 @@ const toView = (row: Row, target: TargetRow | null): ReleaseView => ({
   generation: row.generation,
   commit: row.commit_sha,
   status: row.status,
-  buildUuid: row.build_uuid,
   versionId: row.version_id,
-  url: target?.url ?? null,
-  workerName: target?.worker_name ?? null,
   startedAt: row.started_at,
   finishedAt: row.finished_at,
   failureReason: row.failure_reason,
@@ -73,7 +68,7 @@ async function member(env: Env, authSubject: string, projectId: string) {
 }
 
 export const releases = new Hono<AppEnv>()
-  /** The release target and the newest releases, newest generation first. */
+  /** The newest releases of the Project, newest generation first. */
   .get(
     "/v1/projects/:projectId/releases",
     requireAuth,
@@ -85,20 +80,13 @@ export const releases = new Hono<AppEnv>()
         return fail(c, 404, "not_found", "Project not found");
       }
       const { limit } = c.req.valid("query");
-      const [target, rows] = await c.env.DB.batch([
-        c.env.DB.prepare(
-          "SELECT project_id, worker_name, url FROM release_targets WHERE project_id = ?",
-        ).bind(projectId),
-        c.env.DB.prepare(
-          `SELECT * FROM releases WHERE project_id = ? ORDER BY generation DESC LIMIT ${limit}`,
-        ).bind(projectId),
-      ]);
-      const t = ((target?.results ?? [])[0] as TargetRow | undefined) ?? null;
+      const rows = await c.env.DB.prepare(
+        `SELECT * FROM releases WHERE project_id = ? ORDER BY generation DESC LIMIT ${limit}`,
+      )
+        .bind(projectId)
+        .all<Row>();
       return respond(c, apiData(ProjectReleases), {
-        data: {
-          target: t ? { projectId: t.project_id, workerName: t.worker_name, url: t.url } : null,
-          releases: ((rows?.results ?? []) as Row[]).map((r) => toView(r, t)),
-        },
+        data: { releases: rows.results.map(toView) },
       });
     },
   )
@@ -109,8 +97,8 @@ export const releases = new Hono<AppEnv>()
   })
 
   /**
-   * P13-12: a real smoke failure on the latest deployed release, marked injected: the release URL
-   * is probed with the normal smoke probes plus a route that does not exist. The Canonical
+   * P13-12: a real smoke failure on the latest deployed release, marked injected: the live app
+   * is probed through the apps router with the normal smoke probes plus a route that does not exist. The Canonical
    * Generation does not change; recovery is the next promotion (section 42.10). Safe to repeat.
    */
   .post(
@@ -128,8 +116,7 @@ export const releases = new Hono<AppEnv>()
         await integration(c.env).injectReleaseFailure({ projectId, actorUserId: userId }),
       );
       if (outcome.status === "refused") {
-        const status =
-          outcome.reason === "no_target" || outcome.reason === "no_release" ? 404 : 409;
+        const status = outcome.reason === "no_app" || outcome.reason === "no_release" ? 404 : 409;
         return c.json(
           errorBody(status === 404 ? "not_found" : "conflict", outcome.detail, outcome),
           status,

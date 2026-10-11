@@ -109,7 +109,7 @@ function cached(mint: () => Promise<string>): () => Promise<string> {
   };
 }
 
-/** Development instance: Backend API session and tokens (same as scripts/inject/client.ts). */
+/** Development instance: Backend API session and tokens. */
 async function backendSession(sessionId: string): Promise<Session> {
   return {
     token: cached(async () => {
@@ -1623,14 +1623,11 @@ async function run() {
     (j) => same("changes.total", (j as { data: ProjectStats }).data.changes.total, 1),
   );
   expect(
-    "GET /v1/projects/:id/releases (no target yet)",
+    "GET /v1/projects/:id/releases (none yet)",
     await call("GET", `/v1/projects/${projectId}/releases`),
     200,
     apiData(ProjectReleases),
-    (j) => {
-      const view = (j as { data: ProjectReleases }).data;
-      return same("target", view.target, null) ?? same("releases", view.releases.length, 0);
-    },
+    (j) => same("releases", (j as { data: ProjectReleases }).data.releases.length, 0),
   );
   expectError(
     "GET /v1/projects/:id/releases limit=0 is 400",
@@ -1766,23 +1763,6 @@ async function run() {
     "invalid_request",
   );
 
-  // Releases of an existing release Project (target and list), when the smoke user has one.
-  const all = await call("GET", "/v1/projects?limit=200");
-  const live_ = ((all.json as { data?: { id: string; slug: string }[] })?.data ?? []).find(
-    (x) => x.slug === "acme-shop-live",
-  );
-  if (live_) {
-    expect(
-      "GET releases of acme-shop-live has a target",
-      await call("GET", `/v1/projects/${live_.id}/releases?limit=5`),
-      200,
-      apiData(ProjectReleases),
-      (j) => ((j as { data: ProjectReleases }).data.target ? null : "target is null"),
-    );
-  } else {
-    skip("GET releases with a target", "no acme-shop-live Project for this smoke user");
-  }
-
   // Live endpoint.
   const opened = await live(`/v1/projects/${projectId}/live?afterSequence=0`, true);
   const first = opened.first as
@@ -1853,11 +1833,11 @@ async function run() {
       "invalid_request",
     );
     expectError(
-      "POST releases/inject-failure without a target is 404",
+      "POST releases/inject-failure without a live app is 404",
       await call("POST", `/v1/projects/${projectId}/releases/inject-failure`),
       404,
       "not_found",
-      (j) => same("reason", errorDetails(j)?.reason, "no_target"),
+      (j) => same("reason", errorDetails(j)?.reason, "no_app"),
     );
   }
 

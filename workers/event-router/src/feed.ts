@@ -18,7 +18,6 @@ const KEEP = [
   "agentId",
   "approvalId",
   "attempt",
-  "buildUuid",
   "candidateId",
   "challengeId",
   "changeSetId",
@@ -121,13 +120,13 @@ function summarize(event: EventEnvelope, data: FeedData): string {
       return `Canonical S${data.fromGeneration ?? "?"} → S${data.toGeneration ?? "?"}`;
     case "intent.declared":
       return `Intent declared${on}${s("summary") ? `: ${s("summary")}` : ""}`;
-    // Release path (ADR 0018).
+    // Release path (ADR 0020).
     case "build.started":
-      return `Release of S${data.generation ?? "?"}: Workers Build started`;
+      return `Release of S${data.generation ?? "?"}: app build started`;
     case "build.completed":
-      return `Release of S${data.generation ?? "?"}: build ${s("status") ?? "finished"}${s("buildUuid") ? ` (${s("buildUuid")?.slice(0, 8)})` : ""}`;
+      return `Release of S${data.generation ?? "?"}: build ${s("status") ?? "finished"}`;
     case "deployment.completed":
-      return `Deployed S${data.generation ?? "?"}${s("versionId") ? ` as version ${s("versionId")?.slice(0, 8)}` : ""}`;
+      return `Deployed S${data.generation ?? "?"}${s("status") === "restored" ? " (previous version restored)" : ""}`;
     case "deployment.failed":
       return `Release of S${data.generation ?? "?"} did not deploy${s("reason") ? `: ${s("reason")}` : ""}`;
     case "release.smoke_failed":

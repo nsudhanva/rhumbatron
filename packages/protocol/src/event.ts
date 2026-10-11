@@ -7,7 +7,7 @@ export const EVENT_TYPES = [
   "change.created",
   "change.compiled",
   "change.cancelled",
-  /** A Change reached `completed` after promotion: no release target, or its release finished. */
+  /** A Change reached `completed` after promotion: no live app, or its release finished. */
   "change.completed",
   /** A Change reached `failed` after promotion: its release did not deploy or never started. */
   "change.failed",
@@ -50,7 +50,7 @@ export const EVENT_TYPES = [
   "build.completed",
   "deployment.started",
   "deployment.completed",
-  /** A release did not deploy: no build, a failed build, or an unconfirmed deployment (ADR 0018). */
+  /** A release did not deploy: no bundle, or the production pointer did not move (ADR 0020). */
   "deployment.failed",
   /** A release deployed, but its smoke check did not pass (sections 21.3, 42.10). */
   "release.smoke_failed",

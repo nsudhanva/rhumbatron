@@ -226,9 +226,8 @@ function ApproverName({ approval, me }: { approval: ApprovalWithName; me: string
 ApproverName.displayName = "ApproverName";
 
 /**
- * Release of the promoted generation (AGENTS.md sections 21.3, 37, 42.10; ADR 0018). Workers
- * Builds builds the canonical push; the integration Worker confirms the deployment and runs the
- * smoke check. A failed release never moves the generation back: recovery is a new promotion.
+ * Release of the promoted generation (AGENTS.md sections 21.3, 42.10; ADR 0020). The integration
+ * Worker moves the live app's production pointer to the promoted commit and runs the smoke check. A failed release never moves the generation back: recovery is a new promotion.
  */
 function ReleaseStatus({ release }: { release: Release }) {
   const gen = generation(release.generation);
@@ -236,14 +235,8 @@ function ReleaseStatus({ release }: { release: Release }) {
   if (release.status === "queued" || release.status === "building") {
     return (
       <Banner family="progress" title={`Release: building ${gen}`}>
-        Workers Builds is building commit {commit}
-        {release.workerName ? (
-          <>
-            {" "}
-            for <Mono>{release.workerName}</Mono>
-          </>
-        ) : null}
-        . The smoke check runs after the deployment is confirmed.
+        Releasing commit {commit} to the live app. The smoke check runs after the production pointer
+        moves.
       </Banner>
     );
   }
@@ -261,16 +254,6 @@ function ReleaseStatus({ release }: { release: Release }) {
           ) : null}
           {release.finishedAt ? ` ${timeAgo(release.finishedAt)}` : ""}. Smoke check passed.
         </span>
-        {release.url && (
-          <a
-            href={release.url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-kumo-link underline-offset-2 hover:underline"
-          >
-            Open the app
-          </a>
-        )}
       </div>
     );
   }

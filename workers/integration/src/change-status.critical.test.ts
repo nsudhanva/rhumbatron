@@ -37,7 +37,7 @@ describe("change status transitions", () => {
     }
   });
 
-  it("releases only with a release target, and completes otherwise as before", () => {
+  it("releases only with a live app, and completes otherwise as before", () => {
     expect(changeAfterPromotion(true)).toBe("releasing");
     expect(changeAfterPromotion(false)).toBe("completed");
   });
@@ -92,8 +92,8 @@ describe("releaseRecovery (HOM-204)", () => {
       status: "queued" | "building" | "deployed" | "failed" | "smoke_failed" | "superseded";
       startedAt: string;
     } | null,
-    hasReleaseTarget = true,
-  ) => releaseRecovery({ hasReleaseTarget, release, releasingSince: promotedAt, now: at(minutes) });
+    hasLiveApp = true,
+  ) => releaseRecovery({ hasLiveApp, release, releasingSince: promotedAt, now: at(minutes) });
 
   it("waits while a release can still be live", () => {
     expect(recover(44, null).kind).toBe("wait");
@@ -133,8 +133,7 @@ describe("releaseRecovery (HOM-204)", () => {
 
   it("treats an unparseable timestamp as old, so a bad row cannot hold a Change", () => {
     expect(
-      releaseRecovery({ hasReleaseTarget: true, release: null, releasingSince: "nope", now: at(0) })
-        .kind,
+      releaseRecovery({ hasLiveApp: true, release: null, releasingSince: "nope", now: at(0) }).kind,
     ).toBe("fail_unstarted");
   });
 });

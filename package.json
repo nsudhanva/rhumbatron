@@ -36,7 +36,6 @@
     "tf:drift:prod": "bun scripts/tf.ts prod plan -detailed-exitcode",
     "tf:drift": "bun scripts/tf.ts global plan -detailed-exitcode && bun scripts/tf.ts prod plan -detailed-exitcode",
     "smoke:prod": "bun scripts/smoke.ts prod",
-    "smoke:release": "bun scripts/smoke-release.ts",
     "e2e": "bun scripts/e2e.ts",
     "smoke:models": "ANTHROPIC_API_KEY=$(security find-generic-password -s rhumbatron-anthropic-api-key -w) ANTHROPIC_WORKSPACE_ID=$(security find-generic-password -s rhumbatron-anthropic-workspace-id -w) CLOUDFLARE_ACCOUNT_ID=$(security find-generic-password -s rhumbatron-cloudflare-account-id -w) bun scripts/smoke-models.ts",
     "cost:report": "CLOUDFLARE_MONITOR_TOKEN=$(security find-generic-password -s rhumbatron-cloudflare-monitor-token -w) CLOUDFLARE_D1_TOKEN=$(security find-generic-password -s rhumbatron-cloudflare-api-token -w) CLOUDFLARE_ACCOUNT_ID=$(security find-generic-password -s rhumbatron-cloudflare-account-id -w) bun scripts/cost-report.ts",

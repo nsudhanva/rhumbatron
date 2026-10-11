@@ -14,13 +14,6 @@ interface Env {
   /** Browser Run seconds per UTC day on this environment's meter (ADR 0017). Default 500. */
   BROWSER_DAILY_SECONDS?: string;
   /**
-   * User-scoped API token for the release path (ADR 0018): Workers Builds Configuration Edit and
-   * Workers Scripts Read, used for GET requests only. Never logged. Without it a release fails.
-   */
-  BUILDS_API_TOKEN?: string;
-  /** Account of the release Workers (the Builds API path). */
-  BUILDS_ACCOUNT_ID?: string;
-  /**
    * Live apps bundle builder (ADR 0020): service binding to the apps Worker's `AppBuilder`
    * entrypoint. Prod only; absent on dev, where `app.provision` is a no-op.
    */

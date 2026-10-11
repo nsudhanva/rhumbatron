@@ -1,10 +1,8 @@
 import type { EvidenceCoverage, EvidenceStatus, ReleaseStatus } from "@rhumbatron/protocol";
 
 /**
- * Release decisions (AGENTS.md sections 21.3, 42.10, 60; ADR 0018). Pure except `runProbes`
- * (plain fetch, no bindings), so `scripts/smoke-release.ts` runs the same probes. The
- * ReleaseWorkflow feeds these functions what the Builds API and ProjectRootDO returned.
- * Deterministic. No model call decides whether a release is deployed (section 22.7).
+ * Release decisions (AGENTS.md sections 21.3, 42.10, 60; ADR 0020). Pure: the ReleaseWorkflow
+ * feeds these functions what the apps router and ProjectRootDO returned. Deterministic. No model call decides whether a release is deployed (section 22.7).
  */
 
 /** Section 60: one release per Project and Canonical Generation. Also the Workflow instance ID. */
@@ -41,103 +39,10 @@ export function fromStatuses(to: ReleaseStatus): ReleaseStatus[] {
 
 /**
  * Section 13.1 and 42.10 for releases: a release is for exactly one generation. When canonical has
- * moved past it before the release finished, the newer generation's release owns the Worker.
+ * moved past it before the release finished, the newer generation's release owns the app.
  */
 export function supersededBy(releaseGeneration: number, canonicalGeneration: number) {
   return canonicalGeneration > releaseGeneration;
-}
-
-/* ------------------------------------------------------------------------------------------ */
-/* Builds API                                                                                  */
-/* ------------------------------------------------------------------------------------------ */
-
-/** The fields of a Workers Builds build record this code reads (Builds API, 2026-10). */
-export type BuildRecord = {
-  build_uuid: string;
-  status?: string | null;
-  build_outcome?: string | null;
-  created_on?: string | null;
-  stopped_on?: string | null;
-  build_trigger_metadata?: { commit_hash?: string | null; branch?: string | null } | null;
-};
-
-/** Full or abbreviated (at least 7 hex) commit hashes name the same commit. */
-function sameCommit(a: string | null | undefined, b: string | null | undefined) {
-  if (!a || !b) return false;
-  const x = a.trim().toLowerCase();
-  const y = b.trim().toLowerCase();
-  if (!/^[0-9a-f]{7,64}$/.test(x) || !/^[0-9a-f]{7,64}$/.test(y)) return false;
-  return x.length >= y.length ? x.startsWith(y) : y.startsWith(x);
-}
-
-/**
- * The build of the promoted commit: the newest build whose trigger commit equals it. Builds of
- * other commits (older or newer generations) never match.
- */
-export function matchBuild(builds: readonly BuildRecord[], commit: string): BuildRecord | null {
-  const matching = builds.filter((b) => sameCommit(b.build_trigger_metadata?.commit_hash, commit));
-  matching.sort(
-    (a, b) => (Date.parse(b.created_on ?? "") || 0) - (Date.parse(a.created_on ?? "") || 0),
-  );
-  return matching[0] ?? null;
-}
-
-export type BuildPhase =
-  | { phase: "building"; status: string }
-  | { phase: "succeeded" }
-  | { phase: "failed"; reason: string };
-
-/** Builds API: status queued|initializing|running|stopped; outcome success|fail|skipped|cancelled|terminated. */
-export function buildPhase(build: BuildRecord): BuildPhase {
-  const status = (build.status ?? "").toLowerCase();
-  if (status !== "stopped") return { phase: "building", status: status || "unknown" };
-  const outcome = (build.build_outcome ?? "").toLowerCase();
-  if (outcome === "success") return { phase: "succeeded" };
-  return {
-    phase: "failed",
-    reason: `Workers Build ${build.build_uuid} stopped with outcome ${outcome || "unknown"}.`,
-  };
-}
-
-/** Poll schedule: 15 s, 30 s, then every 60 s, within a 15-minute deadline. */
-export const POLL_DEADLINE_MS = 15 * 60_000;
-export function pollDelaySeconds(attempt: number) {
-  return attempt <= 0 ? 15 : attempt === 1 ? 30 : 60;
-}
-/** Number of polls that fit in the deadline with that schedule (first poll at t = 0). */
-export function maxPolls(deadlineMs = POLL_DEADLINE_MS) {
-  let elapsed = 0;
-  let polls = 1;
-  while (elapsed + pollDelaySeconds(polls - 1) * 1000 <= deadlineMs) {
-    elapsed += pollDelaySeconds(polls - 1) * 1000;
-    polls++;
-  }
-  return polls;
-}
-
-/** The newest deployment's 100 % version from `GET /workers/scripts/:name/deployments`. */
-export function activeVersionId(body: unknown): string | null {
-  const deployments = (body as { result?: { deployments?: unknown } } | null)?.result?.deployments;
-  if (!Array.isArray(deployments) || deployments.length === 0) return null;
-  const sorted = [...deployments].sort(
-    (a, b) =>
-      (Date.parse((b as { created_on?: string }).created_on ?? "") || 0) -
-      (Date.parse((a as { created_on?: string }).created_on ?? "") || 0),
-  );
-  const versions = (sorted[0] as { versions?: unknown }).versions;
-  if (!Array.isArray(versions)) return null;
-  const full =
-    versions.find((v) => (v as { percentage?: number }).percentage === 100) ?? versions[0];
-  const id = (full as { version_id?: unknown } | undefined)?.version_id;
-  return typeof id === "string" && id.length > 0 ? id : null;
-}
-
-/** True when `GET /builds/builds?version_ids=<v>` says build `buildUuid` produced a version. */
-export function versionFromBuild(body: unknown, buildUuid: string): boolean {
-  const builds = (body as { result?: { builds?: unknown } } | null)?.result?.builds;
-  if (!builds || typeof builds !== "object") return false;
-  const values = Array.isArray(builds) ? builds : Object.values(builds);
-  return values.some((b) => (b as { build_uuid?: unknown } | null)?.build_uuid === buildUuid);
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -148,10 +53,10 @@ export type Probe = {
   name: string;
   path: string;
   /**
-   * `page`: 2xx or 3xx, and not an apps router status page. `json`: 200 and a JSON body.
-   * `exists`: 2xx, 401, or 403; a 404 means the route is absent.
+   * `page`: 2xx or 3xx, and not an apps router status page. `exists`: 2xx, 401, or 403; a 404
+   * means the route is absent.
    */
-  expect: "page" | "json" | "exists";
+  expect: "page" | "exists";
   headers?: Record<string, string>;
 };
 
@@ -172,21 +77,16 @@ const probeable = (route: string) => /^GET \/\S*$/.test(route) && !route.include
 /**
  * Release smoke probes for any app: the home page, then up to `MAX_ROUTE_PROBES` static GET routes
  * from the app's own route table (the contract Evidence of the released Candidate), the routes the
- * Change added first. Without a route table, only the home page. `fixed` adds a target's own
- * probes (the dev Acme Shop Live Workers Builds target: `ACME_SHOP_LIVE_PROBES`).
+ * Change added first. Without a route table, only the home page.
  */
 export function smokeProbes(
   table: {
     routes?: readonly string[] | null;
     added?: readonly string[];
-    fixed?: readonly Probe[];
   } = {},
   injectedPath?: string,
 ): Probe[] {
-  const probes: Probe[] = [
-    { name: "home page", path: "/", expect: "page" },
-    ...(table.fixed ?? []),
-  ];
+  const probes: Probe[] = [{ name: "home page", path: "/", expect: "page" }];
   const seen = new Set(probes.map((p) => p.path));
   let routeProbes = 0;
   for (const route of [...(table.added ?? []), ...(table.routes ?? [])]) {
@@ -207,14 +107,6 @@ export function smokeProbes(
   }
   return probes;
 }
-
-/**
- * The Acme Shop Live release target on dev (Workers Builds, migration 0015): its products API
- * must answer JSON. The Acme fixture resolves a caller with no identity to the demo user.
- */
-export const ACME_SHOP_LIVE_PROBES: readonly Probe[] = [
-  { name: "products API", path: "/api/products", expect: "json" },
-];
 
 /**
  * Titles of the apps router's own status pages (workers/apps/src/pages.ts). A home page that is
@@ -258,15 +150,7 @@ export function judgeProbe(probe: Probe, status: number, body: string): ProbeRes
       detail: ok ? `${status}` : status === 404 ? "404: route not deployed" : `${status}`,
     };
   }
-  if (status !== 200) return { probe, status, ok: false, detail: `${status}, expected 200` };
-  if (probe.expect === "json") {
-    try {
-      JSON.parse(body);
-    } catch {
-      return { probe, status, ok: false, detail: "200, but the body is not JSON" };
-    }
-  }
-  return { probe, status, ok: true, detail: "200" };
+  return { probe, status, ok: true, detail: `${status}` };
 }
 
 export type SmokeOutcome = {
@@ -305,25 +189,6 @@ export function classifySmoke(results: readonly ProbeResult[]): SmokeOutcome {
     coverage: "checked_supported",
     summary: `Smoke passed: ${results.map(line).join("; ")}`.slice(0, 500),
   };
-}
-
-/** Runs the probes against the release URL. A probe with no response has status null. */
-export async function runProbes(url: string, probes: readonly Probe[]): Promise<ProbeResult[]> {
-  const base = url.replace(/\/+$/, "");
-  return Promise.all(
-    probes.map(async (probe): Promise<ProbeResult> => {
-      try {
-        const response = await fetch(`${base}${probe.path}`, {
-          headers: { "cache-control": "no-cache", ...probe.headers },
-          redirect: "manual",
-          signal: AbortSignal.timeout(10_000),
-        });
-        return judgeProbe(probe, response.status, await response.text());
-      } catch (error) {
-        return { probe, status: null, ok: false, detail: String(error).slice(0, 120) };
-      }
-    }),
-  );
 }
 
 /** Only a supported pass marks a release deployed. */

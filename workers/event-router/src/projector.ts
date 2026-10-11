@@ -70,7 +70,7 @@ const CHANGE_STATUS: StatusMap = {
   // The D1 row is authoritative (integration change-status.ts); these mirror its unambiguous steps.
   "approval.requested": "awaiting_approval",
   "canonical.promotion.requested": "promoting",
-  // A release target's ReleaseWorkflow started; promotion without one ends with change.completed.
+  // A live app's ReleaseWorkflow started; promotion without one ends with change.completed.
   "build.started": "releasing",
   "change.cancelled": null,
   "change.completed": null,

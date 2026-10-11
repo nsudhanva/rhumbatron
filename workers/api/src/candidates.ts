@@ -89,7 +89,7 @@ const CandidateView = z.object({
   approval: ApprovalView.nullable(),
   baseTree: z.string().nullable(),
   promotedGeneration: z.number().int().nullable(),
-  /** Release of the promoted generation (ADR 0018). Null until promotion starts one. */
+  /** Release of the promoted generation (ADR 0020). Null until promotion starts one. */
   release: ReleaseView.nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -126,15 +126,12 @@ type CandidateRow = {
   release_status: ReleaseView["status"] | null;
   release_generation: number | null;
   release_commit: string | null;
-  release_build: string | null;
   release_version: string | null;
   release_started: string | null;
   release_finished: string | null;
   release_reason: string | null;
   release_evidence_id: string | null;
   release_evidence_key: string | null;
-  release_url: string | null;
-  release_worker: string | null;
 };
 
 const CANDIDATE_COLUMNS = `c.id, c.change_id, ch.project_id, c.status, c.status_reason, c.base_generation,
@@ -144,17 +141,16 @@ const CANDIDATE_COLUMNS = `c.id, c.change_id, ch.project_id, c.status, c.status_
   a.candidate_tree AS approval_tree, a.policy_version AS approval_policy,
   a.reason AS approval_reason, a.created_at AS approval_at, u.email AS approval_email,
   r.id AS release_id, r.status AS release_status, r.generation AS release_generation,
-  r.commit_sha AS release_commit, r.build_uuid AS release_build, r.version_id AS release_version,
+  r.commit_sha AS release_commit, r.version_id AS release_version,
   r.started_at AS release_started, r.finished_at AS release_finished,
   r.failure_reason AS release_reason, r.evidence_id AS release_evidence_id,
-  r.evidence_r2_key AS release_evidence_key, rt.url AS release_url, rt.worker_name AS release_worker`;
+  r.evidence_r2_key AS release_evidence_key`;
 
 // A Candidate promotes once, so it has at most one release (one per generation, migration 0015).
 const CANDIDATE_FROM = `candidates c JOIN changes ch ON ch.id = c.change_id
   LEFT JOIN approvals a ON a.candidate_id = c.id
   LEFT JOIN users u ON u.id = a.approver_user_id
-  LEFT JOIN releases r ON r.candidate_id = c.id
-  LEFT JOIN release_targets rt ON rt.project_id = r.project_id`;
+  LEFT JOIN releases r ON r.candidate_id = c.id`;
 
 function releaseOf(row: CandidateRow): ReleaseView | null {
   if (!row.release_id || !row.release_status || row.release_generation === null) return null;
@@ -166,10 +162,7 @@ function releaseOf(row: CandidateRow): ReleaseView | null {
     generation: row.release_generation,
     commit: row.release_commit ?? "",
     status: row.release_status,
-    buildUuid: row.release_build,
     versionId: row.release_version,
-    url: row.release_url,
-    workerName: row.release_worker,
     startedAt: row.release_started ?? row.updated_at,
     finishedAt: row.release_finished,
     failureReason: row.release_reason,
@@ -429,7 +422,7 @@ export const candidates = new Hono<AppEnv>()
         return fail(c, 404, "not_found", "Candidate not found");
       }
       const rows = await c.env.DB.prepare(
-        // Release smoke Evidence (`release-*`, ADR 0018) is not a verification check: the
+        // Release smoke Evidence (`release-*`, ADR 0020) is not a verification check: the
         // releases endpoint and the Candidate's `release` field show it.
         `SELECT * FROM evidence_index WHERE candidate_id = ?
            AND COALESCE(check_id, '') NOT LIKE 'release-%' ORDER BY created_at`,

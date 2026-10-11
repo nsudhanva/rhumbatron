@@ -17,6 +17,7 @@ import {
   RiskTier,
   VerificationPlan,
 } from "@rhumbatron/protocol";
+import { hasLiveApp } from "./app-release.ts";
 import { candidateFork } from "./candidate-sandbox.ts";
 import { syncCanonicalSource } from "./canonical-source.ts";
 import { releaseRequestScope } from "./change-commands.ts";
@@ -25,7 +26,7 @@ import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
 import { loadProjectPolicy } from "./policy.ts";
 import { recomposeQuietly } from "./recompose.ts";
-import { changeEndedEvent, hasReleaseTarget, startRelease } from "./release.ts";
+import { changeEndedEvent, startRelease } from "./release.ts";
 
 /**
  * Human approval and promotion (AGENTS.md sections 36, 40.2, 42.9, 60; ADR 0013). Called only by
@@ -241,9 +242,9 @@ export async function markCandidateStale(
 /** Product metadata mirrors of the authoritative transition. Safe to repeat. */
 async function recordPromoted(env: Env, row: CandidateRow, generation: number) {
   const now = new Date().toISOString();
-  // With a release target the Change is `releasing` until ReleaseWorkflow finishes (release.ts);
+  // With a live app the Change is `releasing` until ReleaseWorkflow finishes (release.ts);
   // without one, promotion completes it. A Change already past promotion keeps its status.
-  const next = changeAfterPromotion(await hasReleaseTarget(env, row.project_id));
+  const next = changeAfterPromotion(await hasLiveApp(env, row.project_id));
   const results = await env.DB.batch([
     env.DB.prepare(
       `UPDATE candidates SET status = 'promoted', promoted_generation = ?, status_reason = NULL,
@@ -259,7 +260,7 @@ async function recordPromoted(env: Env, row: CandidateRow, generation: number) {
     ).bind(generation, now, row.project_id),
     env.DB.prepare("SELECT status FROM changes WHERE id = ?").bind(row.change_id),
   ]);
-  // Without a release target, promotion ends the Change: say so, so the live view leaves
+  // Without a live app, promotion ends the Change: say so, so the live view leaves
   // `promoting` (section 13.3). A `releasing` Change ends with its release (release.ts).
   const status = (results.at(-1)?.results?.[0] as { status?: string } | undefined)?.status;
   if (next === "completed" && status === "completed") {
@@ -295,8 +296,7 @@ async function promoted(
       }),
     );
   } else {
-    // Canonical `main` is at the promoted commit, so Workers Builds builds it (ADR 0018). Only a
-    // Project with a release target releases. Idempotent per generation; never fails promotion.
+    // Canonical `main` is at the promoted commit. Only a Project with a live app releases (ADR 0020). Idempotent per generation; never fails promotion.
     await startRelease(env, {
       projectId: row.project_id,
       changeId: row.change_id,

@@ -13,6 +13,6 @@ bun run bench   # prints {"p95Ms": n} for GET /api/cart
 bun run dev     # http://localhost:8787
 ```
 
-Release: `src/worker.ts` and `wrangler.jsonc` deploy the shop as the `rhumbatron-acme-shop-dev` Worker. Workers Builds builds it on each push to `main`, which Rhumbatron makes when it promotes a Candidate. This path is blocked until the Workers Builds connection to the Artifacts repo exists ([release runbook](../../docs/operations/release.md)).
+Live app: `src/worker.ts` and `wrangler.jsonc` are what the apps builder bundles when Rhumbatron releases this codebase as a live app (ADR 0020).
 
 Protected invariant: existing cart add, remove, quantity, and total behavior must remain unchanged.

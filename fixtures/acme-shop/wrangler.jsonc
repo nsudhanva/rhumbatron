@@ -1,11 +1,7 @@
-// Release configuration. Workers Builds runs `npx wrangler@4.149.0 deploy` on each push to main.
-// The name must match the Worker that Rhumbatron's Terraform creates for this environment.
+// Live app configuration. The apps builder reads the assets directory and the compatibility date.
 {
-  "name": "rhumbatron-acme-shop-dev",
+  "name": "acme-shop",
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-08",
-  "assets": { "directory": "./public", "not_found_handling": "none" },
-  "workers_dev": true,
-  "preview_urls": false,
-  "observability": { "enabled": true }
+  "assets": { "directory": "./public", "not_found_handling": "none" }
 }

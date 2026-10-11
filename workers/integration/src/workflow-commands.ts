@@ -9,7 +9,7 @@ import { z } from "zod";
  * retry, or the direct fallback below all find the one instance and start nothing new.
  *
  * Volume: one message per Candidate (at most 3 per Change) and one per promoted generation with a
- * release target. About 3 Queue operations each (write, read, delete), so a busy demo day of 20
+ * live app. About 3 Queue operations each (write, read, delete), so a busy demo day of 20
  * Changes is about 250 operations, inside the included Queues allowance.
  */
 

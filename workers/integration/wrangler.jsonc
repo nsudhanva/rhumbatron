@@ -94,7 +94,7 @@
       "binding": "CANDIDATE_WORKFLOW",
       "class_name": "CandidateVerificationWorkflow"
     },
-    // AGENTS.md section 21.3. One instance per promoted generation (ID = release ID, ADR 0018).
+    // AGENTS.md section 21.3. One instance per promoted generation (ID = release ID, ADR 0020).
     {
       "name": "rhumbatron-release-local",
       "binding": "RELEASE_WORKFLOW",

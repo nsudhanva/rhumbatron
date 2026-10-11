@@ -50,11 +50,11 @@ export const canCancel = (status: string) =>
   (CANCELLABLE_FROM as readonly string[]).includes(status);
 
 /**
- * Status after `canonical.advanced`. With a release target, the Change is `releasing` until its
- * release finishes. Without one, promotion is the end of the Change, as before (ADR 0013).
+ * Status after `canonical.advanced`. With a live app, the Change is `releasing` until its
+ * release finishes. Without one, promotion is the end of the Change (ADR 0013, ADR 0020).
  */
-export const changeAfterPromotion = (hasReleaseTarget: boolean): ChangeStatus =>
-  hasReleaseTarget ? "releasing" : "completed";
+export const changeAfterPromotion = (hasLiveApp: boolean): ChangeStatus =>
+  hasLiveApp ? "releasing" : "completed";
 
 /**
  * Status of a `releasing` Change when its release reaches a final status. A superseded release
@@ -81,11 +81,11 @@ export type ReleaseRecovery =
   | { kind: "wait" }
   /** The release finished but the Change was not settled: settle it as the release did. */
   | { kind: "settle"; change: "completed" | "failed" }
-  /** No release target and no release: promotion is the end of the Change (ADR 0013). */
+  /** No live app and no release: promotion is the end of the Change (ADR 0013). */
   | { kind: "complete"; reason: string }
   /** The release is still queued or building: mark it failed, which fails the Change. */
   | { kind: "fail_release"; reason: string }
-  /** No release row exists although the Project has a release target: record a failed one. */
+  /** No release row exists although the Project has a live app: record a failed one. */
   | { kind: "fail_unstarted"; reason: string };
 
 const minutes = (ms: number) => Math.round(ms / 60_000);
@@ -96,7 +96,7 @@ const minutes = (ms: number) => Math.round(ms / 60_000);
  * that does not parse counts as old, so a bad row cannot hold a Change forever.
  */
 export function releaseRecovery(input: {
-  hasReleaseTarget: boolean;
+  hasLiveApp: boolean;
   release: { status: ReleaseStatus; startedAt: string } | null;
   /** `changes.updated_at`: the promotion wrote `releasing` and nothing else moves it. */
   releasingSince: string;
@@ -118,10 +118,10 @@ export function releaseRecovery(input: {
       reason: `The release stayed ${release.status} for more than ${after} minutes; its ReleaseWorkflow did not finish.`,
     };
   }
-  if (!input.hasReleaseTarget) {
+  if (!input.hasLiveApp) {
     return {
       kind: "complete",
-      reason: "The Project has no release target; promotion completed the Change.",
+      reason: "The Project has no live app; promotion completed the Change.",
     };
   }
   return {

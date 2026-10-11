@@ -204,13 +204,13 @@ WHERE ch.status = 'completed' AND ch.updated_at >= ?2
 ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
 
 /**
- * Releases that finished within the window (ADR 0018): deployed, or failed (no build, failed
- * build, unconfirmed deployment, or smoke failure). Superseded releases are not news. `?2` = since.
+ * Releases that finished within the window (ADR 0020): deployed, or failed (no bundle, a
+ * pointer that did not move, or smoke failure). Superseded releases are not news. `?2` = since.
  * Starts from `idx_releases_status_finished`.
  */
 const RELEASES_SQL = `
 SELECT r.id, r.project_id, p.name AS project_name, r.change_id, r.candidate_id, r.generation,
-       r.status, r.failure_reason, r.version_id, r.finished_at, rt.url, r.read_at
+       r.status, r.failure_reason, r.version_id, r.finished_at, r.read_at
 FROM (
   SELECT rel.*, rr.read_at FROM releases rel
   LEFT JOIN notification_reads rr ON rr.user_id = ?1 AND rr.notification_id =
@@ -218,7 +218,6 @@ FROM (
   WHERE rel.status IN ('deployed', 'failed', 'smoke_failed') AND rel.finished_at >= ?2
 ) r
 ${MINE("r.project_id")}
-LEFT JOIN release_targets rt ON rt.project_id = r.project_id
 ORDER BY r.finished_at DESC LIMIT ${PER_KIND}`;
 
 /**
@@ -311,7 +310,6 @@ type ReleaseRow = Base & {
   failure_reason: string | null;
   version_id: string | null;
   finished_at: string;
-  url: string | null;
 };
 
 type NotSelectedRow = Base & {
@@ -495,7 +493,6 @@ function releaseItem(row: ReleaseRow): NotificationView {
       title: `Released S${row.generation}`,
       body: joinParts(
         row.version_id ? `Version ${row.version_id.slice(0, 8)}` : null,
-        row.url,
         "Smoke check passed",
       ),
     };

@@ -132,7 +132,6 @@ export const CONTENT_TABLES: readonly { table: string; where: string }[] = [
   { table: "agents", where: "project_id = ?" },
   { table: "dead_letters", where: "project_id = ?" },
   { table: "releases", where: "project_id = ?" },
-  { table: "release_targets", where: "project_id = ?" },
   { table: "project_events", where: "project_id = ?" },
 ];
 

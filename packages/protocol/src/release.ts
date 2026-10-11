@@ -2,11 +2,11 @@ import { z } from "zod";
 import { CanonicalGeneration, Id } from "./common.ts";
 
 /**
- * Release of one promoted Canonical Generation (AGENTS.md sections 21.3, 37, 42.10; ADR 0018).
+ * Release of one promoted Canonical Generation (AGENTS.md sections 21.3, 42.10; ADR 0020).
  * One release per Project and generation (section 60: "Release -> canonical generation").
  *
  *   queued -> building -> deployed
- *                      -> failed        (no build, build failed, or deployment not confirmed)
+ *                      -> failed        (no bundle, or the production pointer did not move)
  *                      -> smoke_failed  (deployed, but the smoke check did not pass)
  *   queued | building -> superseded     (a newer generation was promoted first)
  *
@@ -33,8 +33,8 @@ export const FINAL_RELEASE_STATUSES: readonly ReleaseStatus[] = [
 /**
  * A `releasing` Change whose release has not finished this long after promotion (or after its
  * release started, whichever is later) is stuck: its source sync or release start failed, or its
- * ReleaseWorkflow died. ReleaseWorkflow polls for at most 15 minutes, then confirms and smokes the
- * deployment in a few more, so 45 minutes never cuts a live release short. The event router's
+ * ReleaseWorkflow died. ReleaseWorkflow builds or copies a bundle, moves the pointer, and smokes the
+ * app in a few minutes, so 45 minutes never cuts a live release short. The event router's
  * sweep selects with it; the integration Worker re-checks it before it changes anything.
  */
 export const RELEASE_STUCK_AFTER_MS = 45 * 60_000;
@@ -47,11 +47,7 @@ export const ReleaseView = z.object({
   generation: CanonicalGeneration,
   commit: z.string(),
   status: ReleaseStatus,
-  buildUuid: z.string().nullable(),
   versionId: z.string().nullable(),
-  /** The release target URL (the Worker's workers.dev URL). */
-  url: z.string().nullable(),
-  workerName: z.string().nullable(),
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
   failureReason: z.string().nullable(),
@@ -61,16 +57,8 @@ export const ReleaseView = z.object({
 });
 export type ReleaseView = z.infer<typeof ReleaseView>;
 
-export const ReleaseTargetView = z.object({
-  projectId: Id,
-  workerName: z.string(),
-  url: z.string(),
-});
-export type ReleaseTargetView = z.infer<typeof ReleaseTargetView>;
-
 /** `GET /v1/projects/:projectId/releases`. */
 export const ProjectReleases = z.object({
-  target: ReleaseTargetView.nullable(),
   releases: z.array(ReleaseView),
 });
 export type ProjectReleases = z.infer<typeof ProjectReleases>;
@@ -80,13 +68,7 @@ export const ReleaseInjectionOutcome = z.discriminatedUnion("status", [
   z.object({ status: z.literal("recorded"), release: ReleaseView, repeated: z.boolean() }),
   z.object({
     status: z.literal("refused"),
-    reason: z.enum([
-      "no_target",
-      "no_release",
-      "release_in_progress",
-      "not_deployed",
-      "probe_passed",
-    ]),
+    reason: z.enum(["no_app", "no_release", "release_in_progress", "not_deployed", "probe_passed"]),
     detail: z.string(),
   }),
 ]);
