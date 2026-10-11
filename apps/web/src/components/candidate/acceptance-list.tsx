@@ -21,7 +21,7 @@ const WORD_TEXT: Record<CriterionAcceptance["status"], string> = {
   unclear: "text-kumo-warning",
 };
 
-export function acceptanceTally(items: CriterionAcceptance[]) {
+function acceptanceTally(items: CriterionAcceptance[]) {
   return {
     met: items.filter((i) => i.status === "met").length,
     total: items.length,

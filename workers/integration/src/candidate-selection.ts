@@ -55,7 +55,7 @@ export type Ranking =
   | { kind: "tie"; tied: string[] };
 
 /** Negative when `a` ranks before `b`. */
-export function compareEntries(a: SelectionEntry, b: SelectionEntry): number {
+function compareEntries(a: SelectionEntry, b: SelectionEntry): number {
   return (
     Number(b.promotable) - Number(a.promotable) ||
     b.criteriaMet - a.criteriaMet ||
@@ -93,12 +93,12 @@ function difference(winner: SelectionEntry, other: SelectionEntry, name: string,
 }
 
 /** Why `loser` lost to `winner`, for `status_reason` and the UI. */
-export function loserReason(winner: SelectionEntry, loser: SelectionEntry, judged = false): string {
+function loserReason(winner: SelectionEntry, loser: SelectionEntry, judged = false): string {
   return `Lost to ${winner.candidateId}: ${difference(winner, loser, "this", judged)}`;
 }
 
 /** Why the winner won, against the runner-up. */
-export function winnerReason(
+function winnerReason(
   winner: SelectionEntry,
   others: readonly SelectionEntry[],
   judged = false,
@@ -225,12 +225,12 @@ function parse<T extends z.ZodType>(schema: T, text: string | null): z.output<T>
 }
 
 /** Acceptance results as the API shows them, or null when the check has not run. */
-export function acceptanceView(acceptanceJson: string | null): AcceptanceResult[] | null {
+function acceptanceView(acceptanceJson: string | null): AcceptanceResult[] | null {
   return parse(z.array(AcceptanceResult), acceptanceJson);
 }
 
 /** One Candidate's entry from its authoritative rows. `score_json` is not always a gate. */
-export function entryFor(row: GroupRow, records: readonly EvidenceRecord[]): SelectionEntry {
+function entryFor(row: GroupRow, records: readonly EvidenceRecord[]): SelectionEntry {
   const plan = parse(VerificationPlan, row.plan_json);
   const acceptance = acceptanceView(row.acceptance_json) ?? [];
   const latest = new Map<string, EvidenceRecord>();

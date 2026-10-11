@@ -27,7 +27,7 @@ import {
  * page shows the detail of the selected node in its inspector.
  */
 
-export const BORDER: Record<DagBorder, string> = {
+const BORDER: Record<DagBorder, string> = {
   accent: "border-2 border-accent-500",
   ink: "border-2 border-kumo-ink",
   dashed: "border-2 border-dashed border-kumo-ink",
@@ -101,7 +101,7 @@ const nodeTypes = { dag: DagNode };
 
 const STROKE = { vectorEffect: "non-scaling-stroke" } as const;
 
-export const EDGE_STYLE: Record<DagEdgeKind, CSSProperties> = {
+const EDGE_STYLE: Record<DagEdgeKind, CSSProperties> = {
   flow: { ...STROKE, stroke: "var(--color-kumo-ink)", strokeWidth: 2 },
   cause: { ...STROKE, stroke: "var(--color-kumo-ink)", strokeWidth: 2 },
   sequence: {

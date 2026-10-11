@@ -17,9 +17,9 @@ import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
 /** Budget of a Change created without one, when the Project has no default. */
-export const BUILT_IN_CHANGE_BUDGET_USD = 3;
-export const MIN_DEFAULT_BUDGET_USD = 0.5;
-export const MAX_DEFAULT_BUDGET_USD = 25;
+const BUILT_IN_CHANGE_BUDGET_USD = 3;
+const MIN_DEFAULT_BUDGET_USD = 0.5;
+const MAX_DEFAULT_BUDGET_USD = 25;
 
 const ProjectIdParam = z.object({ projectId: z.string().regex(/^proj_[a-z0-9-]+$/) });
 

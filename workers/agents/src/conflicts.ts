@@ -29,8 +29,7 @@ import {
  */
 
 /** The stored policy row read for protected resources (D1 `project_policies`, section 53). */
-export const PROTECTED_RESOURCES_SQL =
-  "SELECT policy_json FROM project_policies WHERE project_id = ?";
+const PROTECTED_RESOURCES_SQL = "SELECT policy_json FROM project_policies WHERE project_id = ?";
 
 /**
  * Protected resources from the Project's stored policy row. No row, or a row that does not parse

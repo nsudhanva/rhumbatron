@@ -23,7 +23,7 @@ function sideName(side: RequestConflictSide) {
 }
 
 /** Who decided, in words. `system:arbiter` is the automatic arbiter. */
-export function decidedByWords(decidedBy: string | null) {
+function decidedByWords(decidedBy: string | null) {
   if (!decidedBy) return null;
   if (decidedBy === "system:arbiter") return "Decided automatically by the arbiter";
   if (decidedBy.startsWith("system:")) return `Decided automatically (${decidedBy.slice(7)})`;
@@ -31,7 +31,7 @@ export function decidedByWords(decidedBy: string | null) {
 }
 
 /** One-line decision: which request goes ahead, or that none is chosen yet. */
-export function requestDecision(conflict: RequestConflictDetail) {
+function requestDecision(conflict: RequestConflictDetail) {
   const { a, b } = conflict;
   const winner =
     conflict.winnerChangeId === a.changeId ? a : conflict.winnerChangeId === b.changeId ? b : null;

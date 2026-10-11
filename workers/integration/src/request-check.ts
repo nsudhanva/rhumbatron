@@ -18,7 +18,7 @@ import {
 /** Who decides a conflict when the system arbiter chose a request. */
 export const SYSTEM_ARBITER = "system:arbiter";
 /** The same requester asked twice: the later request replaces the earlier one. */
-export const SAME_REQUESTER = "system:same_requester";
+const SAME_REQUESTER = "system:same_requester";
 
 export const requestRoot = (env: Pick<Env, "PROJECT_ROOT">, projectId: string) => {
   const roots = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
@@ -123,7 +123,7 @@ type Stored = {
 const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
 
 /** Pair row ID: one row per sorted pair and clarification round of the later Change. */
-export const pairId = (first: string, second: string, round = 0) =>
+const pairId = (first: string, second: string, round = 0) =>
   `rc_${first}_${second}${round > 0 ? `_r${round}` : ""}`;
 
 /**

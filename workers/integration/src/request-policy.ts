@@ -333,7 +333,7 @@ export type ArbiterVote = {
  * A verdict counts only when its rationale cites at least one criterion of either side and at
  * least one packet item, and every citation exists. Anything else is an unsupported `ask`.
  */
-export function validateArbitration(
+function validateArbitration(
   raw: unknown,
   a: readonly Criterion[],
   b: readonly Criterion[],

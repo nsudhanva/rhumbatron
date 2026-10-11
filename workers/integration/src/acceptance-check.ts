@@ -25,7 +25,7 @@ import type { CheckOutcome } from "./candidate-composer.ts";
  */
 
 /** Source text sent to the model, in bytes (UTF-16 length is close enough for a cap). */
-export const ACCEPTANCE_SOURCE_CAP = 60_000;
+const ACCEPTANCE_SOURCE_CAP = 60_000;
 /** A quote shorter than this proves nothing ("div", "id"). */
 const MIN_QUOTE_CHARS = 8;
 const MAX_OUTPUT_TOKENS = 2_000;

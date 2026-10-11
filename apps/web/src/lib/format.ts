@@ -120,20 +120,6 @@ export const isCompiling = (status: string) => status === "created" || status ==
 
 export const latestRun = (task: TaskDetail): TaskRun | undefined => task.runs[task.runs.length - 1];
 
-export function lastActiveTask(tasks: TaskDetail[]): TaskDetail | undefined {
-  let best: TaskDetail | undefined;
-  let bestTime = -1;
-  for (const task of tasks) {
-    const run = latestRun(task);
-    const time = run ? new Date(run.endedAt ?? run.startedAt).getTime() : -1;
-    if (time > bestTime) {
-      best = task;
-      bestTime = time;
-    }
-  }
-  return best ?? tasks[0];
-}
-
 export function layoutTasks(tasks: TaskDetail[]) {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const layers = new Map<string, number>();

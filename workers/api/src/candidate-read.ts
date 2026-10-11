@@ -22,7 +22,7 @@ export const GateView = z.object({
 export type GateView = z.infer<typeof GateView>;
 
 /** A plan check as stored, with any check kind. */
-export const CheckView = z.object({
+const CheckView = z.object({
   checkId: z.string().min(1),
   kind: z.string().min(1),
   reason: z.string(),

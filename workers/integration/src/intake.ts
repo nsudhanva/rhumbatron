@@ -39,8 +39,8 @@ import {
 type Complete = (request: CompletionRequest) => Promise<CompletionResult>;
 type WorkersAi = { run(model: string, input: unknown): Promise<unknown> };
 
-export const EMBEDDING_MODEL = "@cf/baai/bge-small-en-v1.5";
-export const RERANK_MODEL = "@cf/baai/bge-reranker-base";
+const EMBEDDING_MODEL = "@cf/baai/bge-small-en-v1.5";
+const RERANK_MODEL = "@cf/baai/bge-reranker-base";
 const COSINE_FLOOR = 0.55;
 const SHORTLIST = 10;
 const MODEL_PAIRS = 5;
@@ -71,7 +71,7 @@ const GENERIC = new Set(
   ).split(" "),
 );
 
-export function contentTokens(text: string): string[] {
+function contentTokens(text: string): string[] {
   return (text.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter(
     (word) => word.length > 1 && !STOP.has(word),
   );
@@ -225,10 +225,7 @@ export type ClefVotes = {
   pBuildable: number | null;
 };
 
-export async function clefVotes(
-  model: DecisionModel | null,
-  packet: IntakePacket,
-): Promise<ClefVotes> {
+async function clefVotes(model: DecisionModel | null, packet: IntakePacket): Promise<ClefVotes> {
   const empty: ClefVotes = {
     pairs: Object.fromEntries(
       packet.targets.map((t) => [t.id, { choice: null, pUnrelated: null }]),

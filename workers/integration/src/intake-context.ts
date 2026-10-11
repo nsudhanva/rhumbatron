@@ -68,7 +68,7 @@ const STACK_BY_DEPENDENCY: Record<string, string> = {
   tailwindcss: "tailwind",
 };
 
-export function stackHints(files: readonly string[], dependencies: readonly string[]): string[] {
+function stackHints(files: readonly string[], dependencies: readonly string[]): string[] {
   const hints = new Set<string>();
   for (const dependency of dependencies) {
     const hint = STACK_BY_DEPENDENCY[dependency];
