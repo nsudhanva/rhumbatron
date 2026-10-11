@@ -166,7 +166,7 @@ Two call paths use the same gateway, header, prices, and meter:
 - `complete()` (`packages/model-router/src/gateway-client.ts`) for the Root Planner, conflict review, and context compaction, always through `meteredComplete()`. It maps function tools to Anthropic tools, caches the system prompt, and replays a whole assistant turn, thinking blocks included, on a follow-up call.
 
 Cost per call is exact: uncached input, output with thinking, cache reads, and cache writes at Anthropic list prices (`ANTHROPIC_PRICES` in `packages/model-router/src/models.ts`).
-The monthly budget is `ANTHROPIC_MONTHLY_BUDGET_USD`: $10 in prod.
+The monthly budget is `ANTHROPIC_MONTHLY_BUDGET_USD`: $100 in prod.
 Each call reserves an estimate on the D1 meter (`usage_counters`, `anthropic-usd-micro` per `YYYY-MM`) with one conditional statement, then settles to its exact cost.
 A refused reservation, a gateway spend-limit 429, or an Anthropic billing error is `spend_limited`: a budget stop, never a retry, and never another provider.
 D1 `usage_counters` also holds the daily caps: 400 agent model calls per day and 200 Clef-flash calls.

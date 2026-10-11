@@ -43,7 +43,7 @@ section 7.3, rule 50), and every account-wide limit is shared with those project
 ### Prod settings
 
 - `MODEL_PROVIDER` is `anthropic`. `ALLOW_OPUS` comes from `var.allow_opus` (default `false`).
-  The monthly Anthropic budget is `var.anthropic_monthly_budget_usd` (default $10). ADR 0021.
+  The monthly Anthropic budget is `var.anthropic_monthly_budget_usd` (default $100). ADR 0021.
 - `CLERK_ALLOW_MISSING_AZP` is `"false"`. `CLERK_AUTHORIZED_PARTIES` comes from
   `var.clerk_authorized_parties` (default `["https://rhumbatron.com"]`). It must include that origin
   and list only `https` origins.

@@ -56,7 +56,7 @@ Cloudflare documentation for the Anthropic endpoint does not mention custom head
 - Spend safety (rule 50, ADR 0019):
   - The per-run call cap, the 400 agent calls per day, and the Change budget stay.
   - A monthly Anthropic budget, `ANTHROPIC_MONTHLY_BUDGET_USD`
-    (`var.anthropic_monthly_budget_usd`): $10 in prod. Terraform rejects a value above its limit. Code enforces it on the D1 meter `usage_counters` (`day` = `YYYY-MM`, counter
+    (`var.anthropic_monthly_budget_usd`): $100 in prod. Terraform rejects a value above its limit. Code enforces it on the D1 meter `usage_counters` (`day` = `YYYY-MM`, counter
     `anthropic-usd-micro`, micro-USD). Every call first reserves an estimate (full output cap,
     prompt uncached) with one conditional statement, then settles to the exact cost. A Pi run
     settles its share after each call and at the end. A timeout keeps its reservation.
