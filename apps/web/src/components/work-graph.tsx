@@ -1,9 +1,9 @@
 import { cn } from "@cloudflare/kumo";
-import { type Edge, Handle, type Node, type NodeProps, Position, ReactFlow } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
+import { type Edge, Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import { type CSSProperties, useMemo } from "react";
 import type { TaskDetail } from "../lib/api";
 import { latestRun, layoutTasks, truncate } from "../lib/format";
+import { canvasHeight, ReadableFlow } from "./readable-flow";
 import { StatusPill } from "./ui/status-pill";
 
 /**
@@ -84,6 +84,9 @@ const SELECTED: CSSProperties = {
 
 const nodeTypes = { task: TaskNode };
 
+/** Rendered height of a TaskNode (three lines plus padding), for the canvas height. */
+const NODE_HEIGHT = 96;
+
 const EDGE_RELEVANT: CSSProperties = { stroke: "var(--color-kumo-ink)", strokeWidth: 2 };
 const EDGE_QUIET: CSSProperties = {
   stroke: "var(--color-kumo-divider)",
@@ -100,7 +103,7 @@ export function WorkGraph({
   selectedId: string | undefined;
   onSelect: (id: string) => void;
 }) {
-  const { nodes, edges } = useMemo(() => {
+  const { nodes, edges, height } = useMemo(() => {
     const positions = layoutTasks(tasks);
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const nodes: TaskFlowNode[] = tasks.map((task) => ({
@@ -128,34 +131,24 @@ export function WorkGraph({
           };
         }),
     );
-    return { nodes, edges };
+    const height = canvasHeight(
+      [...positions.values()].map((p) => p.y),
+      NODE_HEIGHT,
+    );
+    return { nodes, edges, height };
   }, [tasks, selectedId, onSelect]);
 
   return (
     <figure className="grid min-w-0 gap-2">
-      <div
-        className="w-full rule-ink bg-kumo-elevated"
-        style={{ height: "clamp(340px, 48vw, 520px)" }}
-      >
-        <ReactFlow
-          // Remount when the graph first fills in, so fitView frames every Task.
-          key={nodes.length}
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.12, minZoom: 0.2 }}
-          minZoom={0.2}
-          style={{ background: "transparent" }}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          proOptions={{ hideAttribution: true }}
-          colorMode="light"
-          nodesFocusable={false}
-          aria-label="Work Graph"
-        />
-      </div>
+      <ReadableFlow
+        // Remount when the graph first fills in, so the first view frames the Tasks.
+        key={nodes.length}
+        label="Work Graph"
+        height={height}
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+      />
       <figcaption className="grid gap-1.5">
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-[12px]" aria-label="Legend">
           {LEGEND.map((item) => (

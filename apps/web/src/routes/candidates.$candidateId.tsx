@@ -3,7 +3,11 @@ import { Button, buttonVariants, cn } from "@cloudflare/kumo";
 import { Columns } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { AcceptanceList, acceptanceSummary } from "../components/candidate/acceptance-list";
+import {
+  AcceptanceList,
+  acceptanceSummary,
+  NoAcceptanceResult,
+} from "../components/candidate/acceptance-list";
 import { Banner } from "../components/candidate/banner";
 import {
   type CheckRow,
@@ -179,6 +183,12 @@ function CandidateView() {
       )}
 
       <Stats candidate={data} rows={rows} />
+
+      {!data.acceptance && (
+        <Section label="Acceptance criteria">
+          <NoAcceptanceResult />
+        </Section>
+      )}
 
       {data.acceptance && data.acceptance.length > 0 && (
         <Section

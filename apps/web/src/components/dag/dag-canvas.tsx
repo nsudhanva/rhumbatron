@@ -1,15 +1,7 @@
 import { cn } from "@cloudflare/kumo";
-import {
-  type Edge,
-  Handle,
-  MarkerType,
-  type Node,
-  type NodeProps,
-  Position,
-  ReactFlow,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
+import { type Edge, Handle, MarkerType, type Node, type NodeProps, Position } from "@xyflow/react";
 import { type CSSProperties, type ReactNode, useMemo } from "react";
+import { canvasHeight, ReadableFlow } from "../readable-flow";
 import { StatusPill } from "../ui/status-pill";
 import {
   type DagBorder,
@@ -99,6 +91,9 @@ const SELECTED: CSSProperties = {
 
 const nodeTypes = { dag: DagNode };
 
+/** Rendered height of a DagNode with a meta line, for the canvas height. */
+const NODE_HEIGHT = 76;
+
 const STROKE = { vectorEffect: "non-scaling-stroke" } as const;
 
 const EDGE_STYLE: Record<DagEdgeKind, CSSProperties> = {
@@ -187,7 +182,7 @@ export function DagCanvas({
   /** What the graph is derived from and what it hides (DESIGN.md 9.13). */
   caption: ReactNode;
 }) {
-  const { nodes, edges } = useMemo(() => {
+  const { nodes, edges, height } = useMemo(() => {
     const known = new Set(specs.map((n) => n.id));
     const lit = selectedId && known.has(selectedId) ? lineage(edgeSpecs, selectedId) : null;
     const nodes: DagFlowNode[] = specs.map((spec) => ({
@@ -236,34 +231,24 @@ export function DagCanvas({
           ariaLabel: `${e.source} to ${e.target}${e.label ? `: ${e.label}` : ""}`,
         };
       });
-    return { nodes, edges };
+    const height = canvasHeight(
+      specs.map((spec) => spec.position.y),
+      NODE_HEIGHT,
+    );
+    return { nodes, edges, height };
   }, [specs, edgeSpecs, selectedId, onSelect]);
 
   return (
     <figure className="grid min-w-0 gap-2">
-      <div
-        className="w-full rule-ink bg-kumo-elevated"
-        style={{ height: "clamp(380px, 52vw, 600px)" }}
-      >
-        <ReactFlow
-          // Remount when the node set changes, so fitView frames every node.
-          key={nodes.map((n) => n.id).join(",")}
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.12, minZoom: 0.15 }}
-          minZoom={0.15}
-          style={{ background: "transparent" }}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          proOptions={{ hideAttribution: true }}
-          colorMode="light"
-          nodesFocusable={false}
-          aria-label={label}
-        />
-      </div>
+      <ReadableFlow
+        // Remount when the node set changes, so the first view frames the graph again.
+        key={nodes.map((n) => n.id).join(",")}
+        label={label}
+        height={height}
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+      />
       <figcaption className="grid gap-1.5">
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-[12px]" aria-label="Legend">
           {legend.map((item) => (

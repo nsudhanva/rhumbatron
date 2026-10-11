@@ -119,17 +119,49 @@ function CompareView() {
     return <CandidateSkeleton label="Loading Candidates" rows={8} />;
   }
 
-  if (list.length < 2) {
+  const only = list.length === 1 ? list[0] : undefined;
+  if (only) {
+    const projectId = change.data?.projectId;
     return (
       <>
         {title}
         <Section label="Comparison">
           <EmptyState
-            what={
-              list.length === 0
-                ? "This Change has no Candidates yet, so there is nothing to compare."
-                : "This Change has one Candidate, so there is nothing to compare yet."
+            what="This change produced one candidate, so there is nothing to compare."
+            how="A second Candidate appears when a design conflict forks the Change or another Candidate is composed."
+            action={
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  to="/candidates/$candidateId"
+                  params={{ candidateId: only.id }}
+                  className={buttonVariants({ variant: "secondary" })}
+                >
+                  Open the Candidate
+                </Link>
+                {projectId && (
+                  <Link
+                    to="/projects/$projectId/verification"
+                    params={{ projectId }}
+                    className={buttonVariants({ variant: "secondary" })}
+                  >
+                    All Candidates of the Project
+                  </Link>
+                )}
+              </div>
             }
+          />
+        </Section>
+      </>
+    );
+  }
+
+  if (list.length === 0) {
+    return (
+      <>
+        {title}
+        <Section label="Comparison">
+          <EmptyState
+            what="This Change has no Candidates yet, so there is nothing to compare."
             how="A second Candidate appears when a design conflict forks the Change or another Candidate is composed."
             action={
               <Link

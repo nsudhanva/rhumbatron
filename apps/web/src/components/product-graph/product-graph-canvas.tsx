@@ -1,8 +1,8 @@
 import { cn } from "@cloudflare/kumo";
-import { type Edge, Handle, type Node, type NodeProps, Position, ReactFlow } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
+import { type Edge, Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import { type CSSProperties, type ReactNode, useMemo } from "react";
 import { formatNumber } from "../../lib/format";
+import { canvasHeight, ReadableFlow } from "../readable-flow";
 import {
   type AreaState,
   type AreaView,
@@ -95,6 +95,9 @@ const SELECTED: CSSProperties = {
 
 const nodeTypes = { area: AreaNode };
 
+/** Rendered height of an AreaNode, for the canvas height. */
+const NODE_HEIGHT = 80;
+
 const EDGE_RELEVANT: CSSProperties = {
   stroke: "var(--color-kumo-ink)",
   strokeWidth: 2,
@@ -125,7 +128,7 @@ export function ProductGraphCanvas({
   /** Footnote under the legend: what the graph is derived from and what is hidden. */
   caption: ReactNode;
 }) {
-  const { nodes, edges } = useMemo(() => {
+  const { nodes, edges, height } = useMemo(() => {
     const nodes: AreaFlowNode[] = view.areas.map((area) => ({
       id: area.node.id,
       type: "area",
@@ -148,34 +151,24 @@ export function ProductGraphCanvas({
         ariaLabel: `${edge.source} to ${edge.target}: ${edge.label}. ${edge.origins.map(describeOrigin).join("; ")}`,
       };
     });
-    return { nodes, edges };
+    const height = canvasHeight(
+      nodes.map((n) => n.position.y),
+      NODE_HEIGHT,
+    );
+    return { nodes, edges, height };
   }, [view, selectedId, onSelect]);
 
   return (
     <figure className="grid min-w-0 gap-2">
-      <div
-        className="w-full rule-ink bg-kumo-elevated"
-        style={{ height: "clamp(340px, 48vw, 520px)" }}
-      >
-        <ReactFlow
-          // Remount when the visible set changes, so fitView frames every area.
-          key={nodes.map((n) => n.id).join(",")}
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.14, minZoom: 0.2 }}
-          minZoom={0.2}
-          style={{ background: "transparent" }}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          proOptions={{ hideAttribution: true }}
-          colorMode="light"
-          nodesFocusable={false}
-          aria-label="Product Graph"
-        />
-      </div>
+      <ReadableFlow
+        // Remount when the visible set changes, so the first view frames the areas again.
+        key={nodes.map((n) => n.id).join(",")}
+        label="Product Graph"
+        height={height}
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+      />
       <figcaption className="grid gap-1.5">
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-[12px]" aria-label="Legend">
           {LEGEND.map((item) => (

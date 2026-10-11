@@ -13,7 +13,8 @@ import { createContext, type ReactNode, useContext } from "react";
  *   </StatStrip>
  *
  * `density="compact"` sets each cell on one line (label, value, unit, footnote) with 20px
- * numerals, for a page where the strip is context and another block is the focus.
+ * numerals, for a page where the strip is context and another block is the focus. A footnote
+ * that does not fit beside the value wraps to a second small line.
  */
 type Density = "default" | "compact";
 const DensityContext = createContext<Density>("default");
@@ -71,7 +72,7 @@ export function StatCell({
     return (
       <div
         className={cn(
-          "flex min-w-0 flex-[1_1_200px] items-baseline gap-x-2 bg-kumo-base px-3 py-2",
+          "flex min-w-0 flex-[1_1_200px] flex-wrap items-baseline gap-x-2 gap-y-0.5 bg-kumo-base px-3 py-2",
           className,
         )}
       >

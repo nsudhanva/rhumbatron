@@ -1,6 +1,8 @@
 import { Button, cn } from "@cloudflare/kumo";
 import {
   ArrowLineRight,
+  ArrowsIn,
+  ArrowsOut,
   ArrowsOutLineHorizontal,
   CaretDown,
   CaretRight,
@@ -58,10 +60,11 @@ import { useTimelineEvents, useTimelineTasks } from "./use-timeline-data";
  * while the socket is down. Running bars grow to "now" once a second.
  *
  * Zoom: buttons, + / - / 0 keys on the plot, or Ctrl (or pinch) with the wheel. Fit shows the
- * whole span; Now scrolls to the live edge.
+ * whole span; Now scrolls to the live edge. Full screen gives the plot and the rail the whole
+ * viewport (the Fullscreen API, else a fixed overlay); Esc or "Exit full screen" closes it.
  */
 
-const LEFT = 288;
+const LEFT = 340;
 const AXIS_H = 46;
 const PERSON_H = 36;
 const CHANGE_H = 48;
@@ -115,22 +118,25 @@ const TIER_WORD: Record<TimelineBar["tier"], string> = {
 const MARKER_STYLE: Record<MarkerKind, string> = {
   request: "border-2 border-kumo-ink bg-kumo-elevated",
   plan: "bg-kumo-ink",
-  conflict: "bg-accent-500",
+  // A diamond: a conflict needs a decision, it is not an error. Red marks only failures.
+  conflict: "rotate-45 scale-90 bg-kumo-ink",
   clarify: "bg-kumo-warning",
   approval: "border-2 border-kumo-warning bg-kumo-elevated",
   verified: "bg-kumo-success",
-  rejected: "bg-tone-500",
+  rejected: "bg-kumo-danger",
   stale: "border-2 border-tone-500 bg-kumo-elevated",
   promotion: "border-2 border-kumo-ink bg-kumo-success",
   release: "border-2 border-kumo-success bg-kumo-elevated",
-  release_failed: "border border-kumo-ink bg-tone-500",
+  release_failed: "border-2 border-kumo-ink bg-kumo-danger",
   cancelled: "bg-tone-300",
 };
 
 const MARKER_TEXT: Partial<Record<MarkerKind, string>> = {
-  conflict: "font-semibold text-accent-700",
+  conflict: "font-semibold text-kumo-default",
   clarify: "font-semibold text-kumo-warning",
   verified: "text-kumo-success",
+  rejected: "font-semibold text-kumo-danger",
+  release_failed: "font-semibold text-kumo-danger",
   promotion: "font-semibold text-kumo-success",
   release: "text-kumo-success",
 };
@@ -143,8 +149,11 @@ const MARKER_LEGEND: { kind: MarkerKind; label: string }[] = [
   { kind: "approval", label: "Approval" },
   { kind: "verified", label: "Verified" },
   { kind: "rejected", label: "Rejected" },
+  { kind: "stale", label: "Stale" },
   { kind: "promotion", label: "Promotion" },
   { kind: "release", label: "Live" },
+  { kind: "release_failed", label: "Release failed" },
+  { kind: "cancelled", label: "Cancelled" },
 ];
 
 const ATTENTION_KICKER: Record<AttentionKind, string> = {
@@ -203,6 +212,52 @@ function useWidth() {
     return () => observer.disconnect();
   }, [el]);
   return { el, ref: setEl, width };
+}
+
+/**
+ * Full-viewport view of one element: the Fullscreen API when the browser grants it, else a fixed
+ * overlay that Esc closes. The browser's own Esc handling ends a native full screen.
+ */
+function useFullScreen(el: HTMLElement | null) {
+  const [mode, setMode] = useState<"native" | "overlay" | null>(null);
+  useEffect(() => {
+    const onChange = () => {
+      if (!document.fullscreenElement) setMode((m) => (m === "native" ? null : m));
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  useEffect(() => {
+    if (mode !== "overlay") return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setMode(null);
+    };
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = overflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [mode]);
+  const enter = useCallback(async () => {
+    if (!el) return;
+    if (typeof el.requestFullscreen === "function") {
+      try {
+        await el.requestFullscreen();
+        setMode("native");
+        return;
+      } catch {
+        // Refused (iframe, policy, browser): the overlay below does the same job.
+      }
+    }
+    setMode("overlay");
+  }, [el]);
+  const exit = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    setMode(null);
+  }, []);
+  return { full: mode !== null, enter, exit };
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -411,6 +466,9 @@ function TimelineBody({
   const scroller = useWidth();
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
   const tooltip = useTooltip(frame);
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  const screen = useFullScreen(root);
+  const full = screen.full;
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -546,7 +604,13 @@ function TimelineBody({
   };
 
   return (
-    <div className="@container grid min-w-0 gap-3">
+    <div
+      ref={setRoot}
+      className={cn(
+        "@container min-w-0 gap-3",
+        full ? "fixed inset-0 z-[100] flex flex-col bg-kumo-base p-4" : "grid",
+      )}
+    >
       <Toolbar
         pxLabel={atFit ? "Whole timeline shown" : `${perHundred(px)} / 100 px`}
         atFit={atFit}
@@ -556,6 +620,8 @@ function TimelineBody({
         onZoomOut={() => zoomTo(px / ZOOM_STEP)}
         onFit={() => zoomTo("fit")}
         onNow={goNow}
+        full={full}
+        onFullScreen={() => (full ? screen.exit() : void screen.enter())}
       />
       {(eventsError || tasksError) && (
         <SectionError
@@ -563,8 +629,17 @@ function TimelineBody({
           onRetry={onRetry}
         />
       )}
-      <div className="grid min-w-0 gap-4 @min-[1040px]:grid-cols-[minmax(0,1fr)_280px]">
-        <div ref={setFrame} className="relative min-w-0 rule-ink bg-kumo-elevated">
+      <div
+        className={cn(
+          "grid min-w-0 gap-4 @min-[1040px]:grid-cols-[minmax(0,1fr)_280px]",
+          full &&
+            "min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] @min-[1040px]:grid-rows-[minmax(0,1fr)]",
+        )}
+      >
+        <div
+          ref={setFrame}
+          className={cn("relative min-w-0 rule-ink bg-kumo-elevated", full && "min-h-0")}
+        >
           <section
             ref={scroller.ref}
             aria-label="Execution timeline"
@@ -577,7 +652,7 @@ function TimelineBody({
               follow.current = el.scrollLeft + el.clientWidth >= el.scrollWidth - 24;
             }}
             className="relative overflow-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-500"
-            style={{ height: frameHeight }}
+            style={{ height: full ? "100%" : frameHeight }}
           >
             <div className="relative" style={{ width: LEFT + plotWidth, height: AXIS_H + height }}>
               <Axis
@@ -635,7 +710,11 @@ function TimelineBody({
             </div>
           )}
         </div>
-        <AttentionRail items={model.attention} height={frameHeight} projectId={projectId} />
+        <AttentionRail
+          items={model.attention}
+          height={full ? null : frameHeight}
+          projectId={projectId}
+        />
       </div>
       <p id={summaryId} className="sr-only">
         {`${model.counts.people} people, ${model.counts.changes} changes, ${model.counts.tasks} tasks, ${model.counts.running} running. ${model.attention.length} items need attention. On the timeline, press plus or minus to zoom, 0 to fit, End to go to now.`}
@@ -659,6 +738,8 @@ function Toolbar({
   onZoomOut,
   onFit,
   onNow,
+  full,
+  onFullScreen,
 }: {
   pxLabel: string;
   atFit: boolean;
@@ -668,6 +749,8 @@ function Toolbar({
   onZoomOut: () => void;
   onFit: () => void;
   onNow: () => void;
+  full: boolean;
+  onFullScreen: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -717,6 +800,16 @@ function Toolbar({
         >
           {live ? "Now" : "Latest"}
         </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={full ? <ArrowsIn size={16} aria-hidden /> : <ArrowsOut size={16} aria-hidden />}
+          aria-pressed={full}
+          title={full ? "Exit full screen (Esc)" : "Show the timeline on the whole screen"}
+          onClick={onFullScreen}
+        >
+          {full ? "Exit full screen" : "Full screen"}
+        </Button>
       </div>
       <p className="text-[11px] text-kumo-subtle">
         Ctrl or pinch with the wheel zooms at the pointer.
@@ -728,35 +821,40 @@ Toolbar.displayName = "Toolbar";
 
 function Legend({ truncated }: { truncated: boolean }) {
   const bars: BarStatus[] = ["running", "completed", "failed", "cancelled"];
+  const head = "w-[92px] shrink-0 font-semibold text-kumo-default";
   return (
-    <div className="grid gap-1.5">
-      <ul
-        aria-label="Bar colors"
-        className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-kumo-subtle"
-      >
-        {bars.map((s) => (
-          <li key={s} className="inline-flex items-center gap-1.5">
-            <span aria-hidden className={cn("inline-block h-2.5 w-5", BAR_STYLE[s])} />
-            {BAR_WORD[s]} attempt
+    <div className="grid gap-1.5 text-[11px] text-kumo-subtle">
+      <div className="flex gap-2">
+        <span className={head}>Change markers</span>
+        <ul aria-label="Change markers" className="flex flex-wrap gap-x-4 gap-y-1">
+          {MARKER_LEGEND.map((m) => (
+            <li key={m.kind} className="inline-flex items-center gap-1.5">
+              <span aria-hidden className={cn("inline-block size-2.5", MARKER_STYLE[m.kind])} />
+              {m.label}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="flex gap-2">
+        <span className={head}>Task attempts</span>
+        <ul aria-label="Task attempt bars" className="flex flex-wrap gap-x-4 gap-y-1">
+          {bars.map((s) => (
+            <li key={s} className="inline-flex items-center gap-1.5">
+              <span aria-hidden className={cn("inline-block h-2.5 w-5", BAR_STYLE[s])} />
+              {BAR_WORD[s]}
+            </li>
+          ))}
+          <li className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="font-mono text-kumo-default">
+              H S O
+            </span>
+            Haiku, Sonnet, Opus
           </li>
-        ))}
-        <li className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="font-mono text-kumo-default">
-            H S O
-          </span>
-          Haiku, Sonnet, Opus
-        </li>
-        {MARKER_LEGEND.map((m) => (
-          <li key={m.kind} className="inline-flex items-center gap-1.5">
-            <span aria-hidden className={cn("inline-block size-2.5", MARKER_STYLE[m.kind])} />
-            {m.label}
-          </li>
-        ))}
-      </ul>
+        </ul>
+      </div>
+      <p>Red marks only failures and rejections. Hover a marker or bar for its detail.</p>
       {truncated && (
-        <p className="text-[11px] text-kumo-subtle">
-          Markers cover the newest 800 recorded events; older markers are not drawn.
-        </p>
+        <p>Markers cover the newest 800 recorded events; older markers are not drawn.</p>
       )}
     </div>
   );
@@ -875,8 +973,11 @@ function RowView({
             {p.name}
           </span>
           {p.isYou && <Tag variant="neutral">You</Tag>}
-          {p.isOwner && <Tag variant="outline">Owner</Tag>}
-          <span className="ml-auto shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
+          {p.isOwner && <Tag variant="neutral">Owner</Tag>}
+          <span
+            className="ml-auto shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums"
+            title={`${p.changes.length} changes · ${tasks} tasks`}
+          >
             {p.changes.length} · {tasks}
           </span>
         </div>
@@ -951,13 +1052,14 @@ function ChangeRow({
   const x1 = x(change.end ?? now);
   const live = change.end === null;
   const lineY = 30;
-  // Labels sit right of their square while they do not run into the next marker.
+  // Labels sit right of their square while they do not run into the next marker. Squares never
+  // overlap, so each marker keeps its own hover target.
   const placed = useMemo(() => {
     const out: { m: TimelineMarker; left: number; label: boolean }[] = [];
     const xs = change.markers.map((m) => x(m.at));
     let lastRight = Number.NEGATIVE_INFINITY;
     change.markers.forEach((m, i) => {
-      const left = Math.max(xs[i] ?? 0, lastRight + 2) - 5;
+      const left = Math.max((xs[i] ?? 0) - 5, lastRight + 2);
       const next = xs[i + 1] ?? Number.POSITIVE_INFINITY;
       const width = Math.ceil(m.label.length * 6.1) + 6;
       const label = left + 12 + width < next - 6;
@@ -1013,7 +1115,14 @@ function ChangeRow({
               <span
                 key={b.key}
                 aria-hidden
-                className={cn("absolute h-1.5", BAR_STYLE[b.status], "border-0")}
+                onPointerEnter={(e) => tip.show(e.currentTarget, tipFor.bar(t, b))}
+                onPointerLeave={tip.hide}
+                // The 6px bar takes pointer hits 6px above and below it.
+                className={cn(
+                  "absolute h-1.5 before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']",
+                  BAR_STYLE[b.status],
+                  "border-0",
+                )}
                 style={{
                   left: x(b.start),
                   top: lineY + 6,
@@ -1033,7 +1142,7 @@ function ChangeRow({
             onPointerLeave={tip.hide}
             onFocus={(e) => tip.show(e.currentTarget, tipFor.marker(m), true)}
             onBlur={tip.hide}
-            className="absolute z-[6] flex min-w-6 flex-col items-start justify-end gap-1 focus-visible:outline-2 focus-visible:outline-accent-500"
+            className="absolute z-[6] flex min-w-3 flex-col items-start justify-end gap-1 focus-visible:outline-2 focus-visible:outline-accent-500"
             style={{ left, top: MARKER_TOP, height: lineY + 5 - MARKER_TOP }}
           >
             {label && (
@@ -1106,7 +1215,9 @@ function TaskRow({
             </span>
           </span>
           <span className="flex min-w-0 items-baseline gap-1.5 font-mono text-[10px] text-kumo-subtle">
-            <span className="truncate">{task.agentId ?? "no agent yet"}</span>
+            <span className="truncate" title={task.agentId ?? undefined}>
+              {task.agentId ?? "no agent yet"}
+            </span>
             {last && <span className="shrink-0">{TIER_WORD[last.tier]}</span>}
             <span className="ml-auto shrink-0">{view.label}</span>
           </span>
@@ -1123,7 +1234,7 @@ function TaskRow({
         )}
         {task.bars.map((bar) => {
           const x0 = x(bar.start);
-          const width = Math.max(3, x(bar.end ?? now) - x0);
+          const width = Math.max(4, x(bar.end ?? now) - x0);
           const letter = TIER_LETTER[bar.tier];
           const inner =
             width >= 150
@@ -1167,14 +1278,20 @@ function AttentionRail({
   projectId,
 }: {
   items: AttentionItem[];
-  height: number;
+  /** Height of the plot frame; null in full screen, where the rail fills its grid row. */
+  height: number | null;
   projectId: string;
 }) {
   return (
     <aside
       aria-label="Needs attention"
-      className="order-first flex min-w-0 flex-col bg-kumo-elevated @min-[1040px]:order-none @min-[1040px]:max-h-[var(--rh-rail-h)]"
-      style={{ "--rh-rail-h": `${height + 2}px` } as CSSProperties}
+      className={cn(
+        "order-first flex min-w-0 flex-col bg-kumo-elevated @min-[1040px]:order-none",
+        height === null
+          ? "max-h-[30vh] min-h-0 @min-[1040px]:max-h-none"
+          : "@min-[1040px]:max-h-[var(--rh-rail-h)]",
+      )}
+      style={height === null ? undefined : ({ "--rh-rail-h": `${height + 2}px` } as CSSProperties)}
     >
       <div className="flex min-h-10 shrink-0 items-center justify-between gap-2 border-b-2 border-kumo-divider px-3">
         <h3 className="type-h6">Needs attention</h3>
@@ -1223,7 +1340,7 @@ function AttentionRail({
 AttentionRail.displayName = "AttentionRail";
 
 function AttentionBody({ item }: { item: AttentionItem }) {
-  const urgent = item.kind === "conflict" || item.kind === "dead_letter";
+  const urgent = item.kind === "dead_letter";
   return (
     <span className="grid gap-0.5">
       <span className="flex items-baseline justify-between gap-2">
@@ -1232,7 +1349,7 @@ function AttentionBody({ item }: { item: AttentionItem }) {
             "type-kicker",
             urgent
               ? "text-accent-700"
-              : item.kind === "clarify" || item.kind === "approval"
+              : item.kind === "clarify" || item.kind === "approval" || item.kind === "conflict"
                 ? "text-kumo-warning"
                 : "text-kumo-subtle",
           )}

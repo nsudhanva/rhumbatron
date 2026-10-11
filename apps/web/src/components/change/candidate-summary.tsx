@@ -2,7 +2,11 @@ import { Link } from "@tanstack/react-router";
 import type { EvidenceRecord } from "../../lib/api";
 import type { CandidateView } from "../../lib/api-change";
 import { formatNumber, generation } from "../../lib/format";
-import { AcceptanceList, acceptanceSummary } from "../candidate/acceptance-list";
+import {
+  AcceptanceList,
+  acceptanceSummary,
+  NoAcceptanceResult,
+} from "../candidate/acceptance-list";
 import {
   type CheckRow,
   candidateLabels,
@@ -114,6 +118,11 @@ export function CandidateSummary({
         </h3>
         {acceptance && acceptance.length > 0 ? (
           <AcceptanceList items={acceptance} />
+        ) : items.length > 0 && criteria.length > 0 ? (
+          <NoAcceptanceResult
+            criteria={criteria}
+            subject={lead ? "this candidate" : "any candidate yet"}
+          />
         ) : (
           <CriteriaList items={criteria} />
         )}

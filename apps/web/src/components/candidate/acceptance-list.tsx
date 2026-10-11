@@ -81,6 +81,34 @@ export function AcceptanceList({
 }
 AcceptanceList.displayName = "AcceptanceList";
 
+/**
+ * A Candidate with no recorded acceptance result: one line says so, and the criteria (when
+ * given) are listed plainly, with no checkbox that could read as "not met".
+ */
+export function NoAcceptanceResult({
+  criteria = [],
+  subject = "this candidate",
+}: {
+  criteria?: string[];
+  subject?: string;
+}) {
+  return (
+    <div className="grid gap-1">
+      <p className="text-[13px] text-kumo-subtle">No acceptance result recorded for {subject}.</p>
+      {criteria.length > 0 && (
+        <ul className="grid">
+          {criteria.map((c) => (
+            <li key={c} className="border-b border-kumo-rule py-2 text-[13px] text-pretty">
+              {c}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+NoAcceptanceResult.displayName = "NoAcceptanceResult";
+
 /** "4 / 5 met" header text. */
 export function acceptanceSummary(items: CriterionAcceptance[]) {
   const t = acceptanceTally(items);

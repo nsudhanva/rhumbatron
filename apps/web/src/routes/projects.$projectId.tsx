@@ -477,7 +477,7 @@ function RequestedByCell({ requester }: { requester: ChangeRequester }) {
   return (
     <span className="inline-flex items-center gap-1.5 text-[13px]">
       <span>{name}</span>
-      {requester.rank === 0 && <Tag variant="outline">Owner</Tag>}
+      {requester.rank === 0 && <Tag variant="neutral">Owner</Tag>}
     </span>
   );
 }

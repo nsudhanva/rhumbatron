@@ -176,9 +176,7 @@ export function ProjectPeople({ projectId, isOwner }: { projectId: string; isOwn
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <Tag variant={m.role === "owner" ? "outline" : "neutral"}>
-                      {m.role === "owner" ? "Owner" : "Collaborator"}
-                    </Tag>
+                    <Tag variant="neutral">{m.role === "owner" ? "Owner" : "Collaborator"}</Tag>
                     {m.isYou && <Tag variant="accent">You</Tag>}
                     {isOwner && isCollaborator && (
                       <Button
