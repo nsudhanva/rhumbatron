@@ -2,6 +2,8 @@
  * Temporary K2 adapter (ADR 0006). Provider 5.27 has no K2 resource.
  * Invoked only by terraform_data.k2_streams. Idempotent: creates missing streams and
  * subscriptions and fixes retention. It never deletes streams (a replace would lose data).
+ * `K2_MODE=destroy` (terraform_data.k2_streams_teardown, a real environment destroy only) deletes
+ * exactly the named streams and refuses any prod stream.
  */
 import { assertInvokedByTerraform, cfApi, requiredEnv } from "./lib/cloudflare-api.ts";
 
@@ -17,6 +19,21 @@ const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}/k2/stre
 
 const existing = await cfApi<Stream[]>(token, `${base}?per_page=100`);
 const byName = new Map(existing.map((s) => [s.name.toLowerCase(), s]));
+
+if (process.env.K2_MODE === "destroy") {
+  if (config.streams.some((d) => d.name.toLowerCase().endsWith("_prod"))) {
+    console.error("K2 destroy refuses prod streams. Nothing was deleted.");
+    process.exit(1);
+  }
+  for (const desired of config.streams) {
+    const stream = byName.get(desired.name.toLowerCase());
+    if (!stream) continue;
+    await cfApi(token, `${base}/${stream.id}`, { method: "DELETE" });
+    console.log(`deleted stream ${desired.name}`);
+  }
+  console.log(`K2 destroy done: ${config.streams.length} streams checked.`);
+  process.exit(0);
+}
 
 // K2 beta allows 20 streams per account, shared by dev, prod, and other projects (ADR 0017).
 // Refuse before creating anything, so a full account never ends with a partial stream set.

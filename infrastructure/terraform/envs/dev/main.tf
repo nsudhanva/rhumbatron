@@ -235,6 +235,47 @@ resource "terraform_data" "k2_streams" {
   }
 }
 
+# Empties the evidence bucket on a real destroy only, so the bucket delete that follows can succeed
+# (R2 refuses a bucket with objects). Depends on the state module, so it runs before the bucket goes.
+resource "terraform_data" "evidence_bucket_teardown" {
+  input = {
+    account_id = var.account_id
+    repo_root  = local.repo_root
+    bucket     = module.state.evidence_bucket_name
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "bun ${self.input.repo_root}/scripts/r2-empty.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      R2_ACCOUNT_ID         = self.input.account_id
+      R2_BUCKET             = self.input.bucket
+    }
+  }
+}
+
+# Deletes the dev streams on a real destroy only (section 11.4 step 9). Dev is retired, so its
+# events are not kept.
+resource "terraform_data" "k2_streams_teardown" {
+  input = {
+    account_id = var.account_id
+    repo_root  = local.repo_root
+    config     = jsonencode(local.k2_config)
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "bun ${self.input.repo_root}/scripts/k2-sync.ts"
+    environment = {
+      RHUMBATRON_INVOKED_BY = "terraform"
+      K2_MODE               = "destroy"
+      K2_ACCOUNT_ID         = self.input.account_id
+      K2_CONFIG             = self.input.config
+    }
+  }
+}
+
 # Deferred to apply time by depends_on, so a fresh environment works in one apply.
 data "external" "k2_streams" {
   program    = ["bun", "${local.repo_root}/scripts/k2-read.ts"]
