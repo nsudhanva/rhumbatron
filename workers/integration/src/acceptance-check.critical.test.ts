@@ -1,12 +1,13 @@
 // Acceptance check citations (ADR 0026, AGENTS.md 34.4.2). Invariants: a `met` counts only with a
-// quote that code finds in a file the model received; removed patch lines and short quotes prove
-// nothing; malformed output (wrong criterion count) is invalid; only all-met passes.
+// quote that code finds in a patch or composed file the model received; removed patch lines and
+// short quotes prove nothing; code already in the base can be cited from the composed file;
+// malformed output (wrong criterion count) is invalid; only all-met passes.
 import { describe, expect, it } from "vitest";
 import {
   acceptanceOutcome,
+  acceptanceSource,
   citationValid,
-  sourceFromFiles,
-  sourceFromPatch,
+  composedFileOrder,
   validateAcceptance,
 } from "./acceptance-check.ts";
 
@@ -29,7 +30,7 @@ const PATCH = [
 ].join("\n");
 
 describe("acceptance citations", () => {
-  const source = sourceFromPatch(PATCH);
+  const source = acceptanceSource({ text: PATCH, truncated: false }, []);
 
   it("accepts an exact quote of an added line, with or without the + marker", () => {
     expect(
@@ -57,8 +58,85 @@ describe("acceptance citations", () => {
   });
 
   it("checks composed file text when no patch is stored", () => {
-    const files = sourceFromFiles([{ path: "src/a.ts", text: "export const kanban = true;\n" }]);
+    const files = acceptanceSource(null, [
+      { path: "src/a.ts", text: "export const kanban = true;\n" },
+    ]);
     expect(citationValid(files, { path: "src/a.ts", quote: "export const kanban" })).toBe(true);
+  });
+
+  it("meets a criterion with unchanged composed code the patch does not show", () => {
+    // This Change touched only the stylesheet; the counter page came from an earlier Change.
+    const patch = [
+      "diff --git a/public/style.css b/public/style.css",
+      "--- a/public/style.css",
+      "+++ b/public/style.css",
+      "@@ -1 +1 @@",
+      "-h1 { color: black; }",
+      "+h1 { color: navy; }",
+      "",
+    ].join("\n");
+    const indexHtml = [
+      "<!doctype html>",
+      '<link rel="stylesheet" href="/style.css">',
+      "<h1>Team counter</h1>",
+      '<output id="count">0</output>',
+      '<button id="dec">-</button><button id="inc">+</button>',
+      '<script type="module" src="./counter.js"></script>',
+    ].join("\n");
+    const tree = [
+      "public/index.html",
+      "public/style.css",
+      "public/counter.js",
+      "src/app.ts",
+      "README.md",
+    ];
+    expect(composedFileOrder(tree, ["public/style.css"], indexHtml)).toEqual([
+      "public/style.css",
+      "public/index.html",
+      "public/counter.js",
+      "src/app.ts",
+    ]);
+    const read = acceptanceSource({ text: patch, truncated: false }, [
+      { path: "public/style.css", text: "h1 { color: navy; }\n" },
+      { path: "public/index.html", text: indexHtml },
+    ]);
+    const criteria = ["Home page shows heading 'Team counter' with a count and + and - buttons"];
+    const met = validateAcceptance(
+      {
+        results: [
+          {
+            criterion: 1,
+            status: "met",
+            citations: [{ path: "public/index.html", quote: "<h1>Team counter</h1>" }],
+          },
+        ],
+      },
+      criteria,
+      read,
+    );
+    expect(met?.[0]?.status).toBe("met");
+    expect(acceptanceOutcome(met ?? [])).toMatchObject({ status: "pass" });
+    // The patch alone cannot support the same citation: the rule "met needs a valid quote" holds.
+    const patchOnly = acceptanceSource({ text: patch, truncated: false }, []);
+    expect(
+      citationValid(patchOnly, { path: "public/index.html", quote: "<h1>Team counter</h1>" }),
+    ).toBe(false);
+    // A removed patch line stays invalid even though the composed file shares its path.
+    expect(citationValid(read, { path: "public/style.css", quote: "h1 { color: black; }" })).toBe(
+      false,
+    );
+  });
+
+  it("puts the patch first and cuts composed files at the cap, marked truncated", () => {
+    const read = acceptanceSource(
+      { text: PATCH, truncated: false },
+      [{ path: "src/big.ts", text: "const line = 1;\n".repeat(200) }],
+      PATCH.length + 400,
+    );
+    expect(read.files[0]?.kind).toBe("patch");
+    const last = read.files.at(-1);
+    expect(last).toMatchObject({ kind: "file", path: "src/big.ts", truncated: true });
+    expect(read.truncated).toBe(true);
   });
 
   it("turns met without a valid citation into unclear, and fails unless every criterion is met", () => {
