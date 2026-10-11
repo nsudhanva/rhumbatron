@@ -1,5 +1,5 @@
 ---
-// Wraps Starlight's Markdown container to render Mermaid diagrams on the client.
+// Wraps Starlight's Markdown container to render Mermaid diagrams on the client, lazily.
 // biome-ignore lint/correctness/noUnusedImports: Biome does not see template usage in .astro files.
 import Default from "@astrojs/starlight/components/MarkdownContent.astro";
 ---
@@ -9,5 +9,5 @@ import Default from "@astrojs/starlight/components/MarkdownContent.astro";
 <script>
   import { renderMermaid } from "../scripts/mermaid";
 
-  void renderMermaid();
+  renderMermaid();
 </script>

@@ -18,7 +18,7 @@ flowchart TB
   cb --> rb[p95 under 1 ms<br/>verified, waits for approval]
 ```
 
-| | Design A | Design B |
+| Aspect | Design A | Design B |
 |---|---|---|
 | Data model | Normalized mutable tables. Remove and revoke update `wishlist_collaborators` rows in place. | Append-only membership event log. Each event updates a materialized current-member set. |
 | Read path | Every request computes access from the collaborator table. That is one scan per check, and one check per item for `addedByRole`. | Reads use the materialized set: one map lookup per check. |
