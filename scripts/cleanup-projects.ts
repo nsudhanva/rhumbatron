@@ -28,7 +28,7 @@ async function clerk<T>(path: string, body?: unknown, method = "POST"): Promise<
   const response = await fetch(`https://api.clerk.com/v1${path}`, {
     method,
     headers: { authorization: `Bearer ${secretKey}`, "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   if (!response.ok) throw new Error(`Clerk ${path} returned ${response.status}`);
   return (await response.json()) as T;
