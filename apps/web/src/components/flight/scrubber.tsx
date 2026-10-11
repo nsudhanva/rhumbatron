@@ -1,7 +1,8 @@
 import { Button, cn } from "@cloudflare/kumo";
 import { Pause, Play } from "@phosphor-icons/react";
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useId, useMemo, useRef } from "react";
 import { formatNumber } from "../../lib/format";
+import { displayTimeZone } from "../../lib/render-time";
 import type { ActivityEvent } from "../agents/activity-model";
 import { StatusPill } from "../ui/status-pill";
 import { useFlight } from "./flight-context";
@@ -81,12 +82,14 @@ function relative(ms: number) {
   return h > 0 ? `T+${h}:${pad(m)}:${pad(s)}` : `T+${pad(m)}:${pad(s)}`;
 }
 
-/** 24-hour clock. UTC until hydrated (server and first client render agree), then local time. */
-const clock = (at: number, local: boolean) =>
-  new Date(at).toLocaleTimeString("en-GB", {
+/** 24-hour clock in the viewer's zone, the same on the server and in the hydration. */
+const clock = (at: number) => {
+  const timeZone = displayTimeZone();
+  return new Date(at).toLocaleTimeString("en-GB", {
     hour12: false,
-    ...(local ? {} : { timeZone: "UTC" }),
+    ...(timeZone ? { timeZone } : {}),
   });
+};
 
 export function Scrubber() {
   const { model, state } = useFlight();
@@ -96,8 +99,6 @@ export function Scrubber() {
   const setPlaying = useFlightStore((s) => s.setPlaying);
   const setSpeed = useFlightStore((s) => s.setSpeed);
   const notesId = useId();
-  const [local, setLocal] = useState(false);
-  useEffect(() => setLocal(true), []);
 
   const { start, end, live: changeLive } = model.bounds;
   const span = Math.max(1, end - start);
@@ -176,7 +177,7 @@ export function Scrubber() {
   };
 
   const position = ((at - start) / span) * 100;
-  const valueText = `${clock(at, local)}, ${relative(at - start)}${historical ? "" : ", live"}, ${formatNumber(state.events.length)} of ${formatNumber(model.events.length)} facts`;
+  const valueText = `${clock(at)}, ${relative(at - start)}${historical ? "" : ", live"}, ${formatNumber(state.events.length)} of ${formatNumber(model.events.length)} facts`;
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-kumo-rule px-3 py-2">
@@ -218,7 +219,7 @@ export function Scrubber() {
       </div>
 
       <p className="flex shrink-0 items-baseline gap-2 font-mono text-[12px] tabular-nums">
-        <time dateTime={new Date(at).toISOString()}>{clock(at, local)}</time>
+        <time dateTime={new Date(at).toISOString()}>{clock(at)}</time>
         <span className="text-kumo-subtle">{relative(at - start)}</span>
       </p>
 

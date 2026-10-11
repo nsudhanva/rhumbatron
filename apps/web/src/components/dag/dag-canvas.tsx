@@ -131,7 +131,7 @@ const EDGE_STYLE: Record<DagEdgeKind, CSSProperties> = {
 
 const EDGE_LABEL: CSSProperties = {
   fontFamily: "var(--font-mono)",
-  fontSize: 10,
+  fontSize: "var(--rh-text-10)",
   fill: "var(--color-kumo-ink)",
 };
 const EDGE_LABEL_BG: CSSProperties = { fill: "var(--color-kumo-elevated)" };

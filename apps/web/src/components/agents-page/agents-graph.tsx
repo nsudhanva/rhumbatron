@@ -48,6 +48,28 @@ const TIER_LABEL: Record<string, string> = { haiku: "Haiku", sonnet: "Sonnet", o
 
 type ChangeData = { change: ChangeSummary; tasks: TaskDetail[]; conflicts: ConflictDetail[] };
 
+/**
+ * Changes in scope: the chosen Change, else Changes with listed agents active in the range, else
+ * the newest Change. Person narrows every choice. At most MAX_CHANGES. The route loader reads
+ * the Task and conflict lists of the same Changes on the server (`EMPTY_FILTER`).
+ */
+export function changesInScope(
+  changes: ChangeSummary[],
+  agents: AgentView[],
+  filter: DagFilter = EMPTY_FILTER,
+): ChangeSummary[] {
+  const byPerson = changes.filter(
+    (c) => filter.person === null || c.requester?.userId === filter.person,
+  );
+  if (filter.changeId) return byPerson.filter((c) => c.id === filter.changeId);
+  const withAgents = new Set(
+    agents.filter((a) => inTimeRange(a.lastActiveAt, filter.range)).map((a) => a.task.changeId),
+  );
+  const active = byPerson.filter((c) => withAgents.has(c.id));
+  const inRange = byPerson.filter((c) => inTimeRange(c.createdAt, filter.range));
+  return (active.length > 0 ? active : inRange.slice(0, 1)).slice(0, MAX_CHANGES);
+}
+
 type Selection =
   | { kind: "change"; change: ChangeSummary }
   | { kind: "task"; change: ChangeSummary; task: TaskDetail }
@@ -233,20 +255,7 @@ export function AgentsGraph({
 
   const agentsByTask = useMemo(() => new Map(agents.map((a) => [a.task.id, a])), [agents]);
 
-  // Changes in scope: the chosen Change, else Changes with listed agents active in the range,
-  // else the newest Change. Person narrows every choice. At most MAX_CHANGES.
-  const scoped = useMemo(() => {
-    const byPerson = changes.filter(
-      (c) => filter.person === null || c.requester?.userId === filter.person,
-    );
-    if (filter.changeId) return byPerson.filter((c) => c.id === filter.changeId);
-    const withAgents = new Set(
-      agents.filter((a) => inTimeRange(a.lastActiveAt, filter.range)).map((a) => a.task.changeId),
-    );
-    const active = byPerson.filter((c) => withAgents.has(c.id));
-    const inRange = byPerson.filter((c) => inTimeRange(c.createdAt, filter.range));
-    return (active.length > 0 ? active : inRange.slice(0, 1)).slice(0, MAX_CHANGES);
-  }, [changes, agents, filter.person, filter.changeId, filter.range]);
+  const scoped = useMemo(() => changesInScope(changes, agents, filter), [changes, agents, filter]);
   const hiddenChanges = filter.changeId
     ? 0
     : Math.max(

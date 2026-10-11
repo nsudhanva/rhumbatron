@@ -24,6 +24,7 @@ import { PipelineStrip, type StageCount } from "../components/verification-page/
 import { VerificationStats } from "../components/verification-page/verification-stats";
 import { getProject, getProjectVerification } from "../lib/api";
 import { formatNumber, timeAgo } from "../lib/format";
+import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
  * Project-wide verification (AGENTS.md sections 34, 35, 38): how recent Candidates fared against
@@ -31,6 +32,16 @@ import { formatNumber, timeAgo } from "../lib/format";
  * `checked_supported` pass Evidence is a gap and never counts as met.
  */
 export const Route = createFileRoute("/projects_/$projectId/verification")({
+  // Server render: the stats, heat grid and Candidate table are in the first HTML.
+  loader: ({ context: { queryClient }, params: { projectId } }) =>
+    loadOnServer(queryClient, () =>
+      Promise.all([
+        prefetchProjectShell(queryClient, projectId),
+        prefetch(queryClient, ["project-verification", projectId], () =>
+          getProjectVerification({ data: projectId }),
+        ),
+      ]),
+    ),
   component: VerificationPage,
 });
 

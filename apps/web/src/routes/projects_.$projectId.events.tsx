@@ -1,17 +1,25 @@
 import { Show, SignInButton } from "@clerk/tanstack-react-start";
 import { Button, buttonVariants, cn } from "@cloudflare/kumo";
 import { SignIn, X } from "@phosphor-icons/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useCallback, useEffect, useMemo } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { type DagMode, ViewToggle } from "../components/dag/view-toggle";
 import { EventPlane } from "../components/events-page/event-plane";
 import { EventStream } from "../components/events-page/event-stream";
 import { EventsGraph } from "../components/events-page/events-graph";
-import { type FeedEvent, typeTone } from "../components/events-page/feed-model";
-import { type FetchFeedPage, useEventFeed } from "../components/events-page/use-event-feed";
+import {
+  FEED_FIRST_LIMIT,
+  type FeedEvent,
+  type FeedPage,
+  typeTone,
+} from "../components/events-page/feed-model";
+import {
+  type FetchFeedPage,
+  firstPageKey,
+  useEventFeed,
+} from "../components/events-page/use-event-feed";
 import { SectionError } from "../components/project/feedback";
-import { usePageMeta } from "../components/shell/page-meta";
 import { EmptyState } from "../components/ui/empty-state";
 import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
@@ -19,6 +27,7 @@ import { StatCell, StatStrip } from "../components/ui/stat-strip";
 import { listChangeEvents, listChanges, listProjectEvents } from "../lib/api";
 import { EMPTY, formatAge, formatClock, formatNumber } from "../lib/format";
 import { type LiveStatus, useProjectLive } from "../lib/live";
+import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 import { SystemsOnly, useViewMode } from "../lib/view-mode";
 
 /**
@@ -35,6 +44,19 @@ export const Route = createFileRoute("/projects_/$projectId/events")({
     ...(typeof search.change === "string" && search.change ? { change: search.change } : {}),
     ...(search.view === "list" || search.view === "graph" ? { view: search.view } : {}),
   }),
+  loaderDeps: ({ search }) => ({ change: search.change }),
+  // Server render: the stats and the first page of the stream are in the first HTML.
+  loader: ({ context: { queryClient }, params: { projectId }, deps: { change } }) =>
+    loadOnServer(queryClient, () =>
+      Promise.all([
+        prefetchProjectShell(queryClient, projectId),
+        prefetch(queryClient, firstPageKey(projectId, change), () =>
+          change
+            ? listChangeEvents({ data: { changeId: change, limit: FEED_FIRST_LIMIT } })
+            : listProjectEvents({ data: { projectId, limit: FEED_FIRST_LIMIT } }),
+        ),
+      ]),
+    ),
   component: EventsPage,
 });
 
@@ -78,7 +100,6 @@ function EventsView() {
     queryFn: () => listChanges({ data: projectId }),
     enabled: mode === "graph",
   });
-  usePageMeta({ trail: changeId ? [{ label: changeId, mono: true }] : [] });
   const systems = useViewMode() === "systems";
 
   const fetchPage = useCallback<FetchFeedPage>(
@@ -88,7 +109,11 @@ function EventsView() {
         : listProjectEvents({ data: { projectId, ...cursor } }),
     [projectId, changeId],
   );
-  const feed = useEventFeed(`${projectId}:${changeId ?? ""}`, fetchPage);
+  const queryClient = useQueryClient();
+  const [seed] = useState(() =>
+    queryClient.getQueryData<FeedPage>(firstPageKey(projectId, changeId)),
+  );
+  const feed = useEventFeed(`${projectId}:${changeId ?? ""}`, fetchPage, seed);
   const { pull } = feed;
 
   const live = useProjectLive(projectId, true, () => pull());

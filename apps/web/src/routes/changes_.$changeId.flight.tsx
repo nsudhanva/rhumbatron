@@ -2,11 +2,13 @@ import { Show, SignInButton } from "@clerk/tanstack-react-start";
 import { Button } from "@cloudflare/kumo";
 import { SignIn } from "@phosphor-icons/react";
 import { createFileRoute } from "@tanstack/react-router";
+import { preloadChange } from "../components/change/preload-change";
 import { FlightPage, FlightSkeleton } from "../components/flight/flight-page";
 import { useFlightData } from "../components/flight/use-flight-data";
-import { usePageMeta } from "../components/shell/page-meta";
 import { EmptyState } from "../components/ui/empty-state";
 import { Page } from "../components/ui/page";
+import { getChangeDecisions, getWorkspace } from "../lib/api";
+import { loadChange, loadOnServer, prefetch } from "../lib/ssr-data";
 
 /**
  * Flight Control for one Change (AGENTS.md 38, 39): every recorded fact of the Change in
@@ -24,6 +26,22 @@ export const Route = createFileRoute("/changes_/$changeId/flight")({
       },
     ],
   }),
+  // Server render: every panel's facts are in the first HTML (lib/ssr-data.ts). The Change
+  // page's reads plus the two Flight Control adds: the Project workspace and the Decisions.
+  loader: ({ context: { queryClient }, params: { changeId } }) =>
+    loadOnServer(queryClient, () =>
+      Promise.allSettled([
+        preloadChange(queryClient, changeId),
+        loadChange(queryClient, changeId).then((change) =>
+          prefetch(queryClient, ["workspace", change.projectId], () =>
+            getWorkspace({ data: change.projectId }),
+          ),
+        ),
+        prefetch(queryClient, ["change-decisions", changeId], () =>
+          getChangeDecisions({ data: changeId }),
+        ),
+      ]),
+    ),
   component: FlightRoute,
 });
 
@@ -55,7 +73,6 @@ function FlightRoute() {
 function FlightView() {
   const { changeId } = Route.useParams();
   const { model, ready, socket, error, projectId } = useFlightData(changeId);
-  usePageMeta({ trail: [{ label: "Flight Control" }] });
 
   return (
     <Page width="full" gap="tight">

@@ -15,6 +15,7 @@ import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section, TwoUp } from "../components/ui/page";
 import { getProject, getProjectCost } from "../lib/api";
 import { formatClock, formatNumber, truncate } from "../lib/format";
+import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
  * Costs (AGENTS.md sections 24, 44, 56): recorded model usage and spend per Change against its
@@ -27,6 +28,17 @@ export const Route = createFileRoute("/projects_/$projectId/costs")({
     typeof search.change === "string" && /^chg_[a-z0-9-]+$/.test(search.change)
       ? { change: search.change }
       : {},
+  loaderDeps: ({ search }) => ({ change: search.change }),
+  // Server render: the meters, Change table and the selected Change's budget and usage.
+  loader: ({ context: { queryClient }, params: { projectId }, deps: { change } }) =>
+    loadOnServer(queryClient, () =>
+      Promise.all([
+        prefetchProjectShell(queryClient, projectId),
+        prefetch(queryClient, ["project-cost", projectId, change ?? null], () =>
+          getProjectCost({ data: { projectId, ...(change ? { changeId: change } : {}) } }),
+        ),
+      ]),
+    ),
   component: CostsPage,
 });
 

@@ -23,8 +23,27 @@ import {
 } from "../components/workspace-page/model";
 import { getProject, getWorkspace, getWorkspaceFiles, type WorkspaceView } from "../lib/api";
 import { EMPTY, formatAge, formatNumber, generation, truncate } from "../lib/format";
+import { loadOnServer, prefetchProjectShell } from "../lib/ssr-data";
 
 export const Route = createFileRoute("/projects_/$projectId/workspace")({
+  // Server render: the stats, fork tree, fork detail and file index are in the first HTML.
+  loader: ({ context: { queryClient }, params: { projectId } }) =>
+    loadOnServer(queryClient, async () => {
+      const [, view] = await Promise.all([
+        prefetchProjectShell(queryClient, projectId),
+        queryClient.ensureQueryData({
+          queryKey: ["workspace", projectId],
+          queryFn: () => getWorkspace({ data: projectId }),
+        }),
+      ]);
+      const tree = view.canonical.assigned ? view.canonical.treeSha : undefined;
+      if (!tree) return;
+      await queryClient.prefetchQuery({
+        queryKey: ["workspace-files", projectId, tree],
+        queryFn: () => getWorkspaceFiles({ data: { projectId, tree } }),
+        staleTime: Number.POSITIVE_INFINITY,
+      });
+    }),
   component: WorkspacePage,
 });
 

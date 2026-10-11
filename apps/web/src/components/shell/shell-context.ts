@@ -141,6 +141,38 @@ function documentTitle(
   return [page, scoped, "Rhumbatron"].filter(Boolean).join(" · ");
 }
 
+/**
+ * The crumb of a sub-view, derived from the route and its search like the rest of the trail, so
+ * the server renders it and the header keeps its height after hydration (a client-only crumb
+ * wraps the header onto another line on a phone and moves the page down).
+ */
+function subViewTrail(
+  routeId: string | undefined,
+  search: Record<string, unknown>,
+  changes: ChangeSummary[] | undefined,
+): Crumb[] {
+  switch (routeId) {
+    case "/compare/$changeId":
+      return [{ label: "Compare" }];
+    case "/changes_/$changeId/flight":
+      return [{ label: "Flight Control" }];
+    case "/projects_/$projectId/events":
+      return typeof search.change === "string" ? [{ label: search.change, mono: true }] : [];
+    case "/projects_/$projectId/graph": {
+      // The same choice as the Product Graph page: the requested Change, else the newest one.
+      const list = changes ?? [];
+      const requested = list.find((c) => c.id === search.changeId);
+      const selected = requested ?? list[0];
+      const zoom = selected ? (search.zoom ?? "change") : "project";
+      return zoom === "change" && selected
+        ? [{ label: truncate(selected.goal, 44) }]
+        : [{ label: "All Changes" }];
+    }
+    default:
+      return [];
+  }
+}
+
 /** The Project of a Change, from a Changes list already in the query cache. No request. */
 function cachedProjectOf(queryClient: QueryClient, changeId: string | undefined) {
   if (!changeId) return undefined;
@@ -171,6 +203,9 @@ export function useShellContext(): ShellContext {
     candidateId?: string;
   };
   const routeId = useRouterState({ select: (s) => s.matches.at(-1)?.routeId });
+  const search = useRouterState({ select: (s) => s.matches.at(-1)?.search }) as
+    | Record<string, unknown>
+    | undefined;
   const { isSignedIn } = useAuth();
   const signedIn = isSignedIn === true;
   const queryClient = useQueryClient();
@@ -244,6 +279,7 @@ export function useShellContext(): ShellContext {
   // A static crumb belongs here, not in `usePageMeta`: the server renders it, so the header
   // does not grow after hydration (a client-only crumb shifted /design by 27px at 412px wide).
   if (routeId === "/design") trail.push({ label: "Design reference" });
+  trail.push(...subViewTrail(routeId, search ?? {}, changes.data));
 
   return {
     section,

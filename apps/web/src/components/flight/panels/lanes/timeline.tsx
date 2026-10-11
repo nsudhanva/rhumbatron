@@ -11,6 +11,7 @@ import {
 } from "react";
 import { create } from "zustand";
 import { usePrefersReducedMotion } from "../../../../lib/motion";
+import { displayTimeZone } from "../../../../lib/render-time";
 import { useFlight } from "../../flight-context";
 import { type EntityRef, useFlightStore, useSelection } from "../../flight-store";
 import { EntityHover } from "../../hover-preview";
@@ -111,26 +112,18 @@ export function relTime(ms: number) {
   return h > 0 ? `T+${h}:${pad2(m)}:${pad2(s % 60)}` : `T+${pad2(m)}:${pad2(s % 60)}`;
 }
 
-/** Set once any time panel has hydrated: clocks switch from UTC to local time together. */
-const useHydrated = create<{ hydrated: boolean }>()(() => ({ hydrated: false }));
-
 /**
- * 24-hour clock formatter. UTC until hydrated (server and first client render agree), then the
- * viewer's local time, so a clock never causes a hydration mismatch.
+ * 24-hour clock formatter in the viewer's zone (lib/render-time.ts): the server render and the
+ * hydration print the same time, so a clock never causes a hydration mismatch.
  */
 export function useClock(): (ms: number) => string {
-  const hydrated = useHydrated((s) => s.hydrated);
-  useEffect(() => {
-    if (!useHydrated.getState().hydrated) useHydrated.setState({ hydrated: true });
+  return useCallback((ms: number) => {
+    const timeZone = displayTimeZone();
+    return new Date(ms).toLocaleTimeString("en-GB", {
+      hour12: false,
+      ...(timeZone ? { timeZone } : {}),
+    });
   }, []);
-  return useCallback(
-    (ms: number) =>
-      new Date(ms).toLocaleTimeString("en-GB", {
-        hour12: false,
-        ...(hydrated ? {} : { timeZone: "UTC" }),
-      }),
-    [hydrated],
-  );
 }
 
 export type TimeScale = {

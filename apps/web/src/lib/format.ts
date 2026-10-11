@@ -1,9 +1,13 @@
 import type { ChangeDetail, TaskDetail, TaskRun } from "./api";
+import { displayTimeZone, renderNow } from "./render-time";
 
 /*
  * Number and time formats (DESIGN.md section 12): thousands separators, a space before units,
  * money as $0.00, durations as 48s / 3m 12s / 2 h, relative ages as 7m / 2d / just now, the
  * minus sign (U+2212) for negatives, and an em dash for empty or unknown values.
+ *
+ * Ages and clock times read `renderNow` and `displayTimeZone` (render-time.ts), so the server
+ * render and the hydration print the same text.
  */
 
 /** Shown for empty or unknown values. Never "N/A", "null" or a blank. */
@@ -73,7 +77,7 @@ export function formatDuration(seconds: Maybe<number>) {
 }
 
 /** Relative age: `just now`, `7m`, `5h`, `2d`. */
-export function formatAge(iso: Maybe<string>, now = Date.now()) {
+export function formatAge(iso: Maybe<string>, now = renderNow()) {
   if (!iso) return EMPTY;
   const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   if (Number.isNaN(seconds)) return EMPTY;
@@ -84,7 +88,7 @@ export function formatAge(iso: Maybe<string>, now = Date.now()) {
 }
 
 /** Relative age for prose: `just now`, `7m ago`. */
-export function timeAgo(iso: string, now = Date.now()) {
+export function timeAgo(iso: string, now = renderNow()) {
   const age = formatAge(iso, now);
   return age === "just now" || age === EMPTY ? age : `${age} ago`;
 }
@@ -94,7 +98,8 @@ export function formatClock(iso: Maybe<string>) {
   if (!iso) return EMPTY;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return EMPTY;
-  return date.toLocaleTimeString("en-GB", { hour12: false });
+  const timeZone = displayTimeZone();
+  return date.toLocaleTimeString("en-GB", { hour12: false, ...(timeZone ? { timeZone } : {}) });
 }
 
 export const generation = (n: number) => `S${n}`;
@@ -103,7 +108,7 @@ export function truncate(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}\u2026` : text;
 }
 
-export function runDuration(run: TaskRun, now = Date.now()) {
+export function runDuration(run: TaskRun, now = renderNow()) {
   const end = run.endedAt ? new Date(run.endedAt).getTime() : now;
   return formatDuration(Math.max(0, (end - new Date(run.startedAt).getTime()) / 1000));
 }

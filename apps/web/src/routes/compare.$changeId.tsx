@@ -9,25 +9,48 @@ import {
 } from "../components/candidate/comparison-matrix";
 import { candidateLabels, checkRows, isActive } from "../components/candidate/model";
 import { CandidateSkeleton } from "../components/candidate/skeleton";
-import { usePageMeta } from "../components/shell/page-meta";
 import { EmptyState } from "../components/ui/empty-state";
 import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
 import { StatusPill } from "../components/ui/status-pill";
 import { getChange, listCandidateEvidence, listCandidates } from "../lib/api";
 import { formatNumber, generation, timeAgo, truncate } from "../lib/format";
+import { loadChange, loadOnServer, prefetch } from "../lib/ssr-data";
 
 /**
  * Candidate comparison for one Change (AGENTS.md section 38.4, DESIGN.md 9.12). Shows every
  * Candidate against the same criteria so a reader sees in under a minute which future the
  * Evidence selects and why.
  */
-export const Route = createFileRoute("/compare/$changeId")({ component: ComparePage });
+export const Route = createFileRoute("/compare/$changeId")({
+  // Server render: the title and the Evidence matrix are in the first HTML (lib/ssr-data.ts).
+  // Same keys and server functions as the queries below.
+  loader: ({ context: { queryClient }, params: { changeId } }) =>
+    loadOnServer(queryClient, () =>
+      Promise.allSettled([
+        loadChange(queryClient, changeId),
+        queryClient
+          .ensureQueryData({
+            queryKey: ["candidates", changeId],
+            queryFn: () => listCandidates({ data: changeId }),
+          })
+          .then((candidates) =>
+            Promise.all(
+              candidates.map((c) =>
+                prefetch(queryClient, ["candidate-evidence", c.id], () =>
+                  listCandidateEvidence({ data: c.id }),
+                ),
+              ),
+            ),
+          ),
+      ]),
+    ),
+  component: ComparePage,
+});
 
 const POLL_MS = 10_000;
 
 function ComparePage() {
-  usePageMeta({ trail: [{ label: "Compare" }] });
   return (
     <Page>
       <Show when="signed-in">

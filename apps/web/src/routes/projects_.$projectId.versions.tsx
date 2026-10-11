@@ -21,6 +21,7 @@ import {
   rollbackProject,
 } from "../lib/api";
 import { EMPTY, formatNumber, generation, timeAgo } from "../lib/format";
+import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
  * Versions (P16-13; AGENTS.md sections 21.3, 42.10): every Canonical Generation, an "Open" link to
@@ -29,7 +30,20 @@ import { EMPTY, formatNumber, generation, timeAgo } from "../lib/format";
  * Project policy gates the riskiest Change it undoes.
  */
 
-export const Route = createFileRoute("/projects_/$projectId/versions")({ component: VersionsPage });
+export const Route = createFileRoute("/projects_/$projectId/versions")({
+  // Server render: the version table with its "Open" links is in the first HTML.
+  loader: ({ context: { queryClient }, params: { projectId } }) =>
+    loadOnServer(queryClient, () =>
+      Promise.all([
+        prefetchProjectShell(queryClient, projectId),
+        prefetch(queryClient, ["code-versions", projectId], () =>
+          getCodeVersions({ data: projectId }),
+        ),
+        prefetch(queryClient, ["project-app", projectId], () => getProjectApp({ data: projectId })),
+      ]),
+    ),
+  component: VersionsPage,
+});
 
 const LINK = "relative z-10 text-kumo-link underline-offset-2 hover:underline";
 

@@ -24,6 +24,7 @@ import {
   getProject,
 } from "../lib/api";
 import { EMPTY, formatNumber, generation, timeAgo, truncate } from "../lib/format";
+import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
  * Code (P16-18; AGENTS.md 38.5): the files of any Canonical Generation, with the version history
@@ -42,11 +43,42 @@ export const Route = createFileRoute("/projects_/$projectId/code")({
       ? { path: search.path }
       : {}),
   }),
+  loaderDeps: ({ search }) => ({ tree: search.tree, path: search.path }),
+  // Server render: the version picker, file list, open file and history are in the first HTML.
+  loader: ({ context: { queryClient }, params: { projectId }, deps }) =>
+    loadOnServer(queryClient, async () => {
+      const [, , tree] = await Promise.all([
+        prefetchProjectShell(queryClient, projectId),
+        prefetch(queryClient, ["code-versions", projectId], () =>
+          getCodeVersions({ data: projectId }),
+        ),
+        queryClient.ensureQueryData({
+          queryKey: ["code-tree", projectId, deps.tree ?? "live"],
+          queryFn: () => getCodeTree({ data: { projectId, tree: deps.tree } }),
+        }),
+      ]);
+      const path = openPath(deps.path, tree.files);
+      const entry = tree.files.find((f) => f.path === path);
+      // Large files load in the browser: their text would double in the HTML and its data.
+      if (!path || !entry || (entry.size ?? Number.POSITIVE_INFINITY) > SSR_FILE_BYTES) return;
+      await queryClient.prefetchQuery({
+        queryKey: ["code-file", projectId, tree.treeSha, path],
+        queryFn: () => getCodeFile({ data: { projectId, tree: tree.treeSha, path } }),
+        staleTime: Number.POSITIVE_INFINITY,
+      });
+    }),
   component: CodePage,
 });
 
 /** Files opened first when none is chosen. */
 const DEFAULT_FILES = ["README.md", "readme.md", "package.json"];
+/** Largest open file the server render includes. */
+const SSR_FILE_BYTES = 64 * 1024;
+
+/** The file shown: the one in the URL, else the first stored default file. */
+function openPath(path: string | undefined, files: CodeTree["files"] | undefined) {
+  return path ?? DEFAULT_FILES.find((p) => files?.some((f) => f.path === p && f.stored));
+}
 
 function CodePage() {
   return (
@@ -93,8 +125,7 @@ function CodeContent() {
     refetchInterval: (query) => (query.state.data?.contents === "partial" ? 5_000 : false),
   });
   const files = tree.data?.files;
-  const path =
-    search.path ?? DEFAULT_FILES.find((p) => files?.some((f) => f.path === p && f.stored));
+  const path = openPath(search.path, files);
   const treeSha = tree.data?.treeSha;
   const file = useQuery({
     queryKey: ["code-file", projectId, treeSha, path],

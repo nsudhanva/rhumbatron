@@ -25,6 +25,7 @@ import {
 } from "react";
 import { type ChangeSummary, getDeadLetters } from "../../lib/api";
 import { formatAge, formatNumber, truncate } from "../../lib/format";
+import { displayTimeZone, renderNow, zoneOffsetMs } from "../../lib/render-time";
 import { SectionError, SkeletonBar } from "../project/feedback";
 import { ChangeStatusPill } from "../project/status";
 import { EmptyState } from "../ui/empty-state";
@@ -170,16 +171,28 @@ const ATTENTION_KICKER: Record<AttentionKind, string> = {
 /* Time helpers                                                                                */
 /* ------------------------------------------------------------------------------------------ */
 
+// Clock and day in the viewer's zone, the same on the server and in the hydration.
+const zone = () => {
+  const timeZone = displayTimeZone();
+  return timeZone ? { timeZone } : {};
+};
 const clockOf = (t: number, seconds: boolean) =>
   new Date(t).toLocaleTimeString("en-GB", {
     hour12: false,
     hour: "2-digit",
     minute: "2-digit",
     ...(seconds ? { second: "2-digit" } : {}),
+    ...zone(),
   });
 const dayOf = (t: number) =>
-  new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-const localDay = (t: number) => new Date(t).toDateString();
+  new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short", ...zone() });
+const localDay = (t: number) =>
+  new Date(t).toLocaleDateString("en-GB", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    ...zone(),
+  });
 
 /** "1 min", "30 s", "2 h" for the zoom readout. */
 function perHundred(pxPerMs: number) {
@@ -191,7 +204,7 @@ function perHundred(pxPerMs: number) {
 
 /** Wall clock that ticks once a second while `enabled`. */
 function useNow(enabled: boolean) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(renderNow);
   useEffect(() => {
     setNow(Date.now());
     if (!enabled) return;
@@ -364,7 +377,7 @@ export function ProjectTimeline({
     if (!changes || changes.length === 0) return null;
     return Math.min(...changes.map((c) => Date.parse(c.createdAt)).filter((t) => !Number.isNaN(t)));
   }, [changes]);
-  const tasks = useTimelineTasks(changes);
+  const tasks = useTimelineTasks(projectId, changes);
   const events = useTimelineEvents(projectId, oldest);
   // Shares the operator banners' query: no extra read.
   const operator = useQuery({
@@ -498,7 +511,7 @@ function TimelineBody({
   const ticks = useMemo(() => {
     const step =
       TICK_STEPS.find((s) => s * px >= 96) ?? TICK_STEPS[TICK_STEPS.length - 1] ?? 60_000;
-    const offset = new Date(model.start).getTimezoneOffset() * 60_000;
+    const offset = -zoneOffsetMs(model.start);
     const first = Math.ceil((model.start - offset) / step) * step + offset;
     const out: { t: number; seconds: boolean; day: string | null }[] = [];
     let lastDay = "";

@@ -2,10 +2,13 @@ import { Show, SignInButton } from "@clerk/tanstack-react-start";
 import { Button } from "@cloudflare/kumo";
 import { SignIn } from "@phosphor-icons/react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { changesInScope } from "../components/agents-page/agents-graph";
 import { AgentsView } from "../components/agents-page/agents-view";
 import type { DagMode } from "../components/dag/view-toggle";
 import { EmptyState } from "../components/ui/empty-state";
 import { Page, PageTitle } from "../components/ui/page";
+import { type ChangeSummary, getConflicts, getProjectAgents, listTasks } from "../lib/api";
+import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
  * Agents of one Project (AGENTS.md 38.6). The trailing underscore keeps this page out of the
@@ -17,6 +20,26 @@ type AgentsSearch = { view?: DagMode };
 export const Route = createFileRoute("/projects_/$projectId/agents")({
   validateSearch: (search: Record<string, unknown>): AgentsSearch =>
     search.view === "list" || search.view === "graph" ? { view: search.view } : {},
+  loaderDeps: ({ search }) => ({ view: search.view ?? "graph" }),
+  // Server render: the agent tables or the graph with its Task and conflict lists.
+  loader: ({ context: { queryClient }, params: { projectId }, deps }) =>
+    loadOnServer(queryClient, async () => {
+      const [, agents] = await Promise.all([
+        prefetchProjectShell(queryClient, projectId),
+        queryClient.ensureQueryData({
+          queryKey: ["project-agents", projectId],
+          queryFn: () => getProjectAgents({ data: projectId }),
+        }),
+      ]);
+      const changes = queryClient.getQueryData<ChangeSummary[]>(["changes", projectId]);
+      if (deps.view !== "graph" || !changes) return;
+      await Promise.all(
+        changesInScope(changes, agents.agents).flatMap((c) => [
+          prefetch(queryClient, ["tasks", c.id], () => listTasks({ data: c.id })),
+          prefetch(queryClient, ["conflicts", c.id], () => getConflicts({ data: c.id })),
+        ]),
+      );
+    }),
   component: AgentsPage,
 });
 

@@ -3,6 +3,7 @@ import { ArrowCounterClockwise, Pause, Play, Warning } from "@phosphor-icons/rea
 import { Link } from "@tanstack/react-router";
 import { type CSSProperties, type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { formatClock, formatDuration, formatNumber, generation, truncate } from "../../lib/format";
+import { renderNow } from "../../lib/render-time";
 import { Loader } from "../ui/loader";
 import { SegmentedSteps } from "../ui/meter";
 import { Mono } from "../ui/mono";
@@ -108,7 +109,8 @@ type Geometry = ReturnType<typeof layout>;
 
 /** Wall-clock "now" that ticks once a second while `enabled`. */
 function useNow(enabled: boolean) {
-  const [now, setNow] = useState(() => Date.now());
+  // The request instant while hydrating (lib/render-time.ts), so elapsed text matches the server.
+  const [now, setNow] = useState(renderNow);
   useEffect(() => {
     if (!enabled) return;
     setNow(Date.now());

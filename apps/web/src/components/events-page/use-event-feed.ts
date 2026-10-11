@@ -43,14 +43,31 @@ function trim(state: FeedState): FeedState {
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+const fromFirstPage = (page: FeedPage): FeedState => ({
+  status: "ready",
+  error: null,
+  events: page.events,
+  newest: page.nextAfter,
+  oldest: page.nextBefore,
+  hasOlder: page.hasMore,
+});
+
+/** Cache key of the first page a route loader read on the server (lib/ssr-data.ts). */
+export const firstPageKey = (projectId: string, changeId: string | undefined) =>
+  ["events-page-feed", projectId, changeId ?? null] as const;
+
 /**
  * The event stream of one scope (a Project or a Change): the newest page first, then newer
  * events by the `after` cursor on every `pull()`, and older ones by the `before` cursor on
  * `loadOlder()`. Pulls never overlap; a pull asked for while one runs runs once more after it,
  * so no signal is lost. `scopeKey` resets the stream.
+ *
+ * `seed` is the first page when the server already read it: the stream starts from it (so the
+ * server-rendered HTML lists the events) and the first client read takes only newer events.
  */
-export function useEventFeed(scopeKey: string, fetchPage: FetchFeedPage) {
-  const [state, setState] = useState<FeedState>(INITIAL);
+export function useEventFeed(scopeKey: string, fetchPage: FetchFeedPage, seed?: FeedPage) {
+  const [state, setState] = useState<FeedState>(() => (seed ? fromFirstPage(seed) : INITIAL));
+  const seededScope = useRef(seed ? scopeKey : null);
   const [pullError, setPullError] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<string | null>(null);
@@ -73,14 +90,7 @@ export function useEventFeed(scopeKey: string, fetchPage: FetchFeedPage) {
     try {
       const page = await fetchRef.current({ limit: FEED_FIRST_LIMIT });
       if (token !== generation.current) return;
-      const next: FeedState = {
-        status: "ready",
-        error: null,
-        events: page.events,
-        newest: page.nextAfter,
-        oldest: page.nextBefore,
-        hasOlder: page.hasMore,
-      };
+      const next = fromFirstPage(page);
       stateRef.current = next;
       setState(next);
       setPullError(null);
@@ -93,19 +103,6 @@ export function useEventFeed(scopeKey: string, fetchPage: FetchFeedPage) {
       }));
     }
   }, []);
-
-  // A new scope starts a new stream.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scopeKey is the reset trigger
-  useEffect(() => {
-    stateRef.current = INITIAL;
-    setState(INITIAL);
-    setPullError(null);
-    setOlderError(null);
-    void loadFirst();
-    return () => {
-      generation.current += 1;
-    };
-  }, [scopeKey, loadFirst]);
 
   const pullOnce = useCallback(async () => {
     const token = generation.current;
@@ -153,6 +150,23 @@ export function useEventFeed(scopeKey: string, fetchPage: FetchFeedPage) {
     };
     pulling.current = run();
   }, [pullOnce]);
+
+  // A new scope starts a new stream. A server-read first page only needs the newer events.
+  useEffect(() => {
+    if (seededScope.current === scopeKey) {
+      seededScope.current = null;
+      pull();
+    } else {
+      stateRef.current = INITIAL;
+      setState(INITIAL);
+      setPullError(null);
+      setOlderError(null);
+      void loadFirst();
+    }
+    return () => {
+      generation.current += 1;
+    };
+  }, [scopeKey, loadFirst, pull]);
 
   /** Reads the page of events just older than the oldest row shown. */
   const loadOlder = useCallback(async () => {

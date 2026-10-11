@@ -11,7 +11,9 @@ import { DisplaySection } from "../components/settings/display-section";
 import { GeneralSection } from "../components/settings/general-section";
 import { EmptyState } from "../components/ui/empty-state";
 import { Page, PageTitle, Section, TwoUp } from "../components/ui/page";
+import { getProjectApp, getProjectMembers } from "../lib/api";
 import { getProjectSettings } from "../lib/api-settings";
+import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
  * Project Settings (AGENTS.md 38, last navigation item): General, People, Defaults, Display and
@@ -19,6 +21,20 @@ import { getProjectSettings } from "../lib/api-settings";
  * the same rule.
  */
 export const Route = createFileRoute("/projects_/$projectId/settings")({
+  // Server render: every section, with its current values, is in the first HTML.
+  loader: ({ context: { queryClient }, params: { projectId } }) =>
+    loadOnServer(queryClient, () =>
+      Promise.all([
+        prefetchProjectShell(queryClient, projectId),
+        prefetch(queryClient, ["project-settings", projectId], () =>
+          getProjectSettings({ data: projectId }),
+        ),
+        prefetch(queryClient, ["project-members", projectId], () =>
+          getProjectMembers({ data: projectId }),
+        ),
+        prefetch(queryClient, ["project-app", projectId], () => getProjectApp({ data: projectId })),
+      ]),
+    ),
   component: SettingsPage,
 });
 

@@ -8,7 +8,6 @@ import { buildView, type GraphView, type Zoom } from "../components/product-grap
 import { ProductGraphCanvas } from "../components/product-graph/product-graph-canvas";
 import { SectionError, SkeletonBar } from "../components/project/feedback";
 import { ACTIVE_CHANGE_STATUSES, ChangeStatusPill } from "../components/project/status";
-import { usePageMeta } from "../components/shell/page-meta";
 import { EmptyState } from "../components/ui/empty-state";
 import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
@@ -16,6 +15,7 @@ import { StatCell, StatStrip } from "../components/ui/stat-strip";
 import { getProject, listChanges } from "../lib/api";
 import { getProjectProductGraph, type ProductGraph } from "../lib/api-graph";
 import { formatNumber, generation, truncate } from "../lib/format";
+import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
  * Product Graph (AGENTS.md 28, 38.3; DESIGN.md 9.13). Semantic areas of the Project and how
@@ -36,6 +36,16 @@ export const Route = createFileRoute("/projects_/$projectId/graph")({
       ? { area: search.area }
       : {}),
   }),
+  // Server render: the stats, the canvas and the area inspector are in the first HTML.
+  loader: ({ context: { queryClient }, params: { projectId } }) =>
+    loadOnServer(queryClient, () =>
+      Promise.all([
+        prefetchProjectShell(queryClient, projectId),
+        prefetch(queryClient, ["product-graph", projectId], () =>
+          getProjectProductGraph({ data: projectId }),
+        ),
+      ]),
+    ),
   component: ProductGraphPage,
 });
 
@@ -108,13 +118,6 @@ function GraphScreen() {
     [navigate],
   );
   const onSelect = useCallback((area: string) => setSearch({ area }), [setSearch]);
-
-  usePageMeta({
-    trail:
-      zoom === "change" && selectedChange
-        ? [{ label: truncate(selectedChange.goal, 44) }]
-        : [{ label: "All Changes" }],
-  });
 
   return (
     <>

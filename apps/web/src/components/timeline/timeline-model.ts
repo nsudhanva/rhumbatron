@@ -7,6 +7,7 @@ import type {
   TaskRun,
 } from "../../lib/api";
 import { generation, truncate } from "../../lib/format";
+import { renderNow } from "../../lib/render-time";
 
 /**
  * Pure model of the Project execution timeline: people (requesters) -> their Changes -> one row
@@ -275,7 +276,7 @@ export function buildTimeline(input: {
     (a, b) => (ms(a.createdAt) ?? 0) - (ms(b.createdAt) ?? 0),
   );
   for (const change of ordered) {
-    const created = ms(change.createdAt) ?? Date.now();
+    const created = ms(change.createdAt) ?? renderNow();
     const read = input.tasks.get(change.id);
     const markers = (markersByChange.get(change.id) ?? []).sort((a, b) => a.at - b.at);
     // Without a recorded `change.created`, the request marker sits at the Change's creation.
@@ -439,7 +440,7 @@ export function buildTimeline(input: {
   }
   attention.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
 
-  if (!Number.isFinite(start)) start = Date.now();
+  if (!Number.isFinite(start)) start = renderNow();
   if (!Number.isFinite(end)) end = start;
   return {
     people: [...people.values()],

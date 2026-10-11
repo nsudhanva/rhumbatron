@@ -43,7 +43,13 @@ export type ActivityPlayer = {
 };
 
 export function useActivityPlayer(events: ActivityEvent[], ready: boolean): ActivityPlayer {
-  const [state, setState] = useState<Played>(empty);
+  // The first render already shows the recorded state (the server render has the facts), so
+  // the view does not change size when the effect below settles.
+  const [state, setState] = useState<Played>(() => ({
+    ...empty(),
+    ids: new Set(events.map((e) => e.id)),
+    order: events.map((e) => e.id),
+  }));
   const [paused, setPaused] = useState(false);
   const [replaying, setReplaying] = useState(false);
   const settled = useRef(false);

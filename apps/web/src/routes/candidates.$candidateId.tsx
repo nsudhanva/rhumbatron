@@ -38,14 +38,42 @@ import { StatusPill } from "../components/ui/status-pill";
 import {
   type CandidateDetail,
   getCandidate,
+  getCandidatePreview,
   listCandidateEvidence,
   listCandidates,
   listChanges,
 } from "../lib/api";
 import type { CandidateView as CandidateRead } from "../lib/api-change";
 import { EMPTY, formatMs, formatNumber, generation, timeAgo } from "../lib/format";
+import { loadCandidate, loadOnServer, prefetch } from "../lib/ssr-data";
 
-export const Route = createFileRoute("/candidates/$candidateId")({ component: CandidatePage });
+export const Route = createFileRoute("/candidates/$candidateId")({
+  // Server render: the verdict, stats, criteria and Evidence are in the first HTML
+  // (lib/ssr-data.ts). Same keys and server functions as the queries below. The composed diff
+  // (Files changed, below the fold) loads in the browser.
+  loader: ({ context: { queryClient }, params: { candidateId } }) =>
+    loadOnServer(queryClient, () =>
+      Promise.allSettled([
+        loadCandidate(queryClient, candidateId).then((candidate) =>
+          Promise.all([
+            prefetch(queryClient, ["candidates", candidate.changeId], () =>
+              listCandidates({ data: candidate.changeId }),
+            ),
+            prefetch(queryClient, ["changes", candidate.projectId], () =>
+              listChanges({ data: candidate.projectId }),
+            ),
+          ]),
+        ),
+        prefetch(queryClient, ["candidate-evidence", candidateId], () =>
+          listCandidateEvidence({ data: candidateId }),
+        ),
+        prefetch(queryClient, ["candidate-preview", candidateId], () =>
+          getCandidatePreview({ data: candidateId }),
+        ),
+      ]),
+    ),
+  component: CandidatePage,
+});
 
 /** Verification runs for minutes; poll while it is active, then stop (AGENTS.md section 39). */
 const POLL_MS = 10_000;

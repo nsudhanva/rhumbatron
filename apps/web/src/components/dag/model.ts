@@ -1,3 +1,4 @@
+import { renderNow } from "../../lib/render-time";
 /**
  * Shared DAG view model for the Agents and Events graphs (AGENTS.md 38.6, 38.7; DESIGN.md 9.13).
  * Pure functions: node and edge specs in, highlight sets and filter matches out. Layout lives with
@@ -96,7 +97,7 @@ export const TIME_RANGES = {
 } as const;
 export type TimeRange = keyof typeof TIME_RANGES;
 
-export function inTimeRange(iso: string | null | undefined, range: TimeRange, now = Date.now()) {
+export function inTimeRange(iso: string | null | undefined, range: TimeRange, now = renderNow()) {
   const ms = TIME_RANGES[range].ms;
   if (ms === null) return true;
   if (!iso) return false;

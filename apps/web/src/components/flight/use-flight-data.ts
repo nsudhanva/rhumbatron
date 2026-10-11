@@ -17,6 +17,8 @@ import {
 } from "../../lib/api";
 import { isLive } from "../../lib/format";
 import { deltaTouchesChange, type LiveStatus, useProjectLive } from "../../lib/live";
+import { renderNow } from "../../lib/render-time";
+import { CHANGE_FEED_INITIAL } from "../change/preload-change";
 import { useEventFeed } from "../project/use-event-feed";
 import { deriveFlight, type FlightModel } from "./flight-model";
 
@@ -41,7 +43,8 @@ function combineEvidence(results: { data: EvidenceRecord[] | undefined; isPendin
 
 /** Wall clock that ticks once per second only while `enabled`; otherwise fixed. */
 function useNow(enabled: boolean) {
-  const [now, setNow] = useState(() => Date.now());
+  // The request instant while hydrating (lib/render-time.ts), so elapsed text matches the server.
+  const [now, setNow] = useState(renderNow);
   useEffect(() => {
     if (!enabled) return;
     setNow(Date.now());
@@ -122,7 +125,10 @@ export function useFlightData(changeId: string): FlightData {
     queryFn: () => getChangeDecisions({ data: changeId }),
   });
 
-  const feed = useEventFeed({ kind: "change", changeId }, { initial: 200, keep: 1000 });
+  const feed = useEventFeed(
+    { kind: "change", changeId },
+    { initial: CHANGE_FEED_INITIAL, keep: 1000 },
+  );
   // A new claim event in the feed refreshes the Claims read (it holds the full Claim history).
   const lastClaimSeq = useRef(0);
   useEffect(() => {

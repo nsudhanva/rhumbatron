@@ -15,6 +15,7 @@ import { statusLine } from "../components/change/change-status";
 import { ConflictList } from "../components/change/conflict-list";
 import { Disclosure } from "../components/change/disclosure";
 import { awaitingApproval, NeedsAttention } from "../components/change/needs-attention";
+import { CHANGE_FEED_INITIAL, preloadChange } from "../components/change/preload-change";
 import { ChangeFilesChanged } from "../components/code/files-changed";
 import { useEventFeed } from "../components/project/use-event-feed";
 import { TaskPanel } from "../components/task-detail";
@@ -50,6 +51,7 @@ import {
   isLive,
 } from "../lib/format";
 import { deltaTouchesChange, type LiveStatus, useProjectLive } from "../lib/live";
+import { loadOnServer } from "../lib/ssr-data";
 
 /**
  * `?task=<taskId>` opens that Task in the inspector. Selection lives in the URL so browser Back
@@ -60,6 +62,10 @@ export const Route = createFileRoute("/changes/$changeId")({
     typeof search.task === "string" && /^tsk_[A-Za-z0-9_-]+$/.test(search.task)
       ? { task: search.task }
       : {},
+  // Server render: the header, Work Graph, agent activity, Candidates and files are in the
+  // first HTML (lib/ssr-data.ts). Same keys and server functions as the queries below.
+  loader: ({ context: { queryClient }, params: { changeId } }) =>
+    loadOnServer(queryClient, () => preloadChange(queryClient, changeId)),
   component: ChangePage,
 });
 
@@ -167,7 +173,10 @@ function ChangeView() {
     queryFn: () => getChangeClaims({ data: changeId }),
   });
   // Recorded events of this Change: read once, then only newer rows on each push.
-  const feed = useEventFeed({ kind: "change", changeId }, { initial: 100, keep: 500 });
+  const feed = useEventFeed(
+    { kind: "change", changeId },
+    { initial: CHANGE_FEED_INITIAL, keep: 500 },
+  );
   // A new claim event in the feed refreshes the Claims read (it holds the full Claim history).
   const lastClaimSeq = useRef(0);
   useEffect(() => {

@@ -11,6 +11,7 @@ import {
   formatUsd,
   timeAgo,
 } from "../../lib/format";
+import { renderNow } from "../../lib/render-time";
 import { CALLS_PER_RUN } from "../agents/activity-model";
 import { KeyValue } from "../ui/key-value";
 import { ThresholdMeter } from "../ui/meter";
@@ -209,7 +210,7 @@ function LiveRun({ run }: { run: AgentRunView }) {
 LiveRun.displayName = "LiveRun";
 
 /** Wall time of one attempt; a running attempt counts up to now. */
-function attemptDuration(run: AgentRunView, now = Date.now()) {
+function attemptDuration(run: AgentRunView, now = renderNow()) {
   const end = run.endedAt ? Date.parse(run.endedAt) : now;
   return formatDuration(Math.max(0, (end - Date.parse(run.startedAt)) / 1000));
 }

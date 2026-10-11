@@ -21,6 +21,12 @@ import { PageMetaProvider } from "../components/shell/page-meta";
 import { LiveStatusProvider } from "../lib/live-status";
 import { MODE_BOOT_SCRIPT } from "../lib/mode";
 import { PRE_HYDRATION_SCRIPT, replayPreHydrationInput } from "../lib/pre-hydration";
+import {
+  displayTimeZone,
+  markHydrated,
+  renderNow,
+  TIME_ZONE_BOOT_SCRIPT,
+} from "../lib/render-time";
 import appCss from "../styles.css?url";
 
 // Build and environment are shown on every page (AGENTS.md Phase 2 acceptance), in the status bar.
@@ -115,11 +121,22 @@ function RouteHead() {
 }
 
 function RootDocument({ children }: { children: ReactNode }) {
-  // Runs after the whole page has hydrated: adopt text typed into server-rendered fields.
-  useEffect(replayPreHydrationInput, []);
+  // Runs after the whole page has hydrated: adopt text typed into server-rendered fields, and
+  // let later renders read the real clock (lib/render-time.ts).
+  useEffect(() => {
+    markHydrated();
+    replayPreHydrationInput();
+  }, []);
   return (
-    // The boot script sets data-mode before hydration, so the server value may differ.
-    <html lang="en" data-mode="light" suppressHydrationWarning>
+    // The boot script sets data-mode before hydration, so the server value may differ. data-tz
+    // and data-now carry the server render's time zone and instant to the hydration.
+    <html
+      lang="en"
+      data-mode="light"
+      data-tz={displayTimeZone()}
+      data-now={renderNow()}
+      suppressHydrationWarning
+    >
       <head>
         <script
           // biome-ignore lint/security/noDangerouslySetInnerHtml: static script that applies the stored color mode before first paint
@@ -128,6 +145,10 @@ function RootDocument({ children }: { children: ReactNode }) {
         <script
           // biome-ignore lint/security/noDangerouslySetInnerHtml: static script that keeps text typed before hydration
           dangerouslySetInnerHTML={{ __html: PRE_HYDRATION_SCRIPT }}
+        />
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: static script that stores the browser's time zone for server-rendered clock times
+          dangerouslySetInnerHTML={{ __html: TIME_ZONE_BOOT_SCRIPT }}
         />
         <RouteHead />
       </head>

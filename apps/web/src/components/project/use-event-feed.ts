@@ -1,11 +1,17 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type FeedEvent, type FeedPage, listChangeEvents, listProjectEvents } from "../../lib/api";
+import { feedKey } from "../../lib/ssr-data";
 
 /**
  * Reads a recorded event feed (workers/api activity.ts) and keeps it current. The first read takes
  * the newest `initial` events; each `refresh()` then reads only events after the newest `seq`
  * seen, following `nextAfter` while `hasMore`, so no event is skipped or shown twice. Call
  * `refresh()` on every live push: with nothing new it costs one indexed row read.
+ *
+ * A route loader can read the first page on the server (`prefetchFeed` in lib/ssr-data.ts). The
+ * feed then starts from that page, so the server-rendered HTML already lists the events, and the
+ * first client read takes only events after it.
  */
 
 export type FeedScope =
@@ -43,15 +49,22 @@ export function useEventFeed(
   { initial = 50, keep = 300 }: { initial?: number; keep?: number } = {},
 ): EventFeed {
   const key = scope ? (scope.kind === "project" ? scope.projectId : scope.changeId) : null;
-  const [events, setEvents] = useState<FeedEvent[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  // The first page read on the server, if a route loader read it.
+  const [seed] = useState(() =>
+    scope ? queryClient.getQueryData<FeedPage>(feedKey(scope, Math.min(PAGE, initial))) : undefined,
+  );
+  const [events, setEvents] = useState<FeedEvent[]>(() =>
+    seed ? merge([], seed.events, keep) : [],
+  );
+  const [loading, setLoading] = useState(!seed);
   const [error, setError] = useState<string | null>(null);
   const scopeRef = useRef(scope);
   useEffect(() => {
     scopeRef.current = scope;
   });
   // Per-scope reader state. A new scope replaces the object; older reads are discarded.
-  const state = useRef({ cursor: -1, busy: false, again: false });
+  const state = useRef({ key, cursor: seed ? seed.nextAfter : -1, busy: false, again: false });
 
   const run = useCallback(async () => {
     const current = scopeRef.current;
@@ -92,11 +105,14 @@ export function useEventFeed(
 
   useEffect(() => {
     if (!key) return;
-    // A new reader state per scope: reads still in flight for the old scope see they are stale.
-    state.current = { cursor: -1, busy: false, again: false };
-    setEvents([]);
-    setLoading(true);
-    setError(null);
+    if (state.current.key !== key) {
+      // A new reader state per scope: reads still in flight for the old scope see they are stale.
+      state.current = { key, cursor: -1, busy: false, again: false };
+      setEvents([]);
+      setLoading(true);
+      setError(null);
+    }
+    // The first read, or (after a server-read first page) the events since that page.
     void run();
   }, [key, run]);
 

@@ -1,7 +1,8 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeSummary, FeedEvent, TaskDetail } from "../../lib/api";
 import { listProjectEvents } from "../../lib/api";
-import { getTimelineTasks, TIMELINE_TASK_BATCH } from "../../lib/api-timeline";
+import { getTimelineTasks, TIMELINE_TASK_BATCH, type TimelineTasks } from "../../lib/api-timeline";
 import { isClarifyEvent, LIVE_CHANGE_STATUSES, MARKER_EVENT_TYPES } from "./timeline-model";
 
 /**
@@ -27,10 +28,29 @@ type Loaded = { status: string; done: number; total: number };
 const keepEvent = (e: FeedEvent) =>
   MARKER_EVENT_TYPES.has(e.eventType) || isClarifyEvent(e.eventType);
 
-/** Tasks per Change, re-read only where something can have changed. */
-export function useTimelineTasks(changes: ChangeSummary[] | undefined) {
-  const [tasks, setTasks] = useState<ReadonlyMap<string, TaskEntry>>(() => new Map());
-  const loaded = useRef(new Map<string, Loaded>());
+/** Cache key of the Tasks a route loader read on the server (lib/ssr-data.ts). */
+export const timelineTasksKey = (projectId: string) => ["timeline-tasks", projectId] as const;
+
+/**
+ * Tasks per Change, re-read only where something can have changed. When the route loader read
+ * the Tasks on the server, the timeline starts from them (and its rows have their final height).
+ */
+export function useTimelineTasks(projectId: string, changes: ChangeSummary[] | undefined) {
+  const queryClient = useQueryClient();
+  const [seed] = useState(() => {
+    const read = queryClient.getQueryData<TimelineTasks>(timelineTasksKey(projectId));
+    const entries = new Map<string, TaskEntry>();
+    const seen = new Map<string, Loaded>();
+    for (const c of changes ?? []) {
+      const entry = read?.[c.id];
+      if (!entry || !("tasks" in entry)) continue;
+      entries.set(c.id, entry);
+      seen.set(c.id, { status: c.status, done: c.completedCount, total: c.taskCount });
+    }
+    return { entries, seen };
+  });
+  const [tasks, setTasks] = useState<ReadonlyMap<string, TaskEntry>>(seed.entries);
+  const loaded = useRef(seed.seen);
   const state = useRef({ busy: false, again: false, lastLive: 0 });
   const changesRef = useRef(changes);
   changesRef.current = changes;

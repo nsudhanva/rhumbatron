@@ -17,6 +17,7 @@ import {
 } from "../components/project/status";
 import { useEventFeed } from "../components/project/use-event-feed";
 import { ProjectTimeline } from "../components/timeline/project-timeline";
+import { timelineTasksKey } from "../components/timeline/use-timeline-data";
 import { DataTable, RowLink, Td, Th, TRow } from "../components/ui/data-table";
 import { EmptyState } from "../components/ui/empty-state";
 import { KeyValue } from "../components/ui/key-value";
@@ -28,19 +29,53 @@ import {
   type ChangeRequester,
   type ChangeSummary,
   createChange,
+  getDeadLetters,
   getGoalSuggestions,
   getProject,
+  getProjectApp,
   getProjectStats,
   listChanges,
   type ProjectStats as ProjectStatsData,
   provisionProject,
 } from "../lib/api";
 import { getProjectSettings } from "../lib/api-settings";
+import { getTimelineTasks } from "../lib/api-timeline";
 import { EMPTY, formatAge, formatNumber, formatUsd, generation } from "../lib/format";
 import { useProjectLive } from "../lib/live";
 import { useAdoptTypedText } from "../lib/pre-hydration";
+import { loadOnServer, prefetch, prefetchFeed } from "../lib/ssr-data";
 
-export const Route = createFileRoute("/projects/$projectId")({ component: ProjectPage });
+export const Route = createFileRoute("/projects/$projectId")({
+  // Server render: the title, stats, Changes, events and timeline rows are in the first HTML.
+  loader: ({ context: { queryClient }, params: { projectId } }) =>
+    loadOnServer(queryClient, async () => {
+      await Promise.all([
+        prefetch(queryClient, ["project", projectId], () => getProject({ data: projectId })),
+        prefetch(queryClient, ["changes", projectId], () => listChanges({ data: projectId })),
+        prefetch(queryClient, ["project-stats", projectId], () =>
+          getProjectStats({ data: projectId }),
+        ),
+        prefetch(queryClient, ["project-app", projectId], () => getProjectApp({ data: projectId })),
+        prefetch(queryClient, ["project-settings", projectId], () =>
+          getProjectSettings({ data: projectId }),
+        ),
+        prefetch(queryClient, ["dead-letters", projectId, null], () =>
+          getDeadLetters({ data: { projectId, changeId: undefined } }),
+        ),
+        prefetchFeed(queryClient, { kind: "project", projectId }, FEED_INITIAL),
+      ]);
+      const changes = queryClient.getQueryData<ChangeSummary[]>(["changes", projectId]) ?? [];
+      if (changes.length > 0) {
+        await prefetch(queryClient, timelineTasksKey(projectId), () =>
+          getTimelineTasks({ data: changes.map((c) => c.id) }),
+        );
+      }
+    }),
+  component: ProjectPage,
+});
+
+/** Recent events read on first load. */
+const FEED_INITIAL = 50;
 
 /** The changes endpoint returns the newest 20 (workers/api projects.ts). */
 const CHANGE_LIMIT = 20;
@@ -104,7 +139,7 @@ function Overview() {
     queryKey: ["project-stats", projectId],
     queryFn: () => getProjectStats({ data: projectId }),
   });
-  const feed = useEventFeed({ kind: "project", projectId }, { initial: 50 });
+  const feed = useEventFeed({ kind: "project", projectId }, { initial: FEED_INITIAL });
   // Live push (AGENTS.md section 39): each delta means new events were projected. The feed reads
   // only rows after its cursor; the stats aggregate refetches at most every 10 seconds.
   const statsAt = useRef(0);
@@ -238,11 +273,7 @@ function Overview() {
             how="Describe a goal under New change to start the first one."
           />
         ) : (
-          <ChangesTable
-            changes={changes.data}
-            isOwner={project.data?.role === "owner"}
-            projectId={projectId}
-          />
+          <ChangesTable changes={changes.data} />
         )}
       </Section>
 
@@ -394,15 +425,7 @@ const RISK_LABEL: Record<string, string> = {
   critical: "Critical",
 };
 
-function ChangesTable({
-  changes,
-  isOwner,
-  projectId,
-}: {
-  changes: ChangeSummary[] | undefined;
-  isOwner?: boolean;
-  projectId: string;
-}) {
+function ChangesTable({ changes }: { changes: ChangeSummary[] | undefined }) {
   return (
     <div className="grid gap-2">
       <DataTable label="Changes" minWidth={880}>
@@ -433,7 +456,7 @@ function ChangesTable({
                           {change.goal}
                         </RowLink>
                       </span>
-                      <ChangeOutcomeLine change={change} all={changes} />
+                      <ChangeOutcomeLine change={change} />
                       <span className="truncate font-mono text-[11px] text-kumo-subtle tabular-nums">
                         {change.id}
                       </span>
@@ -483,7 +506,7 @@ function reasonAfter(prefix: string, reason: string | null | undefined): string 
   return `${prefix}: ${rest}`;
 }
 
-function ChangeOutcomeLine({ change, all }: { change: ChangeSummary; all: ChangeSummary[] }) {
+function ChangeOutcomeLine({ change }: { change: ChangeSummary }) {
   if (change.status === "needs_input") {
     return (
       <span className="text-[12px] font-medium text-accent-700">

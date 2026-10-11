@@ -12,6 +12,7 @@ import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
 import { acceptInvitation, createProject, listProjects, listUserInvitations } from "../lib/api";
 import { formatAge, formatNumber, generation } from "../lib/format";
+import { loadOnServer, prefetch } from "../lib/ssr-data";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -24,6 +25,14 @@ export const Route = createFileRoute("/")({
       },
     ],
   }),
+  // Server render: the project list is in the first HTML (lib/ssr-data.ts).
+  loader: ({ context: { queryClient } }) =>
+    loadOnServer(queryClient, () =>
+      Promise.all([
+        prefetch(queryClient, ["projects"], () => listProjects()),
+        prefetch(queryClient, ["user-invitations"], () => listUserInvitations()),
+      ]),
+    ),
   component: Home,
 });
 

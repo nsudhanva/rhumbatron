@@ -536,6 +536,32 @@
   filter: grayscale(1) contrast(1.08);
 }
 
+/* Phone text floor (ADR 0027): below `sm` (640px) no text is smaller than 12px. Labels, kickers,
+   pills, log lines and the 9-11px arbitrary sizes keep their designed size from 640px up. This
+   block sits after Tailwind's utilities in the same layer, so it wins at equal specificity. */
+@layer utilities {
+  @media (width < 40rem) {
+    .type-label,
+    .type-kicker,
+    .type-pill,
+    .type-mono-log,
+    .text-\[9px\],
+    .text-\[10px\],
+    .text-\[11px\] {
+      font-size: 12px;
+    }
+  }
+}
+:root {
+  /* Inline-style text (canvas edge labels) reads the same floor. */
+  --rh-text-10: 10px;
+}
+@media (width < 40rem) {
+  :root {
+    --rh-text-10: 12px;
+  }
+}
+
 /* --------------------------------------------------------------------------------------------
  * 6. Feedback: Loader and skeleton (section 8.5)
  * ------------------------------------------------------------------------------------------ */
