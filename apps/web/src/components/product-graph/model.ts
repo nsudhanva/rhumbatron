@@ -1,4 +1,4 @@
-import type { ProductGraph, ProductGraphEdge, ProductGraphNode } from "../../lib/api";
+import type { ProductGraph, ProductGraphEdge, ProductGraphNode } from "../../lib/api-graph";
 
 /**
  * Product Graph view model (AGENTS.md 28, 38.3; DESIGN.md 9.13). Pure functions: the graph the
@@ -6,8 +6,9 @@ import type { ProductGraph, ProductGraphEdge, ProductGraphNode } from "../../lib
  * deterministic layered layout out.
  *
  * Node states (border):
- *   protected  the area holds a policy protected resource (dashed ink), touched or not
- *   new        touched by the scope, absent from the seeded source and from earlier Changes (accent)
+ *   protected  the area holds a protected resource of the Project's own stored policy (dashed
+ *              ink), touched or not. Without a stored policy no area is protected.
+ *   new        touched by the scope, absent from the indexed source and from earlier Changes (accent)
  *   affected   touched by the scope and already present (ink)
  *   unchanged  not touched; shown because it is next to a touched area (1px divider)
  */
@@ -168,7 +169,6 @@ function layout(areas: AreaView[], edges: EdgeView[]) {
 /** One line on where an edge came from, for the inspector and edge titles. */
 export function describeOrigin(origin: ProductGraphEdge["origins"][number]): string {
   switch (origin.kind) {
-    case "fixture_import":
     case "source_import":
       return `${origin.file} imports ${origin.detail}`;
     case "task_dependency":

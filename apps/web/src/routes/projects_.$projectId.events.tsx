@@ -1,10 +1,13 @@
 import { Show, SignInButton } from "@clerk/tanstack-react-start";
 import { Button, buttonVariants, cn } from "@cloudflare/kumo";
 import { SignIn, X } from "@phosphor-icons/react";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { type ReactNode, useCallback, useEffect, useMemo } from "react";
+import { type DagMode, ViewToggle } from "../components/dag/view-toggle";
 import { EventPlane } from "../components/events-page/event-plane";
 import { EventStream } from "../components/events-page/event-stream";
+import { EventsGraph } from "../components/events-page/events-graph";
 import { type FeedEvent, typeTone } from "../components/events-page/feed-model";
 import { type FetchFeedPage, useEventFeed } from "../components/events-page/use-event-feed";
 import { SectionError } from "../components/project/feedback";
@@ -13,7 +16,7 @@ import { EmptyState } from "../components/ui/empty-state";
 import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
 import { StatCell, StatStrip } from "../components/ui/stat-strip";
-import { listChangeEvents, listProjectEvents } from "../lib/api";
+import { listChangeEvents, listChanges, listProjectEvents } from "../lib/api";
 import { EMPTY, formatAge, formatClock, formatNumber } from "../lib/format";
 import { type LiveStatus, useProjectLive } from "../lib/live";
 import { SystemsOnly, useViewMode } from "../lib/view-mode";
@@ -22,13 +25,16 @@ import { SystemsOnly, useViewMode } from "../lib/view-mode";
  * Project events (AGENTS.md 16.1, 17, 38, 39; DESIGN.md 9.9): the causal facts of one Project,
  * newest first, live. The rows come from the feed projection; the live socket only says that
  * something changed, and each signal pulls the events after the newest sequence shown.
- * `?change=<id>` narrows the stream to one Change.
+ * `?change=<id>` narrows the stream to one Change. `?view=graph` shows the loaded events as a DAG;
+ * the list is the default.
  */
-type EventsSearch = { change?: string };
+type EventsSearch = { change?: string; view?: DagMode };
 
 export const Route = createFileRoute("/projects_/$projectId/events")({
-  validateSearch: (search: Record<string, unknown>): EventsSearch =>
-    typeof search.change === "string" && search.change ? { change: search.change } : {},
+  validateSearch: (search: Record<string, unknown>): EventsSearch => ({
+    ...(typeof search.change === "string" && search.change ? { change: search.change } : {}),
+    ...(search.view === "list" || search.view === "graph" ? { view: search.view } : {}),
+  }),
   component: EventsPage,
 });
 
@@ -64,7 +70,14 @@ function EventsPage() {
 
 function EventsView() {
   const { projectId } = Route.useParams();
-  const { change: changeId } = Route.useSearch();
+  const { change: changeId, view } = Route.useSearch();
+  const mode: DagMode = view ?? "list";
+  const navigate = useNavigate({ from: Route.fullPath });
+  const changes = useQuery({
+    queryKey: ["changes", projectId],
+    queryFn: () => listChanges({ data: projectId }),
+    enabled: mode === "graph",
+  });
   usePageMeta({ trail: changeId ? [{ label: changeId, mono: true }] : [] });
   const systems = useViewMode() === "systems";
 
@@ -94,6 +107,36 @@ function EventsView() {
   }, [live, pull]);
 
   const loading = feed.status === "loading";
+  const footer: ReactNode = feed.status === "ready" && (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      {feed.hasOlder ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={feed.loadingOlder}
+          onClick={() => void feed.loadOlder()}
+        >
+          Load older
+        </Button>
+      ) : (
+        feed.events.length > 0 && (
+          <span className="text-[12px] text-kumo-subtle">
+            Start of the recorded stream. Older events are in the R2 audit archive.
+          </span>
+        )
+      )}
+      {feed.olderError && (
+        <span className="text-[12px] text-kumo-danger" role="alert">
+          Older events could not load. {feed.olderError}
+        </span>
+      )}
+      {feed.events.length > 0 && (
+        <Mono subtle>
+          {`seq ${formatNumber(feed.events.at(-1)?.seq)} – ${formatNumber(feed.events[0]?.seq)}`}
+        </Mono>
+      )}
+    </div>
+  );
 
   return (
     <Page>
@@ -123,17 +166,32 @@ function EventsView() {
           </>
         }
         actions={
-          changeId && (
-            <Link
-              to="/projects/$projectId/events"
-              params={{ projectId }}
-              search={{}}
-              className={cn(buttonVariants({ variant: "secondary", size: "sm" }), "gap-1.5")}
-            >
-              <X size={14} aria-hidden />
-              All project events
-            </Link>
-          )
+          <div className="flex flex-wrap items-center gap-3">
+            {changeId && (
+              <Link
+                to="/projects/$projectId/events"
+                params={{ projectId }}
+                search={view ? { view } : {}}
+                className={cn(buttonVariants({ variant: "secondary", size: "sm" }), "gap-1.5")}
+              >
+                <X size={14} aria-hidden />
+                All project events
+              </Link>
+            )}
+            <ViewToggle
+              mode={mode}
+              label="Events view"
+              onChange={(next) =>
+                void navigate({
+                  search: (prev) => {
+                    const { view: _old, ...rest } = prev;
+                    return next === "list" ? rest : { ...rest, view: next };
+                  },
+                  replace: true,
+                })
+              }
+            />
+          </div>
         }
       />
 
@@ -150,58 +208,48 @@ function EventsView() {
         <EventPlane projectId={projectId} events={feed.events} live={live} />
       </SystemsOnly>
 
-      <Section
-        label="Stream"
-        meta={
-          feed.pullError ? (
-            <span className="text-kumo-warning" role="status">
-              Live update failed. Retrying.
-            </span>
-          ) : (
-            <Mono subtle>{loading ? "loading" : `${formatNumber(feed.events.length)} loaded`}</Mono>
-          )
-        }
-      >
-        <EventStream
-          projectId={projectId}
-          events={feed.events}
-          loading={loading}
-          systems={systems}
-          scopedToChange={!!changeId}
-          footer={
-            feed.status === "ready" && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                {feed.hasOlder ? (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    loading={feed.loadingOlder}
-                    onClick={() => void feed.loadOlder()}
-                  >
-                    Load older
-                  </Button>
-                ) : (
-                  feed.events.length > 0 && (
-                    <span className="text-[12px] text-kumo-subtle">
-                      Start of the recorded stream. Older events are in the R2 audit archive.
-                    </span>
-                  )
-                )}
-                {feed.olderError && (
-                  <span className="text-[12px] text-kumo-danger" role="alert">
-                    Older events could not load. {feed.olderError}
-                  </span>
-                )}
-                {feed.events.length > 0 && (
-                  <Mono subtle>
-                    {`seq ${formatNumber(feed.events.at(-1)?.seq)} – ${formatNumber(feed.events[0]?.seq)}`}
-                  </Mono>
-                )}
-              </div>
+      {mode === "graph" ? (
+        changes.isError ? (
+          <SectionError
+            message={`Changes could not load. ${changes.error.message}`}
+            onRetry={() => changes.refetch()}
+          />
+        ) : loading || changes.isPending ? (
+          <span aria-hidden className="skeleton block h-[clamp(380px,52vw,600px)] w-full" />
+        ) : (
+          <EventsGraph
+            projectId={projectId}
+            events={feed.events}
+            changes={changes.data ?? []}
+            scopedToChange={!!changeId}
+            footer={footer}
+          />
+        )
+      ) : (
+        <Section
+          label="Stream"
+          meta={
+            feed.pullError ? (
+              <span className="text-kumo-warning" role="status">
+                Live update failed. Retrying.
+              </span>
+            ) : (
+              <Mono subtle>
+                {loading ? "loading" : `${formatNumber(feed.events.length)} loaded`}
+              </Mono>
             )
           }
-        />
-      </Section>
+        >
+          <EventStream
+            projectId={projectId}
+            events={feed.events}
+            loading={loading}
+            systems={systems}
+            scopedToChange={!!changeId}
+            footer={footer}
+          />
+        </Section>
+      )}
     </Page>
   );
 }

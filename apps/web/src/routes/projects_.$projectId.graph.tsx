@@ -13,13 +13,15 @@ import { EmptyState } from "../components/ui/empty-state";
 import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
 import { StatCell, StatStrip } from "../components/ui/stat-strip";
-import { getProductGraph, getProject, listChanges, type ProductGraph } from "../lib/api";
+import { getProject, listChanges } from "../lib/api";
+import { getProjectProductGraph, type ProductGraph } from "../lib/api-graph";
 import { formatNumber, generation, truncate } from "../lib/format";
 
 /**
  * Product Graph (AGENTS.md 28, 38.3; DESIGN.md 9.13). Semantic areas of the Project and how
  * they depend on each other. By default it shows only the subgraph one Change affects; the
- * zoom switches between Project and Change. Protected invariants always show.
+ * zoom switches between Project and Change. Areas that hold a protected resource of the Project's
+ * own stored policy always show; a Project without a stored policy has none.
  */
 
 type Search = { zoom?: Zoom; changeId?: string; area?: string };
@@ -86,7 +88,7 @@ function GraphScreen() {
 
   const graph = useQuery({
     queryKey: ["product-graph", projectId],
-    queryFn: () => getProductGraph({ data: projectId }),
+    queryFn: () => getProjectProductGraph({ data: projectId }),
     refetchInterval: working ? POLL_MS : false,
   });
 
@@ -130,19 +132,15 @@ function GraphScreen() {
               )}
             <span>
               {zoom === "change"
-                ? "Areas one Change affects, protected invariants, and their direct dependencies"
-                : "Every area the listed Changes touch, plus the seeded source"}
+                ? "Areas one Change affects, protected areas, and their direct dependencies"
+                : "Every area the listed Changes touch, plus the indexed source"}
             </span>
           </>
         }
       />
 
       <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-        <ZoomControl
-          zoom={zoom}
-          changeAvailable={!!changeId}
-          onChange={(next) => setSearch({ zoom: next })}
-        />
+        {changeId && <ZoomControl zoom={zoom} onChange={(next) => setSearch({ zoom: next })} />}
         {changeList.length > 0 && (
           <div className="grid gap-1.5">
             <span className="text-[12px] text-kumo-subtle" id="graph-change-label">
@@ -151,8 +149,9 @@ function GraphScreen() {
             <Select
               aria-labelledby="graph-change-label"
               className="w-[min(480px,calc(100vw-32px))]"
-              value={changeId ?? null}
-              disabled={zoom !== "change"}
+              // Picking a Change while zoomed out switches the zoom to that Change.
+              value={zoom === "change" ? (changeId ?? null) : null}
+              placeholder="All Changes"
               onValueChange={(value) => {
                 if (typeof value === "string") setSearch({ changeId: value, zoom: "change" });
               }}
@@ -195,9 +194,9 @@ function GraphScreen() {
             <EmptyState
               what="No product areas yet."
               how={
-                graph.data?.fixture.applied || graph.data?.source?.kind === "index"
+                graph.data?.source.kind === "index"
                   ? "Submit a Change; its Tasks declare the semantic resources this graph shows."
-                  : "Seed the Acme Shop source on the project overview, or submit a Change."
+                  : "Submit a Change; its Tasks declare the semantic resources this graph shows. Source areas appear once the canonical source is indexed."
               }
             />
           ) : (
@@ -238,16 +237,11 @@ const ZOOMS: { value: Zoom; label: string; title: string }[] = [
   { value: "change", label: "Change", title: "Only the areas one Change affects" },
 ];
 
-/** Semantic zoom (AGENTS.md 38.3): segmented control, selected in ink (DESIGN.md 8.2). */
-function ZoomControl({
-  zoom,
-  changeAvailable,
-  onChange,
-}: {
-  zoom: Zoom;
-  changeAvailable: boolean;
-  onChange: (zoom: Zoom) => void;
-}) {
+/**
+ * Semantic zoom (AGENTS.md 38.3): segmented control, selected in ink (DESIGN.md 8.2). Shown only
+ * when the Project has a Change, so no option is ever disabled.
+ */
+function ZoomControl({ zoom, onChange }: { zoom: Zoom; onChange: (zoom: Zoom) => void }) {
   return (
     <div className="grid gap-1.5">
       <span className="text-[12px] text-kumo-subtle" aria-hidden>
@@ -257,19 +251,17 @@ function ZoomControl({
         <legend className="sr-only">Zoom</legend>
         {ZOOMS.map(({ value, label, title }, index) => {
           const selected = zoom === value;
-          const disabled = value === "change" && !changeAvailable;
           return (
             <button
               key={value}
               type="button"
-              title={disabled ? "This Project has no Change yet" : title}
+              title={title}
               aria-pressed={selected}
-              disabled={disabled}
               onClick={() => onChange(value)}
               className={cn(
-                "flex h-9 items-center px-3.5 text-[13px] transition-colors duration-(--rh-dur-ui) focus-visible:outline-offset-[-2px] disabled:cursor-not-allowed disabled:opacity-45 pointer-coarse:h-11",
+                "flex h-9 items-center px-3.5 text-[13px] transition-colors duration-(--rh-dur-ui) focus-visible:outline-offset-[-2px] pointer-coarse:h-11",
                 index > 0 && "border-l border-kumo-divider",
-                selected ? "bg-kumo-ink text-kumo-inverse" : "enabled:hover:bg-kumo-tint",
+                selected ? "bg-kumo-ink text-kumo-inverse" : "hover:bg-kumo-tint",
               )}
             >
               {label}
@@ -301,7 +293,13 @@ function GraphStats({ view, graph }: { view: GraphView; graph: ProductGraph }) {
       <StatCell
         label="Protected"
         value={formatNumber(guarded.length)}
-        footnote={graph.protectedResources.join(" · ")}
+        footnote={
+          graph.policyVersion === null
+            ? "no Project policy stored"
+            : graph.protectedResources.length > 0
+              ? graph.protectedResources.join(" · ")
+              : `none in policy ${graph.policyVersion}`
+        }
       />
       <StatCell label="Conflicts" value={formatNumber(conflicts)} footnote="on visible areas" />
     </StatStrip>
@@ -326,30 +324,39 @@ function Footnote({
       {formatNumber(counts.tasks)} Tasks and {formatNumber(counts.intents)} Intents across{" "}
       {formatNumber(graph.changes.length)} Changes, {formatNumber(counts.dependencies)} Task
       dependencies, {formatNumber(counts.changeSets)} ChangeSets, {formatNumber(counts.conflicts)}{" "}
-      conflicts, policy <Mono subtle>{graph.policyVersion}</Mono> protected resources (
-      {graph.protectedResources.join(", ")})
-      {graph.source?.kind === "index" ? (
+      conflicts,{" "}
+      {graph.policyVersion === null ? (
+        "no protected areas (this Project has no stored policy)"
+      ) : (
+        <>
+          policy <Mono subtle>{graph.policyVersion}</Mono> protected resources (
+          {graph.protectedResources.length > 0
+            ? graph.protectedResources.join(", ")
+            : "none on these areas"}
+          )
+        </>
+      )}
+      {graph.source.kind === "index" ? (
         <>
           , and the imports of the indexed canonical tree{" "}
           <Mono subtle>{graph.source.treeSha.slice(0, 12)}</Mono>
           {graph.source.current ? "" : " (an earlier tree: the current one is not indexed yet)"}
         </>
-      ) : graph.fixture.applied ? (
-        <>
-          , and the imports of <Mono subtle>{graph.fixture.source}</Mono> as seeded (not the current
-          canonical tree)
-        </>
       ) : (
-        ", with no seeded source"
+        ", with no indexed source yet"
       )}
-      . Edge labels follow the area depended on: Identity is authorization, Catalog is product
-      reference, Cart and Checkout are state. Hidden:{" "}
+      .
+      {graph.edges.some((e) => e.kind !== "dependency")
+        ? " Edge labels follow the area depended on: identity is authorization, catalog is product reference, cart and checkout are state."
+        : ""}{" "}
+      Hidden:{" "}
       {zoom === "change" && hidden.length > 0
         ? `${hidden.length} areas this Change does not touch or border (${hidden.join(", ")}), `
         : ""}
       {view.hiddenEdges > 0 ? `${formatNumber(view.hiddenEdges)} edges to hidden areas, ` : ""}
-      file and symbol dependencies, and runtime wiring ({graph.fixture.hiddenFiles.join(", ")}).
-      {graph.truncated ? " Only the newest 20 Changes and capped rows are read." : ""} Select an
+      file and symbol dependencies
+      {graph.wiringFiles.length > 0 ? `, and runtime wiring (${graph.wiringFiles.join(", ")})` : ""}
+      .{graph.truncated ? " Only the newest 20 Changes and capped rows are read." : ""} Select an
       area to inspect it.
     </>
   );

@@ -1,8 +1,9 @@
 import { cn } from "@cloudflare/kumo";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { getProject, getProjectAgents, type ProjectAgents } from "../../lib/api";
+import { getProject, getProjectAgents, listChanges, type ProjectAgents } from "../../lib/api";
 import { formatNumber, formatUsd, timeAgo } from "../../lib/format";
+import { type DagMode, ViewToggle } from "../dag/view-toggle";
 import { SectionError, SkeletonBar, SkeletonRows } from "../project/feedback";
 import { DataTable, Th } from "../ui/data-table";
 import { EmptyState } from "../ui/empty-state";
@@ -12,6 +13,7 @@ import { StatCell, StatStrip } from "../ui/stat-strip";
 import { StatusPill } from "../ui/status-pill";
 import { AgentInspector } from "./agent-inspector";
 import { AgentTable } from "./agent-table";
+import { AgentsGraph } from "./agents-graph";
 import { SleepingPool } from "./sleeping-pool";
 
 /** Poll while an agent is active. Idle pages do not poll, to stay inside the D1 read allowance. */
@@ -19,9 +21,18 @@ const ACTIVE_POLL_MS = 15_000;
 
 /**
  * Agents page body (AGENTS.md 38.6, 57): active and recently active agents one by one, the rest
- * of the pool aggregated by role. Selecting a row fills the inspector beside the tables.
+ * of the pool aggregated by role. Selecting a row fills the inspector beside the tables. The
+ * Graph view shows the same agents as a DAG of Changes, Tasks, agents and conflicts.
  */
-export function AgentsView({ projectId }: { projectId: string }) {
+export function AgentsView({
+  projectId,
+  mode,
+  onMode,
+}: {
+  projectId: string;
+  mode: DagMode;
+  onMode: (mode: DagMode) => void;
+}) {
   const project = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => getProject({ data: projectId }),
@@ -31,6 +42,11 @@ export function AgentsView({ projectId }: { projectId: string }) {
     queryFn: () => getProjectAgents({ data: projectId }),
     refetchInterval: (query) =>
       (query.state.data?.totals.active ?? 0) > 0 ? ACTIVE_POLL_MS : false,
+  });
+  const changes = useQuery({
+    queryKey: ["changes", projectId],
+    queryFn: () => listChanges({ data: projectId }),
+    enabled: mode === "graph",
   });
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -53,6 +69,7 @@ export function AgentsView({ projectId }: { projectId: string }) {
             <span>active and recently active agents listed, sleeping agents grouped by role</span>
           </>
         }
+        actions={<ViewToggle mode={mode} onChange={onMode} label="Agents view" />}
       />
 
       {agents.isError && (
@@ -95,6 +112,40 @@ export function AgentsView({ projectId }: { projectId: string }) {
             how="Submit a Change on the Overview. Each Task's agent wakes when the Task becomes ready."
           />
         </Section>
+      ) : data && mode === "graph" ? (
+        <div className="grid gap-7">
+          {changes.isError && (
+            <SectionError
+              message={`Changes could not load. ${changes.error.message}`}
+              onRetry={() => changes.refetch()}
+              retrying={changes.isFetching}
+            />
+          )}
+          {changes.isPending ? (
+            <span aria-hidden className="skeleton block h-[clamp(380px,52vw,600px)] w-full" />
+          ) : (
+            <AgentsGraph
+              agents={list}
+              changes={changes.data ?? []}
+              feedAvailable={data.feed.available}
+              live={active.length > 0}
+              pollMs={ACTIVE_POLL_MS}
+            />
+          )}
+          <Section
+            label="Sleeping pool"
+            meta={
+              <>
+                <span>not listed</span>
+                <Mono subtle>
+                  {formatNumber(data.sleeping.unlisted.reduce((s, r) => s + r.count, 0))}
+                </Mono>
+              </>
+            }
+          >
+            <SleepingPool unlisted={data.sleeping.unlisted} notWoken={data.notWoken} />
+          </Section>
+        </div>
       ) : data ? (
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(320px,400px)] items-start gap-7 max-[1100px]:grid-cols-1">
           <div className="grid min-w-0 gap-7">

@@ -388,7 +388,7 @@ function EventRows({
 }
 EventRows.displayName = "EventRows";
 
-function EventDetail({
+export function EventDetail({
   event,
   projectId,
   lag,

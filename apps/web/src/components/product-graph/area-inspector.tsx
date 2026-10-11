@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import type { ProductGraph } from "../../lib/api";
+import type { ProductGraph } from "../../lib/api-graph";
 import { truncate } from "../../lib/format";
 import { EmptyState } from "../ui/empty-state";
 import { KeyValue } from "../ui/key-value";
@@ -14,11 +14,11 @@ import { type AreaView, describeOrigin, type GraphView, STATE_LABEL, type Zoom }
  */
 
 const STATE_EXPLAIN: Record<AreaView["state"], string> = {
-  new: "First touched by this scope. It is not in the seeded source and no earlier listed Change touched it.",
+  new: "First touched by this scope. It is not in the indexed source and no earlier listed Change touched it.",
   affected:
-    "Touched by this scope. It already exists in the seeded source or in an earlier Change.",
+    "Touched by this scope. It already exists in the indexed source or in an earlier Change.",
   protected:
-    "Holds a policy protected resource. Changes here must keep the protected invariant unchanged.",
+    "Holds a protected resource of this Project's policy. Changes here must keep the protected invariant unchanged.",
   unchanged: "Not touched by this scope. Shown because a touched area depends on it, or it on one.",
 };
 
