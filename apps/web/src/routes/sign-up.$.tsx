@@ -1,12 +1,13 @@
 import { ClerkFailed, ClerkLoading, SignUp } from "@clerk/tanstack-react-start";
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { loadClerk } from "../lib/clerk-deferral";
 
 export const Route = createFileRoute("/sign-up/$")({
   head: () => ({
     meta: [
       { title: "Sign up · Rhumbatron" },
       { name: "description", content: "Create a Rhumbatron account." },
-      { name: "robots", content: "noindex" },
     ],
   }),
   component: Page,
@@ -17,6 +18,8 @@ export const Route = createFileRoute("/sign-up/$")({
  * fails to load) the page supplies the h1, so there is always exactly one (DESIGN.md 14).
  */
 function Page() {
+  // A client-side visit from a page that held Clerk back starts the load here.
+  useEffect(loadClerk, []);
   return (
     <main className="flex min-h-full items-center justify-center px-4 py-6">
       <ClerkLoading>

@@ -45,7 +45,7 @@ flowchart LR
 
 | Technology | Used for | Where |
 |---|---|---|
-| TanStack Start 1.168, Router 1.170 | Server-rendered React app and routes | `apps/web` |
+| TanStack Start 1.168, Router 1.170 | Server-rendered React app and routes. The client entry starts after the first contentful paint (`src/server.ts`); text typed before hydration is kept (`src/lib/pre-hydration.ts`) | `apps/web` |
 | React 19.3, Vite 8.3 | UI runtime and build | `apps/web` |
 | `@cloudflare/vite-plugin` 1.63 | Builds the web app as a Worker | `apps/web/vite.config.ts` |
 | Tailwind CSS 4.3 | Styling | `apps/web` |

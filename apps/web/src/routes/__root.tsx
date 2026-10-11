@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/tanstack-react-start";
 import { LinkProvider } from "@cloudflare/kumo";
 import archivo400 from "@fontsource/archivo/files/archivo-latin-400-normal.woff2?url";
 import archivo600 from "@fontsource/archivo/files/archivo-latin-600-normal.woff2?url";
+import archivo800 from "@fontsource/archivo/files/archivo-latin-800-normal.woff2?url";
 import type { QueryClient } from "@tanstack/react-query";
 import {
   Asset,
@@ -14,11 +15,12 @@ import {
   useTags,
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { type AnchorHTMLAttributes, forwardRef, type ReactNode } from "react";
+import { type AnchorHTMLAttributes, forwardRef, type ReactNode, useEffect } from "react";
 import { AppShell } from "../components/shell/app-shell";
 import { PageMetaProvider } from "../components/shell/page-meta";
 import { LiveStatusProvider } from "../lib/live-status";
 import { MODE_BOOT_SCRIPT } from "../lib/mode";
+import { PRE_HYDRATION_SCRIPT, replayPreHydrationInput } from "../lib/pre-hydration";
 import appCss from "../styles.css?url";
 
 // Build and environment are shown on every page (AGENTS.md Phase 2 acceptance), in the status bar.
@@ -48,9 +50,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       { name: "theme-color", content: "#f3f2f2" },
     ],
     links: [
-      // Archivo 400/600 carry almost all text; fetch them with the stylesheet, not after it.
+      // Archivo 400/600 carry almost all text and 800 sets the wordmark and page titles, all
+      // above the fold; fetch them with the stylesheet, not after it.
       // Production only: the dev server serves the stylesheet's fonts from another URL.
-      ...(import.meta.env.PROD ? [archivo400, archivo600] : []).map((href) => ({
+      ...(import.meta.env.PROD ? [archivo400, archivo600, archivo800] : []).map((href) => ({
         rel: "preload",
         as: "font",
         type: "font/woff2",
@@ -112,6 +115,8 @@ function RouteHead() {
 }
 
 function RootDocument({ children }: { children: ReactNode }) {
+  // Runs after the whole page has hydrated: adopt text typed into server-rendered fields.
+  useEffect(replayPreHydrationInput, []);
   return (
     // The boot script sets data-mode before hydration, so the server value may differ.
     <html lang="en" data-mode="light" suppressHydrationWarning>
@@ -119,6 +124,10 @@ function RootDocument({ children }: { children: ReactNode }) {
         <script
           // biome-ignore lint/security/noDangerouslySetInnerHtml: static script that applies the stored color mode before first paint
           dangerouslySetInnerHTML={{ __html: MODE_BOOT_SCRIPT }}
+        />
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: static script that keeps text typed before hydration
+          dangerouslySetInnerHTML={{ __html: PRE_HYDRATION_SCRIPT }}
         />
         <RouteHead />
       </head>

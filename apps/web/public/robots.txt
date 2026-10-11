@@ -1,7 +1,5 @@
 User-agent: *
 Allow: /
 Disallow: /design
-Disallow: /sign-in
-Disallow: /sign-up
 Disallow: /live/
 Disallow: /evidence/

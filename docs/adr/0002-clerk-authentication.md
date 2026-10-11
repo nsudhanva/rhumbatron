@@ -13,6 +13,10 @@ the Clerk production instance on `rhumbatron.com`.
 - `src/start.ts` runs `clerkMiddleware()` after the server-function CSRF middleware.
 - `ClerkProvider` wraps the body contents in `src/routes/__root.tsx`.
 - `/sign-in` and `/sign-up` host the Clerk components.
+- For a visitor the server saw as signed out, `src/client.tsx` holds Clerk's browser scripts
+  (`src/lib/clerk-deferral.ts`) until the first pointer, touch, key or focus event, or Clerk's own
+  15 s script timeout. `/sign-in`, `/sign-up`, a Clerk session cookie or a `__clerk` URL parameter
+  load Clerk at once. Server auth does not change.
 - The API Worker verifies tokens with `@clerk/backend` `verifyToken`. It checks `azp` against
   `CLERK_AUTHORIZED_PARTIES` (prod: `https://rhumbatron.com`). A token without `azp` passes only
   when `CLERK_ALLOW_MISSING_AZP` is `"true"`. Prod sets `"false"`.
