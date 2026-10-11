@@ -427,13 +427,11 @@ function ChangesTable({
                 <TRow key={change.id}>
                   <Td className="max-w-0 w-[45%]">
                     <div className="grid min-w-0 gap-0.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="truncate font-semibold">
-                          <RowLink to="/changes/$changeId" params={{ changeId: change.id }}>
-                            <span title={change.goal}>{change.goal}</span>
-                          </RowLink>
-                        </span>
-                      </div>
+                      <span className="min-w-0 truncate font-semibold" title={change.goal}>
+                        <RowLink to="/changes/$changeId" params={{ changeId: change.id }}>
+                          {change.goal}
+                        </RowLink>
+                      </span>
                       <ChangeOutcomeLine change={change} all={changes} />
                       <span className="truncate font-mono text-[11px] text-kumo-subtle tabular-nums">
                         {change.id}
@@ -474,12 +472,14 @@ function ChangesTable({
 
 function RequestedByCell({ requester }: { requester: ChangeRequester }) {
   const name = requester.isYou ? "You" : (requester.name ?? "Collaborator");
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[13px]">
-      <span>{name}</span>
-      {requester.rank === 0 && <Tag variant="neutral">Owner</Tag>}
-    </span>
-  );
+  return <span className="text-[13px]">{name}</span>;
+}
+
+/** A stored reason that already starts with the outcome word is shown once. */
+function reasonAfter(prefix: string, reason: string | null | undefined): string {
+  if (!reason) return prefix;
+  const rest = reason.replace(new RegExp(`^${prefix}:\\s*`, "i"), "");
+  return `${prefix}: ${rest}`;
 }
 
 function ChangeOutcomeLine({ change, all }: { change: ChangeSummary; all: ChangeSummary[] }) {
@@ -496,14 +496,14 @@ function ChangeOutcomeLine({ change, all }: { change: ChangeSummary; all: Change
   if (outcome.kind === "not_selected") {
     return (
       <span className="text-[12px] text-kumo-subtle inline-flex flex-wrap items-center gap-1">
-        <span>Not selected{outcome.reason ? `: ${outcome.reason}` : ""}</span>
+        <span>{reasonAfter("Not selected", outcome.reason)}</span>
         {outcome.winnerChangeId && (
           <Link
             to="/changes/$changeId"
             params={{ changeId: outcome.winnerChangeId }}
-            className="relative z-10 font-semibold text-kumo-link hover:underline"
+            className="relative z-10 font-medium text-kumo-link underline-offset-2 hover:underline"
           >
-            (view winner)
+            View the selected change
           </Link>
         )}
       </span>
@@ -521,7 +521,7 @@ function ChangeOutcomeLine({ change, all }: { change: ChangeSummary; all: Change
   if (outcome.kind === "duplicate") {
     return (
       <span className="text-[12px] text-kumo-subtle">
-        Duplicate{outcome.reason ? `: ${outcome.reason}` : ""}
+        {reasonAfter("Duplicate", outcome.reason)}
       </span>
     );
   }
