@@ -264,7 +264,7 @@ export const MAX_RECOMPOSES = 2;
 const CLOSED_CHANGE: ReadonlySet<string> = new Set([
   "cancelled",
   "not_selected",
-  "awaiting_owner",
+  "needs_input",
   "failed",
   "completed",
   "promoting",
@@ -272,8 +272,8 @@ const CLOSED_CHANGE: ReadonlySet<string> = new Set([
 ]);
 
 export const requestCannotShip = (status: string, outcome?: string | null) =>
-  ["not_selected", "cancelled", "awaiting_owner"].includes(status) ||
-  ["not_selected", "overridden"].includes(outcome ?? "");
+  ["not_selected", "cancelled", "needs_input"].includes(status) ||
+  ["not_selected", "duplicate"].includes(outcome ?? "");
 
 export type RecomposeDecision =
   | { kind: "recompose"; nextCount: number }

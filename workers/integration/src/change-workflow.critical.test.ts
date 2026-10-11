@@ -11,6 +11,24 @@ vi.mock("cloudflare:workers", () => ({
 vi.mock("./dispatch.ts", () => ({ dispatchReadyTasks: vi.fn() }));
 vi.mock("./code-store.ts", () => ({ readTreeFiles: vi.fn() }));
 vi.mock("./root-planner.ts", () => ({ planChangeResult: vi.fn() }));
+// The intake gate has its own tests (intake.critical.test.ts); here it lets the request through.
+vi.mock("./intake.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./intake.ts")>()),
+  reviewIntake: vi.fn(async () => ({
+    decision: "plan",
+    clarification: null,
+    costUsd: 0,
+    receipt: { verdict: "clear" },
+  })),
+}));
+vi.mock("./intake-context.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./intake-context.ts")>();
+  return {
+    ...real,
+    loadRelatedRequests: vi.fn(async () => []),
+    readCanonicalSummary: vi.fn(async () => real.UNKNOWN_CANONICAL),
+  };
+});
 vi.mock("./events.ts", () => ({
   changeEvent: vi.fn(async (_ctx, eventType, payload) => ({ eventType, payload })),
   appendChangeEvents: vi.fn(),
@@ -133,6 +151,9 @@ describe("planning failure through the Workflow step boundary", () => {
     const test = setup(true);
     expect(await test.run()).toEqual({ cancelled: true });
     expect(test.state()).toEqual({ status: "cancelled", blockedReason: null });
-    expect(appendChangeEvents).not.toHaveBeenCalled();
+    const recorded = vi
+      .mocked(appendChangeEvents)
+      .mock.calls.flatMap((call) => call[2] as unknown as { eventType: string }[]);
+    expect(recorded.map((e) => e.eventType)).toEqual(["change.intake.reviewed"]);
   });
 });

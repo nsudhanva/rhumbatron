@@ -136,7 +136,7 @@ export async function requestCandidateRebase(
         WHERE id = ? AND status = 'rejected' AND json_extract(score_json, '$.rebase') IS NULL
           AND EXISTS (SELECT 1 FROM changes ch JOIN projects p ON p.id = ch.project_id
             WHERE ch.id = candidates.change_id AND ch.status IN ('verifying', 'blocked', 'awaiting_approval', 'running', 'budget_blocked')
-              AND COALESCE(ch.outcome, '') NOT IN ('not_selected', 'overridden') AND p.status = 'active')
+              AND COALESCE(ch.outcome, '') NOT IN ('not_selected', 'duplicate') AND p.status = 'active')
           AND NOT EXISTS (SELECT 1 FROM candidates s WHERE s.change_id = candidates.change_id AND s.status = 'promoted')
           AND EXISTS (SELECT 1 FROM changesets cs WHERE cs.id = ? AND cs.change_id = candidates.change_id AND cs.status = 'proposed')
           AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.change_id = candidates.change_id
@@ -259,7 +259,7 @@ export async function recoverSourceConflicts(env: RebaseEnv, changeId?: string) 
   const rows =
     await env.DB.prepare(`SELECT c.id FROM changes ch JOIN projects p ON p.id = ch.project_id
     JOIN candidates c ON c.change_id = ch.id WHERE ch.status IN ('verifying', 'blocked', 'running', 'awaiting_approval', 'budget_blocked')
-      AND p.status = 'active' AND COALESCE(ch.outcome, '') NOT IN ('not_selected', 'overridden')
+      AND p.status = 'active' AND COALESCE(ch.outcome, '') NOT IN ('not_selected', 'duplicate')
       AND c.status = 'rejected' AND (c.status_reason LIKE 'file_conflict:%' OR c.status_reason LIKE 'source_conflict:%')
       AND (json_extract(c.score_json, '$.rebase') IS NULL OR COALESCE(json_extract(c.score_json, '$.rebase.delivered'), 0) = 0)
       AND (? IS NULL OR ch.id = ?) ORDER BY c.created_at DESC, c.id LIMIT 20`)

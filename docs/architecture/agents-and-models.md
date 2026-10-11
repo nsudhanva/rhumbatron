@@ -163,13 +163,31 @@ flowchart LR
 Two call paths use the same gateway, header, prices, and meter:
 
 - Pi agent runs (`workers/agents/src/models.ts`): Pi's Anthropic Messages API. Pi puts `cache_control` on the system prompt, the tool definitions, and the latest message, and prices each response from its usage fields.
-- `complete()` (`packages/model-router/src/gateway-client.ts`) for the Root Planner, conflict review, and context compaction, always through `meteredComplete()`. It maps function tools to Anthropic tools, caches the system prompt, and replays a whole assistant turn, thinking blocks included, on a follow-up call.
+- `complete()` (`packages/model-router/src/gateway-client.ts`) for the Root Planner, the intake gate, the request review and arbiter, conflict review, and context compaction, always through `meteredComplete()`. It maps function tools to Anthropic tools, caches the system prompt, and replays a whole assistant turn, thinking blocks included, on a follow-up call.
 
 Cost per call is exact: uncached input, output with thinking, cache reads, and cache writes at Anthropic list prices (`ANTHROPIC_PRICES` in `packages/model-router/src/models.ts`).
 The monthly budget is `ANTHROPIC_MONTHLY_BUDGET_USD`: $100 in prod.
 Each call reserves an estimate on the D1 meter (`usage_counters`, `anthropic-usd-micro` per `YYYY-MM`) with one conditional statement, then settles to its exact cost.
 A refused reservation, a gateway spend-limit 429, or an Anthropic billing error is `spend_limited`: a budget stop, never a retry, and never another provider.
 D1 `usage_counters` also holds the daily caps: 400 agent model calls per day and 200 Clef-flash calls.
+
+### Models in the request decisions
+
+The intake gate and the request comparison (ADR 0025, [Shared Projects](shared-projects.md)) use models outside an Agent run.
+They never use the routing rules above: each step has a fixed model and a fixed rule for when its answer counts.
+
+| Step | Model | Answer counts when |
+|---|---|---|
+| Retrieval | Workers AI `@cf/baai/bge-small-en-v1.5`, then `@cf/baai/bge-reranker-base` | Never decides. It shortlists at most 5 related items. |
+| Pair check and "buildable as stated" | Clef-flash, one call, inside the 200 per day counter | It clears a pair at P(`unrelated`) >= 0.9. It plans a clear request at P(buildable) >= 0.9 and asks at <= 0.4. It never marks a duplicate alone. |
+| Coverage review (`coverage_review`) | Sonnet, twice, order swapped | Quotes are text of the packet. Clef-flash and both orders say covered: duplicate. One order: a question. |
+| Readings (`list_interpretations`) | Sonnet, once, in the middle clarity band | Two or more readings whose quotes are in the goal: a question with the readings as options. |
+| Request review (`review_requests`) | Sonnet, once per overlapping pair | Citations and quotes validate. |
+| Arbiter (`arbitrate_requests`) | Sonnet, twice, order swapped | Both runs valid and naming the same request. Anything else asks the later requester. |
+
+Haiku is not a confirming vote in these steps: it shares the model family with Sonnet, so their errors correlate.
+No step gates on a confidence that a model states about itself.
+The receipts are in D1 `change_decisions` (`INTAKE`, `REQUEST_ARBITER`), and the cost counts against the Change budget.
 
 ## Escalation
 

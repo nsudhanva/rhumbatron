@@ -236,13 +236,13 @@ describe("rebase by rerun", () => {
     expect(h.wakes).toHaveLength(2);
   });
 
-  it("never reopens a not_selected, cancelled, awaiting_owner, or promoted request", async () => {
+  it("never reopens a not_selected, cancelled, needs_input, or promoted request", async () => {
     for (const [status, outcome] of [
       ["not_selected", null],
       ["cancelled", null],
-      ["awaiting_owner", null],
+      ["needs_input", null],
       ["verifying", "not_selected"],
-      ["verifying", "overridden"],
+      ["verifying", "duplicate"],
       ["completed", null],
       ["promoting", null],
     ] as const) {

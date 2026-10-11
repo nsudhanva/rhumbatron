@@ -43,7 +43,10 @@ export const Project = z.object({
 });
 export type Project = z.infer<typeof Project>;
 
-/** Who asked for a Change. Rank orders requesters for the priority_wins policy: 0 is the owner. */
+/**
+ * Who asked for a Change. `rank` is the requester's role when the request was made (0 is the
+ * owner, 10 a collaborator), for display only. No build decision reads it.
+ */
 export const Requester = z.object({
   userId: Id,
   name: z.string().nullable(),
@@ -52,9 +55,13 @@ export const Requester = z.object({
 });
 export type Requester = z.infer<typeof Requester>;
 
-/** How a request ended up after the cross-request conflict check (phase 17a, decisions S-09..S-12). */
+/**
+ * How a request ended up after the intake gate and the cross-request check
+ * (docs/architecture/shared-projects.md). `duplicate`: the request closed as a duplicate of
+ * `winnerChangeId`, or of the current app when that is null.
+ */
 export const RequestOutcome = z.object({
-  kind: z.enum(["selected", "partially_selected", "not_selected", "replaces", "overridden"]),
+  kind: z.enum(["selected", "partially_selected", "not_selected", "replaces", "duplicate"]),
   reason: z.string().nullable(),
   winnerChangeId: Id.nullable(),
   decidedBy: z.string().nullable(),
@@ -75,12 +82,77 @@ export const ChangeStatus = z.enum([
   "budget_blocked",
   /** Source could not merge after two bounded rebase reruns. */
   "blocked",
-  /** A conflicting request lost to a higher-priority request (docs/architecture/shared-projects.md). */
+  /** A conflicting request lost to the request the system arbiter chose (shared-projects.md). */
   "not_selected",
-  /** A conflicting request waits for the Project owner to decide. */
-  "awaiting_owner",
+  /** The request is unclear, a duplicate, or conflicts: the workflow waits for an answer. */
+  "needs_input",
 ]);
 export type ChangeStatus = z.infer<typeof ChangeStatus>;
+
+/** One question of a clarification. `options` lists distinct readings when the system found them. */
+export const ChangeQuestion = z.object({
+  id: z.string().min(1).max(64),
+  text: z.string().min(1).max(1000),
+  options: z.array(z.string().min(1).max(300)).max(4).optional(),
+});
+export type ChangeQuestion = z.infer<typeof ChangeQuestion>;
+
+/**
+ * Why a Change is `needs_input` (docs/architecture/shared-projects.md). `relatedChangeId` names the
+ * duplicate or conflicting Change; null for an unclear request or a duplicate of the current app.
+ * `round` is 1 to 3: after the third answer the Change plans without another question.
+ */
+export const ChangeClarification = z.object({
+  kind: z.enum(["unclear", "duplicate", "conflict"]),
+  summary: z.string().max(2000),
+  questions: z.array(ChangeQuestion).max(3),
+  relatedChangeId: Id.nullable(),
+  relatedGoal: z.string().nullable(),
+  askedAt: Timestamp,
+  round: z.number().int().min(1).max(3),
+});
+export type ChangeClarification = z.infer<typeof ChangeClarification>;
+
+/**
+ * `POST /v1/changes/:changeId/clarify`. The requester or the Project owner answers the questions,
+ * asks the system to plan without more questions this round, or withdraws the request.
+ */
+export const ClarifyChangeRequest = z.union([
+  z
+    .object({
+      answers: z
+        .array(
+          z.object({
+            questionId: z.string().min(1).max(64),
+            text: z.string().trim().min(1).max(2000),
+          }),
+        )
+        .min(1)
+        .max(3),
+    })
+    .strict(),
+  z.object({ action: z.literal("proceed_anyway") }).strict(),
+  z.object({ action: z.literal("withdraw") }).strict(),
+]);
+export type ClarifyChangeRequest = z.infer<typeof ClarifyChangeRequest>;
+
+/** Result of one clarification command. A repeat of the same answer returns `repeated: true`. */
+export const ClarifyChangeOutcome = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("recorded"),
+    changeId: Id,
+    changeStatus: ChangeStatus,
+    action: z.enum(["answers", "proceed_anyway", "withdraw"]),
+    round: z.number().int().min(1).max(3),
+    repeated: z.boolean(),
+  }),
+  z.object({
+    status: z.literal("refused"),
+    reason: z.enum(["not_found", "not_waiting", "unknown_question"]),
+    detail: z.string(),
+  }),
+]);
+export type ClarifyChangeOutcome = z.infer<typeof ClarifyChangeOutcome>;
 
 /** Release target after promotion. Canary rollout is deferred (AGENTS.md section 11.5). */
 export const RolloutPolicy = z.object({
@@ -114,6 +186,8 @@ export const ChangeDetail = Change.extend({
   requester: Requester.nullable().optional(),
   outcome: RequestOutcome.nullable().optional(),
   supersedesChangeId: Id.nullable().optional(),
+  /** Set while the Change is `needs_input`; null otherwise. */
+  clarification: ChangeClarification.nullable().optional(),
 });
 export type ChangeDetail = z.infer<typeof ChangeDetail>;
 

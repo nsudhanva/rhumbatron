@@ -22,6 +22,7 @@ import {
   projectRole,
 } from "./identity.ts";
 import { ensureProfile, type RequestColumns, requestFields } from "./members.ts";
+import { changeBudgetUsd } from "./project-settings.ts";
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
@@ -299,7 +300,8 @@ export const projects = new Hono<AppEnv>()
     const rows = await c.env.DB.prepare(
       `SELECT c.id, c.goal, c.status, c.risk_tier, c.budget_usd, c.created_at, c.created_by,
               c.requester_rank, c.outcome, c.outcome_reason, c.outcome_winner_change_id,
-              c.outcome_decided_by, c.supersedes_change_id, u.display_name, u.email,
+              c.outcome_decided_by, c.supersedes_change_id, c.clarification_json,
+              u.display_name, u.email,
               (SELECT COUNT(*) FROM tasks t WHERE t.change_id = c.id) AS task_count,
               (SELECT COUNT(*) FROM tasks t WHERE t.change_id = c.id AND t.status = 'completed') AS completed_count
        FROM changes c LEFT JOIN users u ON u.id = c.created_by
@@ -440,6 +442,8 @@ export const projects = new Hono<AppEnv>()
       const access = await projectAccess(c.env.DB, userId, projectId);
       if (!access) return fail(c, 404, "not_found", "Project not found");
       if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
+      // A request without a budget uses the Project default from Settings.
+      body.budgetUsd = await changeBudgetUsd(c, projectId, body.budgetUsd);
 
       // A request ID is unique per requester, so two users never collide (phase 17a).
       const requestKey = body.clientRequestId ? `${userId}:${body.clientRequestId}` : null;
@@ -472,6 +476,7 @@ export const projects = new Hono<AppEnv>()
           body.budgetUsd,
           requestKey,
           userId,
+          // Display only: the requester's role when the request was made. No decision reads it.
           access.role === "owner" ? 0 : 10,
           now,
           now,

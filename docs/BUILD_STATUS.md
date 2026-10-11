@@ -14,7 +14,8 @@ Prod serves each Project as a live app at `<slug>.rhumbatron.com`. Models run on
 - Candidate composition and verification (build, unit, contract, protected invariants, p95, security, browser, preview smoke), coverage states, and D1 and R2 Evidence.
 - Approval policy, promotion preconditions, `ProjectRootDO` compare-and-swap, and `canonical.advanced`.
 - Live apps (ADR 0020): previews, production pointer, release smoke check, version hosts, rollback, and app removal.
-- Shared Projects (ADR 0023): invitations, owner and collaborator roles, cross-request check, `priority_wins`, and owner override.
+- Shared Projects (ADR 0023): invitations, owner and collaborator roles, and the cross-request check.
+- System request decisions (ADR 0025): intake gate before planning, `needs_input` with clarify answers, duplicate verdict, and the swapped-order system arbiter.
 - Project deletion for the owner and Leave project for a collaborator.
 - UI pages, Flight Control (`/changes/<id>/flight`), and the notification bell.
 - Dead-letter consumer with Retry and Dismiss, section 44 limits, and runaway-billing guards (ADR 0019).
@@ -44,7 +45,7 @@ Prod serves each Project as a live app at `<slug>.rhumbatron.com`. Models run on
 - Deployment sequence: `bun run cf:bundle`, `bun run tf:plan:prod`, `bun run tf:apply:prod`, and `bun run tf:drift:prod`.
 - Artifacts is canonical source for managed Projects (ADR 0010).
 - Models: Anthropic Claude Haiku 5.5 and Sonnet 5.5. The opus tier runs on Sonnet 5.5 unless `ALLOW_OPUS` is `true` (ADR 0021). Workers AI Clef-flash makes cheap bounded decisions.
-- Sharing is per Project. The owner has priority. `priority_wins` decides a conflict, and the owner can override it (ADR 0023).
+- Sharing is per Project (ADR 0023). The owner role is for administration. The system decides between requests and asks the requester when it cannot (ADR 0025).
 - CI runs checks only. Deployment runs locally through Terraform.
 
 ## Next

@@ -17,7 +17,7 @@ import { ensureIdentity } from "./identity.ts";
  *
  * Cost: one D1 batch of 10 capped SELECTs per read (list and count share it), plus the 3-statement
  * `ensureIdentity` batch. Each SELECT starts from a rare state (verified Candidates, open dead
- * letters, blocked Changes, confirmed conflicts, requests awaiting the owner) or a 7-day window through an index, so rows read
+ * letters, blocked Changes, confirmed conflicts, requests that need input) or a 7-day window through an index, so rows read
  * scale with open and recent items, not with history. Marking read writes one row per new mark.
  * Promotion still re-checks everything (section 36): a notification is a pointer, never a gate.
  */
@@ -36,7 +36,7 @@ const NotificationKind = z.enum([
   "release_failed",
   "release_deployed",
   "request_not_selected",
-  "request_awaiting_owner",
+  "request_needs_input",
 ]);
 type NotificationKind = z.infer<typeof NotificationKind>;
 
@@ -221,9 +221,9 @@ ${MINE("r.project_id")}
 ORDER BY r.finished_at DESC LIMIT ${PER_KIND}`;
 
 /**
- * Shared-Project requests (ADR shared-projects). Starts from the Change status index.
- * `request_not_selected`: the requester only (`ch.created_by = ?1`); `overridden` outcomes are
- * the owner's choice and are not news here. Within the window. `?2` = since.
+ * Shared-Project requests (docs/architecture/shared-projects.md). Starts from the Change status
+ * index. `request_not_selected`: the requester only (`ch.created_by = ?1`). Within the window.
+ * `?2` = since.
  */
 const NOT_SELECTED_SQL = `
 SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.outcome_reason, ch.updated_at,
@@ -236,18 +236,22 @@ WHERE ch.status = 'not_selected' AND ch.outcome = 'not_selected' AND ch.created_
 ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
 
 /**
- * request_awaiting_owner: the Project owner only (owner member row, or organization member:
- * the `projectRole` rule). A collaborator never sees it. An action item while the status holds.
+ * request_needs_input (ADR 0025): the requester; for a conflict also the Project owner (owner
+ * member row, or organization member: the `projectRole` rule). An action item while the status
+ * holds. The ID carries the round, so a new question of the same Change is a new item.
  */
-const AWAITING_OWNER_SQL = `
-SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.updated_at, r.read_at
+const NEEDS_INPUT_SQL = `
+SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.updated_at,
+       ch.clarification_json, r.read_at
 FROM changes ch
 ${MINE("ch.project_id")}
-${read("r", `'request_awaiting_owner:' || ch.id`)}
-WHERE ch.status = 'awaiting_owner'
-  AND (EXISTS (SELECT 1 FROM memberships m WHERE m.org_id = p.org_id AND m.user_id = ?1)
-    OR EXISTS (SELECT 1 FROM project_members pm
-               WHERE pm.project_id = p.id AND pm.user_id = ?1 AND pm.role = 'owner'))
+${read("r", `'request_needs_input:' || ch.id || ':' || COALESCE(json_extract(ch.clarification_json, '$.round'), 1)`)}
+WHERE ch.status = 'needs_input'
+  AND (ch.created_by = ?1
+    OR (json_extract(ch.clarification_json, '$.kind') = 'conflict'
+      AND (EXISTS (SELECT 1 FROM memberships m WHERE m.org_id = p.org_id AND m.user_id = ?1)
+        OR EXISTS (SELECT 1 FROM project_members pm
+                   WHERE pm.project_id = p.id AND pm.user_id = ?1 AND pm.role = 'owner'))))
 ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
 
 type Base = { project_id: string; project_name: string; read_at?: string | null };
@@ -301,6 +305,7 @@ type ConflictRow = Base & {
   right_summary: string | null;
 };
 type CompletedRow = Base & { id: string; goal: string; updated_at: string };
+type NeedsInputRow = CompletedRow & { clarification_json: string | null };
 type ReleaseRow = Base & {
   id: string;
   change_id: string;
@@ -531,15 +536,27 @@ function notSelectedItem(row: NotSelectedRow): NotificationView {
   };
 }
 
-function awaitingOwnerItem(row: CompletedRow): NotificationView {
+function needsInputItem(row: NeedsInputRow): NotificationView {
+  let clarification: { kind?: string; round?: number; summary?: string } = {};
+  try {
+    clarification = JSON.parse(row.clarification_json ?? "{}") as typeof clarification;
+  } catch {
+    clarification = {};
+  }
+  const title =
+    clarification.kind === "duplicate"
+      ? "Your request looks like one that exists"
+      : clarification.kind === "conflict"
+        ? "A request conflicts with another request"
+        : "Your request needs more detail";
   return {
     ...project(row),
     changeId: row.id,
-    id: `request_awaiting_owner:${row.id}`,
-    kind: "request_awaiting_owner",
+    id: `request_needs_input:${row.id}:${clarification.round ?? 1}`,
+    kind: "request_needs_input",
     severity: "action",
-    title: "A request needs your choice",
-    body: clip(row.goal, 160),
+    title,
+    body: joinParts(clip(clarification.summary ?? "", 160), clip(row.goal, 100)),
     href: `/changes/${row.id}`,
     createdAt: row.updated_at,
     read: !!row.read_at,
@@ -571,7 +588,7 @@ export async function deriveNotifications(
     completed,
     released,
     notSelected,
-    awaiting,
+    needsInput,
   ] = await db.batch([
     userOnly(VERIFIED_SQL),
     userOnly(DEAD_LETTER_SQL),
@@ -582,7 +599,7 @@ export async function deriveNotifications(
     statement(COMPLETED_SQL),
     statement(RELEASES_SQL),
     statement(NOT_SELECTED_SQL),
-    userOnly(AWAITING_OWNER_SQL),
+    userOnly(NEEDS_INPUT_SQL),
   ]);
   const rows = <T>(result: D1Result | undefined) => (result?.results ?? []) as T[];
   const items: NotificationView[] = [
@@ -597,7 +614,7 @@ export async function deriveNotifications(
     ...rows<CompletedRow>(completed).map(completedItem),
     ...rows<ReleaseRow>(released).map(releaseItem),
     ...rows<NotSelectedRow>(notSelected).map(notSelectedItem),
-    ...rows<CompletedRow>(awaiting).map(awaitingOwnerItem),
+    ...rows<NeedsInputRow>(needsInput).map(needsInputItem),
   ];
   return items.sort(
     (a, b) =>

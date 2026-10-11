@@ -6,7 +6,7 @@ import type { CompletionResult } from "@rhumbatron/model-router";
 import { describe, expect, it, vi } from "vitest";
 import { RequestScopes } from "../../coordinator/src/request-scopes.ts";
 import { createCandidate } from "./candidate-create.ts";
-import { overrideRequest } from "./change-commands.ts";
+import { clarifyChange } from "./change-commands.ts";
 import { recomposeStaleCandidate } from "./recompose.ts";
 import { checkRequestPair } from "./request-check.ts";
 import type { RequestInput } from "./request-policy.ts";
@@ -33,10 +33,9 @@ const ctx = {
   changeId: "chg_b",
   baseGeneration: 0,
 };
-const request = (id: string, user: string, rank: number): RequestInput => ({
+const request = (id: string, user: string): RequestInput => ({
   changeId: id,
   requesterUserId: user,
-  requesterRank: rank,
   goal: `Sort ${id}`,
   criteria: [{ id: "c1", text: `GET /api/products sorts ${id}` }],
   resources: ["products:sort"],
@@ -68,6 +67,36 @@ const conflict = () =>
     verdict: "conflicting",
     conflicts: [{ a: "c1", b: "c1", why: "Different sort orders" }],
   });
+/** One arbiter run. `first` is the side shown as "a" in that run. */
+const vote = (verdict: "prefer_a" | "prefer_b" | "ask") =>
+  reply("arbitrate_requests", {
+    verdict,
+    rationale: "Fits the current app",
+    citedCriteria: [{ side: "a", id: "c1" }],
+    citedItems: ["conflict:1"],
+  });
+const toolOf = (req: unknown) =>
+  (req as { tools?: { function: { name: string } }[] }).tools?.[0]?.function.name;
+/**
+ * Model replies by tool. Intake calls answer "nothing covered, one reading" unless overridden;
+ * every other call takes the next scripted reply in order.
+ */
+function script(rest: CompletionResult[], intake: Partial<Record<string, CompletionResult>> = {}) {
+  vi.mocked(meteredComplete)
+    .mockReset()
+    .mockImplementation(async (_meter, _gateway, req) => {
+      const name = toolOf(req);
+      if (name && intake[name]) return intake[name] as CompletionResult;
+      if (name === "coverage_review") return reply(name, { items: [] });
+      if (name === "list_interpretations")
+        return reply(name, { interpretations: [], decisions: [] });
+      const next = rest.shift();
+      if (!next) throw Error(`unexpected model call ${name}`);
+      return next;
+    });
+}
+const callsOf = (name: string) =>
+  vi.mocked(meteredComplete).mock.calls.filter((call) => toolOf(call[2]) === name);
 const graph = (criteria = ["Sort products", "Cart stays available"]) =>
   reply("submit_work_graph", {
     acceptanceCriteria: criteria,
@@ -127,6 +156,7 @@ function harness() {
   scopes.migrate();
   const events: unknown[] = [];
   const started = new Set<string>();
+  const sent: unknown[] = [];
   const dispatched: unknown[] = [];
   const stored = new Map<string, string>();
   const env = {
@@ -168,7 +198,11 @@ function harness() {
       },
       get: async (id: string) => {
         if (!started.has(id)) throw Error("missing");
-        return { id };
+        return {
+          id,
+          status: async () => ({ status: "waiting" }),
+          sendEvent: async (event: unknown) => sent.push(event),
+        };
       },
     },
     EVIDENCE: { put: async (key: string, value: string) => stored.set(key, value) },
@@ -176,15 +210,20 @@ function harness() {
   } as unknown as Env;
   const add = (r: RequestInput, status = "compiling") => {
     db.prepare(
-      "INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd, created_by, requester_rank, created_at, updated_at) VALUES (?, 'p', ?, ?, 0, 1, ?, ?, ?, ?)",
-    ).run(r.changeId, r.goal, status, r.requesterUserId, r.requesterRank, now, now);
-    scopes.admit(r.changeId, r);
+      "INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd, created_by, created_at, updated_at) VALUES (?, 'p', ?, ?, 0, 1, ?, ?, ?)",
+    ).run(r.changeId, r.goal, status, r.requesterUserId, now, now);
+    scopes.admit(r.changeId, { requesterUserId: r.requesterUserId, requesterRank: 10 });
   };
   const row = (id: string) =>
     db.prepare("SELECT * FROM changes WHERE id = ?").get(id) as Record<string, unknown>;
-  const scope = (r: RequestInput) => scopes.register({ ...r, registeredAt: now });
+  const scope = (r: RequestInput) =>
+    scopes.register({ ...r, requesterRank: 10, registeredAt: now });
   const steps: string[] = [];
   const sleeps: string[] = [];
+  /** Called on each wait; the default lets the day pass with no event. */
+  let onWait: (name: string) => Promise<void> = async () => {
+    throw Error("timed out");
+  };
   const step = {
     async do(name: string, configOrRun: unknown, callback?: () => Promise<unknown>) {
       steps.push(name);
@@ -196,8 +235,10 @@ function harness() {
       sleeps.push(name);
     },
     async sleepUntil() {},
-    async waitForEvent() {
-      throw new Error("not used by this Workflow");
+    async waitForEvent(name: string) {
+      steps.push(name);
+      await onWait(name);
+      return { payload: {}, timestamp: new Date(), type: "clarification" };
     },
   } as Parameters<InstanceType<typeof ChangeWorkflow>["run"]>[1];
   const run = (id: string) =>
@@ -218,39 +259,48 @@ function harness() {
     stored,
     steps,
     sleeps,
+    sent,
     run,
+    setWait: (hook: (name: string) => Promise<void>) => {
+      onWait = hook;
+    },
   };
 }
 
-describe("request selection and owner override on real SQLite", () => {
-  it("persists one review per sorted pair and reuses it on retry without another model call", async () => {
+describe("request selection by the system on real SQLite", () => {
+  it("persists one review and one arbitration per pair and reuses them on retry", async () => {
     const h = harness();
-    const a = request("chg_a", "alice", 0);
-    const b = request("chg_b", "bob", 10);
+    const a = request("chg_a", "alice");
+    const b = request("chg_b", "bob");
     h.add(a);
     h.add(b);
     let calls = 0;
+    const replies = [conflict(), vote("prefer_a"), vote("prefer_b")];
     const complete = async () => {
       calls++;
-      return conflict();
+      return replies.shift() as CompletionResult;
     };
     const first = await checkRequestPair(h.env, ctx, a, b, complete);
-    expect(first).toEqual({ costUsd: 0.01, excluded: ["c1"], stop: null });
-    expect(await checkRequestPair(h.env, ctx, a, b, complete)).toEqual(first);
-    expect(calls).toBe(1);
+    expect(first).toEqual({ costUsd: 0.03, excluded: ["c1"], stop: null });
+    expect(await checkRequestPair(h.env, ctx, a, b, complete)).toEqual({ ...first, costUsd: 0 });
+    expect(calls).toBe(3);
     expect(h.row("chg_b")).toMatchObject({
       outcome: "not_selected",
       outcome_winner_change_id: "chg_a",
-      outcome_decided_by: "policy:priority_wins",
+      outcome_decided_by: "system:arbiter",
     });
     const stored = h.db.prepare("SELECT * FROM request_conflicts").all();
     expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ policy: "system_arbiter", decided_by: "system:arbiter" });
     expect(JSON.stringify(stored)).not.toContain("private reasoning");
+    expect(h.db.prepare("SELECT decision_type, verdict FROM change_decisions").all()).toMatchObject(
+      [{ decision_type: "REQUEST_ARBITER", verdict: "prefer_a" }],
+    );
   });
-  it("does not repeat a provider call when saving its result fails", async () => {
+  it("does not repeat a provider call when saving its result fails, and asks the later requester", async () => {
     const h = harness();
-    const a = request("chg_a", "alice", 0);
-    const b = request("chg_b", "bob", 10);
+    const a = request("chg_a", "alice");
+    const b = request("chg_b", "bob");
     h.add(a);
     h.add(b);
     const prepare = h.env.DB.prepare.bind(h.env.DB);
@@ -271,35 +321,72 @@ describe("request selection and owner override on real SQLite", () => {
       "D1 transient failure",
     );
     expect(await checkRequestPair(h.env, ctx, a, b, complete)).toMatchObject({
-      stop: "awaiting_owner",
+      stop: "needs_input",
     });
     expect(calls).toBe(1);
-    expect(h.row(b.changeId).outcome_reason).toBe("review could not confirm compatibility");
+    expect(h.row(b.changeId).status).toBe("needs_input");
+    expect(JSON.parse(String(h.row(b.changeId).clarification_json))).toMatchObject({
+      kind: "conflict",
+      relatedChangeId: "chg_a",
+      round: 1,
+    });
   });
-  it("awaits the owner on an unsupported review and on equal rank, without rejecting earlier work", async () => {
-    for (const unsupported of [true, false]) {
+  it("asks the later requester on an unsupported review or a disagreeing arbiter, never deciding by role", async () => {
+    for (const replies of [
+      [
+        reply("review_requests", {
+          verdict: "conflicting",
+          conflicts: [{ a: "unknown", b: "c1", why: "unsupported" }],
+        }),
+      ],
+      // Both runs prefer the side shown first: position bias, not agreement.
+      [conflict(), vote("prefer_a"), vote("prefer_a")],
+      [conflict(), vote("ask"), vote("ask")],
+    ]) {
       const h = harness();
-      const a = request("chg_a", "alice", 0);
-      const b = request("chg_b", "bob", unsupported ? 10 : 0);
+      const a = request("chg_a", "alice");
+      const b = request("chg_b", "bob");
       h.add(a);
       h.add(b);
-      const result = await checkRequestPair(h.env, ctx, a, b, async () =>
-        unsupported
-          ? reply("review_requests", {
-              verdict: "conflicting",
-              conflicts: [{ a: "unknown", b: "c1", why: "unsupported" }],
-            })
-          : conflict(),
+      const result = await checkRequestPair(
+        h.env,
+        ctx,
+        a,
+        b,
+        async () => replies.shift() as CompletionResult,
       );
-      expect(result.stop).toBe("awaiting_owner");
-      expect(h.row(b.changeId).status).toBe("awaiting_owner");
+      expect(result.stop).toBe("needs_input");
+      expect(h.row(b.changeId).status).toBe("needs_input");
       expect(h.row(a.changeId).status).toBe("compiling");
+    }
+  });
+  it("asks about a cited duplicate with the quoted criterion, and refuses an invented quote", async () => {
+    for (const quote of ["sorts chg_a", "sorts by popularity"]) {
+      const h = harness();
+      const a = request("chg_a", "alice");
+      const b = request("chg_b", "bob");
+      h.add(a);
+      h.add(b);
+      await checkRequestPair(h.env, ctx, a, b, async () =>
+        reply("review_requests", {
+          verdict: "duplicate",
+          conflicts: [],
+          covered: [{ a: "c1", b: "c1", quote }],
+        }),
+      );
+      const asked = JSON.parse(String(h.row("chg_b").clarification_json));
+      if (quote === "sorts chg_a") {
+        expect(asked).toMatchObject({ kind: "duplicate", relatedChangeId: "chg_a" });
+        expect(asked.questions[0].text).toContain('"sorts chg_a"');
+      } else {
+        expect(asked.kind).toBe("conflict");
+      }
     }
   });
   it("cancels earlier tasks and Candidates when the same requester supersedes them", async () => {
     const h = harness();
-    const a = request("chg_a", "alice", 0);
-    const b = request("chg_b", "alice", 0);
+    const a = request("chg_a", "alice");
+    const b = request("chg_b", "alice");
     h.add(a, "running");
     h.add(b);
     h.db.exec(
@@ -317,8 +404,8 @@ describe("request selection and owner override on real SQLite", () => {
   });
   it("preserves a promoted earlier loser and records replaces on the later winner", async () => {
     const h = harness();
-    const a = request("chg_a", "alice", 0);
-    const b = request("chg_b", "alice", 0);
+    const a = request("chg_a", "alice");
+    const b = request("chg_b", "alice");
     h.add(a, "releasing");
     h.add(b);
     h.db.exec(
@@ -328,155 +415,16 @@ describe("request selection and owner override on real SQLite", () => {
     expect(h.row(a.changeId).status).toBe("releasing");
     expect(h.row(b.changeId).outcome).toBe("replaces");
   });
-  it("creates and starts one attributed override Change under concurrent calls, and resumes after a lost reply", async () => {
-    const h = harness();
-    const a = request("chg_a", "alice", 0);
-    const b = request("chg_b", "bob", 10);
-    h.add(a, "running");
-    h.add(b, "not_selected");
-    h.db
-      .prepare(
-        "INSERT INTO request_conflicts (id, project_id, change_a, change_b, verdict, winner_change_id, loser_change_id, created_at) VALUES ('rc', 'p', 'chg_a', 'chg_b', 'conflicting', 'chg_a', 'chg_b', ?)",
-      )
-      .run(now);
-    const input = { changeId: b.changeId, actorUserId: "alice" };
-    const [one, two] = await Promise.all([
-      overrideRequest(h.env, input),
-      overrideRequest(h.env, input),
-    ]);
-    expect(one.status).toBe("recorded");
-    expect(two).toMatchObject({
-      status: "recorded",
-      changeId: one.status === "recorded" ? one.changeId : "",
-    });
-    if (one.status !== "recorded") throw Error("override refused");
-    expect(h.row(one.changeId)).toMatchObject({
-      created_by: "bob",
-      requester_rank: 10,
-      supersedes_change_id: "chg_b",
-      budget_usd: 1,
-      outcome_decided_by: "alice",
-    });
-    expect(h.row("chg_b")).toMatchObject({ status: "not_selected", outcome: "overridden" });
-    expect(h.row("chg_a")).toMatchObject({
-      status: "not_selected",
-      outcome_reason: "Replaced by the owner's choice",
-      outcome_decided_by: "alice",
-    });
-    expect(h.started.size).toBe(1);
-    expect(
-      h.db
-        .prepare(
-          "SELECT policy, decided_by, winner_change_id FROM request_conflicts WHERE winner_change_id = ?",
-        )
-        .get(one.changeId),
-    ).toMatchObject({
-      policy: "owner_override",
-      decided_by: "alice",
-      winner_change_id: one.changeId,
-    });
-    expect(await overrideRequest(h.env, input)).toMatchObject({
-      changeId: one.changeId,
-      repeated: true,
-    });
-    // Even if the old winner's scope is encountered after a cached registration, the owner's choice wins.
-    const next = { ...b, changeId: one.changeId, supersedesChangeId: b.changeId };
-    const decision = await checkRequestPair(
-      h.env,
-      { ...ctx, changeId: next.changeId },
-      a,
-      next,
-      async () => {
-        throw Error("must not re-review owner choice");
-      },
-    );
-    expect(decision).toMatchObject({ excluded: [], stop: null });
-  });
-  it("resumes an override after its Workflow start fails and leaves promoted winners untouched", async () => {
-    const h = harness();
-    const a = request("chg_a", "alice", 0);
-    const b = request("chg_b", "bob", 10);
-    h.add(a, "completed");
-    h.add(b, "not_selected");
-    h.db
-      .prepare(
-        "INSERT INTO request_conflicts (id, project_id, change_a, change_b, verdict, winner_change_id, loser_change_id, created_at) VALUES ('rc', 'p', 'chg_a', 'chg_b', 'conflicting', 'chg_a', 'chg_b', ?)",
-      )
-      .run(now);
-    h.db.exec(
-      `INSERT INTO candidates (id, change_id, base_generation, status, created_at, updated_at) VALUES ('cand_a', 'chg_a', 0, 'promoted', '${now}', '${now}')`,
-    );
-    const original = h.env.CHANGE_WORKFLOW.create;
-    h.env.CHANGE_WORKFLOW.create = async () => {
-      throw Error("transport failure");
-    };
-    await expect(
-      overrideRequest(h.env, { changeId: b.changeId, actorUserId: "alice" }),
-    ).rejects.toThrow("transport failure");
-    h.env.CHANGE_WORKFLOW.create = original;
-    expect(
-      await overrideRequest(h.env, { changeId: b.changeId, actorUserId: "alice" }),
-    ).toMatchObject({ status: "recorded", repeated: true });
-    expect(h.started.size).toBe(1);
-    expect(h.row(a.changeId)).toMatchObject({ status: "completed", outcome: null });
-    expect(
-      await overrideRequest(h.env, { changeId: a.changeId, actorUserId: "alice" }),
-    ).toMatchObject({ status: "refused", reason: "not_overridable" });
-  });
-  it("records the owner choice on a failed winner that never promoted", async () => {
-    const h = harness();
-    const a = request("chg_a", "alice", 0);
-    const b = request("chg_b", "bob", 10);
-    h.add(a, "failed");
-    h.add(b, "not_selected");
-    h.db
-      .prepare(
-        "INSERT INTO request_conflicts (id, project_id, change_a, change_b, verdict, winner_change_id, loser_change_id, created_at) VALUES ('rc', 'p', 'chg_a', 'chg_b', 'conflicting', 'chg_a', 'chg_b', ?)",
-      )
-      .run(now);
-    await overrideRequest(h.env, { changeId: b.changeId, actorUserId: "alice" });
-    expect(h.row(a.changeId)).toMatchObject({
-      status: "not_selected",
-      outcome_reason: "Replaced by the owner's choice",
-      outcome_decided_by: "alice",
-    });
-  });
-  it("overrides an equal-rank pending choice and does not grant unrelated pairs owner priority", async () => {
-    const h = harness();
-    const a = request("chg_a", "alice", 10);
-    const b = request("chg_b", "bob", 10);
-    const c = request("chg_c", "carol", 0);
-    h.add(a);
-    h.add(b, "awaiting_owner");
-    h.add(c);
-    h.db
-      .prepare(
-        "INSERT INTO request_conflicts (id, project_id, change_a, change_b, verdict, created_at) VALUES ('rc', 'p', 'chg_a', 'chg_b', 'conflicting', ?)",
-      )
-      .run(now);
-    const result = await overrideRequest(h.env, { changeId: b.changeId, actorUserId: "owner" });
-    if (result.status !== "recorded") throw Error("override refused");
-    expect(h.row(a.changeId).status).toBe("not_selected");
-    let calls = 0;
-    h.db.prepare("UPDATE changes SET status = 'compiling' WHERE id = ?").run(result.changeId);
-    const next = { ...b, changeId: result.changeId, supersedesChangeId: b.changeId };
-    await checkRequestPair(h.env, { ...ctx, changeId: next.changeId }, c, next, async () => {
-      calls++;
-      return conflict();
-    });
-    expect(calls).toBe(1);
-    expect(h.row(next.changeId).outcome).toBe("not_selected");
-  });
-  it("refuses recomposition of a losing or overridden Change before creating a Candidate", async () => {
+  it("refuses recomposition of a losing, waiting, or duplicate Change before creating a Candidate", async () => {
     for (const [status, outcome] of [
       ["not_selected", null],
       ["cancelled", null],
-      ["awaiting_owner", null],
+      ["needs_input", null],
       ["running", "not_selected"],
-      ["running", "overridden"],
+      ["running", "duplicate"],
     ] as const) {
       const h = harness();
-      const a = request("chg_a", "alice", 0);
+      const a = request("chg_a", "alice");
       h.add(a, status);
       h.db.prepare("UPDATE changes SET outcome = ? WHERE id = ?").run(outcome, a.changeId);
       h.db.exec(
@@ -493,39 +441,47 @@ describe("request selection and owner override on real SQLite", () => {
       expect(h.db.prepare("SELECT COUNT(*) AS n FROM candidates").get()).toMatchObject({ n: 1 });
     }
   });
+});
+
+describe("ChangeWorkflow with the intake gate on real SQLite", () => {
   it("plans once for independent requests and dispatches selected tasks", async () => {
     const h = harness();
     const a = {
-      ...request("chg_a", "alice", 0),
+      ...request("chg_a", "alice"),
       criteria: [{ id: "c1", text: "Cart works" }],
       resources: ["cart:checkout"],
     };
     h.add(a);
     h.scope(a);
-    h.add(request("chg_b", "bob", 10), "created");
-    vi.mocked(meteredComplete).mockResolvedValue(graph());
+    h.add(request("chg_b", "bob"), "created");
+    script([graph()]);
     expect(await h.run("chg_b")).toMatchObject({ tasks: 1, ready: 1 });
-    expect(meteredComplete).toHaveBeenCalledTimes(1);
+    expect(callsOf("submit_work_graph")).toHaveLength(1);
     expect(h.row("chg_b")).toMatchObject({ status: "running", outcome: null });
+    expect(h.steps.indexOf("intake review")).toBeLessThan(h.steps.indexOf("plan work graph"));
     const planned = JSON.parse(h.stored.values().next().value ?? "{}");
     expect(planned.criteria).toEqual([
       { id: "c1", text: "Sort products" },
       { id: "c2", text: "Cart stays available" },
     ]);
-    vi.mocked(meteredComplete).mockClear();
+    expect(h.db.prepare("SELECT decision_type, verdict FROM change_decisions").all()).toMatchObject(
+      [{ decision_type: "INTAKE", verdict: "clear" }],
+    );
   });
   it("replans only the selected criteria, or stops entirely when all criteria lost", async () => {
     for (const partial of [true, false]) {
       const h = harness();
-      const a = request("chg_a", "alice", 0);
+      const a = request("chg_a", "alice");
       h.add(a);
       h.scope(a);
-      h.add(request("chg_b", "bob", 10), "created");
-      vi.mocked(meteredComplete)
-        .mockReset()
-        .mockResolvedValueOnce(graph(partial ? undefined : ["Sort products"]))
-        .mockResolvedValueOnce(conflict())
-        .mockResolvedValueOnce(graph(["Cart stays available"]));
+      h.add(request("chg_b", "bob"), "created");
+      script([
+        graph(partial ? undefined : ["Sort products"]),
+        conflict(),
+        vote("prefer_a"),
+        vote("prefer_b"),
+        graph(["Cart stays available"]),
+      ]);
       const result = await h.run("chg_b");
       if (partial) {
         expect(result).toMatchObject({ ready: 1 });
@@ -533,11 +489,12 @@ describe("request selection and owner override on real SQLite", () => {
         expect(h.scopes.scope("chg_b")?.criteria).toEqual([
           { id: "c2", text: "Cart stays available" },
         ]);
-        expect(JSON.stringify(vi.mocked(meteredComplete).mock.calls[2]?.[2])).toContain(
-          "Excluded criteria",
-        );
+        expect(JSON.stringify(callsOf("submit_work_graph")[1]?.[2])).toContain("Excluded criteria");
         expect(h.dispatched).toHaveLength(1);
-        expect(h.dispatched[0]).toMatchObject({ body: { payload: { budgetRemainingUsd: 0.97 } } });
+        // Intake (2 coverage + 1 clarity), plan, review, 2 arbiter runs, replan: 8 x $0.01.
+        const body = (h.dispatched[0] as { body: { payload: { budgetRemainingUsd: number } } })
+          .body;
+        expect(body.payload.budgetRemainingUsd).toBeCloseTo(0.92);
       } else {
         expect(result).toEqual({ status: "not_selected" });
         expect(h.scopes.scope("chg_b")).toBeNull();
@@ -545,9 +502,9 @@ describe("request selection and owner override on real SQLite", () => {
       }
     }
   });
-  it("stops the prod card request fully, keeps an independent extra, and fails closed on a bad dependent", async () => {
+  it("stops the card request fully, keeps an independent extra, and asks on a bad dependent", async () => {
     const owner = {
-      ...request("chg_a", "alice", 0),
+      ...request("chg_a", "alice"),
       goal: "Show the recipe list as a compact table with one row per recipe",
       criteria: [{ id: "c1", text: "Home page shows recipes as a table with one row per recipe" }],
     };
@@ -565,20 +522,18 @@ describe("request selection and owner override on real SQLite", () => {
       [[], review(), "not_selected"],
       [[], review([{ side: "b", id: "c2", on: "c1" }]), "not_selected"],
       [["Add a print button to each recipe"], review(), "partially_selected"],
-      [[], review([{ side: "b", id: "c2", on: "c9" }]), "awaiting_owner"],
+      [[], review([{ side: "b", id: "c2", on: "c9" }]), "needs_input"],
     ] as const) {
       const h = harness();
       h.add(owner);
       h.scope(owner);
       h.add(
-        { ...request("chg_b", "bob", 10), goal: "Design: show the recipe list as cards" },
+        { ...request("chg_b", "bob"), goal: "Design: show the recipe list as cards" },
         "created",
       );
-      vi.mocked(meteredComplete)
-        .mockReset()
-        .mockResolvedValueOnce(graph([...cards, ...extra]))
-        .mockResolvedValueOnce(reviewed)
-        .mockResolvedValueOnce(graph([...extra]));
+      const arbiter = expected === "needs_input" ? [] : [vote("prefer_a"), vote("prefer_b")];
+      script([graph([...cards, ...extra]), reviewed, ...arbiter, graph([...extra])]);
+      // The question is never answered here: after 7 days the request is cancelled.
       const result = await h.run("chg_b");
       if (expected === "partially_selected") {
         expect(h.row("chg_b")).toMatchObject({ status: "running", outcome: "partially_selected" });
@@ -586,12 +541,19 @@ describe("request selection and owner override on real SQLite", () => {
           { id: "c3", text: "Add a print button to each recipe" },
         ]);
         expect(h.dispatched).toHaveLength(1);
+      } else if (expected === "needs_input") {
+        expect(result).toEqual({ status: "cancelled" });
+        expect(h.row("chg_b")).toMatchObject({
+          status: "cancelled",
+          blocked_reason: "No answer within 7 days",
+        });
+        expect(h.dispatched).toHaveLength(0);
       } else {
         expect(result).toEqual({ status: expected });
         expect(h.row("chg_b").status).toBe(expected);
         expect(h.dispatched).toHaveLength(0);
       }
-      if (expected !== "awaiting_owner") {
+      if (expected !== "needs_input") {
         const stored = h.db.prepare("SELECT review_json FROM request_conflicts").get() as {
           review_json: string;
         };
@@ -605,7 +567,7 @@ describe("request selection and owner override on real SQLite", () => {
   it("records the earlier loser's dependent criteria for the UI", async () => {
     const h = harness();
     const a = {
-      ...request("chg_a", "bob", 10),
+      ...request("chg_a", "bob"),
       criteria: [
         { id: "c1", text: "Recipe list renders as a grid of large cards" },
         { id: "c2", text: "Each card shows the recipe title" },
@@ -613,16 +575,25 @@ describe("request selection and owner override on real SQLite", () => {
       ],
     };
     const b = {
-      ...request("chg_b", "alice", 0),
+      ...request("chg_b", "alice"),
       criteria: [{ id: "c1", text: "Home page shows recipes as a table" }],
     };
     h.add(a);
     h.add(b);
-    const result = await checkRequestPair(h.env, ctx, a, b, async () =>
+    const replies = [
       reply("review_requests", {
         verdict: "conflicting",
         conflicts: [{ a: "c1", b: "c1", why: "Cards versus table" }],
       }),
+      vote("prefer_b"),
+      vote("prefer_a"),
+    ];
+    const result = await checkRequestPair(
+      h.env,
+      ctx,
+      a,
+      b,
+      async () => replies.shift() as CompletionResult,
     );
     expect(result).toMatchObject({ excluded: [], stop: null });
     expect(h.row("chg_a").status).toBe("not_selected");
@@ -634,20 +605,130 @@ describe("request selection and owner override on real SQLite", () => {
       criterionIds: ["c1", "c2"],
     });
   });
-  it("waits ten times for unscoped earlier work, then fails closed without dispatch", async () => {
+  it("waits ten times for unscoped earlier work, then asks instead of building", async () => {
     const h = harness();
-    h.add(request("chg_a", "alice", 0));
-    h.add(request("chg_b", "bob", 10), "created");
-    vi.mocked(meteredComplete)
-      .mockReset()
-      .mockResolvedValueOnce(graph())
-      .mockResolvedValueOnce(reply("review_requests", { verdict: "abstain" }));
-    expect(await h.run("chg_b")).toEqual({ status: "awaiting_owner" });
+    h.add(request("chg_a", "alice"));
+    h.add(request("chg_b", "bob"), "created");
+    script([graph(), reply("review_requests", { verdict: "abstain" })]);
+    expect(await h.run("chg_b")).toEqual({ status: "cancelled" });
     expect(h.sleeps).toHaveLength(10);
     expect(h.dispatched).toHaveLength(0);
-    expect(vi.mocked(meteredComplete).mock.calls[1]?.[2]).toMatchObject({
+    expect(callsOf("review_requests")[0]?.[2]).toMatchObject({
       tier: "sonnet",
       maxOutputTokens: 1200,
     });
+  });
+  it("asks before planning, then plans with the answer in the goal", async () => {
+    const h = harness();
+    h.add({ ...request("chg_b", "bob"), goal: "Add kanban feature" }, "created");
+    // The first wait gets the requester's answer through the clarify command.
+    h.setWait(async (name) => {
+      if (name !== "wait for answer intake 0") throw Error("timed out");
+      const outcome = await clarifyChange(h.env, {
+        changeId: "chg_b",
+        actorUserId: "bob",
+        request: { answers: [{ questionId: "q1", text: "One kanban board per mission day" }] },
+      });
+      expect(outcome).toMatchObject({ status: "recorded", round: 1, changeStatus: "compiling" });
+    });
+    h.started.add("chg_b");
+    script([graph()]);
+    expect(await h.run("chg_b")).toMatchObject({ tasks: 1 });
+    expect(h.steps).toContain("ask for input");
+    expect(h.sent).toEqual([{ type: "clarification", payload: { round: 1 } }]);
+    // Rule: "Add kanban feature" names one object, so it asks without a model deciding.
+    expect(callsOf("submit_work_graph")).toHaveLength(1);
+    expect(JSON.stringify(callsOf("submit_work_graph")[0]?.[2])).toContain(
+      "One kanban board per mission day",
+    );
+    expect(h.row("chg_b")).toMatchObject({ status: "running", clarification_json: null });
+    expect(JSON.parse(String(h.row("chg_b").clarification_answers_json))).toMatchObject([
+      { round: 1, questionId: "q1", answeredBy: "bob" },
+    ]);
+  });
+});
+
+describe("clarify command on real SQLite", () => {
+  const asked = (h: ReturnType<typeof harness>, kind = "unclear", related: string | null = null) =>
+    h.db
+      .prepare("UPDATE changes SET status = 'needs_input', clarification_json = ? WHERE id = ?")
+      .run(
+        JSON.stringify({
+          kind,
+          summary: "s",
+          questions: [{ id: "q1", text: "What is different?" }],
+          relatedChangeId: related,
+          relatedGoal: related ? "Sort chg_a" : null,
+          askedAt: now,
+          round: 1,
+        }),
+        "chg_b",
+      );
+  it("records one answer per round, refuses unknown questions, and wakes the workflow once", async () => {
+    const h = harness();
+    h.add(request("chg_b", "bob"));
+    asked(h);
+    h.started.add("chg_b");
+    expect(
+      await clarifyChange(h.env, {
+        changeId: "chg_b",
+        actorUserId: "bob",
+        request: { answers: [{ questionId: "q9", text: "x" }] },
+      }),
+    ).toMatchObject({ status: "refused", reason: "unknown_question" });
+    const answer = {
+      changeId: "chg_b",
+      actorUserId: "bob",
+      request: { answers: [{ questionId: "q1", text: "A board per day" }] },
+    };
+    const [one, two] = await Promise.all([
+      clarifyChange(h.env, answer),
+      clarifyChange(h.env, answer),
+    ]);
+    expect([one.status, two.status].sort()).toEqual(["recorded", "recorded"]);
+    expect([one, two].filter((o) => o.status === "recorded" && o.repeated)).toHaveLength(1);
+    expect(JSON.parse(String(h.row("chg_b").clarification_answers_json))).toHaveLength(1);
+    expect(h.sent).toHaveLength(1);
+    expect(h.row("chg_b").status).toBe("compiling");
+  });
+  it("withdraws a duplicate as cancelled with the reason and the related Change", async () => {
+    const h = harness();
+    h.add(request("chg_a", "alice"), "running");
+    h.add(request("chg_b", "bob"));
+    asked(h, "duplicate", "chg_a");
+    h.started.add("chg_b");
+    expect(
+      await clarifyChange(h.env, {
+        changeId: "chg_b",
+        actorUserId: "bob",
+        request: { action: "withdraw" },
+      }),
+    ).toMatchObject({ status: "recorded", changeStatus: "cancelled", action: "withdraw" });
+    expect(h.row("chg_b")).toMatchObject({
+      status: "cancelled",
+      outcome: "duplicate",
+      outcome_winner_change_id: "chg_a",
+      blocked_reason: "Withdrawn by the requester",
+    });
+    expect(h.row("chg_a").status).toBe("running");
+  });
+  it("continues a Change whose first workflow already ended in a new instance", async () => {
+    const h = harness();
+    h.add(request("chg_b", "bob"));
+    asked(h, "conflict", null);
+    // A Change asked before the gate existed: its first instance has already completed.
+    h.started.add("chg_b");
+    const get = h.env.CHANGE_WORKFLOW.get.bind(h.env.CHANGE_WORKFLOW);
+    h.env.CHANGE_WORKFLOW.get = async (id: string) =>
+      id === "chg_b"
+        ? ({ id, status: async () => ({ status: "complete" }) } as unknown as WorkflowInstance)
+        : get(id);
+    await clarifyChange(h.env, {
+      changeId: "chg_b",
+      actorUserId: "bob",
+      request: { action: "proceed_anyway" },
+    });
+    expect([...h.started]).toEqual(["chg_b", "chg_b_r1"]);
+    expect(h.sent).toEqual([]);
   });
 });

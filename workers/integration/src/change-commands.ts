@@ -1,5 +1,12 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
-import type { ChangeCommandOutcome, ChangeStatus, TaskStatus } from "@rhumbatron/protocol";
+import type {
+  ChangeClarification,
+  ChangeCommandOutcome,
+  ChangeStatus,
+  ClarifyChangeOutcome,
+  ClarifyChangeRequest,
+  TaskStatus,
+} from "@rhumbatron/protocol";
 import {
   CANCELLABLE_FROM,
   CHANGE_CANCELLED_REASON,
@@ -9,12 +16,14 @@ import {
 } from "./change-status.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
+import { answeredRounds, parseAnswers, type StoredAnswer } from "./intake-context.ts";
 import { recoverSourceConflicts } from "./rebase.ts";
 import { recoverStaleCandidates } from "./recompose.ts";
 import { startWorkflowOnce } from "./workflow-commands.ts";
 
 /**
- * A person's cancel and budget raise on one Change (AGENTS.md sections 16.1, 44, 60). Called only
+ * A person's cancel, budget raise, and clarification answer on one Change (AGENTS.md sections
+ * 16.1, 44, 60; ADR 0025). Called only
  * by the API over the `INTEGRATION` service binding, after it authenticated the user and checked
  * project membership. Deterministic and idempotent: every write is guarded by the from-states in
  * change-status.ts, and a repeat returns the stored result.
@@ -51,6 +60,15 @@ const notFound = (changeId: string): ChangeCommandOutcome => ({
   reason: "not_found",
   detail: `Change ${changeId} not found`,
 });
+
+/**
+ * A Change that waits for an answer (`needs_input`) can be cancelled too: it has no Tasks yet, or
+ * its Tasks never started (the cross-request check runs before the Work Graph is stored).
+ */
+const CANCEL_FROM: readonly ChangeStatus[] = [...CANCELLABLE_FROM, "needs_input"];
+/** A system decision (arbiter, same requester, intake) cancels as the system, not as a person. */
+const actorKind = (decidedBy: string | undefined) =>
+  decidedBy?.startsWith("system:") ? ("system" as const) : ("user" as const);
 
 const recorded = (
   row: ChangeRow,
@@ -93,7 +111,7 @@ export async function cancelChange(
         },
         {
           actor: {
-            kind: selection?.decidedBy === "policy:priority_wins" ? "system" : "user",
+            kind: actorKind(selection?.decidedBy),
             id: input.actorUserId,
           },
         },
@@ -104,7 +122,8 @@ export async function cancelChange(
   }
   if (
     !canCancel(row.status) &&
-    !(selection && ["awaiting_owner", "failed", "completed"].includes(row.status))
+    row.status !== "needs_input" &&
+    !(selection && ["failed", "completed"].includes(row.status))
   ) {
     return {
       status: "refused",
@@ -136,11 +155,7 @@ export async function cancelChange(
       selection ? 1 : 0,
       selection?.decidedBy ?? null,
       row.id,
-      JSON.stringify(
-        selection
-          ? [...CANCELLABLE_FROM, "awaiting_owner", "failed", "completed"]
-          : CANCELLABLE_FROM,
-      ),
+      JSON.stringify(selection ? [...CANCEL_FROM, "failed", "completed"] : CANCEL_FROM),
     ),
     env.DB.prepare(
       `UPDATE tasks SET status = 'cancelled', updated_at = ?
@@ -180,7 +195,7 @@ export async function cancelChange(
       },
       {
         actor: {
-          kind: selection?.decidedBy === "policy:priority_wins" ? "system" : "user",
+          kind: actorKind(selection?.decidedBy),
           id: input.actorUserId,
         },
       },
@@ -309,149 +324,249 @@ export async function releaseRequestScope(
   await roots.get(roots.idFromName(projectId)).release(changeId);
 }
 
-export type OverrideRequestOutcome =
-  | { status: "recorded"; changeId: string; repeated: boolean }
-  | { status: "refused"; reason: "not_found" | "not_overridable"; detail: string };
+/* ------------------------------------------------------------------------------------------ */
+/* Clarification (ADR 0025)                                                                   */
+/* ------------------------------------------------------------------------------------------ */
 
-/** Fixed-length identity, stable across retries and concurrent owner choices. */
-async function overrideChangeId(changeId: string): Promise<string> {
-  const digest = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`owner-override:${changeId}`)),
-  );
-  return `chg_${[...digest.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+type ClarifyRow = ChangeRow & {
+  goal: string;
+  clarification_json: string | null;
+  clarification_answers_json: string;
+};
+
+const loadClarifyRow = (env: Env, changeId: string) =>
+  env.DB.prepare(
+    `SELECT c.id, c.project_id, c.status, c.base_generation, c.budget_usd, c.goal,
+            c.clarification_json, c.clarification_answers_json, p.org_id, p.slug
+     FROM changes c JOIN projects p ON p.id = c.project_id WHERE c.id = ?`,
+  )
+    .bind(changeId)
+    .first<ClarifyRow>();
+
+function parseClarification(json: string | null): ChangeClarification | null {
+  try {
+    return json ? (JSON.parse(json) as ChangeClarification) : null;
+  } catch {
+    return null;
+  }
 }
 
-/** Internal RPC. The API must authorize the owner before calling this command. */
-export async function overrideRequest(
+/**
+ * Ends a `needs_input` Change as `cancelled` with a reason: the requester withdrew it, or nobody
+ * answered within 7 days. A duplicate keeps `outcome = duplicate` and the related Change as winner.
+ * Guarded on `needs_input`, so it never cancels a Change that an answer already moved on.
+ */
+export async function closeNeedsInput(
   env: Env,
-  input: { changeId: string; actorUserId: string },
-): Promise<OverrideRequestOutcome> {
-  const old = await env.DB.prepare(
-    `SELECT c.*, p.org_id, p.slug FROM changes c JOIN projects p ON p.id = c.project_id WHERE c.id = ?`,
-  )
-    .bind(input.changeId)
-    .first<
-      ChangeRow & {
-        goal: string;
-        created_by: string;
-        requester_rank: number | null;
-        outcome: string | null;
-      }
-    >();
-  if (!old) return { status: "refused", reason: "not_found", detail: "Request not found" };
-  const changeId = await overrideChangeId(old.id);
-  const existing = await env.DB.prepare(
-    "SELECT id FROM changes WHERE id = ? AND supersedes_change_id = ?",
-  )
-    .bind(changeId, old.id)
-    .first<{ id: string }>();
-  if (!existing && !["not_selected", "awaiting_owner"].includes(old.status))
-    return { status: "refused", reason: "not_overridable", detail: `Request is ${old.status}` };
+  input: { changeId: string; actorUserId: string; reason: string },
+): Promise<boolean> {
+  const row = await loadClarifyRow(env, input.changeId);
+  if (!row) return false;
+  const clarification = parseClarification(row.clarification_json);
+  const duplicate = clarification?.kind === "duplicate";
   const now = new Date().toISOString();
-  await env.DB.batch([
-    env.DB.prepare(`INSERT OR IGNORE INTO changes (id, project_id, goal, status, base_generation, budget_usd,
-      created_by, requester_rank, supersedes_change_id, outcome, outcome_decided_by, created_at, updated_at)
-      SELECT ?, project_id, goal, 'created', (SELECT canonical_generation FROM projects WHERE id = changes.project_id),
-        budget_usd, created_by, requester_rank, id, 'selected', ?, ?, ? FROM changes
-      WHERE id = ? AND status IN ('not_selected', 'awaiting_owner')`).bind(
-      changeId,
+  const [change] = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE changes SET status = 'cancelled', blocked_reason = ?, outcome_reason = ?,
+         outcome = CASE WHEN ? THEN 'duplicate' ELSE outcome END,
+         outcome_winner_change_id = CASE WHEN ? THEN ? ELSE outcome_winner_change_id END,
+         outcome_decided_by = CASE WHEN ? THEN ? ELSE outcome_decided_by END,
+         updated_at = ?
+       WHERE id = ? AND status = 'needs_input'`,
+    ).bind(
+      input.reason,
+      input.reason,
+      duplicate ? 1 : 0,
+      duplicate ? 1 : 0,
+      clarification?.relatedChangeId ?? null,
+      duplicate ? 1 : 0,
       input.actorUserId,
       now,
-      now,
-      old.id,
+      row.id,
     ),
-    env.DB.prepare(`UPDATE changes AS old SET status = 'not_selected', outcome = 'overridden', outcome_decided_by = ?, updated_at = ?
-      WHERE id = ? AND EXISTS (SELECT 1 FROM changes WHERE id = ? AND supersedes_change_id = old.id)`).bind(
-      input.actorUserId,
-      now,
-      old.id,
-      changeId,
+    env.DB.prepare(
+      `UPDATE tasks SET status = 'cancelled', updated_at = ?
+       WHERE change_id = ? AND status IN ('pending', 'ready', 'assigned', 'running', 'blocked')
+         AND EXISTS (SELECT 1 FROM changes WHERE id = ? AND status = 'cancelled')`,
+    ).bind(now, row.id, row.id),
+  ]);
+  if (!change?.meta.changes) return false;
+  const ctx = contextOf(row);
+  await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+    await changeEvent(
+      ctx,
+      "change.cancelled",
+      {
+        status: "cancelled",
+        outcome: duplicate ? "duplicate" : null,
+        reason: input.reason,
+        fromStatus: "needs_input",
+      },
+      { actor: { kind: actorKind(input.actorUserId), id: input.actorUserId } },
     ),
   ]);
-  const created = await env.DB.prepare(
-    "SELECT id, base_generation FROM changes WHERE id = ? AND supersedes_change_id = ?",
-  )
-    .bind(changeId, old.id)
-    .first<{ id: string; base_generation: number }>();
-  if (!created)
-    return {
-      status: "refused",
-      reason: "not_overridable",
-      detail: "Request changed before the owner choice was recorded",
-    };
-  const conflicts =
-    await env.DB.prepare(`SELECT COALESCE(winner_change_id, CASE WHEN change_a = ? THEN change_b ELSE change_a END) AS winner_change_id FROM request_conflicts WHERE (change_a = ? OR change_b = ?)
-    AND verdict = 'conflicting' AND (loser_change_id = ? OR winner_change_id IS NULL)`)
-      .bind(old.id, old.id, old.id, old.id)
-      .all<{ winner_change_id: string | null }>();
-  for (const conflict of conflicts.results) {
-    if (!conflict.winner_change_id) continue;
-    const [first, second] = [changeId, conflict.winner_change_id].sort();
-    const conflictId = `rc_${first}_${second}`;
-    // Record the human decision as a new pair. The original pair remains immutable history.
-    await env.DB.prepare(`INSERT OR IGNORE INTO request_conflicts
-      (id, project_id, change_a, change_b, verdict, criteria_json, review_json, policy,
-       winner_change_id, loser_change_id, decided_by, decided_at, created_at)
-      VALUES (?, ?, ?, ?, 'conflicting', '[]', ?, 'owner_override', ?, ?, ?, ?, ?)`)
-      .bind(
-        conflictId,
-        old.project_id,
-        first,
-        second,
-        JSON.stringify({
-          review: { verdict: "conflicting", conflicts: [], supported: true },
-          receipt: {
-            method: "owner-override",
-            supersedesChangeId: old.id,
-            actorUserId: input.actorUserId,
-          },
-          costUsd: 0,
-        }),
+  await releaseRequestScope(env, row.project_id, row.id);
+  return true;
+}
+
+/**
+ * Wakes the ChangeWorkflow that waits for an answer. The waiting instance reads D1 itself, so the
+ * event only shortens the wait; a lost event costs at most one daily re-check. A Change whose first
+ * instance already ended continues in a new instance `<changeId>_r<round>`, started once.
+ */
+async function resumeChangeWorkflow(env: Env, changeId: string, round: number) {
+  try {
+    const instance = await env.CHANGE_WORKFLOW.get(changeId);
+    const { status } = await instance.status();
+    if (!["complete", "errored", "terminated"].includes(status)) {
+      await instance.sendEvent({ type: "clarification", payload: { round } });
+      return;
+    }
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "change.clarification_resume_failed",
         changeId,
-        conflict.winner_change_id,
-        input.actorUserId,
-        now,
-        now,
-      )
-      .run();
-    await cancelChange(
-      env,
-      { changeId: conflict.winner_change_id, actorUserId: input.actorUserId },
-      {
-        reason: "Replaced by the owner's choice",
-        winnerChangeId: changeId,
-        decidedBy: input.actorUserId,
-      },
+        message: String(error).slice(0, 200),
+      }),
     );
+    return;
   }
-  await releaseRequestScope(env, old.project_id, old.id);
-  await appendChangeEvents(env.RESOURCE_SHARD, contextOf(old), [
+  await startWorkflowOnce(env.CHANGE_WORKFLOW, `${changeId}_r${round}`, { changeId });
+}
+
+/** A repeat of the actor's last command returns it; anything else is refused. */
+function notWaiting(
+  row: ClarifyRow,
+  action: "answers" | "proceed_anyway" | "withdraw",
+  actorUserId: string,
+): ClarifyChangeOutcome {
+  const last = parseAnswers(row.clarification_answers_json).at(-1);
+  const repeated =
+    (action === "withdraw" && row.status === "cancelled") ||
+    (action !== "withdraw" && last?.action === action && last.answeredBy === actorUserId);
+  if (repeated)
+    return {
+      status: "recorded",
+      changeId: row.id,
+      changeStatus: row.status,
+      action,
+      round: Math.max(1, Math.min(3, last?.round ?? 1)),
+      repeated: true,
+    };
+  return {
+    status: "refused",
+    reason: "not_waiting",
+    detail: `Change is ${row.status}; it is not waiting for an answer.`,
+  };
+}
+
+/**
+ * `POST /v1/changes/:changeId/clarify`. The API authenticated the actor and checked that the actor
+ * is the requester or the Project owner. Answers append to `clarification_answers_json` (the goal
+ * context of the next intake and planning), `proceed_anyway` plans without another question this
+ * round, `withdraw` cancels. Guarded on the open round: a second submit of the same round is
+ * `repeated`, and only one answer per round is stored.
+ */
+export async function clarifyChange(
+  env: Env,
+  input: { changeId: string; actorUserId: string; request: ClarifyChangeRequest },
+): Promise<ClarifyChangeOutcome> {
+  const row = await loadClarifyRow(env, input.changeId);
+  if (!row) return { status: "refused", reason: "not_found", detail: "Change not found" };
+  const action =
+    "answers" in input.request
+      ? ("answers" as const)
+      : input.request.action === "withdraw"
+        ? ("withdraw" as const)
+        : ("proceed_anyway" as const);
+  const clarification = parseClarification(row.clarification_json);
+  const answers = parseAnswers(row.clarification_answers_json);
+  if (row.status !== "needs_input" || !clarification)
+    return notWaiting(row, action, input.actorUserId);
+  const round = clarification.round;
+  const ctx = contextOf(row);
+  if (action === "withdraw") {
+    await closeNeedsInput(env, {
+      changeId: row.id,
+      actorUserId: input.actorUserId,
+      reason: "Withdrawn by the requester",
+    });
+    await resumeChangeWorkflow(env, row.id, round);
+    const after = await loadChange(env, row.id);
+    return {
+      status: "recorded",
+      changeId: row.id,
+      changeStatus: after?.status ?? "cancelled",
+      action,
+      round,
+      repeated: false,
+    };
+  }
+  const now = new Date().toISOString();
+  let entries: StoredAnswer[];
+  if ("answers" in input.request) {
+    const questions = new Map(clarification.questions.map((q) => [q.id, q.text]));
+    const unknown = input.request.answers.find((a) => !questions.has(a.questionId));
+    if (unknown)
+      return {
+        status: "refused",
+        reason: "unknown_question",
+        detail: `Question ${unknown.questionId} is not part of round ${round}.`,
+      };
+    entries = input.request.answers.map((a) => ({
+      round,
+      action: "answers",
+      questionId: a.questionId,
+      question: questions.get(a.questionId) ?? "",
+      text: a.text,
+      answeredBy: input.actorUserId,
+      answeredAt: now,
+    }));
+  } else {
+    entries = [{ round, action: "proceed_anyway", answeredBy: input.actorUserId, answeredAt: now }];
+  }
+  // Read-modify-write guarded on the open round: of two concurrent answers, one applies.
+  const updated = await env.DB.prepare(
+    `UPDATE changes SET status = 'compiling', clarification_json = NULL,
+       clarification_answers_json = ?, updated_at = ?
+     WHERE id = ? AND status = 'needs_input' AND clarification_answers_json = ?
+       AND json_extract(clarification_json, '$.round') = ?`,
+  )
+    .bind(
+      JSON.stringify([...answers, ...entries]),
+      now,
+      row.id,
+      row.clarification_answers_json,
+      round,
+    )
+    .run();
+  if (!updated.meta.changes) {
+    const after = await loadClarifyRow(env, row.id);
+    if (!after) return { status: "refused", reason: "not_found", detail: "Change not found" };
+    return notWaiting(after, action, input.actorUserId);
+  }
+  await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
     await changeEvent(
-      contextOf(old),
-      "conflict.reviewed",
+      ctx,
+      "change.clarification.answered",
       {
-        status: "not_selected",
-        outcome: "overridden",
-        supersededBy: changeId,
-        decidedBy: input.actorUserId,
+        round,
+        action,
+        kind: clarification.kind,
+        questionIds: entries.flatMap((e) => (e.questionId ? [e.questionId] : [])),
+        answeredRounds: answeredRounds([...answers, ...entries]),
       },
-      { key: "owner-override", actor: { kind: "user", id: input.actorUserId } },
+      { key: `answer-${round}`, actor: { kind: "user", id: input.actorUserId } },
     ),
   ]);
-  const nextCtx = { ...contextOf(old), changeId, baseGeneration: created.base_generation };
-  await appendChangeEvents(env.RESOURCE_SHARD, nextCtx, [
-    await changeEvent(
-      nextCtx,
-      "change.created",
-      {
-        goal: old.goal,
-        supersedesChangeId: old.id,
-        requesterUserId: old.created_by,
-        requesterRank: old.requester_rank,
-      },
-      { actor: { kind: "user", id: input.actorUserId } },
-    ),
-  ]);
-  await startWorkflowOnce(env.CHANGE_WORKFLOW, changeId, { changeId });
-  return { status: "recorded", changeId, repeated: !!existing };
+  await resumeChangeWorkflow(env, row.id, round);
+  return {
+    status: "recorded",
+    changeId: row.id,
+    changeStatus: "compiling",
+    action,
+    round,
+    repeated: false,
+  };
 }

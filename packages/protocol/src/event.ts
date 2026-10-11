@@ -7,6 +7,10 @@ export const EVENT_TYPES = [
   "change.created",
   "change.compiled",
   "change.cancelled",
+  /** The intake gate decided a Change before planning: plan, or ask (shared-projects.md). */
+  "change.intake.reviewed",
+  /** The requester or the owner answered a `needs_input` Change, or asked to plan anyway. */
+  "change.clarification.answered",
   /** A Change reached `completed` after promotion: no live app, or its release finished. */
   "change.completed",
   /** A Change reached `failed` after promotion: its release did not deploy or never started. */
@@ -36,6 +40,8 @@ export const EVENT_TYPES = [
   "candidate.composed",
   "candidate.stale",
   "candidate.rebase_requested",
+  /** Sibling Candidates of one Change and base settled; one winner, or a person picks (ADR 0026). */
+  "candidate.selected",
   "verification.started",
   "verification.check.completed",
   "verification.completed",

@@ -440,7 +440,7 @@ module "integration_worker" {
     { type = "durable_object_namespace", name = "SANDBOX", class_name = "Sandbox", script_name = local.sandbox_worker.script_name },
     # Self-binding to CandidateVerificationWorkflow (literal name avoids a cycle with the resource).
     { type = "workflow", name = "CANDIDATE_WORKFLOW", workflow_name = "rhumbatron-candidate-verification-${local.environment}", class_name = "CandidateVerificationWorkflow" },
-    # Self-binding to ChangeWorkflow: an owner override starts the new linked Change (phase 17a).
+    # Self-binding to ChangeWorkflow: a clarification answer resumes the waiting instance (ADR 0025).
     { type = "workflow", name = "CHANGE_WORKFLOW", workflow_name = "rhumbatron-change-workflow-${local.environment}", class_name = "ChangeWorkflow" },
     # One Artifacts repo per Project; the namespace is created on first use (ADR 0010).
     { type = "artifacts", name = "ARTIFACTS", namespace = "rhumbatron-projects-${local.environment}" },
@@ -463,6 +463,10 @@ module "integration_worker" {
     # Live apps (ADR 0020): bundle builds over RPC to the apps Worker. Without this
     # binding `app.provision` is a no-op.
     { type = "service", name = "APPS", service = local.apps_worker.script_name, entrypoint = "AppBuilder", environment = "production" },
+    # Intake gate (ADR 0025): one embedding and one rerank call per new request (well under 1
+    # Neuron each), plus Clef-flash inside the shared 200 per day cap. Workers AI free: 10,000
+    # Neurons per day.
+    { type = "ai", name = "AI" },
   ]
 
   # New code may read tables a pending migration creates (for example `releases`, 0015).

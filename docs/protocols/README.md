@@ -18,9 +18,9 @@ The Zod schemas in `packages/protocol/src` are the protocol source of truth.
 
 ## Shared Projects
 
-An owner shares a Project with a collaborator by email. The routes are in `workers/api/src/members.ts`. All routes need a signed-in user. The API never reads a role or rank from the client.
+An owner shares a Project with a collaborator by email. The routes are in `workers/api/src/members.ts` and `workers/api/src/clarify.ts`. All routes need a signed-in user. The API never reads a role from the client.
 
-The owner has rank 0. A collaborator has rank 10. The `priority_wins` policy uses the rank to decide between two conflicting requests.
+The owner role is for administration. The system decides between requests (ADR 0025): no role or rank is a decision input.
 
 ### Routes
 
@@ -32,19 +32,18 @@ The owner has rank 0. A collaborator has rank 10. The `priority_wins` policy use
 | DELETE | `/v1/projects/:projectId/members/:userId` | Owner | `removed: true` or `false`. The owner row cannot be removed. | 403, 404 |
 | GET | `/v1/invitations` | Any signed-in user | Pending invitations for the verified emails of the caller. Each item has `projectName` and `invitedBy`. | None |
 | POST | `/v1/invitations/:invitationId/accept` | The invited user | `projectId` and `role`. A repeat by the same user is safe. | 404, 409 |
-| GET | `/v1/changes/:changeId/request-conflicts` | Owner or collaborator | The cross-request conflicts of the Change: both goals, both requesters, the cited criteria, the policy, and the winner. | 404 |
-| POST | `/v1/changes/:changeId/override` | Owner | `202` with the outcome. The API creates a new linked Change with the goal of the request that was not selected. | 403, 404, 409 |
+| GET | `/v1/changes/:changeId/request-conflicts` | Owner or collaborator | The cross-request conflicts and duplicates of the Change: verdict, round, both goals, both requesters, the cited criteria or covered quotes, the policy, and the winner. | 404 |
+| POST | `/v1/changes/:changeId/clarify` | The requester or the owner | `ClarifyChangeOutcome`: `recorded` with `changeStatus`, `action`, `round`, and `repeated`. | 400 (malformed body, unknown question), 403, 404, 409 (not waiting for an answer) |
 
 An invitation binds to a verified email of the signed-in user. If the email is not the user's email, `accept` returns the same 404 as for a missing invitation. The membership binds to the user ID, not to the email.
 
-`override` returns 409 if the Change status is not `not_selected` or `awaiting_owner`. It also returns 409 when the integration Worker refuses the override.
+`clarify` takes `{ answers: [{ questionId, text }] }` (1 to 3 answers to questions of the open round), `{ action: "proceed_anyway" }`, or `{ action: "withdraw" }`. Answers return the Change to `compiling` with the answers in its goal context. `proceed_anyway` plans without another question. `withdraw` cancels the Change with the reason "Withdrawn by the requester". A repeat of the caller's last command returns `repeated: true`.
 
 ### Owner-only actions
 
 Access to a Project does not give permission for each action. A collaborator can view the Project, create Changes, and cancel their own Changes. These routes return 403 with a message that starts with "Only the project owner can" when a collaborator calls them:
 
 - Share, revoke an invitation, and remove a member.
-- Override a request.
 - Cancel the Change of another person.
 - Raise a Change budget.
 - Compose a Candidate, approve a release, and promote a Candidate.
@@ -59,9 +58,10 @@ Access to a Project does not give permission for each action. A collaborator can
 | Response | Field | Meaning |
 |---|---|---|
 | `GET /v1/projects` and `GET /v1/projects/:projectId` | `role` | `owner` or `collaborator`. The caller's role in the Project. |
-| Change list and `GET /v1/changes/:changeId` | `requester` | Who asked for the Change: `userId`, `name`, `rank`, and `isYou`. |
-| Change list and `GET /v1/changes/:changeId` | `outcome` | How the request ended after the cross-request check. Null when no check decided it. |
-| Change list and `GET /v1/changes/:changeId` | `supersedesChangeId` | The ID of the Change that an override replaced. Null for a normal request. |
+| Change list and `GET /v1/changes/:changeId` | `requester` | Who asked for the Change: `userId`, `name`, `rank` (the requester's role at request time, display only), and `isYou`. |
+| Change list and `GET /v1/changes/:changeId` | `outcome` | How the request ended after the intake gate or the cross-request check. Null when no check decided it. |
+| Change list and `GET /v1/changes/:changeId` | `supersedesChangeId` | Null for every request the API creates. |
+| Change list and `GET /v1/changes/:changeId` | `clarification` | `ChangeClarification` while the Change is `needs_input`, else null: `kind` (`unclear`, `duplicate`, `conflict`), `summary`, `questions` (`id`, `text`, optional `options`), `relatedChangeId`, `relatedGoal`, `askedAt`, `round` (1 to 3). |
 
 `POST /v1/projects/:projectId/changes` makes the `clientRequestId` unique for each requester. Two users can send the same `clientRequestId` without a collision.
 
@@ -69,8 +69,8 @@ Access to a Project does not give permission for each action. A collaborator can
 
 | Status | Meaning |
 |---|---|
-| `not_selected` | A conflicting request lost to a request with a higher priority. The Change does no more work. The owner can override it. |
-| `awaiting_owner` | Two conflicting requests have the same rank. The Change waits until the owner decides. |
+| `not_selected` | A conflicting request lost to the request that the system arbiter chose, or the same requester asked again. The Change does no more work. |
+| `needs_input` | The request is unclear, repeats another request or the current app, or conflicts and the system could not decide. The Change waits for the requester (`clarification`). |
 
 ### Request outcome kinds
 
@@ -81,8 +81,8 @@ Access to a Project does not give permission for each action. A collaborator can
 | `selected` | The request won the conflict check, or it has no conflict. |
 | `partially_selected` | The request lost one criterion. The planner made a new plan without that criterion. |
 | `not_selected` | The request lost the conflict check. `winnerChangeId` names the request that won. |
-| `replaces` | The request is a new Change that an owner override made. It replaces `supersedesChangeId`. |
-| `overridden` | The owner chose another request. This request lost. |
+| `replaces` | The request won against an earlier request that had already promoted. |
+| `duplicate` | The request closed as a duplicate. `winnerChangeId` names the related request; null when the current app already delivers it. |
 
 ## Project settings
 

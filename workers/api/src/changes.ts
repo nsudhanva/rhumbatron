@@ -96,7 +96,7 @@ export const changeDetail = new Hono<AppEnv>()
               c.acceptance_criteria_json, c.invariants_json, c.work_graph_ref, c.blocked_reason,
               c.created_at, c.updated_at, c.created_by, c.requester_rank, c.outcome,
               c.outcome_reason, c.outcome_winner_change_id, c.outcome_decided_by,
-              c.supersedes_change_id, u.display_name, u.email
+              c.supersedes_change_id, c.clarification_json, u.display_name, u.email
        FROM changes c LEFT JOIN users u ON u.id = c.created_by WHERE c.id = ?`,
     )
       .bind(changeId)

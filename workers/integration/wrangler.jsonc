@@ -105,5 +105,8 @@
   "artifacts": [{ "binding": "ARTIFACTS", "namespace": "rhumbatron-projects-local" }],
   // Browser Run for the Candidate browser check (AGENTS.md section 35). Capped in code:
   // one session per check, at most 2 per Candidate, 500 browser-seconds per UTC day.
-  "browser": { "binding": "BROWSER" }
+  "browser": { "binding": "BROWSER" },
+  // Intake gate (ADR 0025): embeddings, rerank, and Clef-flash. Clef-flash shares the 200 per day
+  // `usage_counters` cap with the agents and event router Workers.
+  "ai": { "binding": "AI" }
 }

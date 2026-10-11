@@ -4,6 +4,8 @@ import {
   AnyCommandEnvelope,
   type ApprovalOutcome,
   type ChangeCommandOutcome,
+  type ClarifyChangeOutcome,
+  type ClarifyChangeRequest,
   type CodeEditOutcome,
   type PromotionOutcome,
   type ReleaseInjectionOutcome,
@@ -18,12 +20,7 @@ import {
   createCandidate,
   startCandidateVerification,
 } from "./candidate-create.ts";
-import {
-  cancelChange,
-  type OverrideRequestOutcome,
-  overrideRequest,
-  raiseChangeBudget,
-} from "./change-commands.ts";
+import { cancelChange, clarifyChange, raiseChangeBudget } from "./change-commands.ts";
 import { backfillTreeCode, type CodeBackfill } from "./code-store.ts";
 import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
@@ -295,12 +292,16 @@ export default class Integration extends WorkerEntrypoint<Env> {
     return raiseChangeBudget(this.env, input);
   }
 
-  /** The API authenticated the actor and authorized the Project owner. */
-  async overrideRequest(input: {
+  /**
+   * Answers a `needs_input` Change, plans it without another question, or withdraws it (ADR 0025).
+   * The API authenticated the actor and checked the requester or the Project owner.
+   */
+  async clarifyChange(input: {
     changeId: string;
     actorUserId: string;
-  }): Promise<OverrideRequestOutcome> {
-    return overrideRequest(this.env, input);
+    request: ClarifyChangeRequest;
+  }): Promise<ClarifyChangeOutcome> {
+    return clarifyChange(this.env, input);
   }
 
   /**

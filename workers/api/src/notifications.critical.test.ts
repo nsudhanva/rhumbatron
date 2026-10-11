@@ -280,10 +280,10 @@ describe("shared Project request notifications", () => {
     return { ...ctx, request };
   }
 
-  it("only the requester sees request_not_selected, and an overridden request produces none", async () => {
+  it("only the requester sees request_not_selected, and a duplicate outcome produces none", async () => {
     const { request, kinds, list } = shared();
     request("chg_ns", "not_selected", "not_selected");
-    request("chg_ov", "not_selected", "overridden");
+    request("chg_dup", "cancelled", "duplicate");
 
     expect(await kinds("usr_c")).toEqual(["request_not_selected:chg_ns"]);
     expect((await list("usr_c"))[0]).toMatchObject({
@@ -305,18 +305,33 @@ describe("shared Project request notifications", () => {
     ]);
   });
 
-  it("only the owner sees request_awaiting_owner, and a read mark never hides it", async () => {
-    const { d1, request, kinds, list } = shared();
-    request("chg_wait", "awaiting_owner", null);
+  it("request_needs_input goes to the requester, and to the owner only for a conflict", async () => {
+    const { db, d1, request, kinds, list } = shared();
+    const ask = (id: string, kind: string, round = 1) => {
+      request(id, "needs_input", null);
+      db.prepare("UPDATE changes SET clarification_json = ? WHERE id = ?").run(
+        JSON.stringify({ kind, summary: `About ${kind}`, questions: [], round }),
+        id,
+      );
+    };
+    ask("chg_unclear", "unclear");
+    ask("chg_conflict", "conflict", 2);
 
-    expect(await kinds("usr_a")).toEqual(["request_awaiting_owner:chg_wait"]);
-    expect(await kinds("usr_c")).toEqual([]);
+    expect((await kinds("usr_c")).sort()).toEqual([
+      "request_needs_input:chg_conflict:2",
+      "request_needs_input:chg_unclear:1",
+    ]);
+    expect(await kinds("usr_a")).toEqual(["request_needs_input:chg_conflict:2"]);
     expect(await kinds("usr_b")).toEqual([]);
 
     await markNotificationsRead(d1, "usr_a", "all", NOW);
     const after = await list("usr_a");
     expect(after).toHaveLength(1);
-    expect(after[0]).toMatchObject({ read: true, severity: "action" });
+    expect(after[0]).toMatchObject({
+      read: true,
+      severity: "action",
+      title: "A request conflicts with another request",
+    });
     expect(countNotifications(after)).toEqual({ unread: 0, action: 1 });
   });
 });

@@ -123,7 +123,7 @@ export async function recomposeStaleCandidate(
   await env.DB.prepare(
     `INSERT INTO candidates (id, change_id, base_generation, status, created_at, updated_at,
        composition_key, change_set_ids_json, recomposed_from, recompose_count)
-     SELECT ?, ?, ?, 'composing', ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM changes WHERE id = ? AND status NOT IN ('not_selected', 'cancelled', 'awaiting_owner') AND COALESCE(outcome, '') NOT IN ('not_selected', 'overridden')) ON CONFLICT DO NOTHING`,
+     SELECT ?, ?, ?, 'composing', ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM changes WHERE id = ? AND status NOT IN ('not_selected', 'cancelled', 'needs_input') AND COALESCE(outcome, '') NOT IN ('not_selected', 'duplicate')) ON CONFLICT DO NOTHING`,
   )
     .bind(
       next,

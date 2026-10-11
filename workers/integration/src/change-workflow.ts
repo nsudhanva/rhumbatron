@@ -1,27 +1,78 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { anthropicMonthlyBudgetUsd, meteredComplete, opusAllowed } from "@rhumbatron/model-router";
-import { cancelChange, releaseRequestScope } from "./change-commands.ts";
+import { cancelChange, closeNeedsInput, releaseRequestScope } from "./change-commands.ts";
 import { readTreeFiles } from "./code-store.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent, qualify } from "./events.ts";
+import {
+  buildPacket,
+  clefModel,
+  type IntakeClarification,
+  type IntakeOutcome,
+  retrieveRelated,
+  reviewIntake,
+} from "./intake.ts";
+import {
+  answeredRounds,
+  type CanonicalSummary,
+  goalWithAnswers,
+  loadRelatedRequests,
+  parseAnswers,
+  readCanonicalSummary,
+  type StoredAnswer,
+} from "./intake-context.ts";
 import {
   checkRequestPair,
   loadRequest,
   readRequestScope,
   releaseClosedRequests,
   requestRoot,
+  SYSTEM_ARBITER,
 } from "./request-check.ts";
 import { nothingSelected, requestsOverlap, selectedCriteria } from "./request-policy.ts";
-import { type PlannerStepResult, planChangeResult } from "./root-planner.ts";
+import { type PlannerResult, type PlannerStepResult, planChangeResult } from "./root-planner.ts";
 
 /**
- * ChangeWorkflow (AGENTS.md section 21.1), first slice: load the Change, compile the Work Graph,
- * persist Tasks, and dispatch the ready ones. Later phases add the wait, verification, approval,
- * promotion, and release steps. Every step is idempotent, because Workflows retries steps.
+ * ChangeWorkflow (AGENTS.md section 21.1): load the Change, run the intake gate (ADR 0025),
+ * compile the Work Graph, compare it with the other open requests, persist Tasks, and dispatch the
+ * ready ones. When the intake gate or the request comparison asks a question, the Change is
+ * `needs_input` and the workflow waits for the answer (`clarification` event, re-checked daily,
+ * at most 7 days), then runs the next pass with the answers in the goal. At most 3 rounds.
+ * Every step is idempotent, because Workflows retries steps.
  */
 
 export type ChangeWorkflowParams = { changeId: string };
+
+/** Days a `needs_input` Change waits for an answer before it is cancelled. */
+const ANSWER_DAYS = 7;
+const MAX_ROUNDS = 3;
+type WorkersAi = { run(model: string, input: unknown): Promise<unknown> };
+type AnswerState = { status: string; answers: StoredAnswer[]; expired: boolean };
+
+async function readAnswerState(env: Env, changeId: string): Promise<AnswerState> {
+  const row = await env.DB.prepare(
+    "SELECT status, clarification_json, clarification_answers_json FROM changes WHERE id = ?",
+  )
+    .bind(changeId)
+    .first<{
+      status: string;
+      clarification_json: string | null;
+      clarification_answers_json: string | null;
+    }>();
+  let askedAt = Date.now();
+  try {
+    const asked = JSON.parse(row?.clarification_json ?? "null") as { askedAt?: string } | null;
+    if (asked?.askedAt) askedAt = Date.parse(asked.askedAt);
+  } catch {
+    // A missing or broken clarification counts from now.
+  }
+  return {
+    status: row?.status ?? "missing",
+    answers: parseAnswers(row?.clarification_answers_json),
+    expired: Date.now() - askedAt >= ANSWER_DAYS * 86_400_000,
+  };
+}
 
 type ChangeRow = {
   id: string;
@@ -33,6 +84,7 @@ type ChangeRow = {
   org_id: string;
   slug: string;
   name: string;
+  clarification_answers_json: string | null;
 };
 
 type Loaded = {
@@ -41,6 +93,7 @@ type Loaded = {
   projectName: string;
   budgetUsd: number;
   status: string;
+  answers: StoredAnswer[];
 };
 
 /** Resolve the current canonical tree, then read its code store or tree listing. */
@@ -52,6 +105,14 @@ async function canonicalFiles(env: Env, projectId: string): Promise<string[] | n
 }
 
 const taskIdFor = (changeId: string, key: string) => `tsk_${changeId.slice(4)}_${key}`;
+
+const scopeResources = (ctx: ChangeContext, planned: PlannerResult) => [
+  ...new Set(
+    planned.plan.tasks.flatMap((task) =>
+      task.semanticResources.map((resource) => qualify(ctx, resource)),
+    ),
+  ),
+];
 
 export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams> {
   private complete(req: import("@rhumbatron/model-router").CompletionRequest, changeId: string) {
@@ -71,13 +132,133 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
     );
   }
 
+  /**
+   * One intake review (ADR 0025): retrieval, Clef-flash, Sonnet. Records the INTAKE Decision
+   * Receipt and `change.intake.reviewed`. The model cost counts against the Change budget.
+   */
+  private async intake(
+    ctx: ChangeContext,
+    goal: string,
+    canonical: CanonicalSummary,
+    round: number,
+    remainingUsd: number,
+  ): Promise<Omit<IntakeOutcome, "receipt">> {
+    const ai = (this.env as { AI?: WorkersAi }).AI;
+    const related = await loadRelatedRequests(this.env, ctx.projectId, ctx.changeId);
+    const retrieval = await retrieveRelated(ai, goal, related);
+    const outcome = await reviewIntake(
+      {
+        changeId: ctx.changeId,
+        request: goal,
+        packet: buildPacket(goal, retrieval.related, canonical),
+        retrieval,
+      },
+      {
+        clef: clefModel(ai, this.env.DB),
+        complete: (req) => this.complete(req, ctx.changeId),
+        canSpend: (spentUsd) => spentUsd < remainingUsd,
+      },
+    );
+    const verdict = String(outcome.receipt.verdict ?? outcome.decision);
+    await this.env.DB.prepare(
+      `INSERT OR IGNORE INTO change_decisions
+         (id, change_id, decision_type, round, verdict, decided_by, receipt_json, created_at)
+       VALUES (?, ?, 'INTAKE', ?, ?, 'system:intake', ?, ?)`,
+    )
+      .bind(
+        `dec_${ctx.changeId}_intake_${round}`,
+        ctx.changeId,
+        round,
+        verdict,
+        JSON.stringify(outcome.receipt),
+        new Date().toISOString(),
+      )
+      .run();
+    await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
+      await changeEvent(
+        ctx,
+        "change.intake.reviewed",
+        {
+          round,
+          decision: outcome.decision,
+          verdict,
+          kind: outcome.clarification?.kind ?? null,
+          relatedChangeId: outcome.clarification?.relatedChangeId ?? null,
+          costUsd: outcome.costUsd,
+          decisionReceipt: outcome.receipt,
+        },
+        { key: `intake-${round}` },
+      ),
+    ]);
+    return {
+      decision: outcome.decision,
+      clarification: outcome.clarification,
+      costUsd: outcome.costUsd,
+    };
+  }
+
+  /** The Change waits for its requester. False when it left `compiling` first (cancelled). */
+  private async ask(
+    changeId: string,
+    clarification: IntakeClarification,
+    round: number,
+  ): Promise<boolean> {
+    const now = new Date().toISOString();
+    await this.env.DB.prepare(
+      "UPDATE changes SET status = 'needs_input', clarification_json = ?, updated_at = ? WHERE id = ? AND status = 'compiling'",
+    )
+      .bind(JSON.stringify({ ...clarification, askedAt: now, round }), now, changeId)
+      .run();
+    const row = await this.env.DB.prepare("SELECT status FROM changes WHERE id = ?")
+      .bind(changeId)
+      .first<{ status: string }>();
+    return row?.status === "needs_input";
+  }
+
+  /**
+   * Waits for `clarification` events, one day at a time, and reads D1 after each event or day: the
+   * row is the truth, so a lost or stale event only delays. After 7 days without an answer the
+   * Change is cancelled with a reason. Returns the status after the wait.
+   */
+  private async waitForAnswer(
+    step: WorkflowStep,
+    changeId: string,
+    tag: string,
+  ): Promise<AnswerState> {
+    for (let i = 0; i < ANSWER_DAYS * 2; i += 1) {
+      try {
+        await step.waitForEvent(`wait for answer${tag} ${i}`, {
+          type: "clarification",
+          timeout: "1 day",
+        });
+      } catch {
+        // Timed out: re-check the row once a day.
+      }
+      const state = await step.do(`read answer${tag} ${i}`, () =>
+        readAnswerState(this.env, changeId),
+      );
+      if (state.status !== "needs_input" || state.expired) {
+        if (state.status !== "needs_input") return state;
+        break;
+      }
+    }
+    await step.do(`close unanswered${tag}`, () =>
+      closeNeedsInput(this.env, {
+        changeId,
+        actorUserId: "system:intake",
+        reason: `No answer within ${ANSWER_DAYS} days`,
+      }),
+    );
+    return step.do(`read answer${tag} final`, () => readAnswerState(this.env, changeId));
+  }
+
   override async run(event: Readonly<WorkflowEvent<ChangeWorkflowParams>>, step: WorkflowStep) {
     const { changeId } = event.payload;
 
     const loaded = await step.do("load change", async (): Promise<Loaded | null> => {
       const row = await this.env.DB.prepare(
         `SELECT c.id, c.project_id, c.goal, c.status, c.base_generation, c.budget_usd,
-                p.org_id, p.slug, p.name
+                c.clarification_answers_json, p.org_id, p.slug, p.name
          FROM changes c JOIN projects p ON p.id = c.project_id WHERE c.id = ?`,
       )
         .bind(changeId)
@@ -95,6 +276,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         projectName: row.name,
         budgetUsd: row.budget_usd,
         status: row.status,
+        answers: parseAnswers(row.clarification_answers_json),
       };
     });
     // A missing Change, or one that already compiled, needs no work.
@@ -108,15 +290,6 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       return { skipped: true };
     }
     const { ctx } = loaded;
-    await step.do("admit request", async () => {
-      const requester = await loadRequest(this.env, changeId);
-      return requestRoot(this.env, ctx.projectId).admit(
-        changeId,
-        requester
-          ? { requesterUserId: requester.requesterUserId, requesterRank: requester.requesterRank }
-          : undefined,
-      );
-    });
 
     const compiling = await step.do("mark compiling", async () => {
       await this.env.DB.prepare(
@@ -137,152 +310,239 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       return { cancelled: true };
     }
 
-    let result: PlannerStepResult;
-    try {
-      result = await step.do(
-        "plan work graph",
-        // One retry for transient model failures. Each attempt makes at most two model calls.
-        { retries: { limit: 1, delay: "30 seconds", backoff: "constant" }, timeout: "5 minutes" },
-        async () => {
-          // Resolve at planning time (and again on transient retries), not in cached load output.
-          // Unknown source is not an empty repository and must not force a bootstrap Task.
-          const files = await canonicalFiles(this.env, ctx.projectId).catch(() => null);
-          return planChangeResult(
-            { goal: loaded.goal, projectName: loaded.projectName, files },
-            (req) => this.complete(req, changeId),
-            { allowOpus: opusAllowed(this.env.ALLOW_OPUS) },
-          );
-        },
+    let answers = loaded.answers;
+    // A new instance after an answer to a Change asked before this instance existed (resume).
+    let skipAsk = answers.at(-1)?.action === "proceed_anyway";
+    let admitted = false;
+    let spent = 0;
+    let planned: PlannerResult;
+    let goal: string;
+    let canonical: CanonicalSummary;
+    let current: NonNullable<Awaited<ReturnType<typeof loadRequest>>>;
+    const excluded = new Set<string>();
+    for (let pass = 0; ; pass += 1) {
+      const tag = pass === 0 ? "" : ` ${pass}`;
+      const answered = answeredRounds(answers);
+      const mayAsk = !skipAsk && answered < MAX_ROUNDS;
+      goal = goalWithAnswers(loaded.goal, answers);
+      canonical = await step.do(`read canonical summary${tag}`, () =>
+        readCanonicalSummary(this.env, ctx.projectId),
       );
-    } catch (error) {
-      // Model failures reach here only after the Workflow's transient retry is exhausted.
-      result = { ok: false, errors: [String(error).slice(0, 200)] };
-    }
-    if (!result.ok) {
-      const errors = result.errors;
-      const reason = `Planning failed: ${errors.join("; ")}`;
-      const failed = await step.do("mark failed", async () => {
-        await this.env.DB.prepare(
-          `UPDATE changes SET status = 'failed', blocked_reason = ?, updated_at = ?
-           WHERE id = ? AND status = 'compiling'`,
-        )
-          .bind(reason, new Date().toISOString(), changeId)
-          .run();
-        const row = await this.env.DB.prepare("SELECT status FROM changes WHERE id = ?")
-          .bind(changeId)
-          .first<{ status: string }>();
-        return row?.status === "failed";
-      });
-      if (!failed) {
-        await step.do("release cancelled planning request", () =>
+
+      if (mayAsk) {
+        const remaining = loaded.budgetUsd - spent;
+        const intake = await step.do(
+          `intake review${tag}`,
+          { retries: { limit: 1, delay: "30 seconds", backoff: "constant" }, timeout: "5 minutes" },
+          () => this.intake(ctx, goal, canonical, answered + 1, remaining),
+        );
+        spent += intake.costUsd;
+        if (intake.decision === "ask" && intake.clarification) {
+          const clarification = intake.clarification;
+          const asked = await step.do(`ask for input${tag}`, () =>
+            this.ask(changeId, clarification, answered + 1),
+          );
+          if (!asked) {
+            await step.do(`release unasked request${tag}`, () =>
+              releaseRequestScope(this.env, ctx.projectId, changeId),
+            );
+            return { cancelled: true };
+          }
+          const state = await this.waitForAnswer(step, changeId, `${tag} intake`);
+          if (state.status !== "compiling") {
+            await step.do(`release unanswered request${tag}`, () =>
+              releaseRequestScope(this.env, ctx.projectId, changeId),
+            );
+            return { status: state.status };
+          }
+          answers = state.answers;
+          skipAsk = answers.at(-1)?.action === "proceed_anyway";
+          continue;
+        }
+      }
+
+      if (!admitted) {
+        await step.do("admit request", async () => {
+          const requester = await loadRequest(this.env, changeId);
+          return requestRoot(this.env, ctx.projectId).admit(
+            changeId,
+            requester
+              ? {
+                  requesterUserId: requester.requesterUserId,
+                  requesterRank: requester.requesterRank,
+                }
+              : undefined,
+          );
+        });
+        admitted = true;
+      }
+
+      let result: PlannerStepResult;
+      try {
+        result = await step.do(
+          `plan work graph${tag}`,
+          // One retry for transient model failures. Each attempt makes at most two model calls.
+          { retries: { limit: 1, delay: "30 seconds", backoff: "constant" }, timeout: "5 minutes" },
+          async () => {
+            // Resolve at planning time (and again on transient retries), not in cached load output.
+            // Unknown source is not an empty repository and must not force a bootstrap Task.
+            const files = await canonicalFiles(this.env, ctx.projectId).catch(() => null);
+            return planChangeResult(
+              { goal, projectName: loaded.projectName, files },
+              (req) => this.complete(req, changeId),
+              { allowOpus: opusAllowed(this.env.ALLOW_OPUS) },
+            );
+          },
+        );
+      } catch (error) {
+        // Model failures reach here only after the Workflow's transient retry is exhausted.
+        result = { ok: false, errors: [String(error).slice(0, 200)] };
+      }
+      if (!result.ok) {
+        const errors = result.errors;
+        const reason = `Planning failed: ${errors.join("; ")}`;
+        const failed = await step.do("mark failed", async () => {
+          await this.env.DB.prepare(
+            `UPDATE changes SET status = 'failed', blocked_reason = ?, updated_at = ?
+             WHERE id = ? AND status = 'compiling'`,
+          )
+            .bind(reason, new Date().toISOString(), changeId)
+            .run();
+          const row = await this.env.DB.prepare("SELECT status FROM changes WHERE id = ?")
+            .bind(changeId)
+            .first<{ status: string }>();
+          return row?.status === "failed";
+        });
+        if (!failed) {
+          await step.do("release cancelled planning request", () =>
+            releaseRequestScope(this.env, ctx.projectId, changeId),
+          );
+          return { cancelled: true };
+        }
+        await step.do("record failed event", async () => {
+          await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
+            await changeEvent(ctx, "change.failed", {
+              status: "failed",
+              phase: "planning",
+              reason,
+              errors,
+            }),
+          ]);
+        });
+        await step.do("release failed request", () =>
           releaseRequestScope(this.env, ctx.projectId, changeId),
         );
-        return { cancelled: true };
+        return { failed: true, reason: errors };
       }
-      await step.do("record failed event", async () => {
-        await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
-          await changeEvent(ctx, "change.failed", {
-            status: "failed",
-            phase: "planning",
-            reason,
-            errors,
-          }),
-        ]);
+      planned = result.planned;
+      spent += planned.calls.reduce((sum, call) => sum + call.costUsd, 0);
+      const resources = scopeResources(ctx, planned);
+      const loadedRequest = await step.do(`load request scope${tag}`, () =>
+        loadRequest(this.env, changeId, planned.criteria, resources),
+      );
+      if (loadedRequest?.status !== "compiling") {
+        await step.do("release stopped request", () =>
+          releaseRequestScope(this.env, ctx.projectId, changeId),
+        );
+        return { skipped: true };
+      }
+      current = { ...loadedRequest, goal };
+      const registrant = current;
+      const plannedNow = planned;
+      const registration = await step.do(`check other requests${tag}`, async () => {
+        await releaseClosedRequests(this.env, ctx.projectId);
+        await this.env.EVIDENCE.put(
+          `work-graphs/${ctx.projectId}/${changeId}.json`,
+          JSON.stringify(plannedNow),
+          { httpMetadata: { contentType: "application/json" } },
+        );
+        const registeredAt = new Date().toISOString();
+        const scope = {
+          changeId,
+          requesterUserId: registrant.requesterUserId,
+          requesterRank: registrant.requesterRank,
+          criteria: plannedNow.criteria,
+          resources,
+          registeredAt,
+        };
+        const root = requestRoot(this.env, ctx.projectId);
+        // The receipt is immutable: a later pass keeps its order and earlier set, new criteria.
+        const receipt = await root.registerScope(scope);
+        if (pass > 0) await root.updateScope(scope);
+        await this.env.DB.prepare(
+          "UPDATE changes SET scope_registered_at = COALESCE(scope_registered_at, ?) WHERE id = ?",
+        )
+          .bind(registeredAt, changeId)
+          .run();
+        return {
+          order: receipt.order,
+          earlier: receipt.earlier.map((scope) => ({
+            changeId: scope.changeId,
+            requesterUserId: scope.requesterUserId,
+            criteria: scope.criteria,
+            resources: scope.resources,
+            scoped: scope.scoped,
+          })),
+        };
       });
-      await step.do("release failed request", () =>
-        releaseRequestScope(this.env, ctx.projectId, changeId),
-      );
-      return { failed: true, reason: errors };
-    }
-    let { planned } = result;
-    const initialSpend = planned.calls.reduce((sum, call) => sum + call.costUsd, 0);
-    let reviewSpend = 0;
-    let replanSpend = 0;
-    const scopeResources = () => [
-      ...new Set(
-        planned.plan.tasks.flatMap((task) =>
-          task.semanticResources.map((resource) => qualify(ctx, resource)),
-        ),
-      ),
-    ];
-    const current = await step.do("load request scope", () =>
-      loadRequest(this.env, changeId, planned.criteria, scopeResources()),
-    );
-    if (current?.status !== "compiling") {
-      await step.do("release stopped request", () =>
-        releaseRequestScope(this.env, ctx.projectId, changeId),
-      );
-      return { skipped: true };
-    }
-    const registration = await step.do("check other requests", async () => {
-      await releaseClosedRequests(this.env, ctx.projectId);
-      await this.env.EVIDENCE.put(
-        `work-graphs/${ctx.projectId}/${changeId}.json`,
-        JSON.stringify(planned),
-        { httpMetadata: { contentType: "application/json" } },
-      );
-      const registeredAt = new Date().toISOString();
-      const receipt = await requestRoot(this.env, ctx.projectId).registerScope({
-        changeId,
-        requesterUserId: current.requesterUserId,
-        requesterRank: current.requesterRank,
-        criteria: planned.criteria,
-        resources: scopeResources(),
-        registeredAt,
-      });
-      await this.env.DB.prepare(
-        "UPDATE changes SET scope_registered_at = COALESCE(scope_registered_at, ?) WHERE id = ?",
-      )
-        .bind(registeredAt, changeId)
-        .run();
-      return {
-        order: receipt.order,
-        earlier: receipt.earlier.map((scope) => ({
-          changeId: scope.changeId,
-          requesterUserId: scope.requesterUserId,
-          requesterRank: scope.requesterRank,
-          criteria: scope.criteria,
-          resources: scope.resources,
-          scoped: scope.scoped,
-        })),
-      };
-    });
-    const excluded = new Set<string>();
-    let reviews = 0;
-    for (const earlier of registration.earlier) {
-      let scope = await step.do(`read scope ${earlier.changeId}`, () =>
-        readRequestScope(this.env, ctx.projectId, earlier.changeId),
-      );
-      for (let attempt = 0; scope && !scope.scoped && attempt < 10; attempt += 1) {
-        await step.sleep(`wait for scope ${earlier.changeId} ${attempt}`, "15 seconds");
-        scope = await step.do(`refresh scope ${earlier.changeId} ${attempt}`, () =>
+      let reviews = 0;
+      let askedInCompare = false;
+      excluded.clear();
+      for (const earlier of registration.earlier) {
+        let scope = await step.do(`read scope ${earlier.changeId}${tag}`, () =>
           readRequestScope(this.env, ctx.projectId, earlier.changeId),
         );
+        for (let attempt = 0; scope && !scope.scoped && attempt < 10; attempt += 1) {
+          await step.sleep(`wait for scope ${earlier.changeId} ${attempt}${tag}`, "15 seconds");
+          scope = await step.do(`refresh scope ${earlier.changeId} ${attempt}${tag}`, () =>
+            readRequestScope(this.env, ctx.projectId, earlier.changeId),
+          );
+        }
+        if (!scope) continue;
+        const known = scope;
+        const a = await step.do(`load request ${earlier.changeId}${tag}`, () =>
+          loadRequest(this.env, earlier.changeId, known.criteria, known.resources),
+        );
+        if (!a || ["cancelled", "not_selected", "failed", "completed"].includes(a.status)) continue;
+        a.scoped = scope.scoped;
+        const overlaps = requestsOverlap(a, registrant);
+        const affordable = spent < loaded.budgetUsd;
+        const pair = await step.do(
+          `compare request ${earlier.changeId}${tag}`,
+          { retries: { limit: 1, delay: "15 seconds", backoff: "constant" }, timeout: "4 minutes" },
+          () =>
+            checkRequestPair(
+              this.env,
+              ctx,
+              a,
+              registrant,
+              (req) => this.complete(req, changeId),
+              !overlaps || (reviews < 4 && affordable),
+              { round: answered, mayAsk, canArbitrate: affordable, canonical },
+            ),
+        );
+        if (overlaps) reviews += 1;
+        spent += pair.costUsd;
+        if (pair.stop === "not_selected") return { status: "not_selected" };
+        if (pair.stop === "needs_input") {
+          askedInCompare = true;
+          break;
+        }
+        for (const id of pair.excluded) excluded.add(id);
       }
-      if (!scope) continue;
-      const a = await step.do(`load request ${earlier.changeId}`, () =>
-        loadRequest(this.env, earlier.changeId, scope.criteria, scope.resources),
-      );
-      if (!a || ["cancelled", "not_selected", "failed", "completed"].includes(a.status)) continue;
-      a.scoped = scope.scoped;
-      const overlaps = requestsOverlap(a, current);
-      const pair = await step.do(
-        `compare request ${earlier.changeId}`,
-        { retries: { limit: 1, delay: "15 seconds", backoff: "constant" }, timeout: "3 minutes" },
-        () =>
-          checkRequestPair(
-            this.env,
-            ctx,
-            a,
-            current,
-            (req) => this.complete(req, changeId),
-            !overlaps || (reviews < 4 && initialSpend + reviewSpend < loaded.budgetUsd),
-          ),
-      );
-      if (overlaps) reviews += 1;
-      reviewSpend += pair.costUsd;
-      if (pair.stop) return { status: pair.stop };
-      for (const id of pair.excluded) excluded.add(id);
+      if (askedInCompare) {
+        const state = await this.waitForAnswer(step, changeId, `${tag} compare`);
+        if (state.status !== "compiling") {
+          await step.do(`release unanswered request${tag} compare`, () =>
+            releaseRequestScope(this.env, ctx.projectId, changeId),
+          );
+          return { status: state.status };
+        }
+        answers = state.answers;
+        skipAsk = answers.at(-1)?.action === "proceed_anyway";
+        continue;
+      }
+      break;
     }
     if (excluded.size > 0) {
       const remaining = selectedCriteria(planned.criteria, [...excluded]);
@@ -311,11 +571,11 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
             }>();
           await cancelChange(
             this.env,
-            { changeId, actorUserId: fields?.outcome_decided_by ?? "policy:priority_wins" },
+            { changeId, actorUserId: fields?.outcome_decided_by ?? SYSTEM_ARBITER },
             {
               reason: fields?.outcome_reason ?? "Not selected: conflicts with an earlier request",
               winnerChangeId: fields?.outcome_winner_change_id ?? "",
-              decidedBy: fields?.outcome_decided_by ?? "policy:priority_wins",
+              decidedBy: fields?.outcome_decided_by ?? SYSTEM_ARBITER,
             },
           );
         });
@@ -331,7 +591,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
             const files = await canonicalFiles(this.env, ctx.projectId).catch(() => null);
             return planChangeResult(
               {
-                goal: loaded.goal,
+                goal,
                 projectName: loaded.projectName,
                 files,
                 excludedCriteria: losing,
@@ -363,7 +623,8 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         return { failed: true };
       }
       planned = replanned.planned;
-      replanSpend = planned.calls.reduce((sum, call) => sum + call.costUsd, 0);
+      spent += planned.calls.reduce((sum, call) => sum + call.costUsd, 0);
+      const replannedGraph = planned;
       await step.do("mark partially selected", async () => {
         await this.env.DB.prepare(
           "UPDATE changes SET outcome = 'partially_selected', outcome_reason = replace(outcome_reason, 'Not selected:', 'Partially selected:') WHERE id = ? AND status = 'compiling'",
@@ -374,8 +635,8 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
           changeId,
           requesterUserId: current.requesterUserId,
           requesterRank: current.requesterRank,
-          criteria: planned.criteria,
-          resources: scopeResources(),
+          criteria: replannedGraph.criteria,
+          resources: scopeResources(ctx, replannedGraph),
           registeredAt: new Date().toISOString(),
         });
         await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
@@ -497,7 +758,6 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
     });
     if (compiled === false) return { cancelled: true, tasks: planned.plan.tasks.length };
 
-    const spent = initialSpend + reviewSpend + replanSpend;
     const ready = await step.do("dispatch ready tasks", async () =>
       dispatchReadyTasks(this.env, ctx, Math.max(0, loaded.budgetUsd - spent)),
     );

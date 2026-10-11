@@ -19,8 +19,9 @@ The path uses these stable IDs (section 60 of `AGENTS.md`):
 ## Part 1: from goal to ready Tasks
 
 The API stores the Change and starts one ChangeWorkflow.
-The ChangeWorkflow calls the Root Planner, stores the Work Graph, and dispatches the ready Tasks.
+The ChangeWorkflow runs the intake gate, calls the Root Planner, compares the plan with the other open requests, stores the Work Graph, and dispatches the ready Tasks.
 The API returns before any model call (section 58).
+An unclear, duplicate, or conflicting request waits for its requester (`needs_input`) instead of building (ADR 0025, [Shared Projects](shared-projects.md)).
 
 ```mermaid
 sequenceDiagram
@@ -42,8 +43,16 @@ sequenceDiagram
   API->>CW: CHANGE_WORKFLOW.create(id = changeId)
   API-->>User: 201 Change
   CW->>D1: status compiling
+  CW->>GW: intake gate: embeddings, Clef-flash, Sonnet when needed
+  alt unclear, duplicate
+    CW->>D1: status needs_input, clarification
+    User->>API: POST /v1/changes/:id/clarify
+    API->>CW: event clarification (answers in the goal)
+  end
+  CW->>Root: admit, then registerScope after planning
   CW->>GW: Root Planner call, tool submit_work_graph
   GW-->>CW: WorkGraphPlan (Zod and cycle check)
+  CW->>GW: request review and arbiter for overlapping requests
   CW->>D1: tasks, task_dependencies, status running (one batch)
   CW->>Shard: change.compiled, task.created (outbox)
   CW->>D1: pending to ready when dependencies are complete
@@ -56,7 +65,9 @@ Notes:
 - The routing rules send the Root Planner to the `opus` tier (`taskKind = plan`, `complexity = large`). The prompt asks for 2 to 8 Tasks. The schema accepts 1 to 12 (`MAX_TASKS_PER_CHANGE`).
 - The Work Graph JSON goes to R2 at `work-graphs/<project>/<change>.json`.
 - Change events go to the ResourceShardDO that owns `change:<id>`. This keeps ProjectRootDO cold (section 13.1).
-- The API updates ProjectViewDO directly with the new Change. Only an owner override emits `change.created`.
+- The API updates ProjectViewDO directly with the new Change.
+- The intake gate records `change.intake.reviewed` and an `INTAKE` Decision Receipt in D1 `change_decisions`. An answer records `change.clarification.answered`.
+- A `needs_input` Change waits for the event `clarification`, re-reads D1 once a day, and is cancelled after 7 days without an answer. After 3 answered rounds it plans without another question.
 
 ## Part 2: from a wake to a published ChangeSet
 
@@ -102,13 +113,15 @@ Notes:
 - Only Task kinds `implement`, `migrate`, and `test` get a workspace. Other kinds get read-only file tools.
 - A Task with dependencies starts on a stacked workspace: canonical plus the dependency ChangeSets. See [Agents and models](agents-and-models.md#stacked-workspaces).
 - Conflict detection is deterministic. A model review (Sonnet tier, then Opus tier) runs later from a durable schedule, never on the run path.
+- Protected resources for conflict detection and review come from the Project's stored policy (D1 `project_policies`, `protectedResources`). Each detection or review run reads the row once. A Project without a row, or with a row that does not parse, has no protected resources there.
 - When the last Task completes, AgentDO moves the Change to `verifying` and records `verification.started` with reason `work_graph_completed`.
 
 ## Part 3: from Candidates to a release
 
 The causal router turns `verification.started` into one `candidate.create` command.
 The integration Worker applies the fork rule and starts one CandidateVerificationWorkflow per Candidate.
-A human approves and promotes. ProjectRootDO runs the compare-and-swap.
+When a Change has sibling Candidates on one base, the last one to settle selects the winner (ADR 0026).
+Policy or a person promotes the winner. ProjectRootDO runs the compare-and-swap.
 
 ```mermaid
 sequenceDiagram
@@ -130,10 +143,12 @@ sequenceDiagram
   VW->>SBX: merge ChangeSets in Work Graph order
   VW->>D1: plan_json, status verifying, candidate.composed
   loop each check in the Verification Plan
-    VW->>SBX: run check command
+    VW->>SBX: run check command (or Dynamic Worker, or acceptance model call)
     VW->>D1: Evidence row in D1, output in R2
   end
-  VW->>D1: gate: verified or rejected, approval.requested
+  VW->>D1: gate: verified or rejected
+  VW->>D1: last sibling: claim selection, rank, losers rejected, candidate.selected
+  VW->>D1: approval.requested for a gated winner
   User->>INT: approve (API RPC decideApproval)
   User->>INT: promote (API RPC promoteCandidate)
   INT->>Root: promote(): compare-and-swap
@@ -145,6 +160,7 @@ sequenceDiagram
 
 Notes:
 
+- Siblings never race. A verified Candidate does not promote while a sibling on the same base still composes or verifies. The last run to settle claims the selection with one conditional D1 update and ranks the group: promotable first, then most acceptance criteria met, then fewer gaps, then more passing checks. A tie goes to the Integration Judge (one Sonnet call over the Evidence). Without a valid preference the Change is `awaiting_approval` and a person picks. Losers become `rejected` with the comparison as the reason. A winner that does not meet every acceptance criterion, or has no acceptance result, never auto-promotes: the Change is `awaiting_approval` with the reason, and a person approves and promotes it or cancels the Change. See [Source and verification](source-and-verification.md#sibling-candidates-and-selection).
 - Promotion is a human action in the UI, except under policy `autoPromoteRiskTiers`. Auto-promotion applies when the verified Candidate needs no human approval and `autoPromoteRiskTiers` lists the Change risk tier (`low` in `policy-1`). Then the CandidateVerificationWorkflow calls the same `promoteCandidate` path with actor `system:auto-promotion`. `canonical.promotion.requested` then records `trigger: "auto"`. All section 36 preconditions still apply. A Candidate that needs approval never promotes automatically (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
 - Only a Project with a live app releases. See [Live apps](live-apps.md).
 - The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a live app, else `completed`. The release then ends the Change as `completed` (deployed or superseded) or `failed`.
@@ -166,7 +182,9 @@ stateDiagram-v2
   compiling --> running: Work Graph stored
   compiling --> failed: planner failed
   compiling --> not_selected: lost a request conflict
-  compiling --> awaiting_owner: conflict needs the owner
+  compiling --> needs_input: unclear, duplicate, or undecided conflict
+  needs_input --> compiling: answer or proceed anyway
+  needs_input --> cancelled: withdrawn, or no answer in 7 days
   running --> verifying: last Task completed
   running --> budget_blocked: budget or limit stop
   budget_blocked --> running: person raises the budget
@@ -187,6 +205,7 @@ stateDiagram-v2
   verifying --> cancelled: person cancels
   awaiting_approval --> cancelled: person cancels
   budget_blocked --> cancelled: person cancels
+  needs_input --> cancelled: person cancels
   completed --> [*]
   failed --> [*]
   cancelled --> [*]
@@ -241,8 +260,8 @@ stateDiagram-v2
   composing --> stale: base behind canonical
   verifying --> verified: every required check passes
   verifying --> rejected: a required check has a gap
-  verified --> rejected: approver rejects
-  verified --> promoted: compare-and-swap succeeds
+  verified --> rejected: approver rejects, or a sibling wins the selection
+  verified --> promoted: compare-and-swap succeeds (the selection winner or the only Candidate)
   verified --> stale: canonical advanced first
   verifying --> stale: canonical advanced
   promoted --> [*]

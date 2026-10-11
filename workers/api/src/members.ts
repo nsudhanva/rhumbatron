@@ -1,7 +1,9 @@
 import { createClerkClient } from "@clerk/backend";
+import { ChangeClarification } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
+import { clarify } from "./clarify.ts";
 import { fail, validate } from "./http.ts";
 import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
 
@@ -9,11 +11,12 @@ import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
  * Shared Projects (docs/architecture/shared-projects.md).
  *
  * The owner shares a Project by email. An invitation binds only to a Clerk-verified email of the
- * signed-in user, and the membership binds to the immutable user ID. Rank orders requesters for
- * the priority_wins conflict policy: the owner is 0, a collaborator 10.
+ * signed-in user, and the membership binds to the immutable user ID. `rank` only orders the member
+ * list (the owner is 0, a collaborator 10). No build decision reads it: the system decides
+ * between requests (ADR 0025).
  *
- * Also the request views: who asked for a Change, how the cross-request check decided it, and the
- * owner's override.
+ * Also the request views: who asked for a Change, how the intake gate and the cross-request check
+ * decided it, and the clarification route (clarify.ts, mounted here).
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -29,7 +32,6 @@ const InviteRequest = z.object({ email: z.string().trim().toLowerCase().email().
 
 /** Internal RPC on the integration Worker (service binding `INTEGRATION`). */
 type IntegrationRpc = {
-  overrideRequest(input: { changeId: string; actorUserId: string }): Promise<unknown>;
   cancelChange(input: { changeId: string; actorUserId: string }): Promise<unknown>;
 };
 const integration = (env: Env) => env.INTEGRATION as unknown as IntegrationRpc;
@@ -101,7 +103,10 @@ function requesterName(name: string | null, email: string | null): string | null
 /** The Change columns the request fields need (join `users u ON u.id = c.created_by`). */
 export type RequestColumns = {
   created_by: string;
+  /** Role snapshot at request time, display only. */
   requester_rank: number | null;
+  /** Set while the Change is `needs_input`. A query that does not select it reads null. */
+  clarification_json?: string | null;
   outcome: string | null;
   outcome_reason: string | null;
   outcome_winner_change_id: string | null;
@@ -116,8 +121,19 @@ const OUTCOMES = new Set([
   "partially_selected",
   "not_selected",
   "replaces",
-  "overridden",
+  "duplicate",
 ]);
+
+/** The stored clarification, or null when there is none or it does not parse. */
+function clarificationOf(json: string | null | undefined): ChangeClarification | null {
+  if (!json) return null;
+  try {
+    const parsed = ChangeClarification.safeParse(JSON.parse(json));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 export function requestFields(row: RequestColumns, viewerUserId: string) {
   return {
@@ -135,13 +151,14 @@ export function requestFields(row: RequestColumns, viewerUserId: string) {
               | "partially_selected"
               | "not_selected"
               | "replaces"
-              | "overridden",
+              | "duplicate",
             reason: row.outcome_reason,
             winnerChangeId: row.outcome_winner_change_id,
             decidedBy: row.outcome_decided_by,
           }
         : null,
     supersedesChangeId: row.supersedes_change_id,
+    clarification: clarificationOf(row.clarification_json),
   };
 }
 
@@ -161,7 +178,21 @@ function citedCriteria(
   let inputs: { a?: Side; b?: Side } = {};
   try {
     pairs = JSON.parse(criteriaJson ?? "[]") as Pair[];
-    inputs = (JSON.parse(reviewJson ?? "{}") as { inputs?: typeof inputs }).inputs ?? {};
+    const stored = JSON.parse(reviewJson ?? "{}") as {
+      inputs?: typeof inputs;
+      review?: { verdict?: string; covered?: { a?: unknown; b?: unknown; quote?: unknown }[] };
+    };
+    inputs = stored.inputs ?? {};
+    // A duplicate cites, for each criterion of the later request, the earlier criterion that
+    // already delivers it. Orient it like criteria_json: `a` belongs to change_a.
+    if (stored.review?.verdict === "duplicate" && Array.isArray(stored.review.covered)) {
+      const flip = inputs.a?.changeId !== changeA;
+      pairs = stored.review.covered.map((c) => ({
+        a: flip ? c.b : c.a,
+        b: flip ? c.a : c.b,
+        why: typeof c.quote === "string" ? `Already covered: "${c.quote}"` : "Already covered",
+      }));
+    }
   } catch {
     return [];
   }
@@ -192,6 +223,8 @@ function citedCriteria(
 const newInvitationId = () => `inv_${crypto.randomUUID().replaceAll("-", "")}`;
 
 export const members = new Hono<AppEnv>()
+  /** `POST /v1/changes/:changeId/clarify` (clarify.ts). */
+  .route("/", clarify)
   /** Members of a shared Project. The owner also sees pending invitations. */
   .get(
     "/v1/projects/:projectId/members",
@@ -493,7 +526,7 @@ export const members = new Hono<AppEnv>()
     },
   )
 
-  /** Cross-request conflicts of one Change, with both goals and the cited criteria. */
+  /** Cross-request conflicts and duplicates of one Change, with both goals and the cited criteria. */
   .get(
     "/v1/changes/:changeId/request-conflicts",
     requireAuth,
@@ -508,7 +541,7 @@ export const members = new Hono<AppEnv>()
         return fail(c, 404, "not_found", "Change not found");
       }
       const rows = await c.env.DB.prepare(
-        `SELECT r.id, r.verdict, r.criteria_json, r.review_json, r.policy, r.winner_change_id, r.loser_change_id,
+        `SELECT r.id, r.verdict, r.round, r.criteria_json, r.review_json, r.policy, r.winner_change_id, r.loser_change_id,
                 r.decided_by, r.decided_at, r.created_at,
                 a.id AS a_id, a.goal AS a_goal, a.status AS a_status, a.created_by AS a_by,
                 ua.display_name AS a_name, ua.email AS a_email,
@@ -517,7 +550,7 @@ export const members = new Hono<AppEnv>()
          FROM request_conflicts r
          JOIN changes a ON a.id = r.change_a LEFT JOIN users ua ON ua.id = a.created_by
          JOIN changes b ON b.id = r.change_b LEFT JOIN users ub ON ub.id = b.created_by
-         WHERE (r.change_a = ?1 OR r.change_b = ?1) AND r.verdict = 'conflicting'
+         WHERE (r.change_a = ?1 OR r.change_b = ?1) AND r.verdict IN ('conflicting', 'duplicate')
          ORDER BY r.created_at DESC LIMIT 10`,
       )
         .bind(changeId)
@@ -536,6 +569,8 @@ export const members = new Hono<AppEnv>()
         data: (rows.results ?? []).map((r) => ({
           id: r.id,
           verdict: r.verdict,
+          /** Clarification round of the later request when the pair was compared (0 first). */
+          round: Number(r.round ?? 0),
           criteria: citedCriteria(
             r.criteria_json ?? null,
             r.review_json ?? null,
@@ -551,36 +586,5 @@ export const members = new Hono<AppEnv>()
           b: side(r, "b"),
         })),
       });
-    },
-  )
-
-  /** The owner chooses a not-selected request instead (decision S-12). */
-  .post(
-    "/v1/changes/:changeId/override",
-    requireAuth,
-    validate("param", ChangeIdParam),
-    async (c) => {
-      const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
-      const { changeId } = c.req.valid("param");
-      const change = await c.env.DB.prepare("SELECT project_id, status FROM changes WHERE id = ?")
-        .bind(changeId)
-        .first<{ project_id: string; status: string }>();
-      const role = change ? await projectRole(c.env.DB, userId, change.project_id) : null;
-      if (!change || !role) return fail(c, 404, "not_found", "Change not found");
-      if (role !== "owner") {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("choose between requests"));
-      }
-      if (change.status !== "not_selected" && change.status !== "awaiting_owner") {
-        return fail(c, 409, "conflict", "Only a request that was not selected can be chosen.");
-      }
-      const outcome = (await integration(c.env).overrideRequest({
-        changeId,
-        actorUserId: userId,
-      })) as { status?: string; changeId?: string; reason?: string; detail?: string };
-      if (outcome?.status === "refused") {
-        return fail(c, 409, "conflict", outcome.detail ?? "The request could not be chosen.");
-      }
-      // Completes synchronously, so 200 rather than 202.
-      return c.json({ data: outcome }, 200);
     },
   );

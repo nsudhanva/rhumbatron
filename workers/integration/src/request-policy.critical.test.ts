@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { recomposeDecision } from "./app-release-model.ts";
+import { UNKNOWN_CANONICAL } from "./intake-context.ts";
 import {
+  arbiterDecision,
+  arbiterItemIds,
+  arbitrateRequests,
   losingCriterionIds,
   nothingSelected,
-  priorityWins,
   type RequestInput,
   requestsOverlap,
   resourceTokens,
@@ -16,7 +19,6 @@ const a: RequestInput = {
   changeId: "a",
   goal: "Newest first",
   requesterUserId: "alice",
-  requesterRank: 0,
   criteria: [{ id: "c1", text: "GET /api/products sorts newest first" }],
   resources: ["project:shop:api:product-order"],
   scoped: true,
@@ -26,7 +28,6 @@ const b: RequestInput = {
   changeId: "b",
   goal: "Oldest first",
   requesterUserId: "bob",
-  requesterRank: 10,
   criteria: [{ id: "c1", text: "GET /api/products sorts oldest first" }],
 };
 describe("request compatibility boundaries", () => {
@@ -85,20 +86,84 @@ describe("request compatibility boundaries", () => {
       });
     }
   });
-  it("selects owner priority, supersedes the same requester, and waits on equal ranks", () => {
-    expect(priorityWins(a, b)).toEqual({ winner: "a", loser: "b" });
-    expect(priorityWins({ ...a, requesterRank: 10 }, { ...b, requesterRank: 0 })).toEqual({
-      winner: "b",
-      loser: "a",
+  it("accepts a duplicate only when every covered quote is text of the cited earlier criterion", () => {
+    const covered = (quote: string, aId = "c1", bId = "c1") => ({
+      verdict: "duplicate",
+      conflicts: [],
+      covered: [{ a: aId, b: bId, quote }],
     });
-    expect(priorityWins(a, { ...b, requesterUserId: "alice" })).toEqual({
-      winner: "b",
-      loser: "a",
-    });
-    expect(priorityWins(a, { ...b, requesterRank: 0 })).toEqual({ awaitingOwner: true });
+    expect(
+      validateRequestReview(covered("sorts newest first"), a.criteria, b.criteria),
+    ).toMatchObject({ verdict: "duplicate", supported: true });
+    for (const raw of [
+      covered("sorts by price"),
+      covered("sorts newest first", "c9"),
+      covered("sorts newest first", "c1", "c9"),
+      { verdict: "duplicate", conflicts: [] },
+      { ...covered("sorts newest first"), verdict: "compatible" },
+    ])
+      expect(validateRequestReview(raw, a.criteria, b.criteria).supported).toBe(false);
     expect(
       selectedCriteria([...b.criteria, { id: "c2", text: "Cart remains available" }], ["c1"]),
     ).toEqual([{ id: "c2", text: "Cart remains available" }]);
+  });
+  it("arbitrates only on two agreeing, cited runs in swapped order; anything else asks", async () => {
+    const items = arbiterItemIds([{ a: "c1", b: "c1" }], UNKNOWN_CANONICAL);
+    expect([...items]).toEqual(["a:goal", "b:goal", "conflict:1"]);
+    const vote = (verdict: string, cites = true) => ({
+      provider: "anthropic" as const,
+      model: "claude-sonnet-5-5",
+      tier: "sonnet" as const,
+      content: null,
+      toolCalls: [
+        {
+          id: "x",
+          type: "function" as const,
+          function: {
+            name: "arbitrate_requests",
+            arguments: JSON.stringify({
+              verdict,
+              rationale: "Fits the app",
+              citedCriteria: cites ? [{ side: "a", id: "c1" }] : [{ side: "a", id: "c9" }],
+              citedItems: ["conflict:1"],
+            }),
+          },
+        },
+      ],
+      message: { role: "assistant" as const, content: null },
+      finishReason: "tool_use",
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0.01,
+      latencyMs: 1,
+      gatewayLogId: null,
+    });
+    const run = (first: ReturnType<typeof vote>, second: ReturnType<typeof vote>) => {
+      const replies = [first, second];
+      return arbitrateRequests(
+        a,
+        b,
+        [{ a: "c1", b: "c1", why: "x" }],
+        UNKNOWN_CANONICAL,
+        async () => replies.shift() as ReturnType<typeof vote>,
+      );
+    };
+    // The swapped run sees B as "a": prefer_b there is prefer_a in the real frame.
+    expect((await run(vote("prefer_a"), vote("prefer_b"))).decision).toBe("prefer_a");
+    expect((await run(vote("prefer_b"), vote("prefer_a"))).decision).toBe("prefer_b");
+    // Position bias: both runs prefer whatever is shown first. Not an agreement.
+    expect((await run(vote("prefer_a"), vote("prefer_a"))).decision).toBe("ask");
+    expect((await run(vote("prefer_a"), vote("ask"))).decision).toBe("ask");
+    // An invented citation makes the run unsupported, even when both runs agree.
+    expect((await run(vote("prefer_a", false), vote("prefer_b"))).decision).toBe("ask");
+    expect(
+      arbiterDecision(
+        { verdict: "prefer_a", rationale: "x", supported: true },
+        { verdict: "prefer_b", rationale: "x", supported: false },
+      ),
+    ).toBe("ask");
   });
   it("refuses recomposition for every blocked status and losing outcome", () => {
     const facts = {
@@ -110,12 +175,12 @@ describe("request compatibility boundaries", () => {
       isRollback: false,
       siblingPromoted: false,
     };
-    for (const changeStatus of ["not_selected", "cancelled", "awaiting_owner"])
+    for (const changeStatus of ["not_selected", "cancelled", "needs_input"])
       expect(recomposeDecision({ ...facts, changeStatus })).toEqual({
         kind: "skip",
         reason: "change_closed",
       });
-    for (const changeOutcome of ["not_selected", "overridden"])
+    for (const changeOutcome of ["not_selected", "duplicate"])
       expect(recomposeDecision({ ...facts, changeOutcome })).toEqual({
         kind: "skip",
         reason: "change_closed",
