@@ -75,7 +75,7 @@ export const ProjectReleases = z.object({
 });
 export type ProjectReleases = z.infer<typeof ProjectReleases>;
 
-/** `POST /v1/projects/:projectId/releases/inject-failure` (P13-12, dev and demo only). */
+/** `POST /v1/projects/:projectId/releases/inject-failure` (P13-12, fixture routes only). */
 export const ReleaseInjectionOutcome = z.discriminatedUnion("status", [
   z.object({ status: z.literal("recorded"), release: ReleaseView, repeated: z.boolean() }),
   z.object({

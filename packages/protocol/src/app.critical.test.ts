@@ -21,7 +21,7 @@ describe("parseAppHost", () => {
   });
 
   it("reserves Rhumbatron and Clerk hosts, also as preview targets", () => {
-    for (const label of ["www", "api", "dev", "api-dev", "clerk", "accounts", "clkmail"]) {
+    for (const label of ["www", "api", "clerk", "accounts", "clkmail"]) {
       expect(parseAppHost(`${label}.rhumbatron.com`, D)).toEqual({ kind: "reserved", label });
     }
     expect(parseAppHost("rhumbatron-x.rhumbatron.com", D).kind).toBe("reserved");

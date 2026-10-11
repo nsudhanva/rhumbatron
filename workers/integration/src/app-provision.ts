@@ -18,8 +18,8 @@ import type { SourceIndex } from "./provision.ts";
 /**
  * `app.provision` (P16-08, ADR 0020): builds the app bundle of a Project's canonical commit and
  * points its production host at it. Runs after `project.provision` and on request (the API's
- * "Deploy app" route, for Projects that existed before live apps). Prod only: without the `APPS`
- * binding (dev) it returns `disabled` and writes nothing.
+ * "Deploy app" route, for Projects that existed before live apps). Without the `APPS`
+ * binding (local runs) it returns `disabled` and writes nothing.
  *
  * Idempotent. The pointer row moves only after the bundle exists, so a failed build never takes a
  * live version down. Cost per build: one Artifacts read per source file (about 20 for Acme), a few

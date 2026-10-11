@@ -29,7 +29,7 @@ import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { handleFixtureCommand } from "./fixture-changesets.ts";
 import { type HumanEditInput, submitHumanEdit } from "./human-edit.ts";
-import { cleanupProject, forkRetentionDays, sweepForks } from "./project-cleanup.ts";
+import { cleanupProject, FORK_RETENTION_DAYS, sweepForks } from "./project-cleanup.ts";
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
 import { recoverSourceConflicts } from "./rebase.ts";
@@ -135,7 +135,7 @@ async function handleCommand(
     const rebases = await recoverSourceConflicts(env);
     const result = await sweepForks(env, {
       now: Date.now(),
-      retentionDays: forkRetentionDays(env.ENVIRONMENT),
+      retentionDays: FORK_RETENTION_DAYS,
     });
     // P16-22: preview rows (and their data) expire with their 7-day bundles.
     const previews = await expirePreviews(env);

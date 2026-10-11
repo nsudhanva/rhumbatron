@@ -17,8 +17,6 @@ export const APP_PRODUCTION_CHANNEL = "production";
 export const RESERVED_APP_LABELS: ReadonlySet<string> = new Set([
   "www",
   "api",
-  "dev",
-  "api-dev",
   "clerk",
   "accounts",
   "clkmail",

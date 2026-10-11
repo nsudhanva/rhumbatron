@@ -7,20 +7,18 @@ import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Dev-only Wishlist design-conflict fixture (AGENTS.md sections 32.4, 54; P9-08). Publishing is a
+ * Wishlist design-conflict fixture (AGENTS.md sections 32.4, 54; P9-08). Publishing is a
  * command: the API checks the caller and the Change, then queues `fixture.publish`; the
  * integration Worker commits each design to an Artifacts fork and records fixture-sourced
  * ChangeSets and Intents. No model call. The routes answer only where the `FIXTURES_ENABLED`
- * binding is "true" (dev and prod, ADR 0017) or the environment is dev or local; elsewhere 404, as
- * if absent.
+ * binding is "true" (prod, ADR 0017) or the environment is local; elsewhere 404, as if
+ * absent.
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
-const DEV_ENVIRONMENTS: readonly string[] = ["dev", "local"];
-
 export const fixturesEnabled = (env: Env) =>
-  env.FIXTURES_ENABLED === "true" || DEV_ENVIRONMENTS.includes(env.ENVIRONMENT as string);
+  env.FIXTURES_ENABLED === "true" || env.ENVIRONMENT === "local";
 
 const ChangeIdParam = z.object({ changeId: z.string().regex(/^chg_[a-z0-9-]+$/) });
 const PublishRequest = z.object({ design: z.enum(["a", "b", "both"]) });

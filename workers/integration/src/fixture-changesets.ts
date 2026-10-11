@@ -585,8 +585,8 @@ async function publishFixtureChangeSets(
   return { status: "published", changeSets, conflicts };
 }
 
-/** Environments where fixture ChangeSets may be published. Never production. */
-const FIXTURE_ENVIRONMENTS: readonly string[] = ["dev", "local"];
+/** The environment where fixture ChangeSets may be published by queue command. */
+const FIXTURE_ENVIRONMENT = "local";
 
 /** Queue entry for `fixture.publish` (payload `{designs: ["a", "b"]}`). Logs the outcome. */
 export async function handleFixtureCommand(
@@ -599,8 +599,8 @@ export async function handleFixtureCommand(
     designs.length > 0 &&
     designs.every((d): d is WishlistDesign => d === "a" || d === "b");
   const outcome: FixtureOutcome =
-    !FIXTURE_ENVIRONMENTS.includes(env.ENVIRONMENT as string) || !command.changeId || !valid
-      ? { status: "skipped", reason: "not a dev fixture command" }
+    env.ENVIRONMENT !== FIXTURE_ENVIRONMENT || !command.changeId || !valid
+      ? { status: "skipped", reason: "not a local fixture command" }
       : await publishFixtureChangeSets(env, {
           projectId: command.projectId,
           changeId: command.changeId,

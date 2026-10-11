@@ -221,7 +221,7 @@ export const getProject = createServerFn()
   .inputValidator((projectId: string) => projectId)
   .handler(({ data }) => call<ProjectDetail>(`/v1/projects/${data}`));
 
-/** Live app of a Project (ADR 0020). `enabled` is false where apps are not served (dev). */
+/** Live app of a Project (ADR 0020). `enabled` is false where apps are not served (local runs). */
 export type ProjectAppView = {
   enabled: boolean;
   app: {

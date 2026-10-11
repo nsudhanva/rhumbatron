@@ -7,7 +7,7 @@ const LINK = "text-kumo-link underline-offset-2 hover:underline";
 
 /**
  * "Live at <host> · Open app" under the Project title (Phase 16, ADR 0020). Renders nothing where
- * live apps are off (dev). A Project from before live apps gets a "Deploy app" action. "Remove
+ * live apps are off (local runs). A Project from before live apps gets a "Deploy app" action. "Remove
  * app" (P16-20) confirms in place; the Project and its history stay.
  */
 export function LiveAppLine({

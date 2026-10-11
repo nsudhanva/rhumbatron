@@ -15,7 +15,7 @@ import { canAccessProject, ensureIdentity, ownerOnlyMessage, projectRole } from 
  * Releases of a Project (AGENTS.md sections 21.3, 37, 42.10; ADR 0018). Read-only from D1: the
  * integration Worker's ReleaseWorkflow owns every release row. The failure injection route (P13-12)
  * is an RPC to the integration Worker and answers only where the fixture routes answer
- * (FIXTURES_ENABLED, dev, local); elsewhere 404, as if absent.
+ * (FIXTURES_ENABLED, local); elsewhere 404, as if absent.
  *
  * Cost: a read is 2 D1 queries (target by primary key, releases by `idx_releases_project`).
  */

@@ -35,7 +35,7 @@ if (process.env.K2_MODE === "destroy") {
   process.exit(0);
 }
 
-// K2 beta allows 20 streams per account, shared by dev, prod, and other projects (ADR 0017).
+// K2 beta allows 20 streams per account, shared by prod and other projects (ADR 0017).
 // Refuse before creating anything, so a full account never ends with a partial stream set.
 const ACCOUNT_STREAM_LIMIT = 20;
 const missing = config.streams.filter((d) => !byName.has(d.name.toLowerCase()));

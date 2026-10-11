@@ -594,7 +594,7 @@ export async function removeApp(env: Env, projectId: string): Promise<AppRemoval
 
   // Data stores first (production last), then their rows, so a retry never loses track of a store.
   const batch = results.slice(0, WIPES_PER_PASS);
-  // Without the apps Worker (dev) there is no store to reach; the rows still go.
+  // Without the apps Worker (local runs) there is no store to reach; the rows still go.
   if (env.APPS) {
     const { wiped } = await env.APPS.wipeData(batch.map((r) => storeName(projectId, r.channel)));
     result.wiped = wiped;

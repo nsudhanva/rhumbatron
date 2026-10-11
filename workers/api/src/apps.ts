@@ -28,7 +28,7 @@ import { canAccessProject, ensureIdentity, ownerOnlyMessage, projectRole } from 
  * Cost: a read is 1 D1 query by primary key. A deploy request is 1 Queue message.
  *
  * Milestone B: Candidate previews, version links, "Remove app" (P16-20), and "Roll back to Sk"
- * (P16-13). A rollback is canonical, not app-specific, so it works on dev too.
+ * (P16-13). A rollback is canonical, not app-specific, so it works without the apps Worker too.
  */
 
 /** Internal RPC on the integration Worker (service binding `INTEGRATION`). */

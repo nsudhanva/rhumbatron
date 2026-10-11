@@ -5,7 +5,7 @@ const LINK = "text-kumo-link underline-offset-2 hover:underline";
 
 /**
  * "Open preview" in the Candidate header (P16-10, ADR 0020): the Candidate's composed source,
- * live on its own host with its own data. Renders nothing where live apps are off (dev) or when
+ * live on its own host with its own data. Renders nothing where live apps are off (local runs) or when
  * the Candidate has no preview (no app, build not passed, or the Change's 3 previews are in use).
  */
 export function PreviewLink({ candidateId, active }: { candidateId: string; active: boolean }) {

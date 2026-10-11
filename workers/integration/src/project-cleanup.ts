@@ -17,7 +17,7 @@ import { type ForkRow, forksOwnedBy, isProjectId, type OwnedFork } from "./repo-
  *    tool logs, conflict packets), `apps/` and `app-previews/` (live app bundles), `evidence/`
  *    (check reports, stdout, screenshots), `work-graphs/`, and `workspace/` (manifests).
  * 3. Live apps: waits for `removeApp` (prod) to wipe the app data stores. Without the apps Worker
- *    (dev) it removes the preview and version rows itself.
+ *    (local runs) it removes the preview and version rows itself.
  * 4. Task by Task, 25 per message: the AgentDO of each Task is purged, then the Task's D1 rows.
  * 5. The other D1 content rows (see CONTENT_TABLES): Changes with their goal text, plans,
  *    Candidates, ChangeSets, Evidence summaries, approvals, request conflicts, members and
@@ -67,8 +67,8 @@ const R2_PAGE = 1000;
 
 const DAY_MS = 86_400_000;
 
-/** Fork retention after a run or Candidate finishes: 7 days in dev (section 43), 30 in prod. */
-export const forkRetentionDays = (environment: string) => (environment === "prod" ? 30 : 7);
+/** Fork retention after a run or Candidate finishes: 30 days (section 43). */
+export const FORK_RETENTION_DAYS = 30;
 
 const sqlList = (values: readonly string[]) => values.map((v) => `'${v}'`).join(", ");
 
@@ -312,7 +312,7 @@ export async function cleanupProject(env: CleanupEnv, projectId: string): Promis
 /**
  * True when the Project's app rows are down to nothing or one tombstone. With the apps Worker
  * bound, `removeApp` (same delivery, before this) does the work, so anything else means wait.
- * Without it (dev) there are no data stores: the preview and version rows go here and the
+ * Without it (local runs) there are no data stores: the preview and version rows go here and the
  * production row is reduced to the tombstone, as `removeApp` does.
  */
 async function appsSettled(env: CleanupEnv, projectId: string): Promise<boolean> {

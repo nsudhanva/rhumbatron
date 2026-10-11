@@ -49,9 +49,8 @@ type MemFs = Parameters<typeof git.init>[0]["fs"] & {
 };
 
 /**
- * Hard stop at the monthly Sandbox hours, counted conservatively. ADR 0017 splits the approved
- * 20 hours between dev (5) and prod (15): each environment's `SANDBOX_MONTHLY_SECONDS` binding
- * sets its own meter. This is the fallback when the binding is absent.
+ * Hard stop at the monthly Sandbox hours, counted conservatively. ADR 0017 sets prod at 15
+ * hours: the `SANDBOX_MONTHLY_SECONDS` binding sets the meter. This is the fallback when the binding is absent.
  */
 const MONTHLY_SECONDS = 36_000;
 
