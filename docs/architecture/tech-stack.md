@@ -6,9 +6,7 @@ Versions are the pinned versions of 2026-10-10.
 
 Status values:
 
-- **In use**: the code runs it on dev and prod.
-- **Dev only**: the dev environment has it, prod does not.
-- **Prod only**: the prod environment has it, dev does not.
+- **In use**: the code runs it on prod.
 - **Deferred**: a decision or code path exists, but nothing runs it.
 - **Not built**: `AGENTS.md` names it, and the repository has no code for it.
 
@@ -70,7 +68,7 @@ flowchart LR
 |---|---|---|---|
 | Hono 4.13 | Public product API, body limits, validation | `workers/api` | In use |
 | Zod 4.6 | Protocol schemas and request validation | `packages/protocol`, every Worker | In use |
-| Clerk (`@clerk/backend` 3.23, `@clerk/tanstack-react-start` 1.7) | User sign-in and token check (ADR 0002). Prod uses a Clerk production instance, dev a development instance | `workers/api`, `apps/web` | In use |
+| Clerk (`@clerk/backend` 3.23, `@clerk/tanstack-react-start` 1.7) | User sign-in and token check (ADR 0002). Prod uses a Clerk production instance | `workers/api`, `apps/web` | In use |
 
 ## Coordination and events
 
@@ -110,8 +108,8 @@ flowchart LR
 | Browser Run (`@cloudflare/puppeteer` 1.4) | Browser check of a Candidate, with a daily seconds cap | `workers/integration/src/browser-check.ts` | In use |
 | Bun test and project checks | Build, test, contract, security, performance, and invariant checks inside the Sandbox | `workers/integration` | In use |
 | `@rhumbatron/evidence` | Coverage states and citation validation | `packages/evidence` | In use |
-| Dynamic Workers (Worker Loader, `@cloudflare/worker-bundler` 0.2.6) | Run the generated app of a Project at `<slug>.rhumbatron.com` (ADR 0020) | `workers/apps` | Prod only |
-| Workers Builds | Release of the Acme Shop Live Worker. Legacy path (ADR 0018) | `workers/integration/src/release.ts` | Dev only |
+| Dynamic Workers (Worker Loader, `@cloudflare/worker-bundler` 0.2.6) | Run the generated app of a Project at `<slug>.rhumbatron.com` (ADR 0020) | `workers/apps` | In use |
+| Workers Builds | Release of the Acme Shop Live Worker. Legacy path (ADR 0018) | `workers/integration/src/release.ts` | Deferred |
 
 ## Storage
 
@@ -139,14 +137,14 @@ flowchart LR
 
 | Technology | Used for | Where | Status |
 |---|---|---|---|
-| Terraform (Cloudflare provider `~> 5.27`, `external` `~> 2.4`) | Every remote Cloudflare change. Three roots: `envs/global`, `envs/dev`, `envs/prod` | `infrastructure/terraform` | In use |
+| Terraform (Cloudflare provider `~> 5.27`, `external` `~> 2.4`) | Every remote Cloudflare change. Two environment roots plus bootstrap: `envs/global`, `envs/prod` | `infrastructure/terraform` | In use |
 | R2 remote state | Terraform state backend | `backend.hcl` per root | In use |
 | `terraform_data` adapters | K2, Vectorize, Sandbox Worker, apps Worker, D1 migrations, budget alerts (temporary, ADR 0006, 0003, 0012) | `scripts/*.ts` | In use |
-| Cloudflare DNS | `rhumbatron.com`, `dev`, `api`, `docs`, wildcard for apps, Clerk records | `modules/dns`, `envs/prod` | In use |
+| Cloudflare DNS | `rhumbatron.com`, `api`, `docs`, wildcard for apps, Clerk records | `modules/dns`, `envs/prod` | In use |
 | Zone settings | HTTPS, TLS 1.3, strict SSL | `modules/security` | In use |
 | WAF, rate limits, Turnstile, Access | Edge protection | `modules/security` is a stub for these | Not built |
 | Wrangler 4.149 | Local development, type generation, bundling only | `apps/*`, `workers/*` | In use |
-| Pause switch | `locals.paused` stops crons and container work | `envs/dev`, `envs/prod` | In use |
+| Pause switch | `locals.paused` stops crons and container work | `envs/prod` | In use |
 
 ## Tooling and docs
 
@@ -162,14 +160,14 @@ flowchart LR
 | Gitleaks | Secret scan in the hook and `bun run check:secrets` | `lefthook.yml` | In use |
 | `scripts/check-guardrails.ts` | Enforces Terraform-only and no `wrangler deploy` | `scripts` | In use |
 | GitHub Actions | One `ci` workflow: lint, typecheck, critical tests, build, bundle, Terraform validate. It never deploys | `.github/workflows/ci.yml` | In use |
-| Astro 7.3, Starlight 0.42, Mermaid 12.1 | This documentation site at `docs.rhumbatron.com` | `apps/docs` | Prod only |
+| Astro 7.3, Starlight 0.42, Mermaid 12.1 | This documentation site at `docs.rhumbatron.com` | `apps/docs` | In use |
 | Playwright | Local browser tests | Not a dependency | Not built |
 
 ## Model routing today
 
 `routeByRules` in `packages/model-router/src/rules.ts` picks the tier.
 `resolveTier` then maps the tier to a model.
-ADR 0021 sets `ALLOW_OPUS` to `false` on dev and prod, so every opus decision runs on Sonnet and the receipt records `opus_disabled`.
+ADR 0021 sets `ALLOW_OPUS` to `false`, so every opus decision runs on Sonnet and the receipt records `opus_disabled`.
 
 | Work | Tier chosen | Model that runs | Source |
 |---|---|---|---|
@@ -187,7 +185,7 @@ ADR 0021 sets `ALLOW_OPUS` to `false` on dev and prod, so every opus decision ru
 Thinking effort is low for haiku, medium for sonnet, and high for opus.
 Output caps are 4,000 tokens for haiku and 8,000 for sonnet and opus.
 Two failures at one tier escalate the Task one tier.
-The caps are 400 agent model calls per day and a monthly Anthropic budget of 15 USD on dev and 10 USD on prod.
+The caps are 400 agent model calls per day and a monthly Anthropic budget of 10 USD.
 
 ## Planned in AGENTS.md but not in use
 
@@ -209,7 +207,7 @@ The caps are 400 agent model calls per day and a monthly Anthropic budget of 15 
 | Model providers: Anthropic or OpenAI | Anthropic only. OpenRouter and Gemini on Vertex AI ran earlier (ADR 0007, 0016) and are removed |
 | Seven deployables | Nine Workers: the seven, plus `rhumbatron-sandbox` (ADR 0012) and `rhumbatron-apps` (ADR 0020, prod). The docs site is a tenth, assets-only Worker |
 | First-party Terraform resources for new products | Temporary `terraform_data` adapters for K2, Vectorize, the Sandbox Worker, and the apps Worker |
-| Workers Builds releases every Project | Dynamic Workers release every Project on prod. Workers Builds serves only Acme Shop Live on dev (ADR 0018, 0020) |
+| Workers Builds releases every Project | Dynamic Workers release every Project on prod. Workers Builds serves no Project (ADR 0018, 0020, 0024) |
 | Vectorize index in Phase 1 | Created in Phase 7 through an adapter (ADR 0003). Embeddings are 384-dimension `bge-small-en-v1.5` |
 | New Projects start from a template | Every Project starts from an empty repository (ADR 0022) |
 | Clerk for authentication | Clerk is in use. Prod uses a production instance |

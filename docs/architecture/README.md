@@ -16,7 +16,7 @@ A Verification Workflow runs executable checks on each Candidate.
 Only `checked_supported` Evidence with status `pass` can satisfy a required check.
 A human approves a gated Candidate.
 ProjectRootDO then advances the Canonical Generation with compare-and-swap.
-The release moves the live app pointer in prod (ADR 0020). On dev, Workers Builds builds the promoted source for Acme Shop Live.
+The release moves the live app pointer in prod (ADR 0020).
 A Release Workflow observes the deployment.
 
 > Many Agents can propose many futures. Only verified evidence can advance the Canonical State.
@@ -84,7 +84,7 @@ Differences from `AGENTS.md`:
 
 There are nine Rhumbatron Workers plus one release target Worker for the Acme Shop demo.
 `rhumbatron-apps` runs live apps and exists in prod only (ADR 0020). The docs site is a tenth, assets-only Worker in prod.
-Each Worker is named `rhumbatron-<component>-<env>`, where `<env>` is `dev` or `prod`.
+Each Worker is named `rhumbatron-<component>-<env>`, where `<env>` is `prod` (ADR 0024).
 
 The first diagram shows how the Workers call each other.
 Solid arrows are service bindings or cross-script Durable Object bindings.
@@ -149,8 +149,8 @@ flowchart TB
 
 | Worker | Hosts | Main bindings (Terraform names) | Triggers |
 |---|---|---|---|
-| `rhumbatron-web` | TanStack Start app and static assets | `API` (service) | Custom domain: `dev.rhumbatron.com`, or `rhumbatron.com` and `www` in prod |
-| `rhumbatron-api` | Hono product API | `DB`, `EVIDENCE`, `PROJECT_ROOT`, `PROJECT_VIEW`, `AGENTS`, `INTEGRATION`, `INTEGRATION_COMMANDS`, `AGENT_WAKEUPS`, `CHANGE_WORKFLOW` | Custom domain: `api-dev.rhumbatron.com` or `api.rhumbatron.com` |
+| `rhumbatron-web` | TanStack Start app and static assets | `API` (service) | Custom domain: `rhumbatron.com` and `www` |
+| `rhumbatron-api` | Hono product API | `DB`, `EVIDENCE`, `PROJECT_ROOT`, `PROJECT_VIEW`, `AGENTS`, `INTEGRATION`, `INTEGRATION_COMMANDS`, `AGENT_WAKEUPS`, `CHANGE_WORKFLOW` | Custom domain: `api.rhumbatron.com` |
 | `rhumbatron-coordinator` | ProjectRootDO, ResourceShardDO, ProjectViewDO | Own DO classes, `EVENT_ROUTER` (service), K2 producers `EVENTS_00` to `EVENTS_07` | DO alarms only |
 | `rhumbatron-event-router` | K2 pull consumer, causal router, dead-letter consumer | `DB`, `EVIDENCE`, `PROJECT_VIEW`, `RESOURCE_SHARD`, `AGENT_WAKEUPS`, `INTEGRATION_COMMANDS`, `INDEXING`, `AI`, `K2_STREAM_IDS`, `K2_CONSUMER_TOKEN` | Cron `* * * * *`, `nudge` RPC, `rhumbatron-dead-letter` Queue |
 | `rhumbatron-integration` | ChangeWorkflow, CandidateVerificationWorkflow, ReleaseWorkflow, approval and promotion RPC | `DB`, `EVIDENCE`, `AGENT_WAKEUPS`, `RESOURCE_SHARD`, `PROJECT_ROOT`, `SANDBOX`, `CANDIDATE_WORKFLOW`, `RELEASE_WORKFLOW`, `ARTIFACTS`, `BROWSER`, AI Gateway variables, `BUILDS_API_TOKEN` | `rhumbatron-integration` Queue, RPC |
@@ -163,7 +163,7 @@ flowchart TB
 Notes:
 
 - `AGENTS.md` section 12 lists seven deployables. The code adds `rhumbatron-sandbox` because the provider cannot attach a container to a DO class in another Worker (ADR 0012).
-- The release Worker is in Terraform (`cloudflare_worker.acme_shop`). Its Workers Builds connection exists on dev (ADR 0018). Live apps replace this path on prod (ADR 0020).
+- The release Worker is in Terraform (`cloudflare_worker.acme_shop`). Live apps replace the Workers Builds path on prod (ADR 0018, ADR 0020).
 
 ## Reading order
 

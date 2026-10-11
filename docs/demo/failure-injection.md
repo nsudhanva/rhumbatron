@@ -7,73 +7,21 @@ Two kinds of proof exist:
 
 - **Critical tests** run the real decision code with the fault applied. They run in
   `bun run test:critical` and in CI.
-- **Live injection** (`bun run inject`) applies faults through the public dev API, as the Clerk
-  smoke user, and reports pass or fail per fault.
+- **Live injection** has no script. See [Live injection](#live-injection).
 
 The live run does not inject a fault that needs an internal hook. This page lists each needed
 hook. No one has added these hooks yet. Each hook is a test-only path into production code and
 needs its own review.
 
-## Run live injection
+## Live injection
 
-```mermaid
-flowchart LR
-  start[bun run inject] --> sel{Flags}
-  sel -->|default| d[API faults:<br/>retry, double submit, budget]
-  sel -->|"--sandbox"| c[Candidate faults:<br/>one Sandbox verification]
-  sel -->|"--only=release-smoke-failure"| r[Release smoke fault]
-  d --> rep[pass or FAIL per fault]
-  c --> rep
-  r --> rep
-  rep --> keep{"--keep set?"}
-  keep -->|no| arch[Archive created Projects]
-  keep -->|yes| stay[Keep Projects]
-```
-
-```sh
-bun run inject                      # default faults: no Sandbox, no model calls, ~15 D1 rows
-bun run inject --sandbox            # adds the Candidate faults: one Sandbox verification
-bun run inject --only=stale-candidate,promotion-double-submit --sandbox
-bun run inject --keep               # do not archive the Projects it created
-```
-
-- Credentials: The same Keychain items as `bun run smoke:dev`
-  (`rhumbatron-clerk-secret-key-dev`, `rhumbatron-clerk-smoke-user-id-dev`). No new secret.
-- Target: Dev only (`https://api-dev.rhumbatron.com`). Dev must be running (not paused).
-- Model calls: None. The script creates every Change with `startPlanning: false`.
-- Sandbox: None by default. `--sandbox` runs one Acme Shop baseline Candidate verification. It
-  uses a few minutes of the 5 h monthly dev Sandbox cap (ADR 0017). The stale Candidate stops at
-  workflow step 1 and never opens the Sandbox.
-- Cleanup: The script archives every Project that it created with `DELETE /v1/projects/:id`. The
-  archive deletes the Project's Artifacts repos. Evidence and D1 rows stay.
-- The script reports a fault that could not run as `FAIL`, never as a skipped pass (section 34.4.1).
-
-| Fault ID | Default | What it does | Expected recovery |
-|---|---|---|---|
-| `change-retry` | yes | Creates a Change twice with one `clientRequestId`. | `201`, then `200` with the same Change ID. |
-| `change-double-submit` | yes | Sends the two creates concurrently. | Both succeed with one Change ID; the Project stores one Change. |
-| `project-double-submit` | yes | Creates two Projects with one slug concurrently. | Exactly one `201` and one `409`. |
-| `budget-limit` | yes | Creates Changes with budget `$1000` and `$0`. | Both `400`. |
-| `candidate-without-source` | yes | Asks for a Candidate on a Project with no source. | `409`; no Candidate row; no Sandbox. |
-| `candidate-double-submit` | `--sandbox` | Three concurrent Candidate creates for one composition. | All `202`, one Candidate ID, one Candidate row, one verification. |
-| `early-promotion` | `--sandbox` | Promotes while the Candidate still verifies. | `409 blocked`; the Canonical Generation does not move. |
-| `approval-cross-change` | `--sandbox` | Approves a Candidate through another Change's path. | `404`; no decision recorded. |
-| `approval-double-submit` | `--sandbox` | Two concurrent approvals, then a conflicting reject. | Without a gate: both `409 not_required`. With a gate: one decision, identical repeat accepted, reject `409 already_decided`. |
-| `promotion-double-submit` | `--sandbox` | Two concurrent promotions of the verified Candidate. | Both `200`; exactly one first promotion; generation advances once. |
-| `stale-candidate` | `--sandbox` | Promotes a Candidate built on the old base. | `409 stale`; Candidate marked `stale`; generation does not move. |
-| `release-smoke-failure` | `--only` | Probes the demo Project's latest deployed release with the normal smoke probes plus a route that does not exist (P13-12). | `200`; release `smoke_failed` with `release-s<N>-injected` Evidence; a repeat is `repeated`; generation does not move. |
-
-### Fixed risk found while writing `change-double-submit`
-
-`POST /v1/projects/:projectId/changes` read by `clientRequestId` and then inserted. Two concurrent
-requests could both miss the read. The second insert then failed with `500` on the `UNIQUE
-(project_id, client_request_id)` constraint (migration 0001). `workers/api/src/projects.ts` now
-inserts with `ON CONFLICT (project_id, client_request_id) DO NOTHING` and reads the row back.
-Both callers get the same Change (section 60).
+No script injects faults live. Prod is the only remote environment
+([ADR 0024](../adr/0024-retire-dev-environment.md)), and a fault run must not touch prod data. The
+critical tests are the proof for every fault below.
 
 ## Fault map
 
-| P13 | Fault (section) | Proven by critical tests | Live (`bun run inject`) | Gap or hook needed |
+| P13 | Fault (section) | Proven by critical tests | Live | Gap or hook needed |
 |---|---|---|---|---|
 | P13-01 to 04 | Budget stop (24, 44) | `packages/model-router/src/budget.critical.test.ts` (per-run call cap per tier, cost cap, Task share never negative, budget stop ends the Task without escalation); `route.critical.test.ts` (`budget_exhausted` stops) | `budget-limit` | See [budget stop](#budget-stop). |
 | P13-05 | Duplicate delivery (42.1, 42.2, 60) | `workers/event-router/src/dedupe.critical.test.ts` (Event applied once per consumer group); `workers/coordinator/src/view-model.critical.test.ts` (duplicate Event ID ignored); `workers/event-router/src/archive.critical.test.ts` (redelivered batch, same R2 key); `workers/event-router/src/projector.critical.test.ts` (out-of-order generation); `workers/agents/src/wake-consumer.critical.test.ts` (redelivered and concurrent wake: one assignment, one run); `workers/coordinator/src/promotion-cas.critical.test.ts` (promotion retry); `workers/agents/src/conflicts.critical.test.ts` (one conflict from either detector) | `change-retry`, `change-double-submit`, `project-double-submit`, `candidate-double-submit`, `approval-double-submit`, `promotion-double-submit` | Live K2 redelivery needs a replay hook. See [duplicate Event](#duplicate-event). |
@@ -130,7 +78,7 @@ from the Candidate fork, and the Candidate verifies. Task Workspaces need the sa
 
 ### K2 outage
 
-Hook: a dev-only runtime flag (for example KV key `inject:k2-down-until` in `rhumbatron-config-dev`)
+Hook: a dev-only runtime flag (for example KV key `inject:k2-down-until` in `rhumbatron-config-prod`)
 that `OutboxPublisher` checks before each send and treats as a retryable K2 failure. KV values are
 runtime data, not Terraform configuration. Expected: Mutations still commit, and unpublished
 outbox rows grow. The dashboard lags. After the flag expires, every Event publishes once.
@@ -143,7 +91,7 @@ No escalation to a stronger tier occurs. Live injection spends free-tier model c
 
 ### Poison command
 
-Consumers retry a failure. After 3 retries, the Queue moves it to `rhumbatron-dead-letter-dev`.
+Consumers retry a failure. After 3 retries, the Queue moves it to `rhumbatron-dead-letter-prod`.
 The event router consumes the dead-letter Queue (`workers/event-router/src/dead-letter.ts`). It
 records `task.failed` and blocks the Task. The Project and Change pages then show Retry and
 Dismiss (section 42.7).
@@ -157,11 +105,11 @@ ReleaseWorkflow (ADR 0018) observes the Workers Build of each promoted commit, c
 deployment, and smoke checks the release URL. Injection:
 
 ```sh
-bun run inject --only=release-smoke-failure     # dev; RELEASE_PROJECT_ID=<id> to pick a Project
+# No script calls the route. It answers where FIXTURES_ENABLED is set, or locally.
 ```
 
 - The fault needs a deployed release. That is the smoke user's `acme-shop-live` Project
-  (`bun run demo:live`) with its Workers Builds connection and one promotion that deployed. The
+  (created by a live run) with its Workers Builds connection and one promotion that deployed. The
   fault never runs by default, because it changes the demo Project's release state.
 - What happens: `POST /v1/projects/:projectId/releases/inject-failure` answers only where
   `FIXTURES_ENABLED` is set, or in dev and local. It probes the live release URL with the normal

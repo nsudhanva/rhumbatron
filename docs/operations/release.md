@@ -1,23 +1,14 @@
 # Application Releases Runbook
 
-This runbook covers application releases through Cloudflare Workers Builds, release smoke checks, and failure injection.
+This runbook covers application releases through Cloudflare Workers Builds, and release smoke checks.
 
-> **Live apps replace this path (P16-15).** A Project with a live app (prod) releases by moving its app pointer to the promoted commit's bundle, then runs the same smoke probes through the apps router. A smoke failure moves the pointer back to the previous version. See [ADR 0020](../adr/0020-live-apps-dynamic-workers.md), "Previews, releases, versions, rollback". Workers Builds is **legacy**: it stays only for the dev release target Acme Shop Live below, which keeps working unchanged.
+> **Live apps replace this path (P16-15).** A Project with a live app (prod) releases by moving its app pointer to the promoted commit's bundle, then runs the same smoke probes through the apps router. A smoke failure moves the pointer back to the previous version. See [ADR 0020](../adr/0020-live-apps-dynamic-workers.md), "Previews, releases, versions, rollback". Workers Builds is **legacy**: no Project uses it ([ADR 0024](../adr/0024-retire-dev-environment.md)).
 
 ## Principles
 
 A Git push to Cloudflare Artifacts starts each application release. `ReleaseWorkflow` then verifies the release with executable Evidence (`AGENTS.md` sections 21.3 and 37, [ADR 0018](../adr/0018-release-via-workers-builds.md)).
 
-**Status (2026-10-10): connected.** The Workers Builds connection from the Artifacts repo `rhumbatron-projects-dev/proj_077b581d-15b3-4f6d-b68a-6a6659cc2668` (Acme Shop Live) to `rhumbatron-acme-shop-dev` exists. An operator made it in the dashboard (Worker → Settings → Builds → Connect), because the Builds API rejects `cloudflare_artifacts` request bodies (error 12065).
-
-| Item | Value |
-|---|---|
-| Trigger UUID | `4fb2e3cf-ac43-4cd3-8107-855a94059a7b` |
-| Repo connection UUID | `c61776d4-d809-44aa-8915-a68f29982ce4` (provider `cloudflare_artifacts`) |
-| Branch | `main` only; Preview builds are off |
-| Build command | none |
-| Deploy command | `npx wrangler@4.149.0 deploy` |
-| Build token | `rhumbatron acme-shop-dev build token` (created by the dashboard, dedicated to this Worker) |
+**Connection:** The Builds API rejects `cloudflare_artifacts` request bodies (error 12065), so an operator connects the Artifacts repo in the dashboard (Worker → Settings → Builds → Connect).
 
 Check it with `cf builds triggers list --external-script-id <worker tag>`.
 
@@ -110,40 +101,17 @@ The Worker sends only read-only GET requests and never logs the token. The D1 ta
 Run the release smoke check against the deployed release target:
 
 ```sh
-# Smoke check dev:
+# Smoke check prod:
 bun run smoke:release
 
-# Smoke check prod (see the note below):
-bun run smoke:release prod
-
 # Smoke check a specific project:
-bun run smoke:release dev --project <project-id>
+bun run smoke:release prod --project <project-id>
 ```
 
-- **Credentials**: The script uses the Clerk smoke user credentials (`CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` from Keychain). It loads the dev items (`rhumbatron-clerk-*-dev`). Prod uses the Clerk production instance. For a prod run, put the prod smoke-user credentials in those variables.
+- **Credentials**: The script uses the Clerk smoke user credentials (`CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` from Keychain). Without them, the script reads the prod items (`rhumbatron-clerk-*-prod`). Prod uses the Clerk production instance.
 - **Checks**:
   - `release_targets` contains the release target.
   - The latest release that is not superseded has status `deployed`.
   - D1 contains the deployed `versionId`.
   - R2 and D1 contain the release smoke Evidence object.
   - Live HTTP probes against the app shell and the products API return 200 OK.
-
----
-
-## 4. Release Failure Injection (P13-12)
-
-Simulate a production deployment failure. Canonical Git history stays intact.
-
-```sh
-bun run inject --only=release-smoke-failure
-```
-
-- **Mechanism**:
-  - The injection targets the smoke user's `acme-shop-live` Project on dev.
-  - It calls `POST /v1/projects/:projectId/releases/inject-failure` (enabled by `FIXTURES_ENABLED = "true"`).
-  - It probes the live release URL with the standard probes plus the missing route `/__rhumbatron/injected-missing-route`.
-  - The HTTP 404 starts the standard failure path. The release becomes `smoke_failed`, Evidence `release-s<N>-injected` goes to R2, and the event `release.smoke_failed` (`injected: true`) is emitted.
-- **Invariants kept**:
-  - The Canonical Generation does not change and does not roll back.
-  - All release and Change history stays.
-  - To recover, write and promote the next generation `S<N+1>`.

@@ -14,11 +14,11 @@ These runbooks tell operators how to run Rhumbatron environments, infrastructure
 
 | Runbook | Purpose | Primary Commands |
 |---|---|---|
-| [Deployment](./deploy.md) | Terraform deployments for dev, prod, and global; bundle generation; bootstrap/apex switches; D1 migration ordering. | `bun run cf:bundle`<br>`bun run tf:plan:dev` / `tf:apply:dev`<br>`bun run tf:plan:prod` / `tf:apply:prod`<br>`bun run tf global <args>`<br>`bun run tf:drift` / `tf:drift:prod`<br>`bun run smoke:dev` / `smoke:prod` |
-| [Pause & Resume](./pause-resume.md) | Global `paused` switch that stops background cron sweeps and container execution to save quota. | `bun run tf:plan:<env>` / `tf:apply:<env>` |
+| [Deployment](./deploy.md) | Terraform deployments for prod and global; bundle generation; bootstrap/apex switches; D1 migration ordering. | `bun run cf:bundle`<br>`bun run tf:plan:prod` / `tf:apply:prod`<br>`bun run tf global <args>`<br>`bun run tf:drift` / `tf:drift:prod`<br>`bun run smoke:prod` |
+| [Pause & Resume](./pause-resume.md) | Global `paused` switch that stops background cron sweeps and container execution to save quota. | `bun run tf:plan:prod` / `tf:apply:prod` |
 | [Cleanup & Retention](./cleanup.md) | Smoke-test Project cleanup, the Project archive pipeline, daily fork sweeps, and R2 retention lifecycles. | `bun run cleanup:projects`<br>`bun run cleanup:projects --dry-run` |
 | [Costs & Budgets](./costs.md) | Cost reports, guard layers, budget ceilings (Sandbox, Browser Run, Anthropic spend), account budget alerts, call quotas, and recovery after a cap trips. | `bun run cost:report`<br>`bun run cost:report --alerts-only` |
-| [Application Releases](./release.md) | Legacy Workers Builds releases (dev only, connected), live app releases on prod, smoke verification, and failure injection. | `bun run smoke:release`<br>`bun run inject --only=release-smoke-failure` |
+| [Application Releases](./release.md) | Legacy Workers Builds releases, live app releases on prod, and smoke verification. | `bun run smoke:release` |
 | [Resource Naming](./naming.md) | Conventions for naming and tagging Cloudflare resources and Workers. | `bun run check:guardrails` |
 
 ---

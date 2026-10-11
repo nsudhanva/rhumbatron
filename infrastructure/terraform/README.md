@@ -9,26 +9,22 @@ the dashboard, `wrangler deploy`, or direct API writes. Read every plan. Never u
 | Path | State key | Purpose |
 |---|---|---|
 | `bootstrap/` | `bootstrap/terraform.tfstate` | R2 state bucket `rhumbatron-terraform-state-global` only. The first apply used local state (see Bootstrap). |
-| `envs/global/` | `global/terraform.tfstate` | Zone-wide and account-wide singletons: `rhumbatron.com` zone settings (TLS, `ssl = "strict"`) and the billing budget alerts adapter (ADR 0019). Dev and prod never own these. |
-| `envs/dev/` | `dev/terraform.tfstate` | Dev environment. Applied. |
-| `envs/prod/` | `prod/terraform.tfstate` | Prod environment. Mirrors dev resource for resource (ADR 0017). Applied. Switches: `paused`, `bootstrap`, `attach_apex`. |
+| `envs/global/` | `global/terraform.tfstate` | Zone-wide and account-wide singletons: `rhumbatron.com` zone settings (TLS, `ssl = "strict"`) and the billing budget alerts adapter (ADR 0019). Prod does not own these. |
+| `envs/prod/` | `prod/terraform.tfstate` | Prod environment, the only remote environment (ADR 0017, ADR 0024). Applied. Switches: `paused`, `bootstrap`, `attach_apex`. |
 | `modules/` | - | Shared modules. See Modules. |
 
-All four roots use the S3 backend on R2, with `use_lockfile = true`.
+All three roots use the S3 backend on R2, with `use_lockfile = true`.
 
 ```mermaid
 flowchart TB
   S[("R2 bucket<br/>rhumbatron-terraform-state-global")]
   B["bootstrap"] -- "bootstrap/terraform.tfstate" --> S
   G["envs/global"] -- "global/terraform.tfstate" --> S
-  D["envs/dev"] -- "dev/terraform.tfstate" --> S
   P["envs/prod"] -- "prod/terraform.tfstate" --> S
   B -. creates .-> S
   G --> MG["modules: dns, security"]
-  D --> ME["modules: dns, state, async, ai,<br/>worker, durable-worker"]
-  P --> ME
-  D --> AD["terraform_data adapters"]
-  P --> AD
+  P --> ME["modules: dns, state, async, ai,<br/>worker, durable-worker"]
+  P --> AD["terraform_data adapters"]
   G --> AB["terraform_data.budget_alerts"]
 ```
 
@@ -47,31 +43,34 @@ flowchart TB
 | `observability` | Placeholder | No resources. Log settings are in `worker` and `durable-worker`. |
 
 Each env root keeps some resources inline: queue consumers, Workflows, the release target Worker
-`rhumbatron-acme-shop-<env>`, Clerk DNS records (prod), and the adapters below.
+`rhumbatron-acme-shop-prod`, Clerk DNS records (prod), and the adapters below.
 
 ## Environments
 
-| | local | dev | prod |
-|---|---|---|---|
-| Runs on | Miniflare via `bun run dev` | Cloudflare | Cloudflare |
-| Resources | Simulated by Wrangler, stored in `.wrangler/state` | Terraform `envs/dev` | Terraform `envs/prod` |
-| Name suffix | none | `-dev` | `-prod` |
-| Web hostname | `localhost:5173` | `dev.rhumbatron.com` | `rhumbatron.com` |
-| API hostname | `localhost:8787` | `api-dev.rhumbatron.com` | `api.rhumbatron.com` |
-| R2 `events/` retention | none | 30 days | 365 days |
-| R2 `evidence/` retention | none | 30 days | kept |
-| R2 `tmp/` retention | none | 7 days | 7 days |
-| Clerk instance | development | development | production (ADR 0017) |
-| `MODEL_PROVIDER` | - | `anthropic` | `anthropic` |
-| Anthropic budget per calendar month | - | $15 | $10 |
-| `ALLOW_OPUS` | - | `false` | `false` |
-| `www` | none | none | Custom domain of the prod web Worker; the Worker returns 301 to the apex |
+| | local | prod |
+|---|---|---|
+| Runs on | Miniflare via `bun run dev` | Cloudflare |
+| Resources | Simulated by Wrangler, stored in `.wrangler/state` | Terraform `envs/prod` |
+| Name suffix | none | `-prod` |
+| Web hostname | `localhost:5173` | `rhumbatron.com` |
+| API hostname | `localhost:8787` | `api.rhumbatron.com` |
+| R2 `events/` retention | none | 365 days |
+| R2 `evidence/` retention | none | kept |
+
+| R2 `tmp/` retention | none | 7 days |
+| Clerk instance | development | production (ADR 0017) |
+| `MODEL_PROVIDER` | - | `anthropic` |
+| Anthropic budget per calendar month | - | $10 |
+| `ALLOW_OPUS` | - | `false` |
+| `www` | none | Custom domain of the prod web Worker; the Worker returns 301 to the apex |
+
+Prod is the only remote environment (ADR 0024). Local work uses `wrangler dev`.
 
 Hostnames stay one label deep so Universal SSL covers them.
 
 ## Binding names
 
-Every Worker uses the same binding names in `wrangler.jsonc` (local) and Terraform (dev, prod).
+Every Worker uses the same binding names in `wrangler.jsonc` (local) and Terraform (prod).
 
 | Binding | Resource | Name pattern |
 |---|---|---|
@@ -90,7 +89,7 @@ R2 lifecycle rules are prefix-based. Write expiring objects under `events/`, `ev
 
 ## Wrapper and credentials
 
-`bun run tf <bootstrap|global|dev|prod> <terraform args...>` (`scripts/tf.ts`) loads credentials
+`bun run tf <bootstrap|global|prod> <terraform args...>` (`scripts/tf.ts`) loads credentials
 from the macOS Keychain (ADR 0004) and runs Terraform in that root. A value that is already set
 in the environment wins. The wrapper refuses `-auto-approve`.
 
@@ -100,14 +99,14 @@ in the environment wins. The wrapper refuses `-auto-approve`.
 | `TF_VAR_account_id` | `rhumbatron-cloudflare-account-id` | all |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | `rhumbatron-r2-state-access-key-id` / `rhumbatron-r2-state-secret-access-key` (bucket-scoped R2 key) | all |
 | `TF_VAR_alert_email` | `rhumbatron-alert-email` | global |
-| `TF_VAR_clerk_secret_key` | `rhumbatron-clerk-secret-key-dev` / `-prod` | dev / prod |
+| `TF_VAR_clerk_secret_key` | `rhumbatron-clerk-secret-key-prod` | prod |
 | `TF_VAR_clerk_publishable_key` | `rhumbatron-clerk-publishable-key-prod` | prod |
-| `TF_VAR_k2_consumer_token` | `rhumbatron-k2-consumer-token-dev` | dev, prod |
-| `TF_VAR_anthropic_api_key` | `rhumbatron-anthropic-api-key` | dev, prod |
-| `TF_VAR_anthropic_workspace_id` | `rhumbatron-anthropic-workspace-id` (not secret) | dev, prod |
-| `TF_VAR_builds_api_token` | `rhumbatron-cloudflare-builds-token` | dev, prod |
+| `TF_VAR_k2_consumer_token` | `rhumbatron-k2-consumer-token-dev` (original item name, kept) | prod |
+| `TF_VAR_anthropic_api_key` | `rhumbatron-anthropic-api-key` | prod |
+| `TF_VAR_anthropic_workspace_id` | `rhumbatron-anthropic-workspace-id` (not secret) | prod |
+| `TF_VAR_builds_api_token` | `rhumbatron-cloudflare-builds-token` | prod |
 
-Prod reuses the dev K2 and Builds items (ADR 0017) and the Anthropic items (ADR 0021). See ADR 0004 for token
+Prod uses the K2 and Builds items (ADR 0017) and the Anthropic items (ADR 0021). The K2 item keeps its original `-dev` name. See ADR 0004 for token
 scopes.
 
 ## Backend configuration
@@ -125,19 +124,18 @@ The state key and the other backend settings are in each root's `versions.tf`.
 ## Environment workflow
 
 ```sh
-cp infrastructure/terraform/envs/dev/backend.example.hcl infrastructure/terraform/envs/dev/backend.hcl  # once
-bun run tf dev init -backend-config=backend.hcl   # once
+cp infrastructure/terraform/envs/prod/backend.example.hcl infrastructure/terraform/envs/prod/backend.hcl  # once
+bun run tf prod init -backend-config=backend.hcl   # once
 bun run cf:bundle                                  # before every plan (writes dist/bundles/manifest.json)
-bun run tf:plan:dev                                # writes dev.tfplan; read it
-bun run tf:apply:dev                               # applies exactly that plan
-bun run tf:drift                                   # global and dev must report no changes
+bun run tf:plan:prod                               # writes prod.tfplan; read it
+bun run tf:apply:prod                              # applies exactly that plan
+bun run tf:drift:prod                              # prod must report no changes
 ```
 
-Prod uses the same flow: `bun run tf:plan:prod`, `bun run tf:apply:prod`, `bun run tf:drift:prod`.
-`tf:drift` does not cover prod. For global, run `bun run tf global plan -out=global.tfplan`, then
-`bun run tf global apply global.tfplan`.
+`bun run tf:drift` checks global and prod together. For global, run
+`bun run tf global plan -out=global.tfplan`, then `bun run tf global apply global.tfplan`.
 
-Apply order for a fresh account: `bootstrap`, `envs/global`, `envs/dev`, `envs/prod`. A fresh
+Apply order for a fresh account: `bootstrap`, `envs/global`, `envs/prod`. A fresh
 environment applies twice: first with `local.bootstrap = true` (breaks the coordinator and event
 router binding cycle and creates the first Durable Object migrations), then with `false`
 (ADR 0012, ADR 0017).
@@ -151,11 +149,11 @@ these scripts or the API directly.
 
 | Adapter | Resource | Script | Roots | ADR |
 |---|---|---|---|---|
-| K2 streams and subscriptions | `terraform_data.k2_streams`, `data.external.k2_streams` | `k2-sync.ts`, `k2-read.ts` | dev, prod | 0006 |
+| K2 streams and subscriptions | `terraform_data.k2_streams`, `data.external.k2_streams` | `k2-sync.ts`, `k2-read.ts` | prod | 0006 |
 | K2 account limit check (plan time) | `data.external.k2_inventory` | `k2-read.ts` (`mode = inventory`) | prod | 0017 |
-| Vectorize index | `terraform_data.vectorize_index`, `terraform_data.vectorize_index_teardown` | `vectorize-sync.ts` | dev, prod | 0003 |
-| Sandbox Worker and container application | `terraform_data.sandbox_worker`, `terraform_data.sandbox_worker_teardown` | `sandbox-deploy.ts` | dev, prod | 0012 |
-| D1 schema migrations | `terraform_data.d1_migrations` | `d1-migrate.ts` | dev, prod | AGENTS.md 11.6 |
+| Vectorize index | `terraform_data.vectorize_index`, `terraform_data.vectorize_index_teardown` | `vectorize-sync.ts` | prod | 0003 |
+| Sandbox Worker and container application | `terraform_data.sandbox_worker`, `terraform_data.sandbox_worker_teardown` | `sandbox-deploy.ts` | prod | 0012 |
+| D1 schema migrations | `terraform_data.d1_migrations` | `d1-migrate.ts` | prod | AGENTS.md 11.6 |
 | Billing budget alerts | `terraform_data.budget_alerts` | `budget-alerts.ts` (operator `cf` CLI login) | global | 0019 |
 
 K2 never deletes streams. Vectorize and the Sandbox Worker delete only on a real destroy, through
@@ -173,13 +171,13 @@ flowchart LR
 
 ## D1 migrations
 
-`terraform_data.d1_migrations` in the dev and prod roots runs `scripts/d1-migrate.ts` when any
+`terraform_data.d1_migrations` in the prod root runs `scripts/d1-migrate.ts` when any
 file in `migrations/d1` changes. See [`migrations/d1/README.md`](../../migrations/d1/README.md).
 
 ## Static checks
 
 `bun run tf:check` runs `terraform fmt -check`, `terraform init -backend=false`,
-`terraform validate`, and `tflint` for the bootstrap, global, dev, and prod roots. It also
+`terraform validate`, and `tflint` for the bootstrap, global, and prod roots. It also
 validates `modules/worker` and `modules/durable-worker` directly. It does not contact the state
 backend and does not create resources.
 

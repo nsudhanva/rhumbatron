@@ -98,7 +98,7 @@ The command tool refuses shell metacharacters.
 ## Model routing
 
 The code keeps the tier names `haiku`, `sonnet`, and `opus` from `AGENTS.md`.
-Every tier calls Anthropic Claude through the AI Gateway on dev and prod (ADR 0021).
+Every tier calls Anthropic Claude through the AI Gateway (ADR 0021).
 Opus is off by default: the opus tier runs on Sonnet unless `ALLOW_OPUS` is `"true"`.
 
 ### Deterministic rules, then Clef-flash
@@ -166,7 +166,7 @@ Two call paths use the same gateway, header, prices, and meter:
 - `complete()` (`packages/model-router/src/gateway-client.ts`) for the Root Planner, conflict review, and context compaction, always through `meteredComplete()`. It maps function tools to Anthropic tools, caches the system prompt, and replays a whole assistant turn, thinking blocks included, on a follow-up call.
 
 Cost per call is exact: uncached input, output with thinking, cache reads, and cache writes at the ADR 0021 prices.
-The monthly budget per environment is `ANTHROPIC_MONTHLY_BUDGET_USD`: dev $15, prod $10.
+The monthly budget is `ANTHROPIC_MONTHLY_BUDGET_USD`: $10 in prod.
 Each call reserves an estimate on the D1 meter (`usage_counters`, `anthropic-usd-micro` per `YYYY-MM`) with one conditional statement, then settles to its exact cost.
 A refused reservation, a gateway spend-limit 429, or an Anthropic billing error is `spend_limited`: a budget stop, never a retry, and never another provider.
 D1 `usage_counters` also holds the daily caps: 400 agent model calls per day and 200 Clef-flash calls.

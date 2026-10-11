@@ -11,7 +11,7 @@ Phases 0 through 13 and 16 are complete. Prod serves each Project as a live app 
 - P10: Sandbox Candidate composition and verification (build, unit, contract, Cart invariant, p95, security), coverage states, D1 and R2 Evidence.
 - P11-01 through P11-10: Approval policy and dialog, promotion preconditions, ProjectRootDO compare-and-swap, `canonical.advanced`, and stale-promotion checks. The release path through Workers Builds is built and applied (ADR 0018).
 - P12: All UI pages, Flight Control (`/changes/<id>/flight`), and notification bell.
-- P13: Dead-letter consumer with Retry and Dismiss, section 44 limits, advisory Claims, failure injection (`bun run inject`), smoke checks (`bun run smoke:dev`, `bun run smoke:sandbox`), and cleanup (`bun run cleanup:projects`).
+- P13: Dead-letter consumer with Retry and Dismiss, section 44 limits, advisory Claims, smoke checks (`bun run smoke:prod`), and cleanup (`bun run cleanup:projects`).
 - P14: `.github/workflows/ci.yml` (checks only; no deploy credentials). The project has no other CI/CD by choice.
 - Production: Terraform deploys `https://rhumbatron.com` from `envs/prod` (ADR 0017). `www` redirects to the apex. Sign-in uses the Clerk production instance. Smoke: `bun run smoke:prod`.
 - Runaway-billing guards (ADR 0019): Durable Object alarm caps, causal wakeup caps, and account budget alerts at 10, 25, and 100 USD.
@@ -20,27 +20,28 @@ Phases 0 through 13 and 16 are complete. Prod serves each Project as a live app 
 - P17a (Linear HOM-231 through HOM-240): per-Project sharing with verified-email invitations, owner-only actions, one Change per request, serialized scope registration in ProjectRootDO, criteria-level Sonnet review, `priority_wins`, owner override as a linked Change, the recompose guard, not-selected notifications, rebase by re-run after a merge conflict, and a required preview smoke check before promotion.
 - Milestone (P17a, prod, 2026-10-10): two accounts sent requests to one shared Project at the same time. Rhumbatron shipped the compatible requests, did not select the conflicting one, and shipped it after the owner override. A designer and a frontend developer then built a recipe app together.
 - Milestone (P16, prod): an agent-driven Change on Acme Live (`https://acme-live.rhumbatron.com`) added `GET /api/health`. Two Tasks ran on Claude. The Candidate passed its checks, got a preview, promoted automatically and went live in under 3 minutes. Model cost was 0.005 USD.
-- Milestone: A real model-driven Change ran end to end on dev (`https://dev.rhumbatron.com`). The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD.
+- Milestone: A real model-driven Change ran end to end. The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD.
 
 ## Active
-- P17a-11 to P17a-13 (HOM-241 to HOM-243): "Delete project" for the owner and "Leave project" for a collaborator in the web app. A project delete removes all project data. Then remove all existing Projects on prod and dev.
+- P17a-11 to P17a-13 (HOM-241 to HOM-243): "Delete project" for the owner and "Leave project" for a collaborator in the web app. A project delete removes all project data. Then remove all existing Projects on prod.
 
 ## Blocked
 - None.
 
 ## Cost
 - Workers Paid account shared with other projects. Rhumbatron stays within free and included limits.
-- Sandbox: 1 instance. Agent Workspaces and Candidate checks sleep after 2 idle minutes. The hard cap is 5 hours per month in dev and 15 in prod.
-- Browser Run: Capped at 250 seconds per day per environment.
-- Anthropic: code budgets of 15 USD (dev) and 10 USD (prod) per month. Model work stops at the budget (ADR 0021).
+- Sandbox: 1 instance. Agent Workspaces and Candidate checks sleep after 2 idle minutes. The hard cap is 15 hours per month in prod.
+- Browser Run: Capped at 250 seconds per day.
+- Anthropic: code budget of 10 USD per month in prod. Model work stops at the budget (ADR 0021).
 - Live apps: 60 app builds per day; preview bundles expire after 7 days.
 - Account budget alerts: 10, 25, and 100 USD (ADR 0019).
-- Pause switch: `locals.paused` in `infrastructure/terraform/envs/{dev,prod}/main.tf`.
+- Prod is the only remote environment (ADR 0024).
+- Pause switch: `locals.paused` in `infrastructure/terraform/envs/prod/main.tf`.
 - Cost reporting: `bun run cost:report`.
 
 ## Decisions
 - Terraform owns remote control-plane changes. Never `wrangler deploy`.
-- Deployment sequence: `bun run cf:bundle`, `bun run tf:plan:<env>`, `bun run tf:apply:<env>`, and `bun run tf:drift` (dev) or `bun run tf:drift:prod`.
+- Deployment sequence: `bun run cf:bundle`, `bun run tf:plan:prod`, `bun run tf:apply:prod`, and `bun run tf:drift:prod`.
 - Artifacts is canonical source for managed Projects (ADR 0010).
 - Release via Workers Builds: Promotion pushes to Artifacts, and ReleaseWorkflow observes the build (ADR 0018).
 - Sharing is per Project, not Clerk Organizations. The owner has priority; a conflict is decided by `priority_wins` and the owner can override (ADR 0023).

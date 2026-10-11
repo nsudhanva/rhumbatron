@@ -9,27 +9,27 @@ rhumbatron-<component>-<env>
 ```
 
 - `component`: lowercase kebab-case purpose, for example `control`, `evidence`, `agent-wakeups`, `api`.
-- `env`: `dev`, `prod`, or `global` (shared across environments, for example Terraform state).
+- `env`: `prod` or `global` (shared account-wide, for example Terraform state).
 
 `bun run check:guardrails` rejects Terraform resource names that break this pattern.
 
 ## Current and planned names
 
-| Resource | dev | prod | global |
-|---|---|---|---|
-| Terraform state bucket (R2) | | | `rhumbatron-terraform-state-global` |
-| Terraform token | | | `rhumbatron-terraform-global` |
-| State backend key | | | `rhumbatron-terraform-state-backend-global` |
-| D1 control database | `rhumbatron-control-dev` | `rhumbatron-control-prod` | |
-| KV config namespace | `rhumbatron-config-dev` | `rhumbatron-config-prod` | |
-| R2 evidence bucket | `rhumbatron-evidence-dev` | `rhumbatron-evidence-prod` | |
-| Queues | `rhumbatron-<purpose>-dev` | `rhumbatron-<purpose>-prod` | |
-| Vectorize index | `rhumbatron-memory-dev` | `rhumbatron-memory-prod` | |
-| AI Gateway | `rhumbatron-models-dev` | `rhumbatron-models-prod` | |
-| Artifacts namespace | `rhumbatron-projects-dev` | `rhumbatron-projects-prod` | |
-| Workers | `rhumbatron-<component>-dev` | `rhumbatron-<component>-prod` | |
-| Release target Worker | `rhumbatron-acme-shop-dev` | `rhumbatron-acme-shop-prod` | |
-| K2 streams | `rhumbatron_events_00_dev`..`07` | `rhumbatron_events_00_prod`..`07` | |
+| Resource | prod | global |
+|---|---|---|
+| Terraform state bucket (R2) | | `rhumbatron-terraform-state-global` |
+| Terraform token | | `rhumbatron-terraform-global` |
+| State backend key | | `rhumbatron-terraform-state-backend-global` |
+| D1 control database | `rhumbatron-control-prod` | |
+| KV config namespace | `rhumbatron-config-prod` | |
+| R2 evidence bucket | `rhumbatron-evidence-prod` | |
+| Queues | `rhumbatron-<purpose>-prod` | |
+| Vectorize index | `rhumbatron-memory-prod` | |
+| AI Gateway | `rhumbatron-models-prod` | |
+| Artifacts namespace | `rhumbatron-projects-prod` | |
+| Workers | `rhumbatron-<component>-prod` | |
+| Release target Worker | `rhumbatron-acme-shop-prod` | |
+| K2 streams | `rhumbatron_events_00_prod`..`07` | |
 
 K2 streams are the one exception: K2 names allow only letters, digits, and underscores, so they
 use `rhumbatron_events_NN_<env>` (ADR 0006).
@@ -43,7 +43,7 @@ Terraform applies these standard tags wherever it supports them.
 | Key | Values |
 |---|---|
 | `project` | `rhumbatron` |
-| `env` | `dev`, `prod`, `global` |
+| `env` | `prod`, `global` |
 | `component` | the name's component part |
 | `managed-by` | `terraform` |
 

@@ -100,7 +100,7 @@ Notes:
 
 - The subrequest budget is at most 37 per invocation, below the Workers Free limit of 50.
 - The router releases the claim rows before a nack. Without that step, a redelivery would skip the events as duplicates.
-- The archive key is `events/<day>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz`. The R2 lifecycle expires `events/` after 30 days in dev and 365 days in prod.
+- The archive key is `events/<day>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz`. The R2 lifecycle expires `events/` after 365 days.
 - Terraform creates four subscriptions: `causal-router`, `project-view-projector`, `audit-archiver`, and `analytics-projector`.
 - `analytics-projector` (`workers/event-router/src/analytics.ts`) maps lifecycle Events to section 41.1 metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others). It writes one data point for each Event to the `rhumbatron_event_metrics_<env>` dataset (binding `EVENT_METRICS`). This separate dataset keeps these points apart from the source points in `METRICS`. Dedupe uses `processed_events` like the other consumers. It skips maintenance and release-sweep ticks, so a tick stays at 46 subrequests or fewer. The expected volume is about 1,000 points on a busy day, and the free limit is 100,000.
 

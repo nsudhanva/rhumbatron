@@ -4,34 +4,31 @@ This page explains how Terraform owns the Cloudflare control plane, and how the 
 
 Main source files:
 
-- `infrastructure/terraform/bootstrap`, `envs/global`, `envs/dev`, `envs/prod`, `modules/*`
+- `infrastructure/terraform/bootstrap`, `envs/global`, `envs/prod`, `modules/*`
 - `scripts/tf.ts`, `scripts/build-workers.ts`, and the adapter scripts in `scripts/`
 - `workers/coordinator/src/alarm-guard.ts`, `workers/event-router/src/causal.ts`, `workers/agents/src/limits.ts`
-- ADR 0004 (bootstrap credentials), 0005 (DO Workers), 0006 (K2 adapter), 0012 (Sandbox Worker), 0017 (prod), 0019 (billing guards)
+- ADR 0004 (bootstrap credentials), 0005 (DO Workers), 0006 (K2 adapter), 0012 (Sandbox Worker), 0017 (prod), 0019 (billing guards), 0024 (prod only)
 
 ## Terraform roots and state
 
-There are four roots.
+There are three roots.
 `bootstrap` creates only the state bucket.
-`global` owns account-wide and zone-wide singletons, so dev and prod never both manage the shared zone.
-`dev` and `prod` each own one full environment.
-All four keep state in one R2 bucket, with one key per root.
+`global` owns account-wide and zone-wide singletons.
+`prod` owns the one full environment (ADR 0024).
+All three keep state in one R2 bucket, with one key per root.
 
 ```mermaid
 flowchart TB
   subgraph R2["R2 bucket rhumbatron-terraform-state-global"]
     KB["bootstrap/terraform.tfstate"]
     KG["global/terraform.tfstate"]
-    KD["dev/terraform.tfstate"]
     KP["prod/terraform.tfstate"]
   end
   BOOT["bootstrap root<br/>creates the state bucket<br/>(prevent_destroy)"] --> KB
   GLOB["envs/global<br/>zone read, TLS settings,<br/>budget alerts"] --> KG
-  DEV["envs/dev<br/>dev.rhumbatron.com,<br/>api-dev.rhumbatron.com"] --> KD
   PROD["envs/prod<br/>rhumbatron.com, www,<br/>api.rhumbatron.com"] --> KP
   TF["bun run tf root args<br/>(credentials from Keychain)"] --> BOOT
   TF --> GLOB
-  TF --> DEV
   TF --> PROD
 ```
 
@@ -48,7 +45,7 @@ Rules:
 ```mermaid
 flowchart LR
   GLOB["envs/global"]
-  ENV["envs/dev and envs/prod"]
+  ENV["envs/prod"]
   DNS["modules/dns<br/>zone data source"]
   SEC["modules/security<br/>zone TLS settings"]
   ST["modules/state<br/>R2 evidence, D1, KV"]
@@ -75,9 +72,7 @@ Two Worker modules exist (ADR 0005):
 - `modules/worker` uses `cloudflare_worker`, `cloudflare_worker_version`, and `cloudflare_workers_deployment` at 100 percent, plus custom domains and cron triggers.
 - `modules/durable-worker` uses `cloudflare_workers_script`, because Cloudflare rejects Durable Object migrations in version uploads. The steady state is migration tag `v1 -> v1`.
 
-Prod mirrors dev resource for resource, with `-prod` names.
-Prod also has Clerk DNS records, a Clerk key check, and a K2 account-limit precondition.
-Operators update the two files together by hand.
+Prod has Clerk DNS records, a Clerk key check, and a K2 account-limit precondition.
 
 ### Temporary adapters
 
@@ -113,15 +108,15 @@ The project never uses `wrangler deploy`.
 ```mermaid
 flowchart LR
   A["bun run cf:bundle"] --> B["dist/bundles/manifest.json<br/>(modules, sha256)"]
-  B --> C["bun run tf:plan:dev<br/>-out=dev.tfplan"]
+  B --> C["bun run tf:plan:prod<br/>-out=prod.tfplan"]
   C --> D["Read the plan"]
-  D --> E["bun run tf:apply:dev"]
-  E --> F["bun run tf:drift<br/>plan -detailed-exitcode"]
-  F --> G["bun run smoke:dev"]
+  D --> E["bun run tf:apply:prod"]
+  E --> F["bun run tf:drift:prod<br/>plan -detailed-exitcode"]
+  F --> G["bun run smoke:prod"]
 ```
 
 A new bundle hash creates a new Worker version (`modules/worker`) or a new full script upload (`modules/durable-worker`).
-The same bundles serve dev and prod. Bindings carry the environment configuration.
+Bindings carry the environment configuration.
 
 ## Cost guard layers
 
@@ -135,7 +130,7 @@ flowchart TB
   L3["3. Causal caps<br/>1,000 commands per Change per day,<br/>Clef-flash 200 calls per day"]
   L4["4. Section 44 limits<br/>8 agents, 4 Sandboxes, 3 Candidates,<br/>2 attempts per tier, 2 browser runs"]
   L5["5. Queue and K2 bounds<br/>3 retries then dead-letter,<br/>K2 batch dead-lettered after 5 failures"]
-  L6["6. Metered caps in D1<br/>Sandbox 5 h dev, 15 h prod per month,<br/>Browser 250 s per day,<br/>400 model calls per day,<br/>Anthropic $15 dev, $10 prod per month"]
+  L6["6. Metered caps in D1<br/>Sandbox 15 h per month,<br/>Browser 250 s per day,<br/>400 model calls per day,<br/>Anthropic $10 per month"]
   L7["7. AI Gateway<br/>20 requests per minute,<br/>Anthropic spend limit (best effort)"]
   L8["8. Account budget alerts<br/>email at $10, $25, $100"]
   L9["Pause switch<br/>locals.paused"]
@@ -155,49 +150,26 @@ flowchart TB
 | Attempts | 2 per Task per tier | `limits.ts` |
 | Model calls | 16 or 32 per run, 400 per day | `packages/model-router/src/budget.ts` |
 | Change budget | `budgetUsd`, default 3 USD, max 100 | `packages/protocol/src/project.ts` |
-| Sandbox time | 18,000 s per month per environment | `SANDBOX_MONTHLY_SECONDS` binding |
-| Browser Run | 250 s per day per environment, 55 s per session, 2 runs per Candidate | `BROWSER_DAILY_SECONDS` binding, `check-semantics.ts` |
+| Sandbox time | 54,000 s per month | `SANDBOX_MONTHLY_SECONDS` binding |
+| Browser Run | 250 s per day, 55 s per session, 2 runs per Candidate | `BROWSER_DAILY_SECONDS` binding, `check-semantics.ts` |
 | Embeddings | 2,000 texts per day, 10,000 vectors per account | `workers/indexer/src/handler.ts` |
 | Vectorize queries | 1,000 per day | `workers/agents/src/retrieval.ts` |
-| Anthropic spend | 15 USD dev, 10 USD prod per calendar month, reserve then settle on the D1 meter | `ANTHROPIC_MONTHLY_BUDGET_USD` binding, `packages/model-router/src/spend-meter.ts` |
+| Anthropic spend | 10 USD per calendar month, reserve then settle on the D1 meter | `ANTHROPIC_MONTHLY_BUDGET_USD` binding, `packages/model-router/src/spend-meter.ts` |
 | Account | Alerts at 10, 25, 100 USD | `envs/global` |
 
 A guard that trips stops new expensive work and keeps all state.
 A concurrency limit applies backpressure. The work waits for a free slot.
 A budget limit stops the work. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit named.
 
-### How the approved caps split between environments
+### Caps
 
-ADR 0017 split the approved budgets evenly between dev and prod. ADR 0021 split the $25 Anthropic budget unevenly.
-Each Worker reads its share from a binding and meters it in its own D1 database.
-
-```mermaid
-pie showData
-  title Anthropic budget per calendar month (USD)
-  "dev" : 15
-  "prod" : 10
-```
-
-```mermaid
-pie showData
-  title Sandbox hours per month
-  "dev" : 5
-  "prod" : 15
-```
-
-```mermaid
-pie showData
-  title Browser Run seconds per day
-  "dev" : 250
-  "prod" : 250
-```
-
-The two Browser Run shares add up to 500 s, below the free 10 minutes per day.
-The two Sandbox shares add up to the approved 20 hours per month.
+Prod is the only consumer (ADR 0024). The prod caps are Anthropic 10 USD per calendar month, Sandbox
+15 hours per month, and Browser Run 250 seconds per day. The Worker reads each cap from a binding and
+meters it in the prod D1 database.
 
 ## Pause switch
 
-Each environment has `locals.paused` in `envs/<env>/main.tf`.
+Prod has `locals.paused` in `envs/prod/main.tf`.
 To pause, set it to `true`.
 Then plan and apply.
 All data stays.

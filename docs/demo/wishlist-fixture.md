@@ -40,7 +40,7 @@ membership table per read. This cost comes from recomputing access from the tabl
 contains no sleep. Design B does 120 map lookups. `bun run bench` runs the cart and wishlist benchmarks and reports the
 slowest endpoint's p95 as the API p95.
 
-Measured on an Apple Silicon laptop (`bun run demo:wishlist --local`):
+Measured on an Apple Silicon laptop (a local run of both designs):
 
 | Check | Design A | Design B |
 |---|---|---|
@@ -63,7 +63,7 @@ touched). The shop root has no `data-testid="wishlist"`, so the browser check ru
 
 1. `POST /v1/changes/:changeId/fixture-changesets` `{"design": "a" | "b" | "both"}`. The route
    answers 404 unless `FIXTURES_ENABLED` is `"true"` or `ENVIRONMENT` is `dev` or `local`
-   (`workers/api/src/fixtures.ts`). Terraform sets `FIXTURES_ENABLED = "true"` in dev and prod.
+   (`workers/api/src/fixtures.ts`). Terraform sets `FIXTURES_ENABLED = "true"` in prod.
    The route requires auth, Project membership, an active Project, and a Change in `created`
    (unplanned) or `verifying`. It queues `fixture.publish` on the integration Queue. `GET` on the
    same path shows the published designs.
@@ -87,15 +87,8 @@ Each Workspace fork has a `task_runs` row, so Project cleanup and the fork sweep
 
 ## Commands
 
-```sh
-bun run demo:wishlist --local          # both designs, local checks, no Cloudflare
-bun run demo:wishlist --local a        # one design; add --keep to keep the temp checkout
-bun run demo:wishlist                  # dev: new Change on acme-shop-demo, then A and B Candidates
-bun run demo:wishlist --change chg_... # dev: resume or re-print an existing Change
-```
-
-The remote run needs `acme-shop-demo` (`bun run demo:project`) and the deployed dev Workers.
-At the end, A is `rejected` on `performance`, and B is `verified` and waits for human approval.
+The fixture Designs A and B are in `fixtures/wishlist`. No script publishes them
+([ADR 0024](../adr/0024-retire-dev-environment.md)).
 
 ## Limits
 

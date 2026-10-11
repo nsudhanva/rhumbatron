@@ -1,49 +1,23 @@
 # Demo runbook
 
-This runbook maps the AGENTS.md section 55 sequence to the dev UI (`https://dev.rhumbatron.com`) and API (`https://api-dev.rhumbatron.com`).
+This runbook maps the AGENTS.md section 55 sequence to the prod UI (`https://rhumbatron.com`) and API (`https://api.rhumbatron.com`).
 
-Deploys use Terraform only: `bun run cf:bundle`, `bun run tf:plan:dev`, `bun run tf:apply:dev`, and `bun run tf:drift`. Production (`https://rhumbatron.com`) is live, but the demo scripts target dev, so the demo runs on dev.
+Prod is the only remote environment ([ADR 0024](../adr/0024-retire-dev-environment.md)). Run the sequence by hand in the prod UI, with a real model-driven Change. No script publishes the fixture Designs A and B ([wishlist-fixture.md](wishlist-fixture.md)).
 
-Two scripts feed the sequence:
-
-- `bun run demo:live` runs a real model-driven Change (Root Planner, agents, automatic Candidate). Use it for steps 5 to 13.
-- `bun run demo:wishlist` publishes the fixture Designs A and B without a model call ([wishlist-fixture.md](wishlist-fixture.md)). Use it for steps 14 to 30.
-
-```mermaid
-sequenceDiagram
-  participant D as demo:wishlist
-  participant O as Operator
-  participant W as dev web
-  participant API as api-dev
-  participant I as integration
-  participant S as Sandbox
-  D->>API: new Change, then fixture-changesets (both)
-  API->>I: fixture.publish
-  I->>I: Intents on wishlist:membership, conflict, fork_candidates
-  D->>API: Candidate A, then Candidate B
-  I->>S: verify both (build, unit, contract, Cart, p95, security)
-  S-->>I: A rejected on p95, B verified
-  O->>W: approve B
-  O->>W: Promote S(N) to S(N+1)
-  W->>API: CAS promotion in ProjectRootDO
-```
+Deploys use Terraform only: `bun run cf:bundle`, `bun run tf:plan:prod`, `bun run tf:apply:prod`, and `bun run tf:drift:prod`.
 
 ## Before the demo
 
-1. Make sure that dev is not paused. The value must be `locals.paused = false` in `infrastructure/terraform/envs/dev/main.tf`.
-2. If dev is paused, set the value to `false` and apply with Terraform ([pause-resume.md](../operations/pause-resume.md)).
-3. Run `bun run smoke:dev`.
-4. Run `bun run smoke:sandbox`.
-5. Run `bun run demo:project` to make or reset the demo Project. The script prepares `acme-shop-demo` with seeded Acme Shop source in Artifacts. It prints the Project ID.
-6. Run `bun run demo:wishlist` to prepare the scripted demo. The script publishes fixture Designs A and B with a semantic conflict on `wishlist:membership`. Candidate A fails p95 by design. Candidate B passes and promotes after approval.
-7. Optional: Run `bun run inject` for failure injection ([failure-injection.md](failure-injection.md)).
-8. Optional: Run `bun run cleanup:projects`.
-9. After testing, pause dev compute.
+1. Make sure that prod is not paused. The value must be `locals.paused = false` in `infrastructure/terraform/envs/prod/main.tf`.
+2. If prod is paused, set the value to `false` and apply with Terraform ([pause-resume.md](../operations/pause-resume.md)).
+3. Run `bun run smoke:prod`.
+4. Optional: Run `bun run cleanup:projects --dry-run`, then `bun run cleanup:projects`, to remove smoke-test Projects.
+5. After testing, pause compute if it is not needed.
 
 Cost and limits:
-- Sandbox: 5 hours per month in dev, 15 in prod.
-- Browser Run: 250 seconds per day per environment.
-- Claude (Anthropic): code stops model work at 15 USD (dev) and 10 USD (prod) per calendar month (ADR 0021).
+- Sandbox: 15 hours per month in prod.
+- Browser Run: 250 seconds per day.
+- Claude (Anthropic): code stops model work at 10 USD per calendar month (ADR 0021).
 - Check usage with `bun run cost:report` ([costs.md](../operations/costs.md)).
 
 ## UI routes

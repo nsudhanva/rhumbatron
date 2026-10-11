@@ -11,11 +11,10 @@ Many agents can propose many futures of one codebase. Only verified evidence can
 | Environment | Web | API | Sign-in |
 |---|---|---|---|
 | prod | `https://rhumbatron.com` (`www` redirects to the apex) | `https://api.rhumbatron.com` | Clerk production instance. Email and password only. Google is off until an OAuth client exists. |
-| dev | `https://dev.rhumbatron.com` | `https://api-dev.rhumbatron.com` | Clerk development instance. |
 
-Terraform deploys both environments (`envs/dev`, `envs/prod`, ADR 0017).
+Prod is the only remote environment. Terraform deploys it (`envs/prod`, ADR 0017, ADR 0024). Local work uses `wrangler dev`.
 
-A real model-driven Change ran end to end on dev. The Root Planner and four agents built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD. That run used Gemini on Vertex AI. Anthropic has replaced it (ADR 0021).
+A real model-driven Change ran end to end. The Root Planner and four agents built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD. That run used Gemini on Vertex AI. Anthropic has replaced it (ADR 0021).
 
 ## Architecture
 
@@ -92,7 +91,7 @@ bun run dev          # runs all apps and Workers locally
 
 For the web app, copy `apps/web/.env.example` to `apps/web/.env.local` and add Clerk development keys.
 
-Remote scripts (`tf`, `smoke:*`, `demo:*`, `inject`, `cost:report`) read credentials from the macOS Keychain. `scripts/tf.ts` lists the items for each Terraform root. The `package.json` scripts list the rest.
+Remote scripts (`tf`, `smoke:*`, `cleanup:projects`, `cost:report`) read credentials from the macOS Keychain. `scripts/tf.ts` lists the items for each Terraform root. The `package.json` scripts list the rest.
 
 ```mermaid
 flowchart LR
@@ -110,10 +109,10 @@ workers/<name>           One Cloudflare Worker per directory, each with its own 
 packages/                Shared logic: protocol (Zod schemas), evidence, conflict, model-router, ...
 containers/coding-agent  Sandbox image
 fixtures/                Demo Project source (Acme Shop) and its Wishlist designs
-infrastructure/terraform Bootstrap, env roots (global, dev, prod), modules
+infrastructure/terraform Bootstrap, env roots (global, prod), modules
 migrations/d1            D1 SQL migrations (applied by Terraform)
 docs/                    ADRs, protocols, operations, demo, build status
-scripts/                 Bundle, checks, smoke, demo, failure injection, cost report
+scripts/                 Bundle, checks, smoke, cleanup, cost report
 ```
 
 ## Commands
@@ -131,46 +130,39 @@ scripts/                 Bundle, checks, smoke, demo, failure injection, cost re
 | `bun run check:secrets` | Run gitleaks scan on history and staged changes. |
 | `bun run tf:check` | Run `terraform fmt`, `validate`, and tflint on all roots without remote access. |
 | `bun run cf:bundle` | Build Worker bundles and `dist/bundles/manifest.json` for Terraform. |
-| `bun run tf <bootstrap\|global\|dev\|prod> <args>` | Run Terraform for one root with Keychain credentials. Refuses `-auto-approve`. |
-| `bun run tf:plan:dev` / `tf:apply:dev` | Plan dev to `dev.tfplan`, then apply that plan. |
+| `bun run tf <bootstrap\|global\|prod> <args>` | Run Terraform for one root with Keychain credentials. Refuses `-auto-approve`. |
 | `bun run tf:plan:prod` / `tf:apply:prod` | Plan prod to `prod.tfplan`, then apply that plan. |
-| `bun run tf:drift` / `tf:drift:prod` | Post-apply plan that must show zero changes (`global` and `dev`; `prod`). |
-| `bun run smoke:dev` / `smoke:prod` | Remote smoke check. Dev runs the signed-in flow; prod runs public checks only. |
-| `bun run smoke:plan` | Dev smoke plus one real goal through the Root Planner (1 to 4 model calls). |
-| `bun run smoke:sandbox` | Dev smoke plus Sandbox verification and promotion of the Acme Shop baseline. |
-| `bun run smoke:models [dev\|prod]` | Anthropic through AI Gateway: workspace header, one tool call per tier, one prompt cache hit (under 1 cent). |
+| `bun run tf:drift` / `tf:drift:prod` | Post-apply plan that must show zero changes (`global` and `prod`). |
+| `bun run smoke:prod` | Remote smoke check. Public checks always run; the signed-in flow runs when `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` are set. |
+| `bun run smoke:models` | Anthropic through AI Gateway: workspace header, one tool call per tier, one prompt cache hit (under 1 cent). |
 | `bun run smoke:release` | Read-only check of the latest Acme Shop Live release. |
-| `bun run demo:project` | Create or reuse the Acme Shop demo Project on dev. |
-| `bun run demo:wishlist` | Run the scripted Wishlist demo (Designs A vs B, conflict, verification). |
-| `bun run demo:live` | Run a real model-driven Change on dev and stream progress. |
-| `bun run inject` | Run failure injection against public dev APIs. |
-| `bun run cleanup:projects` | Archive smoke-test Projects (`--dry-run` lists them only). |
+| `bun run cleanup:projects` | Archive smoke-test Projects on prod (`--dry-run` lists them only). Needs `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` for the prod Clerk instance. |
 | `bun run cost:report` | Read-only report of usage, caps, and leftover resources (`--alerts-only`). |
 
 ## Deployment
 
 Terraform is the only way to change Cloudflare control-plane configuration. Never run `wrangler deploy`, make manual dashboard edits, or issue direct REST writes (one documented exception: ADR 0014).
 
-Deployment sequence (dev; prod uses the `:prod` scripts):
+Deployment sequence:
 
 ```sh
 bun run cf:bundle
-bun run tf:plan:dev
-bun run tf:apply:dev
-bun run tf:drift
-bun run smoke:dev
+bun run tf:plan:prod
+bun run tf:apply:prod
+bun run tf:drift:prod
+bun run smoke:prod
 ```
 
 See [docs/operations/deploy.md](docs/operations/deploy.md) and [infrastructure/terraform/README.md](infrastructure/terraform/README.md).
 
 Cost controls ([docs/operations/costs.md](docs/operations/costs.md)):
 - Rhumbatron runs on a shared Workers Paid account within included allowances.
-- Sandbox: 5 hours per month in dev, 15 in prod.
-- Browser Run: 250 seconds per day per environment.
-- Claude (Anthropic): code stops model work at 15 USD (dev) and 10 USD (prod) per calendar month (ADR 0021).
+- Sandbox: 15 hours per month in prod.
+- Browser Run: 250 seconds per day in prod.
+- Claude (Anthropic): code stops model work at 10 USD per calendar month in prod (ADR 0021).
 - Account budget alerts at 10, 25, and 100 USD (ADR 0019, `envs/global`).
-- Pause switch: `locals.paused` in `infrastructure/terraform/envs/{dev,prod}/main.tf` ([pause-resume.md](docs/operations/pause-resume.md)).
-- Application release through Workers Builds works for Acme Shop Live on dev ([release.md](docs/operations/release.md)). Live apps on Dynamic Workers replace it on prod (ADR 0020).
+- Pause switch: `locals.paused` in `infrastructure/terraform/envs/prod/main.tf` ([pause-resume.md](docs/operations/pause-resume.md)).
+- Live apps on Dynamic Workers release every Project on prod (ADR 0020). The Workers Builds release path is described in [release.md](docs/operations/release.md).
 
 ## CI
 
