@@ -388,7 +388,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       await finish("rejected", CHANGE_CANCELLED_REASON);
       return { status: "rejected", reason: "change_cancelled" };
     };
-    if (["cancelled", "not_selected", "awaiting_owner"].includes(loaded.changeStatus ?? ""))
+    if (["cancelled", "not_selected", "needs_input"].includes(loaded.changeStatus ?? ""))
       return stop({ halted: "change_cancelled" });
 
     if (!loaded.canonical?.commit) {

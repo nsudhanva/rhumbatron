@@ -150,7 +150,6 @@ const MARKER_LEGEND: { kind: MarkerKind; label: string }[] = [
 const ATTENTION_KICKER: Record<AttentionKind, string> = {
   clarify: "Question",
   approval: "Approval",
-  owner: "Owner choice",
   blocked: "Blocked",
   budget: "Budget",
   limit: "Limit",
@@ -1233,7 +1232,7 @@ function AttentionBody({ item }: { item: AttentionItem }) {
             "type-kicker",
             urgent
               ? "text-accent-700"
-              : item.kind === "clarify" || item.kind === "approval" || item.kind === "owner"
+              : item.kind === "clarify" || item.kind === "approval"
                 ? "text-kumo-warning"
                 : "text-kumo-subtle",
           )}

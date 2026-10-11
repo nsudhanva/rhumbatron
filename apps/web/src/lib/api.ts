@@ -25,7 +25,7 @@ export type ChangeRequester = {
 };
 
 export type ChangeOutcome = {
-  kind: "selected" | "partially_selected" | "not_selected" | "replaces" | "overridden" | string;
+  kind: "selected" | "partially_selected" | "not_selected" | "replaces" | "duplicate" | string;
   reason?: string | null;
   winnerChangeId?: string | null;
   decidedBy?: string | null;
@@ -1302,14 +1302,6 @@ export type RequestConflictDetail = {
   b: RequestConflictSide;
 };
 
-export type OverrideOutcome = {
-  status?: string;
-  changeId: string;
-  repeated?: boolean;
-  reason?: string;
-  detail?: string;
-};
-
 export const getProjectMembers = createServerFn()
   .inputValidator((projectId: string) => projectId)
   .handler(({ data }) => call<ProjectMembersView>(`/v1/projects/${data}/members`));
@@ -1365,7 +1357,3 @@ export const acceptInvitation = createServerFn({ method: "POST" })
 export const getRequestConflicts = createServerFn()
   .inputValidator((changeId: string) => changeId)
   .handler(({ data }) => call<RequestConflictDetail[]>(`/v1/changes/${data}/request-conflicts`));
-
-export const overrideChange = createServerFn({ method: "POST" })
-  .inputValidator((changeId: string) => changeId)
-  .handler(({ data }) => call<OverrideOutcome>(`/v1/changes/${data}/override`, { method: "POST" }));

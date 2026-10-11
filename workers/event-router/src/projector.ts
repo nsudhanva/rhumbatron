@@ -77,6 +77,26 @@ const CHANGE_STATUS: StatusMap = {
   "change.failed": null,
 };
 
+/**
+ * Intake and request-check events carry the resulting status in their payload: a question to the
+ * requester shows the Change as `needs_input` until the answer arrives.
+ */
+function changeStatusOf(event: EventEnvelope): string | null | undefined {
+  const payload = (event.payload ?? {}) as Record<string, unknown>;
+  switch (event.eventType) {
+    case "change.intake.reviewed":
+      return payload.decision === "ask" ? "needs_input" : "compiling";
+    case "change.clarification.answered":
+      return payload.action === "withdraw" ? null : "compiling";
+    case "conflict.reviewed":
+      return event.taskId === undefined && payload.status === "needs_input"
+        ? "needs_input"
+        : undefined;
+    default:
+      return CHANGE_STATUS[event.eventType];
+  }
+}
+
 /** An Agent sleeps when its Task ends (AGENTS.md section 13.4). */
 const AGENT_STATUS: StatusMap = {
   "agent.woken": "awake",
@@ -106,7 +126,7 @@ function latestStatuses(events: EventEnvelope[]): Record<ListName, Latest> {
     lists[list].set(id, { status, ...(changeId ? { changeId } : {}) });
   };
   for (const event of events) {
-    note("activeChanges", event.changeId, CHANGE_STATUS[event.eventType]);
+    note("activeChanges", event.changeId, changeStatusOf(event));
     note("activeTasks", event.taskId, TASK_STATUS[event.eventType], event.changeId);
     if (event.actor.kind === "agent") {
       note("activeAgents", event.actor.id, AGENT_STATUS[event.eventType], event.changeId);

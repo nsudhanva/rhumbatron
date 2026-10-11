@@ -86,7 +86,6 @@ export type TimelinePerson = {
 export type AttentionKind =
   | "clarify"
   | "approval"
-  | "owner"
   | "blocked"
   | "budget"
   | "limit"
@@ -122,7 +121,6 @@ export const LIVE_CHANGE_STATUSES = new Set([
   "running",
   "verifying",
   "awaiting_approval",
-  "awaiting_owner",
   "needs_input",
   "promoting",
   "releasing",
@@ -387,15 +385,6 @@ export function buildTimeline(input: {
         key: `approval:${change.id}`,
         kind: "approval",
         title: "Approval needed before promotion",
-        detail: goal,
-        at: lastAt,
-        changeId: change.id,
-      });
-    } else if (change.status === "awaiting_owner") {
-      attention.push({
-        key: `owner:${change.id}`,
-        kind: "owner",
-        title: "Overlaps another request: the owner chooses",
         detail: goal,
         at: lastAt,
         changeId: change.id,

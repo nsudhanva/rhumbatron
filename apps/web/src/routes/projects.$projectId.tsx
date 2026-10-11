@@ -32,7 +32,6 @@ import {
   getProject,
   getProjectStats,
   listChanges,
-  overrideChange,
   type ProjectStats as ProjectStatsData,
   provisionProject,
 } from "../lib/api";
@@ -403,34 +402,8 @@ function ChangesTable({
   isOwner?: boolean;
   projectId: string;
 }) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [overridingId, setOverridingId] = useState<string | null>(null);
-  const [overrideError, setOverrideError] = useState<string | null>(null);
-
-  const override = useMutation({
-    mutationFn: (changeId: string) => overrideChange({ data: changeId }),
-    onMutate: (changeId) => {
-      setOverridingId(changeId);
-      setOverrideError(null);
-    },
-    onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
-      if (result?.changeId) {
-        await navigate({ to: "/changes/$changeId", params: { changeId: result.changeId } });
-      }
-    },
-    onError: (err) => {
-      setOverrideError(err.message);
-    },
-    onSettled: () => {
-      setOverridingId(null);
-    },
-  });
-
   return (
     <div className="grid gap-2">
-      {overrideError && <p className="text-[12px] text-kumo-danger font-medium">{overrideError}</p>}
       <DataTable label="Changes" minWidth={880}>
         <thead>
           <tr>
@@ -450,8 +423,6 @@ function ChangesTable({
             <SkeletonRows cells={["title", 80, 64, 48, "numeric", "numeric", "numeric"]} />
           ) : (
             changes.map((change) => {
-              const canOverride =
-                isOwner && (change.status === "not_selected" || change.status === "awaiting_owner");
               return (
                 <TRow key={change.id}>
                   <Td className="max-w-0 w-[45%]">
@@ -462,21 +433,6 @@ function ChangesTable({
                             <span title={change.goal}>{change.goal}</span>
                           </RowLink>
                         </span>
-                        {canOverride && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            className="relative z-10 shrink-0 text-[11px] px-2 py-0.5 h-6 leading-tight whitespace-nowrap"
-                            loading={override.isPending && overridingId === change.id}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              override.mutate(change.id);
-                            }}
-                          >
-                            Use this instead
-                          </Button>
-                        )}
                       </div>
                       <ChangeOutcomeLine change={change} all={changes} />
                       <span className="truncate font-mono text-[11px] text-kumo-subtle tabular-nums">
@@ -527,10 +483,10 @@ function RequestedByCell({ requester }: { requester: ChangeRequester }) {
 }
 
 function ChangeOutcomeLine({ change, all }: { change: ChangeSummary; all: ChangeSummary[] }) {
-  if (change.status === "awaiting_owner") {
+  if (change.status === "needs_input") {
     return (
       <span className="text-[12px] font-medium text-accent-700">
-        Waiting for the owner to choose
+        Waiting for an answer from the requester
       </span>
     );
   }
@@ -553,21 +509,6 @@ function ChangeOutcomeLine({ change, all }: { change: ChangeSummary; all: Change
       </span>
     );
   }
-  // An owner's choice is also `selected`; say why it was built.
-  if (change.supersedesChangeId) {
-    return (
-      <span className="text-[12px] text-kumo-subtle inline-flex flex-wrap items-center gap-1">
-        <span>Owner's choice, replaces an earlier request</span>
-        <Link
-          to="/changes/$changeId"
-          params={{ changeId: change.supersedesChangeId }}
-          className="relative z-10 font-semibold text-kumo-link hover:underline"
-        >
-          (view earlier)
-        </Link>
-      </span>
-    );
-  }
   if (outcome.kind === "selected") {
     return <span className="text-[12px] text-kumo-subtle">Selected</span>;
   }
@@ -577,19 +518,10 @@ function ChangeOutcomeLine({ change, all }: { change: ChangeSummary; all: Change
   if (outcome.kind === "replaces") {
     return <span className="text-[12px] text-kumo-subtle">Replaces earlier request</span>;
   }
-  if (outcome.kind === "overridden") {
-    const rebuilt = all.find((c) => c.supersedesChangeId === change.id);
-    if (!rebuilt) return <span className="text-[12px] text-kumo-subtle">Chosen by the owner</span>;
+  if (outcome.kind === "duplicate") {
     return (
-      <span className="text-[12px] text-kumo-subtle inline-flex flex-wrap items-center gap-1">
-        <span>Chosen by the owner: rebuilt as</span>
-        <Link
-          to="/changes/$changeId"
-          params={{ changeId: rebuilt.id }}
-          className="relative z-10 font-semibold text-kumo-link hover:underline"
-        >
-          the new Change
-        </Link>
+      <span className="text-[12px] text-kumo-subtle">
+        Duplicate{outcome.reason ? `: ${outcome.reason}` : ""}
       </span>
     );
   }
