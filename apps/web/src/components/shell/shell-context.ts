@@ -83,6 +83,8 @@ export type ShellContext = {
   projectName?: string | undefined;
   changeId?: string | undefined;
   candidateId?: string | undefined;
+  /** Goal of the Change in context, once it loads. */
+  changeGoal?: string | undefined;
   /**
    * The route names a Change or Candidate whose Project is still loading, and no earlier
    * Project can stand in. The sidebar shows skeleton rows for the Project pages.
@@ -206,6 +208,7 @@ export function useShellContext(): ShellContext {
     projectName: project.data?.name,
     changeId,
     candidateId: params.candidateId,
+    changeGoal: change.data?.goal,
     resolving: loadingRecord && !projectId,
     latestChange: latest ? { id: latest.id, goal: latest.goal } : undefined,
     noChanges: changes.data?.length === 0,

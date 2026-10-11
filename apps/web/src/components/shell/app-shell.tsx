@@ -100,8 +100,10 @@ type NavItem = {
   icon: Icon;
   section?: ShellSection;
   link: LinkOptions;
-  /** Short mono note on the right, for example which Change the item opens. */
+  /** Short mono note on the right. */
   hint?: string;
+  /** Second line under the label: which Change a Change page opens. */
+  subtitle?: string;
   /** Full explanation in the tooltip. */
   title?: string;
 };
@@ -126,13 +128,24 @@ function changeScopedItem(
   base: Pick<NavItem, "label" | "icon" | "section">,
   linkFor: (changeId: string) => LinkOptions,
 ): NavItem {
-  if (context.changeId) return { ...base, link: linkFor(context.changeId) };
+  if (context.changeId) {
+    return {
+      ...base,
+      link: linkFor(context.changeId),
+      ...(context.changeGoal
+        ? {
+            subtitle: `for: ${context.changeGoal}`,
+            title: `${base.label} of: ${context.changeGoal}`,
+          }
+        : {}),
+    };
+  }
   if (context.latestChange) {
     return {
       ...base,
       link: linkFor(context.latestChange.id),
-      hint: "latest",
-      title: `Opens the newest Change: ${context.latestChange.goal}`,
+      subtitle: `for: ${context.latestChange.goal}`,
+      title: `${base.label} of the newest Change: ${context.latestChange.goal}`,
     };
   }
   return {
@@ -314,8 +327,17 @@ function NavRow({ item, current }: { item: NavItem; current: boolean }) {
           : "border-transparent hover:bg-kumo-faint",
       )}
     >
-      <IconComponent size={16} aria-hidden className="shrink-0" />
-      <span className="truncate">{item.label}</span>
+      <IconComponent
+        size={16}
+        aria-hidden
+        className={cn("shrink-0", item.subtitle && "mt-[3px] self-start")}
+      />
+      <span className="grid min-w-0">
+        <span className="truncate">{item.label}</span>
+        {item.subtitle && (
+          <span className="truncate text-[11px] font-normal text-kumo-subtle">{item.subtitle}</span>
+        )}
+      </span>
       {item.hint && (
         <span className="ml-auto shrink-0 font-mono text-[10px] font-normal text-kumo-subtle">
           {item.hint}
