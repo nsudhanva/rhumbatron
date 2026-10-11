@@ -1,7 +1,16 @@
-import { ApprovalView, apiData, EvidenceRecord, VerificationPlan } from "@rhumbatron/protocol";
+import { ApprovalView, apiData, EvidenceRecord } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
+import {
+  type EvidenceRow,
+  GateView,
+  PlanView,
+  readEvidence,
+  readGate,
+  readPlan,
+  readStringArray,
+} from "./candidate-read.ts";
 import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
@@ -14,6 +23,9 @@ import { canAccessProject, ensureIdentity } from "./identity.ts";
  *   (at most `maxCandidates - 1` extra rows), so per-Change names (Baseline, Candidate A, B) stay
  *   stable;
  * - their Evidence rows, capped at `EVIDENCE_LIMIT`.
+ *
+ * Rows degrade one at a time (candidate-read.ts): a Candidate without a readable plan or gate has
+ * `plan: null` or `gate: null`, and an unreadable Evidence row is left out, so its check is a gap.
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -35,15 +47,8 @@ const CandidateView = z.object({
   composedCommit: z.string().nullable(),
   composedTree: z.string().nullable(),
   changeSetIds: z.array(z.string()),
-  plan: VerificationPlan.nullable(),
-  gate: z
-    .object({
-      promotable: z.boolean(),
-      gaps: z.array(z.object({ checkId: z.string(), reason: z.string() })),
-      humanApprovalRequired: z.boolean().optional(),
-      p95Ms: z.number().optional(),
-    })
-    .nullable(),
+  plan: PlanView.nullable(),
+  gate: GateView.nullable(),
   approvalRequired: z.boolean(),
   approval: ApprovalView.nullable(),
   baseTree: z.string().nullable(),
@@ -99,25 +104,8 @@ type Row = {
   approval_at: string | null;
 };
 
-type EvidenceRow = {
-  id: string;
-  candidate_id: string;
-  check_id: string | null;
-  kind: string;
-  status: EvidenceRecord["status"];
-  coverage: EvidenceRecord["coverage"];
-  summary: string;
-  r2_key: string | null;
-  content_hash: string;
-  started_at: string | null;
-  completed_at: string | null;
-  created_at: string;
-  metrics_json: string | null;
-  source_refs_json: string;
-};
-
 function toView(row: Row): CandidateView {
-  const plan = row.plan_json ? (JSON.parse(row.plan_json) as VerificationPlan) : null;
+  const plan = readPlan(row.plan_json);
   return {
     id: row.id,
     changeId: row.change_id,
@@ -128,9 +116,9 @@ function toView(row: Row): CandidateView {
     artifactRef: row.artifact_ref,
     composedCommit: row.composed_commit,
     composedTree: row.composed_tree,
-    changeSetIds: JSON.parse(row.change_set_ids_json) as string[],
+    changeSetIds: readStringArray(row.change_set_ids_json),
     plan,
-    gate: row.score_json ? (JSON.parse(row.score_json) as CandidateView["gate"]) : null,
+    gate: readGate(row.score_json),
     approvalRequired: plan?.humanApprovalRequired ?? false,
     approval:
       row.approval_id && row.approval_decision && row.approval_user_id && row.approval_at
@@ -150,24 +138,6 @@ function toView(row: Row): CandidateView {
     promotedGeneration: row.promoted_generation,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  };
-}
-
-function toEvidence(r: EvidenceRow): EvidenceRecord {
-  return {
-    evidenceId: r.id,
-    candidateId: r.candidate_id,
-    checkId: r.check_id ?? r.kind,
-    kind: r.kind,
-    status: r.status,
-    coverage: r.coverage,
-    startedAt: r.started_at ?? r.created_at,
-    completedAt: r.completed_at ?? r.created_at,
-    summary: r.summary,
-    contentHash: r.content_hash,
-    ...(r.r2_key ? { r2Key: r.r2_key } : {}),
-    ...(r.metrics_json ? { metrics: JSON.parse(r.metrics_json) as Record<string, number> } : {}),
-    sourceRefs: JSON.parse(r.source_refs_json) as string[],
   };
 }
 
@@ -220,7 +190,10 @@ export const verification = new Hono<AppEnv>().get(
         .all<EvidenceRow>();
       const evidenceRows = result.results ?? [];
       evidenceTruncated = evidenceRows.length > EVIDENCE_LIMIT;
-      evidence = evidenceRows.slice(0, EVIDENCE_LIMIT).map(toEvidence);
+      evidence = evidenceRows
+        .slice(0, EVIDENCE_LIMIT)
+        .map(readEvidence)
+        .filter((e): e is EvidenceRecord => e !== null);
     }
 
     const changes = new Map<string, z.infer<typeof ChangeRef>>();

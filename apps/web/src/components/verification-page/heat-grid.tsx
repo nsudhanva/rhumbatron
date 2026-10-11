@@ -25,11 +25,17 @@ const index = (n: number) => String(n).padStart(2, "0");
 
 function cellTitle(item: VerifiedCandidate, kind: string, cell: HeatCell) {
   const head = `${index(item.gridIndex ?? 0)} · ${item.label} · ${kind}`;
-  if (cell.verdict === "none") return `${head}: not in the verification plan`;
+  if (cell.verdict === "none") {
+    return item.candidate.plan === null
+      ? `${head}: no plan recorded`
+      : `${head}: not in the verification plan`;
+  }
   const parts = cell.rows.map((r) => {
     const word = statusView(r.verdict === "pending" ? "queued" : r.verdict).label;
     const title = criterion(r, item.budget).title;
-    return r.reason ? `${title} ${word} (${REASON_WORDS[r.reason]})` : `${title} ${word}`;
+    return r.reason
+      ? `${title} ${word} (${REASON_WORDS[r.reason] ?? r.reason})`
+      : `${title} ${word}`;
   });
   return `${head}: ${parts.join("; ")}`;
 }

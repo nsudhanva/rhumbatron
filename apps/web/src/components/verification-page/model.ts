@@ -130,17 +130,26 @@ function median(sorted: number[]): number | null {
     : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
 }
 
-/** Gate words for a table row: "7 / 7 met", "5 / 7 met · performance timed out". */
+/**
+ * Gate words for a table row: "7 / 7 met", "5 / 7 met · performance timed out". A finished
+ * Candidate without a plan reads "No plan recorded" (with its status reason), never as met.
+ */
 export function gateWords(item: VerifiedCandidate): string {
   const { tally, candidate } = item;
   if (tally.total === 0) {
-    return isActive(candidate) ? "plan pending" : (candidate.statusReason ?? "no required checks");
+    if (isActive(candidate)) return "plan pending";
+    if (candidate.plan === null) {
+      return candidate.statusReason
+        ? `No plan recorded · ${candidate.statusReason}`
+        : "No plan recorded";
+    }
+    return candidate.statusReason ?? "no required checks";
   }
   const head = `${tally.met} / ${tally.total} met`;
   const problem = tally.failed[0] ?? tally.gaps[0];
   if (problem) {
     const more = tally.failed.length + tally.gaps.length - 1;
-    const reason = REASON_WORDS[problem.reason ?? "missing"];
+    const reason = REASON_WORDS[problem.reason ?? "missing"] ?? problem.reason;
     return `${head} · ${problem.kind}: ${reason}${more > 0 ? ` · +${more} more` : ""}`;
   }
   if (tally.pending.length > 0) return `${head} · ${tally.pending.length} pending`;
