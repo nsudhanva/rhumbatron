@@ -67,3 +67,8 @@ infrastructure/terraform/.terraform-check/
 
 # TanStack Start generated files
 .tanstack/
+
+# Playwright UI suite and Lighthouse output
+e2e/.auth/
+e2e/.results/
+e2e/.lighthouse/
