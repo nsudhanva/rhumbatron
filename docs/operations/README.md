@@ -18,7 +18,7 @@ These runbooks tell operators how to run Rhumbatron environments, infrastructure
 | [Pause & Resume](./pause-resume.md) | Global `paused` switch that stops background cron sweeps and container execution to save quota. | `bun run tf:plan:prod` / `tf:apply:prod` |
 | [Cleanup & Retention](./cleanup.md) | Smoke-test Project cleanup, the Project archive pipeline, daily fork sweeps, and R2 retention lifecycles. | `bun run cleanup:projects`<br>`bun run cleanup:projects --dry-run` |
 | [Costs & Budgets](./costs.md) | Cost reports, guard layers, budget ceilings (Sandbox, Browser Run, Anthropic spend), account budget alerts, call quotas, and recovery after a cap trips. | `bun run cost:report`<br>`bun run cost:report --alerts-only` |
-| [Application Releases](./release.md) | Legacy Workers Builds releases, live app releases on prod, and smoke verification. | `bun run smoke:release` |
+| [Application Releases](./release.md) | Live app releases on prod, release targets, and release checks. | `bun run smoke:release`<br>`bun run e2e prod` |
 | [Resource Naming](./naming.md) | Conventions for naming and tagging Cloudflare resources and Workers. | `bun run check:guardrails` |
 
 ---
@@ -27,12 +27,11 @@ These runbooks tell operators how to run Rhumbatron environments, infrastructure
 
 - [ADR 0004: Resource organization and bootstrap credentials](../adr/0004-resource-organization-and-bootstrap-credentials.md)
 - [ADR 0005: Durable Object Worker deploys](../adr/0005-durable-object-worker-deploys.md)
-- [ADR 0007: OpenRouter free models](../adr/0007-openrouter-free-models.md)
 - [ADR 0010: Artifacts project source](../adr/0010-artifacts-project-source.md)
 - [ADR 0011: Sandbox workspaces](../adr/0011-sandbox-workspaces.md)
 - [ADR 0012: Sandbox worker](../adr/0012-sandbox-worker.md)
 - [ADR 0014: Workers Builds connection to Artifacts](../adr/0014-workers-builds-artifacts-connection.md)
-- [ADR 0016: Gemini overflow](../adr/0016-gemini-overflow.md)
 - [ADR 0017: Prod environment](../adr/0017-prod-environment.md)
 - [ADR 0018: Release via Workers Builds](../adr/0018-release-via-workers-builds.md)
 - [ADR 0019: Runaway-billing guards](../adr/0019-runaway-billing-guards.md)
+- [ADR 0020: Live apps on Dynamic Workers](../adr/0020-live-apps-dynamic-workers.md)

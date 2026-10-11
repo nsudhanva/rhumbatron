@@ -1,8 +1,8 @@
 # Shared requests demo
 
-This runbook shows two people who change one live Project at the same time. Alice owns the Project and Bob is a collaborator. Four requests run in parallel, and one pair of requests conflicts. The design is in [phase-17a-shared-projects.md](../plans/phase-17a-shared-projects.md). The API is in [protocols](../protocols/README.md#shared-projects).
+This runbook shows two people who change one live Project at the same time. Alice owns the Project and Bob is a collaborator. Four requests run in parallel, and one pair of requests conflicts. The design is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
 
-Use production (`https://rhumbatron.com`). You need two accounts with different email addresses and two browser profiles. Alice must own a live Project that has the Daily Planner app.
+Use production (`https://rhumbatron.com`). You need two accounts with different email addresses and two browser profiles. Alice must own a Project whose live app is a daily planner: one section per day with checklist items.
 
 ```mermaid
 sequenceDiagram
@@ -73,7 +73,7 @@ If Bob calls an owner-only route, the API returns 403.
 2. On the Conflicting requests card, click "Use this instead".
 3. Make sure that a new Change opens. It has the goal and the requester of C2.
 4. Make sure that the new Change links to C2 (`supersedesChangeId`) and that its outcome kind is `replaces`.
-5. If C1 has not promoted, make sure that C1 shows "Replaced by owner". If C1 has promoted, the new Change builds on the promoted state.
+5. If C1 has not promoted, make sure that C1 is cancelled with the reason that the owner replaced it. If C1 has promoted, the new Change builds on the promoted state.
 6. Wait for the new Change to finish. Open the live app and make sure that the light yellow background shows.
 
 An override works only on a Change with the status `not_selected` or `awaiting_owner`. Any other status returns 409. Bob cannot override. The API returns 403.

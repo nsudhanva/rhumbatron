@@ -33,7 +33,7 @@ Bundle the Worker code locally before you plan or deploy:
 bun run cf:bundle
 ```
 
-- The script compiles all deployables through Turbo: `apps/web`, `workers/api`, `workers/coordinator`, `workers/agents`, `workers/event-router`, `workers/integration`, `workers/indexer`, and `workers/sandbox`.
+- The script bundles all deployables with `wrangler deploy --dry-run` (local bundling only): `apps/web`, `apps/docs` (assets only), `workers/api`, `workers/coordinator`, `workers/agents`, `workers/event-router`, `workers/integration`, `workers/indexer`, `workers/sandbox`, and `workers/apps`.
 - It writes `dist/bundles/manifest.json` with the bundle file lists and SHA-256 hashes.
 - Bundles do not depend on the environment. Terraform bindings supply the environment configuration.
 
@@ -41,7 +41,7 @@ bun run cf:bundle
 
 ## 2. Deploy
 
-Prod is the only remote environment ([ADR 0024](../adr/0024-retire-dev-environment.md)). Run local checks first (`bun run check`), because every change deploys to prod.
+Prod is the only remote environment. Run local checks first (`bun run check`), because every change deploys to prod.
 
 ### Production (`prod`)
 
@@ -73,7 +73,7 @@ Set these switches in `infrastructure/terraform/envs/prod/main.tf`.
 
 - **Location**: `locals { bootstrap = false }` in `envs/prod/main.tf`.
 - **Purpose**: The switch breaks the circular dependency between `coordinator_worker` and `event_router_worker` ([ADR 0005](../adr/0005-durable-object-worker-deploys.md), [ADR 0017](../adr/0017-prod-environment.md)). It also selects the first Durable Object migrations.
-- **First apply on a new environment**:
+- **First apply on a new account**:
   1. Set `bootstrap = true`.
   2. Plan and apply (`bun run tf:plan:prod` && `bun run tf:apply:prod`).
      - This apply leaves out the coordinator's `EVENT_ROUTER` service binding.
@@ -85,13 +85,15 @@ Set these switches in `infrastructure/terraform/envs/prod/main.tf`.
 
 ### `attach_apex` Switch
 
-- **Location**: `locals { attach_apex = true }` in `envs/prod/main.tf`. The cutover is complete. The value is `true`, and the apex serves the prod web Worker.
+- **Location**: `locals { attach_apex = true }` in `envs/prod/main.tf`.
 - **Purpose**: The switch attaches the apex domains (`rhumbatron.com` and `www.rhumbatron.com`) to the production web Worker ([ADR 0017](../adr/0017-prod-environment.md)).
-- **Cutover sequence**:
-  1. Keep `attach_apex = false` during the initial deployment. If a DNS record exists for the hostname, Cloudflare rejects the Worker custom domain.
-  2. Delete the legacy DNS records at `rhumbatron.com`.
-  3. Set `attach_apex = true`.
-  4. Run the plan, and then apply it. The apply attaches the apex custom domain.
+- **Rule**: A Worker custom domain cannot take a hostname that has its own DNS record. Delete such a record before you set the switch to `true`.
+
+### `apps.routing` Switch
+
+- **Location**: `locals.apps.routing = true` in `envs/prod/main.tf`.
+- **Purpose**: The switch adds the proxied wildcard DNS record, the wildcard route `*.rhumbatron.com/*` to the apps Worker, and `APPS_DOMAIN` on the API ([ADR 0020](../adr/0020-live-apps-dynamic-workers.md)).
+- **Rule**: A Workers route runs before a Worker custom domain on the same hostname. `locals.apps.bypass_hosts` lists every custom-domain host (`api`, `www`, `docs`). Terraform adds a route without a Worker for each one. Add every new proxied subdomain to this list before it goes live.
 
 ---
 

@@ -2,7 +2,7 @@
 
 This runbook maps the AGENTS.md section 55 sequence to the prod UI (`https://rhumbatron.com`) and API (`https://api.rhumbatron.com`).
 
-Prod is the only remote environment ([ADR 0024](../adr/0024-retire-dev-environment.md)). Run the sequence by hand in the prod UI, with a real model-driven Change. No script publishes the fixture Designs A and B ([wishlist-fixture.md](wishlist-fixture.md)).
+Prod is the only remote environment. Run the sequence by hand in the prod UI, with a real model-driven Change. For a repeatable conflict, publish the fixture Designs A and B on an unplanned Change ([wishlist-fixture.md](wishlist-fixture.md)).
 
 Deploys use Terraform only: `bun run cf:bundle`, `bun run tf:plan:prod`, `bun run tf:apply:prod`, and `bun run tf:drift:prod`.
 
@@ -11,8 +11,9 @@ Deploys use Terraform only: `bun run cf:bundle`, `bun run tf:plan:prod`, `bun ru
 1. Make sure that prod is not paused. The value must be `locals.paused = false` in `infrastructure/terraform/envs/prod/main.tf`.
 2. If prod is paused, set the value to `false` and apply with Terraform ([pause-resume.md](../operations/pause-resume.md)).
 3. Run `bun run smoke:prod`.
-4. Optional: Run `bun run cleanup:projects --dry-run`, then `bun run cleanup:projects`, to remove smoke-test Projects.
-5. After testing, pause compute if it is not needed.
+4. Create the `Acme Shop` Project. The UI creates empty Projects only. Send `POST /v1/fixtures/projects` with `{"name": "Acme Shop", "slug": "acme-shop-demo"}` and a session token. The route seeds the Acme Shop baseline at Canonical Generation `S0`. It answers 404 where `FIXTURES_ENABLED` is not `true`. Terraform sets it to `true` in prod.
+5. Optional: Run `bun run cleanup:projects --dry-run`, then `bun run cleanup:projects`, to remove smoke-test Projects. The command keeps `acme-shop-demo`.
+6. After testing, pause compute if it is not needed.
 
 Cost and limits:
 - Sandbox: 15 hours per month in prod.
@@ -72,5 +73,5 @@ Cost and limits:
 - Advisory Claims: Agents use advisory Claims to signal intent on semantic resources without blocking.
 - Stale promotions: If another Candidate advanced the Canonical State first, compare-and-swap rejects the promotion.
 - Missing checks: Rhumbatron never treats an incomplete or timed-out check (`not_checked`) as a pass.
-- Spend cap: code stops Claude spend at 15 USD per calendar month on dev (ADR 0021). The Sandbox cap is 5 hours per month in dev and 15 in prod.
+- Spend cap: code stops Claude spend at 10 USD per calendar month (ADR 0021). The Sandbox cap is 15 hours per month.
 - Leftover compute: Run `bun run cost:report` to check active resources and spend. Run `bun run cleanup:projects` to remove test Projects.

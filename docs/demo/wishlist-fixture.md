@@ -81,14 +81,15 @@ touched). The shop root has no `data-testid="wishlist"`, so the browser check ru
    `system:fixture`.
 3. `POST /v1/changes/:changeId/candidates` takes an optional `{"changeSetIds": [...]}` subset, so
    design A and design B become separate Candidates. Without a body it composes every proposed
-   ChangeSet, as before.
+   ChangeSet.
 
 Each Workspace fork has a `task_runs` row, so Project cleanup and the fork sweep delete it.
 
-## Commands
+## Setup
 
-The fixture Designs A and B are in `fixtures/wishlist`. No script publishes them
-([ADR 0024](../adr/0024-retire-dev-environment.md)).
+1. Create the Acme Shop Project with `POST /v1/fixtures/projects` (see [runbook.md](runbook.md)).
+2. Create a Change on it with `startPlanning: false`, so the Root Planner does not run.
+3. Send `POST /v1/changes/:changeId/fixture-changesets` with `{"design": "both"}`.
 
 ## Limits
 

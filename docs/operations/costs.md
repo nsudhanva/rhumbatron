@@ -60,7 +60,7 @@ flowchart LR
 
 ### Sandbox Container Usage (`SANDBOX_MONTHLY_SECONDS`)
 
-- **Allowance**: `SANDBOX_MONTHLY_SECONDS = 54000` (15 hours/month in prod), inside the ~25 included basic-instance hours of Workers Paid ([ADR 0017](../adr/0017-prod-environment.md)). Prod is the only environment ([ADR 0024](../adr/0024-retire-dev-environment.md)).
+- **Allowance**: `SANDBOX_MONTHLY_SECONDS = 54000` (15 hours/month in prod), inside the ~25 included basic-instance hours of Workers Paid ([ADR 0017](../adr/0017-prod-environment.md)).
 - **Idle timeout**: Agent Workspace Sandboxes sleep after 2 idle minutes (`workers/agents/src/workspace.ts`). Candidate check Sandboxes sleep after 2 idle minutes (`workers/integration/src/candidate-sandbox.ts`).
 - **Period**: The D1 meter counts per UTC calendar month.
 - **Instance count**: `max_instances = 1`.
@@ -85,7 +85,7 @@ flowchart LR
 
 - **Daily agent call cap**: 400 calls/day (`AGENT_DAILY_CALL_CAP = 400`).
 - **Workers AI Clef-flash**: 200 calls/day (under the 10,000 daily Neurons allowance).
-- **`MODEL_PROVIDER`**: `anthropic`. OpenRouter and Gemini on Vertex AI are removed, so there is no GCP spend.
+- **`MODEL_PROVIDER`**: `anthropic`. Terraform rejects any other value.
 - **`ALLOW_OPUS`**: `false` by default. The opus tier then runs on Sonnet 5.5, and the Decision Receipt records the downgrade. Set `allow_opus = true` in Terraform only with the owner's approval.
 
 ---

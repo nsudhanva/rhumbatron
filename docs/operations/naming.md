@@ -13,7 +13,7 @@ rhumbatron-<component>-<env>
 
 `bun run check:guardrails` rejects Terraform resource names that break this pattern.
 
-## Current and planned names
+## Names
 
 | Resource | prod | global |
 |---|---|---|
@@ -47,10 +47,10 @@ Terraform applies these standard tags wherever it supports them.
 | `component` | the name's component part |
 | `managed-by` | `terraform` |
 
-- Workers: Terraform applies them now as `key:value` strings through `cloudflare_worker.tags`.
+- Workers: Terraform applies them as `key:value` strings through `cloudflare_worker.tags`.
 - D1, KV, R2, Queues, AI Gateway, Vectorize, Durable Object namespaces: Cloudflare Resource Tagging
-  supports them, but provider 5.27 has no resource for it. Apply the tags when first-party support
-  exists (ADR 0004).
+  supports them, but provider 5.27 has no resource for it, so these resources carry no tags
+  (ADR 0004).
 
 ## Local
 

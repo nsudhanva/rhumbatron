@@ -8,9 +8,9 @@ the dashboard, `wrangler deploy`, or direct API writes. Read every plan. Never u
 
 | Path | State key | Purpose |
 |---|---|---|
-| `bootstrap/` | `bootstrap/terraform.tfstate` | R2 state bucket `rhumbatron-terraform-state-global` only. The first apply used local state (see Bootstrap). |
+| `bootstrap/` | `bootstrap/terraform.tfstate` | R2 state bucket `rhumbatron-terraform-state-global` only. The first apply uses local state (see Bootstrap). |
 | `envs/global/` | `global/terraform.tfstate` | Zone-wide and account-wide singletons: `rhumbatron.com` zone settings (TLS, `ssl = "strict"`) and the billing budget alerts adapter (ADR 0019). Prod does not own these. |
-| `envs/prod/` | `prod/terraform.tfstate` | Prod environment, the only remote environment (ADR 0017, ADR 0024). Applied. Switches: `paused`, `bootstrap`, `attach_apex`. |
+| `envs/prod/` | `prod/terraform.tfstate` | Prod environment, the only remote environment (ADR 0017). Switches: `paused`, `bootstrap`, `attach_apex`, `apps.routing`. |
 | `modules/` | - | Shared modules. See Modules. |
 
 All three roots use the S3 backend on R2, with `use_lockfile = true`.
@@ -30,20 +30,22 @@ flowchart TB
 
 ## Modules
 
-| Module | Status | Owns |
-|---|---|---|
-| `worker` | Implemented | One Worker: version per bundle hash, 100 percent deployment, custom domains, cron triggers. |
-| `durable-worker` | Implemented | One Worker that hosts Durable Object classes, as a full script upload (ADR 0005). |
-| `dns` | Implemented | Reads the `rhumbatron.com` zone. Outputs `zone_id` and `zone_name`. Manages no records. |
-| `state` | Implemented | D1 `rhumbatron-control-<env>`, R2 `rhumbatron-evidence-<env>` with lifecycle rules, KV `rhumbatron-config-<env>`. |
-| `async` | Implemented | Six Queues `rhumbatron-<purpose>-<env>`. |
-| `ai` | Implemented | AI Gateway `rhumbatron-models-<env>` with the Anthropic spend limit (ADR 0021). |
-| `security` | Implemented | Zone settings only. WAF, rate limits, Access, and Turnstile come after the protected endpoint exists. |
-| `code-storage` | Placeholder | No resources. |
-| `observability` | Placeholder | No resources. Log settings are in `worker` and `durable-worker`. |
+| Module | Owns |
+|---|---|
+| `worker` | One Worker: version per bundle hash, 100 percent deployment, custom domains, cron triggers. |
+| `durable-worker` | One Worker that hosts Durable Object classes, as a full script upload (ADR 0005). |
+| `dns` | Reads the `rhumbatron.com` zone. Outputs `zone_id` and `zone_name`. Manages no records. |
+| `state` | D1 `rhumbatron-control-<env>`, R2 `rhumbatron-evidence-<env>` with lifecycle rules, KV `rhumbatron-config-<env>`. |
+| `async` | Six Queues `rhumbatron-<purpose>-<env>`. |
+| `ai` | AI Gateway `rhumbatron-models-<env>` with the Anthropic spend limit (ADR 0021). |
+| `security` | Zone settings only. |
+| `code-storage` | No resources. |
+| `observability` | No resources. Log settings are in `worker` and `durable-worker`. |
 
 Each env root keeps some resources inline: queue consumers, Workflows, the release target Worker
-`rhumbatron-acme-shop-prod`, Clerk DNS records (prod), and the adapters below.
+`rhumbatron-acme-shop-prod`, the docs Worker `rhumbatron-docs-prod` (`envs/prod/docs.tf`, assets only,
+`docs.rhumbatron.com`), the live app wildcard DNS record and routes, Clerk DNS records (prod), and
+the adapters below.
 
 ## Environments
 
@@ -56,15 +58,15 @@ Each env root keeps some resources inline: queue consumers, Workflows, the relea
 | API hostname | `localhost:8787` | `api.rhumbatron.com` |
 | R2 `events/` retention | none | 365 days |
 | R2 `evidence/` retention | none | kept |
-
 | R2 `tmp/` retention | none | 7 days |
+| R2 `app-previews/` retention | none | 7 days |
 | Clerk instance | development | production (ADR 0017) |
 | `MODEL_PROVIDER` | - | `anthropic` |
 | Anthropic budget per calendar month | - | $10 |
 | `ALLOW_OPUS` | - | `false` |
 | `www` | none | Custom domain of the prod web Worker; the Worker returns 301 to the apex |
 
-Prod is the only remote environment (ADR 0024). Local work uses `wrangler dev`.
+Prod is the only remote environment. Local work uses `wrangler dev`.
 
 Hostnames stay one label deep so Universal SSL covers them.
 
@@ -76,12 +78,14 @@ Every Worker uses the same binding names in `wrangler.jsonc` (local) and Terrafo
 |---|---|---|
 | `DB` | D1 | `rhumbatron-control-<env>` |
 | `EVIDENCE` | R2 | `rhumbatron-evidence-<env>` |
-| `CONFIG` | KV | `rhumbatron-config-<env>` (created; no Worker binds it yet) |
+| `CONFIG` | KV | `rhumbatron-config-<env>` (integration Worker) |
 | `MEMORY` | Vectorize (temporary adapter, ADR 0003) | `rhumbatron-memory-<env>` |
 | `EVENTS_00` .. `EVENTS_07` | K2 producers (coordinator) | `rhumbatron_events_NN_<env>` |
 | `ARTIFACTS` | Artifacts namespace (created on first use, ADR 0010) | `rhumbatron-projects-<env>` |
 | `SANDBOX` | Sandbox class in the Sandbox Worker (ADR 0012) | `rhumbatron-sandbox-<env>` |
-| `METRICS` | Analytics Engine dataset | `rhumbatron_metrics_<env>` |
+| `METRICS` | Analytics Engine dataset (agents, indexer) | `rhumbatron_metrics_<env>` |
+| `EVENT_METRICS` | Analytics Engine dataset (event router) | `rhumbatron_event_metrics_<env>` |
+| `LOADER`, `APP_DATA` | Dynamic Worker loader and app data Durable Object, in the apps Worker (ADR 0020) | `rhumbatron-apps-<env>` |
 | Queue producers | Queues | `rhumbatron-<purpose>-<env>` for agent-wakeups, integration, verification, indexing, release, dead-letter |
 
 R2 lifecycle rules are prefix-based. Write expiring objects under `events/`, `evidence/`, or
@@ -101,13 +105,12 @@ in the environment wins. The wrapper refuses `-auto-approve`.
 | `TF_VAR_alert_email` | `rhumbatron-alert-email` | global |
 | `TF_VAR_clerk_secret_key` | `rhumbatron-clerk-secret-key-prod` | prod |
 | `TF_VAR_clerk_publishable_key` | `rhumbatron-clerk-publishable-key-prod` | prod |
-| `TF_VAR_k2_consumer_token` | `rhumbatron-k2-consumer-token-dev` (original item name, kept) | prod |
+| `TF_VAR_k2_consumer_token` | `rhumbatron-k2-consumer-token-dev` | prod |
 | `TF_VAR_anthropic_api_key` | `rhumbatron-anthropic-api-key` | prod |
 | `TF_VAR_anthropic_workspace_id` | `rhumbatron-anthropic-workspace-id` (not secret) | prod |
 | `TF_VAR_builds_api_token` | `rhumbatron-cloudflare-builds-token` | prod |
 
-Prod uses the K2 and Builds items (ADR 0017) and the Anthropic items (ADR 0021). The K2 item keeps its original `-dev` name. See ADR 0004 for token
-scopes.
+Prod uses the K2 and Builds items (ADR 0017) and the Anthropic items (ADR 0021). See ADR 0004 for token scopes.
 
 ## Backend configuration
 
@@ -153,12 +156,13 @@ these scripts or the API directly.
 | K2 account limit check (plan time) | `data.external.k2_inventory` | `k2-read.ts` (`mode = inventory`) | prod | 0017 |
 | Vectorize index | `terraform_data.vectorize_index`, `terraform_data.vectorize_index_teardown` | `vectorize-sync.ts` | prod | 0003 |
 | Sandbox Worker and container application | `terraform_data.sandbox_worker`, `terraform_data.sandbox_worker_teardown` | `sandbox-deploy.ts` | prod | 0012 |
+| Apps Worker (Dynamic Worker loader binding) | `terraform_data.apps_worker`, `terraform_data.apps_worker_teardown` | `apps-deploy.ts` | prod | 0020 |
 | D1 schema migrations | `terraform_data.d1_migrations` | `d1-migrate.ts` | prod | AGENTS.md 11.6 |
 | Billing budget alerts | `terraform_data.budget_alerts` | `budget-alerts.ts` (operator `cf` CLI login) | global | 0019 |
 
-K2 never deletes streams. Vectorize and the Sandbox Worker delete only on a real destroy, through
+K2 never deletes streams. Vectorize, the Sandbox Worker and the apps Worker delete only on a real destroy, through
 their teardown resources. Artifacts has no adapter: the namespace is created on first use through
-the `ARTIFACTS` binding (ADR 0010). The Workers Builds connection has no API path yet (ADR 0014,
+the `ARTIFACTS` binding (ADR 0010). The Workers Builds connection has no API path (ADR 0014,
 ADR 0018).
 
 ```mermaid
@@ -181,10 +185,10 @@ file in `migrations/d1` changes. See [`migrations/d1/README.md`](../../migration
 validates `modules/worker` and `modules/durable-worker` directly. It does not contact the state
 backend and does not create resources.
 
-## Bootstrap (done once)
+## Bootstrap
 
-The bootstrap state is already in R2. These are the steps that created it. The Terraform token and
-the backend key were created with the `cf` CLI (ADR 0004).
+A fresh account needs these steps once. The Terraform token and the backend key are created with the
+`cf` CLI (ADR 0004).
 
 1. Apply `bootstrap/` with local state. It creates only the state bucket (`prevent_destroy`).
 2. Create the bucket-scoped backend key with the `cf` CLI and store it in the Keychain.

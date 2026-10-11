@@ -29,6 +29,7 @@ The output shows the listed Projects, the count of matched smoke Projects, and t
 
 ```sh
 bun run cleanup:projects
+bun run cleanup:projects --all   # every active Project of the smoke user, fixtures included
 ```
 
 The script calls `DELETE /v1/projects/:id` for each matched Project with the Clerk smoke user credentials.
