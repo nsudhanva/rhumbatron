@@ -15,8 +15,8 @@ export const MAX_CALLS_PER_RUN: Record<ModelTier, number> = { haiku: 16, sonnet:
 export const AGENT_DAILY_CALL_CAP = 400;
 
 /**
- * Fallback for the `ANTHROPIC_MONTHLY_BUDGET_USD` binding: the prod budget ($10 per calendar
- * month; Terraform `envs/prod`), so a Worker without the binding never gets more than prod.
+ * Fallback for the `ANTHROPIC_MONTHLY_BUDGET_USD` binding: a low safe budget ($10 per calendar
+ * month), so a Worker without the binding never spends the prod budget (Terraform `envs/prod`).
  */
 export const ANTHROPIC_MONTHLY_BUDGET_FALLBACK_USD = 10;
 

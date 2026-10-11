@@ -26,7 +26,7 @@ variable "max_stored_logs" {
 }
 
 variable "spend_limit_usd" {
-  description = "Gateway spend limit on Anthropic per 30 days. Prod passes its monthly budget (ADR 0021: 10)."
+  description = "Gateway spend limit on Anthropic per 30 days. Prod passes its monthly budget (ADR 0021: 100)."
   type        = number
   default     = 10
 }

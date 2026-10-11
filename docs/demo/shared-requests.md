@@ -83,7 +83,7 @@ An override works only on a Change with the status `not_selected` or `awaiting_o
 - Each request has a budget of about 1 USD.
 - A Sonnet review runs for each pair of overlapping requests. One review costs about one cent.
 - The demo has one overlapping pair, so it adds about one cent.
-- Model spend counts against the monthly cap of 10 USD for prod (ADR 0021). Run `bun run cost:report` before and after the demo ([costs.md](../operations/costs.md)).
+- Model spend counts against the monthly cap of 100 USD for prod (ADR 0021). Run `bun run cost:report` before and after the demo ([costs.md](../operations/costs.md)).
 
 ## Cleanup
 

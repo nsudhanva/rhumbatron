@@ -51,7 +51,7 @@ section 7.3, rule 50), and every account-wide limit is shared with those project
   answer, so the AGENTS.md section 55 demo runs on prod. Without the binding the routes answer in
   `local` only.
 - `VITE_CLERK_PUBLISHABLE_KEY` is a `plain_text` binding on the web Worker (ADR 0002).
-- `SANDBOX_MONTHLY_SECONDS` is 54,000 (15 hours). `BROWSER_DAILY_SECONDS` is 250.
+- `SANDBOX_MONTHLY_SECONDS` is 72,000 (20 hours). `BROWSER_DAILY_SECONDS` is 960. Both are 80 % of the Workers Paid included allowance.
 - `rhumbatron-acme-shop-prod` is the Worker for the Workers Builds release path (ADR 0018). Terraform
   creates the Worker. Workers Builds owns its versions.
 
@@ -95,8 +95,8 @@ this table when a resource, binding, or code path changes.
 | Queues | 10,000 ops/day | 6 queues, 6 consumers | 0 ops idle; ~3 ops per woken Task. |
 | K2 | 20 streams, 10 GB | 8 streams | Billing disabled in beta. |
 | Workflows | 3,000 steps/day | 3 workflows | ~7 steps per Change, 10 to 14 per Candidate, ~8 per release. |
-| Sandbox / Containers | 25 GiB-h memory, 375 vCPU-min, 200 GB-h disk / month | 1 app, `basic`, `max_instances = 1`, 15 h/month meter | |
-| Browser Run | 10 min/day (free figure) | 250 s/day guard | |
+| Sandbox / Containers | 25 GiB-h memory, 375 vCPU-min, 200 GB-h disk / month | 1 app, `basic`, `max_instances = 1`, 20 h/month meter | |
+| Browser Run | 10 browser hours / month | 960 s/day guard | |
 | Workers AI | 10,000 Neurons/day | Clef-flash cap 200 calls/day; embeddings (ADR 0003) | |
 | AI Gateway | free core features | 1 gateway, 10,000 stored logs | |
 | Analytics Engine | 100,000 points/day | dataset `rhumbatron_metrics_prod` | |

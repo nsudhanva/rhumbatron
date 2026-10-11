@@ -115,7 +115,7 @@ sequenceDiagram
 | Reservation on open | 300 s | 900 s |
 | Idle tail before sleep | 120 s (`sleepAfter` 2 min) | 120 s (`sleepAfter` 2 min) |
 | Concurrency | 4 open workspaces per Change | Checks run one after another in one workflow |
-| Monthly meter | `SANDBOX_MONTHLY_SECONDS` (54,000 s = 15 h) | Same meter |
+| Monthly meter | `SANDBOX_MONTHLY_SECONDS` (72,000 s = 20 h) | Same meter |
 
 A Sandbox loss does not lose committed work.
 The workspace restores from the same fork, base, and stacked merges, and checks the recorded start commit (section 42.5).

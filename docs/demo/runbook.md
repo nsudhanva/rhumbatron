@@ -16,9 +16,9 @@ Deploys use Terraform only: `bun run cf:bundle`, `bun run tf:plan:prod`, `bun ru
 6. After testing, pause compute if it is not needed.
 
 Cost and limits:
-- Sandbox: 15 hours per month in prod.
-- Browser Run: 250 seconds per day.
-- Claude (Anthropic): code stops model work at 10 USD per calendar month (ADR 0021).
+- Sandbox: 20 hours per month in prod.
+- Browser Run: 960 seconds per day.
+- Claude (Anthropic): code stops model work at 100 USD per calendar month (ADR 0021).
 - Check usage with `bun run cost:report` ([costs.md](../operations/costs.md)).
 
 ## UI routes
@@ -73,5 +73,5 @@ Cost and limits:
 - Advisory Claims: Agents use advisory Claims to signal intent on semantic resources without blocking.
 - Stale promotions: If another Candidate advanced the Canonical State first, compare-and-swap rejects the promotion.
 - Missing checks: Rhumbatron never treats an incomplete or timed-out check (`not_checked`) as a pass.
-- Spend cap: code stops Claude spend at 10 USD per calendar month (ADR 0021). The Sandbox cap is 15 hours per month.
+- Spend cap: code stops Claude spend at 100 USD per calendar month (ADR 0021). The Sandbox cap is 20 hours per month.
 - Leftover compute: Run `bun run cost:report` to check active resources and spend. Run `bun run cleanup:projects` to remove test Projects.

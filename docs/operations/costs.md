@@ -46,9 +46,9 @@ bun run cost:report
 ```mermaid
 flowchart LR
   subgraph prod[prod]
-    ps[Sandbox 15 h/month]
-    pb[Browser Run 250 s/day]
-    pv[Anthropic 10 USD / month]
+    ps[Sandbox 20 h/month]
+    pb[Browser Run 960 s/day]
+    pv[Anthropic 100 USD / month]
   end
   subgraph each[prod limits]
     ac[Calls per day: 400 agent,<br/>200 Clef-flash]
@@ -60,7 +60,7 @@ flowchart LR
 
 ### Sandbox Container Usage (`SANDBOX_MONTHLY_SECONDS`)
 
-- **Allowance**: `SANDBOX_MONTHLY_SECONDS = 54000` (15 hours/month in prod), inside the ~25 included basic-instance hours of Workers Paid ([ADR 0017](../adr/0017-prod-environment.md)).
+- **Allowance**: `SANDBOX_MONTHLY_SECONDS = 72000` (20 hours/month in prod), 80 % of the 25 included basic-instance hours of Workers Paid ([ADR 0017](../adr/0017-prod-environment.md)).
 - **Idle timeout**: Agent Workspace Sandboxes sleep after 2 idle minutes (`workers/agents/src/workspace.ts`). Candidate check Sandboxes sleep after 2 idle minutes (`workers/integration/src/candidate-sandbox.ts`).
 - **Period**: The D1 meter counts per UTC calendar month.
 - **Instance count**: `max_instances = 1`.
@@ -68,13 +68,13 @@ flowchart LR
 ### Browser Run (`BROWSER_DAILY_SECONDS`)
 
 - **Free allowance**: 10 minutes/day (600 seconds/day).
-- **Prod cap** ([ADR 0017](../adr/0017-prod-environment.md)): `BROWSER_DAILY_SECONDS = 250` (250 seconds/day).
+- **Prod cap** ([ADR 0017](../adr/0017-prod-environment.md)): `BROWSER_DAILY_SECONDS = 960` (960 seconds/day, 80 % of the 10 included browser hours per month).
 - **Per-session limits**: 55 seconds maximum per check. At most 2 browser checks per Candidate.
 
 ### Anthropic Spend (`ANTHROPIC_MONTHLY_BUDGET_USD`)
 
 - **Ceiling**: Code enforces it on the prod D1 meter (`usage_counters`, counter `anthropic-usd-micro` per calendar month, in micro-USD) ([ADR 0021](../adr/0021-anthropic-model-provider.md)).
-  - Prod: 10 USD per calendar month. Terraform rejects a higher value.
+  - Prod: 100 USD per calendar month. Terraform rejects a higher value.
 - **How**: Every model call reserves an estimate first (one conditional D1 statement), then settles to its exact cost from the response usage fields, cache reads and writes included. A refused reservation is a budget stop. No other provider is tried.
 - **Second line**: The AI Gateway spend limit on the `anthropic` provider uses the same value per 30 days. Cloudflare documents it for BYOK and Unified Billing requests, so it may not count requests that carry their own key.
 - **Worker binding**: The agents, integration, and API Workers get the value through the `ANTHROPIC_MONTHLY_BUDGET_USD` plain text binding.
@@ -96,6 +96,6 @@ flowchart LR
 |---|---|---|
 | **Anthropic monthly budget ($10)** | The meter refuses the reservation, or the gateway or Anthropic refuses for spend or billing. The Task is `blocked` and the Change `budget_blocked` (`monthly_model_spend`). | 1. Run `bun run cost:report` and check the AI Gateway logs.<br>2. The meter resets at the start of the next UTC calendar month.<br>3. A larger budget needs the owner's approval, a new validation bound in `envs/prod/variables.tf`, a plan, and an apply. |
 | **Agent Daily Calls (400 calls/day)** | Agent runs pause and reject further model calls. | Look for looping agent Tasks or unusual prompt churn. The cap resets at 00:00 UTC. |
-| **Sandbox Monthly Seconds (54,000 s)** | The Sandbox refuses new containers. Tasks that need a container fail. | Look for unclosed containers or long-running tests. The meter resets at the start of each UTC calendar month. To save budget, set `paused = true`. |
+| **Sandbox Monthly Seconds (72,000 s)** | The Sandbox refuses new containers. Tasks that need a container fail. | Look for unclosed containers or long-running tests. The meter resets at the start of each UTC calendar month. To save budget, set `paused = true`. |
 | **Account budget alert (10, 25, 100 USD)** | The account emails the owner. Nothing stops by itself. | Run `bun run cost:report`, find the source, and set `paused = true` in `envs/prod`. |
-| **Browser Run Daily Seconds (250 s)** | Browser Run rejects sessions, or sessions fail. | Candidate browser checks fail or fall back to non-browser checks. The daily quota resets at 00:00 UTC. |
+| **Browser Run Daily Seconds (960 s)** | Browser Run rejects sessions, or sessions fail. | Candidate browser checks fail or fall back to non-browser checks. The daily quota resets at 00:00 UTC. |

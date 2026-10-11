@@ -9,7 +9,7 @@ Anthropic Claude (ADR 0021).
 | `environment` | - | `dev` or `prod`. |
 | `requests_per_minute` | `20` | Gateway rate limit. |
 | `max_stored_logs` | `10000` | Stored logs before the oldest are deleted. |
-| `spend_limit_usd` | `10` | Spend limit on `anthropic` per 30 days. Each env passes its monthly budget: dev 15, prod 10 (ADR 0021). Best effort: the code meter is the stop. |
+| `spend_limit_usd` | `10` | Spend limit on `anthropic` per 30 days. Prod passes its monthly budget: 100 (ADR 0021). Best effort: the code meter is the stop. |
 
 Output: `gateway_id`.
 

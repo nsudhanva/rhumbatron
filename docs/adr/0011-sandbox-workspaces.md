@@ -36,9 +36,9 @@ container application resource. ADR 0012 describes the Terraform adapter that de
   120 s idle tail.
 - One monthly meter in D1 `usage_counters` (`sandbox-seconds`, keyed by month) serves both. A
   workspace session reserves 300 s before it opens. When it closes, it settles its wall time plus a
-  120 s idle tail. The `SANDBOX_MONTHLY_SECONDS` binding sets the cap: 54,000 s (15 hours) in prod.
+  120 s idle tail. The `SANDBOX_MONTHLY_SECONDS` binding sets the cap: 72,000 s (20 hours) in prod.
   The code fallback without the binding is 36,000 s. Past the cap, the meter refuses new sessions.
-- 15 hours of `basic` is about 15 GiB-hours of the 25 GiB-hours of memory that Workers Paid includes.
+- 20 hours of `basic` is 20 GiB-hours, 80 % of the 25 GiB-hours of memory that Workers Paid includes.
 
 ## Diagram
 

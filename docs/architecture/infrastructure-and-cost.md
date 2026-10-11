@@ -131,7 +131,7 @@ flowchart TB
   L3["3. Causal caps<br/>1,000 commands per Change per day,<br/>Clef-flash 200 calls per day"]
   L4["4. Section 44 limits<br/>8 agents, 4 Sandboxes, 3 Candidates,<br/>2 attempts per tier, 2 browser runs"]
   L5["5. Queue and K2 bounds<br/>3 retries then dead-letter,<br/>K2 batch dead-lettered after 5 failures"]
-  L6["6. Metered caps in D1<br/>Sandbox 15 h per month,<br/>Browser 250 s per day,<br/>400 model calls per day,<br/>Anthropic $10 per month"]
+  L6["6. Metered caps in D1<br/>Sandbox 20 h per month,<br/>Browser 960 s per day,<br/>400 model calls per day,<br/>Anthropic $100 per month"]
   L7["7. AI Gateway<br/>20 requests per minute,<br/>Anthropic spend limit (best effort)"]
   L8["8. Account budget alerts<br/>email at $10, $25, $100"]
   L9["Pause switch<br/>locals.paused"]
@@ -151,11 +151,11 @@ flowchart TB
 | Attempts | 2 per Task per tier | `limits.ts` |
 | Model calls | 16 or 32 per run, 400 per day | `packages/model-router/src/budget.ts` |
 | Change budget | `budgetUsd`, default 3 USD, max 100 | `packages/protocol/src/project.ts` |
-| Sandbox time | 54,000 s per month | `SANDBOX_MONTHLY_SECONDS` binding |
-| Browser Run | 250 s per day, 55 s per session, 2 runs per Candidate | `BROWSER_DAILY_SECONDS` binding, `check-semantics.ts` |
+| Sandbox time | 72,000 s per month | `SANDBOX_MONTHLY_SECONDS` binding |
+| Browser Run | 960 s per day, 55 s per session, 2 runs per Candidate | `BROWSER_DAILY_SECONDS` binding, `check-semantics.ts` |
 | Embeddings | 2,000 texts per day, 10,000 vectors per account | `workers/indexer/src/handler.ts` |
 | Vectorize queries | 1,000 per day | `workers/agents/src/retrieval.ts` |
-| Anthropic spend | 10 USD per calendar month, reserve then settle on the D1 meter | `ANTHROPIC_MONTHLY_BUDGET_USD` binding, `packages/model-router/src/spend-meter.ts` |
+| Anthropic spend | 100 USD per calendar month, reserve then settle on the D1 meter | `ANTHROPIC_MONTHLY_BUDGET_USD` binding, `packages/model-router/src/spend-meter.ts` |
 | Account | Alerts at 10, 25, 100 USD | `envs/global` |
 
 A guard that trips stops new expensive work and keeps all state.
@@ -164,8 +164,8 @@ A budget limit stops the work. The Task becomes `blocked`, and the Change become
 
 ### Caps
 
-The prod caps are Anthropic 10 USD per calendar month, Sandbox
-15 hours per month, and Browser Run 250 seconds per day. The Worker reads each cap from a binding and
+The prod caps are Anthropic 100 USD per calendar month, Sandbox
+20 hours per month, and Browser Run 960 seconds per day. The Worker reads each cap from a binding and
 meters it in the prod D1 database.
 
 ## Pause switch

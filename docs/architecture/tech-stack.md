@@ -173,7 +173,7 @@ flowchart LR
 Thinking effort is low for haiku, medium for sonnet, and high for opus.
 Output caps are 4,000 tokens for haiku and 8,000 for sonnet and opus.
 Two failures at one tier escalate the Task one tier.
-The caps are 400 agent model calls per day and a monthly Anthropic budget of 10 USD.
+The caps are 400 agent model calls per day and a monthly Anthropic budget of 100 USD.
 
 ## Differences from AGENTS.md section 5
 

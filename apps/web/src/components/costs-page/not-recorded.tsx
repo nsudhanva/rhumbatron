@@ -26,9 +26,8 @@ export function NotRecorded({ monthlyBudgetUsd }: { monthlyBudgetUsd: number }) 
       <p>
         Spend is the sum of recorded attempt cost: each Claude response priced from its usage
         fields, cache reads and writes included (ADR 0021). Model work stops at $
-        {formatNumber(monthlyBudgetUsd)} per calendar month in this environment. Attempts before ADR
-        0021 kept their OpenRouter ($0.00) or Gemini cost. No routing savings are claimed. Call,
-        Clef-flash and Sandbox meters are account-wide, across every Project.
+        {formatNumber(monthlyBudgetUsd)} per calendar month in this environment. No routing savings
+        are claimed. Call, Clef-flash and Sandbox meters are account-wide, across every Project.
       </p>
     </footer>
   );

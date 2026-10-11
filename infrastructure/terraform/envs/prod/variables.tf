@@ -78,16 +78,16 @@ variable "anthropic_workspace_id" {
 variable "anthropic_monthly_budget_usd" {
   description = "Anthropic budget in USD per calendar month for this environment, enforced in code on the D1 meter and mirrored to the gateway spend limit (ADR 0021)."
   type        = number
-  default     = 10
+  default     = 100
 
   validation {
-    condition     = var.anthropic_monthly_budget_usd >= 0 && var.anthropic_monthly_budget_usd <= 10
-    error_message = "Raising the prod Anthropic budget above $10 needs a new approval (ADR 0021)."
+    condition     = var.anthropic_monthly_budget_usd >= 0 && var.anthropic_monthly_budget_usd <= 100
+    error_message = "Raising the prod Anthropic budget above $100 needs a new approval (ADR 0021)."
   }
 }
 
 variable "model_provider" {
-  description = "Model provider for agents and the Root Planner. Only \"anthropic\" exists (ADR 0021); OpenRouter and Gemini on Vertex AI are removed."
+  description = "Model provider for agents and the Root Planner. The only provider is \"anthropic\" (ADR 0021)."
   type        = string
   default     = "anthropic"
 

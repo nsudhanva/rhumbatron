@@ -19,13 +19,13 @@ if (!token || !accountId) {
 const alertsOnly = process.argv.includes("--alerts-only");
 const env = "prod";
 /**
- * Sandbox cap from `local.caps.sandbox_monthly_seconds` in envs/prod/main.tf (ADR 0017): 54,000 s
- * (15 h), inside the included container hours. Anthropic budget per calendar month from
- * `anthropic_monthly_budget_usd` in envs/prod/variables.tf (ADR 0021): $10. Prod is the only
+ * Sandbox cap from `local.caps.sandbox_monthly_seconds` in envs/prod/main.tf (ADR 0017): 72,000 s
+ * (20 h), 80 % of the included container hours. Anthropic budget per calendar month from
+ * `anthropic_monthly_budget_usd` in envs/prod/variables.tf (ADR 0021): $100. Prod is the only
  * environment.
  */
-const SANDBOX_MONTHLY_HOURS = 54_000 / 3600;
-const ANTHROPIC_MONTHLY_BUDGET_USD = 10;
+const SANDBOX_MONTHLY_HOURS = 72_000 / 3600;
+const ANTHROPIC_MONTHLY_BUDGET_USD = 100;
 const api = `https://api.cloudflare.com/client/v4/accounts/${accountId}`;
 
 type Level = "OK" | "WARN" | "ALERT" | "ERROR";

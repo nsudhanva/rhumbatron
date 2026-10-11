@@ -13,7 +13,7 @@ export { candidateFork };
  */
 
 /**
- * Hard stop at the monthly Sandbox hours. Same meter as Task workspaces. ADR 0017 sets 15
+ * Hard stop at the monthly Sandbox hours. Same meter as Task workspaces. ADR 0017 sets 20
  * hours through the `SANDBOX_MONTHLY_SECONDS` binding; this is the fallback when the binding is
  * absent.
  */

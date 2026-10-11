@@ -40,7 +40,7 @@ per month, 10 M requests and 30 M CPU-ms shared with Workers.
   The commit is the content address: a stored bundle is reused, never rebuilt.
 - Builder: `AppBuilder` entrypoint of the apps Worker, with `@cloudflare/worker-bundler` 0.2.6
   (esbuild-wasm). It runs in the Worker, not in the Sandbox, so builds use no container time
-  (the Sandbox cap is 15 h per month in prod). npm dependencies come from the public
+  (the Sandbox cap is 20 h per month in prod). npm dependencies come from the public
   registry at build time. The integration Worker reads the build inputs of one commit through
   its Artifacts binding (one read per file; it skips tests, benchmarks, lockfiles, and docs).
   It then calls `APPS.build(...)` over a service binding with `entrypoint = "AppBuilder"`.

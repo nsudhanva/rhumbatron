@@ -30,9 +30,9 @@ Prod serves each Project as a live app at `<slug>.rhumbatron.com`. Models run on
 
 ## Cost
 - Workers Paid account shared with other projects. Rhumbatron stays within free and included limits.
-- Sandbox: 1 instance. Agent Workspaces and Candidate checks sleep after 2 idle minutes. The hard cap is 15 hours per month.
-- Browser Run: 250 seconds per day.
-- Anthropic: code budget of 10 USD per month. Model work stops at the budget (ADR 0021).
+- Sandbox: 1 instance. Agent Workspaces and Candidate checks sleep after 2 idle minutes. The hard cap is 20 hours per month.
+- Browser Run: 960 seconds per day.
+- Anthropic: code budget of 100 USD per month. Model work stops at the budget (ADR 0021).
 - Live apps: 60 app builds per day. Preview bundles expire after 7 days.
 - Account budget alerts: 10, 25, and 100 USD (ADR 0019).
 - Pause switch: `locals.paused` in `infrastructure/terraform/envs/prod/main.tf`.

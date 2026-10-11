@@ -126,14 +126,15 @@ resource "cloudflare_dns_record" "clerk" {
   comment = "Clerk production instance (managed by Terraform, envs/prod)"
 }
 
-# Prod caps (ADR 0017). The Sandbox budget is 15 h/month and the Browser Run budget is 250 s/day.
+# Prod caps (ADR 0017): 80 % of the Workers Paid included allowance. The Sandbox budget is 20 h/month
+# (of 25 basic-instance hours) and the Browser Run budget is 960 s/day (of 10 browser hours/month).
 # Each Worker reads its share from a binding and enforces it on this environment's D1 meter. The
 # Anthropic budget per calendar month (var.anthropic_monthly_budget_usd, ADR 0021) is enforced the
 # same way by every model caller.
 locals {
   caps = {
-    sandbox_monthly_seconds = 54000 # 15 h
-    browser_daily_seconds   = 250   # under the 600 s free figure
+    sandbox_monthly_seconds = 72000 # 20 h
+    browser_daily_seconds   = 960   # 8 h per 30 days
   }
   cap_bindings = {
     sandbox   = { type = "plain_text", name = "SANDBOX_MONTHLY_SECONDS", text = tostring(local.caps.sandbox_monthly_seconds) }
