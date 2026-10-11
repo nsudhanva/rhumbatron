@@ -191,9 +191,7 @@ export function composeCommand(
  * on the new canonical state, its Change blocked, or nothing for a closed Change. The command ID
  * derives from the event; the integration side is idempotent per composition key.
  */
-export function recomposeCommand(
-  event: EventEnvelope,
-): CommandEnvelope<{ generation: number }> | null {
+function recomposeCommand(event: EventEnvelope): CommandEnvelope<{ generation: number }> | null {
   if (event.eventType !== "canonical.advanced") return null;
   const generation = (event.payload as { toGeneration?: unknown } | null)?.toGeneration;
   if (typeof generation !== "number") return null;
