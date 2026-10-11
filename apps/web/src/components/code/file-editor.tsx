@@ -6,13 +6,14 @@ import { useState } from "react";
 import { type CodeFile, submitCodeEdit } from "../../lib/api";
 import { SectionError } from "../project/feedback";
 import { shortSha } from "../workspace-page/model";
+import { CodeEditor } from "./code-editor";
 import { formatBytes } from "./file-view";
 
 /** Same limit as the API (MAX_EDIT_BYTES in packages/protocol code-edit.ts). */
 const MAX_EDIT_BYTES = 256 * 1024;
 
 /**
- * Edit one file of the live tree (P16-19). A plain mono textarea in the file view's dress
+ * Edit one file of the live tree (P16-19). A CodeMirror editor in the file view's dress
  * (DESIGN.md 9.10), then a message and Save. Save creates a new Change with one human ChangeSet;
  * it ships only after the same checks as agent work, so this never changes canonical directly.
  */
@@ -32,7 +33,7 @@ export function FileEditor({
   const [message, setMessage] = useState(`Update ${file.path.split("/").at(-1) ?? file.path}`);
   // One request ID per editing session: a repeated Save finds the same Change.
   const [clientRequestId] = useState(() => `edit-${crypto.randomUUID()}`);
-  // A textarea reports "\n" line ends; keep a file that used CRLF in CRLF.
+  // The editor reports "\n" line ends; keep a file that used CRLF in CRLF.
   const crlf = file.content.includes("\r\n");
   const saved = crlf ? content.replace(/\r?\n/g, "\r\n") : content;
   const bytes = new TextEncoder().encode(saved).length;
@@ -79,16 +80,12 @@ export function FileEditor({
             <span title={file.treeSha}>tree {shortSha(file.treeSha)}</span>
           </span>
         </figcaption>
-        <textarea
-          aria-label={`Contents of ${file.path}`}
-          className="block w-full resize-y bg-transparent px-3 py-2 font-mono text-[12px] leading-[1.7] whitespace-pre outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent-500"
-          style={{ minHeight: 360, maxHeight: 640 }}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          wrap="off"
+        <CodeEditor
+          path={file.path}
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={setContent}
+          minHeight={360}
+          maxHeight={640}
         />
       </figure>
       <Input
