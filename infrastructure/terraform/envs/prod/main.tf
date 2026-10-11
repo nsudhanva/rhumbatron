@@ -458,13 +458,8 @@ module "integration_worker" {
     { type = "browser", name = "BROWSER" },
     local.cap_bindings.browser,
     local.cap_bindings.sandbox,
-    # Self-binding to ReleaseWorkflow (AGENTS.md section 21.3, ADR 0018); literal name as above.
+    # Self-binding to ReleaseWorkflow (AGENTS.md section 21.3, ADR 0020); literal name as above.
     { type = "workflow", name = "RELEASE_WORKFLOW", workflow_name = "rhumbatron-release-${local.environment}", class_name = "ReleaseWorkflow" },
-    # Release observation only (ADR 0018): GET Workers Builds builds and triggers, and the release
-    # Worker's deployments. User-scoped token: Workers Builds Configuration Edit + Workers Scripts
-    # Read. Bound on this Worker only; never logged.
-    { type = "secret_text", name = "BUILDS_API_TOKEN", text = var.builds_api_token },
-    { type = "plain_text", name = "BUILDS_ACCOUNT_ID", text = var.account_id },
     # Live apps (ADR 0020): bundle builds over RPC to the apps Worker. Without this
     # binding `app.provision` is a no-op.
     { type = "service", name = "APPS", service = local.apps_worker.script_name, entrypoint = "AppBuilder", environment = "production" },
@@ -490,8 +485,8 @@ resource "cloudflare_workflow" "candidate_verification" {
   script_name   = module.integration_worker.name
 }
 
-# AGENTS.md section 21.3 (ADR 0018). One instance per promoted generation of a Project with a
-# release target; about 6 steps plus 2 per build poll (a 2-minute build is about 16 steps).
+# AGENTS.md section 21.3 (ADR 0020). One instance per promoted generation of a Project with a
+# live app; about 8 steps per release.
 resource "cloudflare_workflow" "release" {
   account_id    = var.account_id
   workflow_name = "rhumbatron-release-${local.environment}"
@@ -789,33 +784,6 @@ resource "cloudflare_workers_route" "apps_bypass" {
 
   zone_id = module.dns.zone_id
   pattern = "${each.value}/*"
-}
-
-# Release target for the Acme Shop demo Project (AGENTS.md section 37, ADR 0018). Terraform owns
-# the Worker; Workers Builds owns its versions after the one-time dashboard connection.
-resource "cloudflare_worker" "acme_shop" {
-  account_id = var.account_id
-  name       = "rhumbatron-acme-shop-${local.environment}"
-
-  subdomain = {
-    enabled          = true
-    previews_enabled = false
-  }
-
-  observability = {
-    enabled = true
-    logs = {
-      enabled            = true
-      invocation_logs    = true
-      head_sampling_rate = 1
-    }
-  }
-
-  # Workers Builds runs `wrangler deploy` from the Project's own wrangler.jsonc, which sets the
-  # workers.dev preview setting at runtime (ADR 0018: Builds owns this Worker's deployments).
-  lifecycle {
-    ignore_changes = [subdomain]
-  }
 }
 
 # One consumer for all wake commands. Poison commands go to the dead-letter Queue (section 42.7).

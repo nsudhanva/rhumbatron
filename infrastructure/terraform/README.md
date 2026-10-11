@@ -39,11 +39,9 @@ flowchart TB
 | `async` | Six Queues `rhumbatron-<purpose>-<env>`. |
 | `ai` | AI Gateway `rhumbatron-models-<env>` with the Anthropic spend limit (ADR 0021). |
 | `security` | Zone settings only. |
-| `code-storage` | No resources. |
 | `observability` | No resources. Log settings are in `worker` and `durable-worker`. |
 
-Each env root keeps some resources inline: queue consumers, Workflows, the release target Worker
-`rhumbatron-acme-shop-prod`, the docs Worker `rhumbatron-docs-prod` (`envs/prod/docs.tf`, assets only,
+Each env root keeps some resources inline: queue consumers, Workflows, the docs Worker `rhumbatron-docs-prod` (`envs/prod/docs.tf`, assets only,
 `docs.rhumbatron.com`), the live app wildcard DNS record and routes, Clerk DNS records (prod), and
 the adapters below.
 
@@ -108,9 +106,8 @@ in the environment wins. The wrapper refuses `-auto-approve`.
 | `TF_VAR_k2_consumer_token` | `rhumbatron-k2-consumer-token-dev` | prod |
 | `TF_VAR_anthropic_api_key` | `rhumbatron-anthropic-api-key` | prod |
 | `TF_VAR_anthropic_workspace_id` | `rhumbatron-anthropic-workspace-id` (not secret) | prod |
-| `TF_VAR_builds_api_token` | `rhumbatron-cloudflare-builds-token` | prod |
 
-Prod uses the K2 and Builds items (ADR 0017) and the Anthropic items (ADR 0021). See ADR 0004 for token scopes.
+Prod uses the K2 item (ADR 0017) and the Anthropic items (ADR 0021). See ADR 0004 for token scopes.
 
 ## Backend configuration
 
@@ -162,8 +159,7 @@ these scripts or the API directly.
 
 K2 never deletes streams. Vectorize, the Sandbox Worker and the apps Worker delete only on a real destroy, through
 their teardown resources. Artifacts has no adapter: the namespace is created on first use through
-the `ARTIFACTS` binding (ADR 0010). The Workers Builds connection has no API path (ADR 0018,
-ADR 0018).
+the `ARTIFACTS` binding (ADR 0010).
 
 ```mermaid
 flowchart LR

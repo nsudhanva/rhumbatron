@@ -21,7 +21,7 @@
     {
       "worker": "workers/integration",
       "side": "terraform-only",
-      "names": ["ANTHROPIC_API_KEY", "BUILDS_API_TOKEN"],
+      "names": ["ANTHROPIC_API_KEY"],
       "reason": "Secret: Terraform uploads it as secret_text; never in a committed wrangler.jsonc (supply via .dev.vars locally)."
     },
     {
@@ -33,7 +33,7 @@
     {
       "worker": "workers/integration",
       "side": "terraform-only",
-      "names": ["ALLOW_OPUS", "ANTHROPIC_WORKSPACE_ID", "BUILDS_ACCOUNT_ID", "MODEL_PROVIDER"],
+      "names": ["ALLOW_OPUS", "ANTHROPIC_WORKSPACE_ID", "MODEL_PROVIDER"],
       "reason": "Runtime variable set only by Terraform (environment config travels in bindings); local code uses its default."
     },
     {

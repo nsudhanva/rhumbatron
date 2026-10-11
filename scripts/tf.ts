@@ -33,7 +33,6 @@ const rootKeychain: Record<string, Record<string, string>> = {
     TF_VAR_k2_consumer_token: "rhumbatron-k2-consumer-token-dev",
     TF_VAR_anthropic_api_key: "rhumbatron-anthropic-api-key",
     TF_VAR_anthropic_workspace_id: "rhumbatron-anthropic-workspace-id",
-    TF_VAR_builds_api_token: "rhumbatron-cloudflare-builds-token",
   },
 };
 
