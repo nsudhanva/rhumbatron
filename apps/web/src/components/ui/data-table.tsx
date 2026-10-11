@@ -36,7 +36,9 @@ export function DataTable({
   className?: string;
 }) {
   return (
-    <div className={cn("min-w-0 overflow-x-auto", className)}>
+    // `relative`: absolutely positioned descendants (the sr-only caption and header text) stay
+    // inside the scroller instead of widening the page.
+    <div className={cn("relative min-w-0 overflow-x-auto", className)}>
       <table className="w-full border-collapse text-left text-[13px]" style={{ minWidth }}>
         {label && <caption className="sr-only">{label}</caption>}
         {children}

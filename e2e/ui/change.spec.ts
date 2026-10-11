@@ -48,6 +48,11 @@ test.describe("Change page", () => {
     await open(page, `/changes/${REAL.withdrawnUnclear}`);
     await expect(page.getByText(/Cancelled|Withdrawn/).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Build it as it is" })).toHaveCount(0);
+    // Ended before planning: no section that could only stay empty; Details stays.
+    for (const name of ["Agent activity", "Result", "Files changed", "Task"]) {
+      await expect(page.getByRole("heading", { name, exact: true })).toHaveCount(0);
+    }
+    await expect(page.getByRole("button", { name: /Details/ })).toBeVisible();
   });
 });
 

@@ -107,6 +107,12 @@ test("Verification, Workspace, Versions, Costs show their data", async ({ page }
 
 test("Code: browse a file, Edit opens CodeMirror, Cancel leaves it", async ({ page }) => {
   await open(page, `${P}/code`);
+  // File tree rows meet the 24px target size.
+  const rowHeight = await page
+    .getByRole("button", { name: /app\.ts/ })
+    .first()
+    .evaluate((el) => el.getBoundingClientRect().height);
+  expect(rowHeight).toBeGreaterThanOrEqual(24);
   await page
     .getByRole("button", { name: /app\.ts/ })
     .first()
@@ -133,6 +139,8 @@ test("Settings: sections, members, every input named", async ({ page }) => {
   await expect(
     page.locator("#content").getByText("smoke+prod@rhumbatron.com").first(),
   ).toBeVisible();
+  // Members sits under the People h2.
+  await expect(page.getByRole("heading", { name: "Members", level: 3 })).toBeVisible();
   // Every input on the page has an accessible name (Kumo warns about a nameless Input here).
   const nameless = await page.evaluate(() =>
     [...document.querySelectorAll("#content input, #content textarea")]

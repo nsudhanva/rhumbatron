@@ -31,7 +31,7 @@ const LEGEND: { state: AreaState; label: string }[] = [
   { state: "unchanged", label: "Unchanged dependency" },
 ];
 
-type AreaNodeData = { area: AreaView; selected: boolean; onSelect: (id: string) => void };
+type AreaNodeData = { area: AreaView; selected: boolean };
 type AreaFlowNode = Node<AreaNodeData, "area">;
 
 function metaLine(area: AreaView): string {
@@ -53,7 +53,7 @@ function metaLine(area: AreaView): string {
 }
 
 function AreaNode({ data }: NodeProps<AreaFlowNode>) {
-  const { area, selected, onSelect } = data;
+  const { area, selected } = data;
   const kicker =
     area.state === "protected" && area.touched ? "Protected · touched" : STATE_LABEL[area.state];
   return (
@@ -61,7 +61,6 @@ function AreaNode({ data }: NodeProps<AreaFlowNode>) {
       type="button"
       aria-pressed={selected}
       aria-label={`${area.node.name}, ${kicker}`}
-      onClick={() => onSelect(area.node.id)}
       className={cn(
         "grid w-[200px] cursor-pointer gap-1 bg-kumo-base px-3 py-2.5 text-left transition-shadow duration-(--rh-dur-ui) hover:bg-kumo-row-hover",
         STATE_BORDER[area.state],
@@ -133,7 +132,7 @@ export function ProductGraphCanvas({
       id: area.node.id,
       type: "area",
       position: view.positions.get(area.node.id) ?? { x: 0, y: 0 },
-      data: { area, selected: area.node.id === selectedId, onSelect },
+      data: { area, selected: area.node.id === selectedId },
       draggable: false,
     }));
     const edges: Edge[] = view.edges.map(({ edge, relevant }) => {
@@ -156,7 +155,7 @@ export function ProductGraphCanvas({
       NODE_HEIGHT,
     );
     return { nodes, edges, height };
-  }, [view, selectedId, onSelect]);
+  }, [view, selectedId]);
 
   return (
     <figure className="grid min-w-0 gap-2">
@@ -168,6 +167,7 @@ export function ProductGraphCanvas({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        onNodeClick={onSelect}
       />
       <figcaption className="grid gap-1.5">
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-[12px]" aria-label="Legend">

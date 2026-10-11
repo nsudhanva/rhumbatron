@@ -5,7 +5,7 @@
  */
 import type { Page } from "@playwright/test";
 
-export const API = "https://api.rhumbatron.com";
+const API = "https://api.rhumbatron.com";
 
 function env() {
   const secretKey = process.env.CLERK_SECRET_KEY;
@@ -16,7 +16,7 @@ function env() {
   return { secretKey, userId };
 }
 
-export async function clerkBackend<T>(path: string, body?: unknown, method = "POST"): Promise<T> {
+async function clerkBackend<T>(path: string, body?: unknown, method = "POST"): Promise<T> {
   const { secretKey } = env();
   const response = await fetch(`https://api.clerk.com/v1${path}`, {
     method,
@@ -27,7 +27,7 @@ export async function clerkBackend<T>(path: string, body?: unknown, method = "PO
   return (await response.json()) as T;
 }
 
-export async function signInToken(): Promise<string> {
+async function signInToken(): Promise<string> {
   const { userId } = env();
   const ticket = await clerkBackend<{ token: string }>("/sign_in_tokens", {
     user_id: userId,

@@ -100,7 +100,7 @@ export function FileBrowser({
                     type="button"
                     aria-expanded={row.expanded}
                     onClick={() => toggle(row.path)}
-                    className="flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 text-left transition-colors duration-(--rh-dur-ui) hover:bg-kumo-row-hover focus-visible:outline-offset-[-2px] pointer-coarse:min-h-11"
+                    className="flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 text-left transition-colors duration-(--rh-dur-ui) hover:bg-kumo-row-hover focus-visible:outline-offset-[-2px] pointer-coarse:min-h-11"
                   >
                     <TreePrefix prefix={row.prefix} />
                     {row.expanded ? (
@@ -153,7 +153,7 @@ function OpenButton({
       aria-current={selected || undefined}
       onClick={() => onOpen(path)}
       className={cn(
-        "flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 text-left transition-colors duration-(--rh-dur-ui) hover:bg-kumo-row-hover focus-visible:outline-offset-[-2px] pointer-coarse:min-h-11",
+        "flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 text-left transition-colors duration-(--rh-dur-ui) hover:bg-kumo-row-hover focus-visible:outline-offset-[-2px] pointer-coarse:min-h-11",
         selected && "bg-kumo-faint font-semibold shadow-[inset_2px_0_0_var(--color-accent-500)]",
       )}
     >

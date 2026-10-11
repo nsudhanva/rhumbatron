@@ -137,7 +137,7 @@ export function Attribution({ sets }: { sets: ChangeSetAttribution[] }) {
   return (
     <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-kumo-subtle">
       {sets.map((s) => (
-        <span key={s.id} title={s.summary || s.id} className="whitespace-nowrap">
+        <span key={s.id} title={s.summary || s.id} className="min-w-0 wrap-anywhere">
           <Author set={s} /> · {s.taskKey ?? s.id}
         </span>
       ))}

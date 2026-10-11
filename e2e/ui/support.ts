@@ -18,7 +18,7 @@ export const REAL = {
   withdrawnUnclear: "chg_fed9f5e4-bcde-42fc-890c-a702b3d3dc0e",
 };
 
-export const PROJECT_PAGES = [
+const PROJECT_PAGES = [
   "graph",
   "agents",
   "events",

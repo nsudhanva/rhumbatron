@@ -41,18 +41,17 @@ const LEGEND: { border: Border; label: string }[] = [
   { border: "idle", label: "Waiting or cancelled" },
 ];
 
-type TaskNodeData = { task: TaskDetail; selected: boolean; onSelect: (id: string) => void };
+type TaskNodeData = { task: TaskDetail; selected: boolean };
 type TaskFlowNode = Node<TaskNodeData, "task">;
 
 function TaskNode({ data }: NodeProps<TaskFlowNode>) {
-  const { task, selected, onSelect } = data;
+  const { task, selected } = data;
   const run = latestRun(task);
   return (
     <button
       type="button"
       aria-pressed={selected}
       aria-label={`${task.key} ${task.title}`}
-      onClick={() => onSelect(task.id)}
       className={cn(
         "grid w-60 cursor-pointer gap-1.5 bg-kumo-base px-3 py-2.5 text-left transition-shadow duration-(--rh-dur-ui) hover:bg-kumo-row-hover",
         BORDER_CLASS[BORDER_OF[task.status]],
@@ -110,7 +109,7 @@ export function WorkGraph({
       id: task.id,
       type: "task",
       position: positions.get(task.id) ?? { x: 0, y: 0 },
-      data: { task, selected: task.id === selectedId, onSelect },
+      data: { task, selected: task.id === selectedId },
       draggable: false,
     }));
     const edges: Edge[] = tasks.flatMap((task) =>
@@ -136,7 +135,7 @@ export function WorkGraph({
       NODE_HEIGHT,
     );
     return { nodes, edges, height };
-  }, [tasks, selectedId, onSelect]);
+  }, [tasks, selectedId]);
 
   return (
     <figure className="grid min-w-0 gap-2">
@@ -148,6 +147,7 @@ export function WorkGraph({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        onNodeClick={onSelect}
       />
       <figcaption className="grid gap-1.5">
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-[12px]" aria-label="Legend">

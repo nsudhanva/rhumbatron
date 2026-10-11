@@ -301,6 +301,14 @@ function ChangeView() {
   const selectedTask = selected ? taskList.find((t) => t.id === selected) : undefined;
   const spend = changeSpend(taskList);
   const compiling = isCompiling(data.status) && taskList.length === 0;
+  // Ended before planning (withdrawn, not selected, or cancelled or failed before the Work Graph):
+  // no Task, agent run, Candidate or file change can appear, so those sections stay out.
+  const endedBeforePlanning =
+    ENDED.has(data.status) &&
+    !tasks.isPending &&
+    taskList.length === 0 &&
+    !candidates.isPending &&
+    candidateList.length === 0;
   const canAnswer = data.requester?.isYou === true || isOwner;
   const names = candidateLabels(candidateList);
   const liveApp = projectApp.data?.app?.status === "ready" ? projectApp.data.app : null;
@@ -392,7 +400,12 @@ function ChangeView() {
         hasOperatorIssues={operatorIssues}
       />
 
-      <div className="grid gap-7 min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
+      <div
+        className={cn(
+          "grid gap-7",
+          !endedBeforePlanning && "min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]",
+        )}
+      >
         <Section
           label="Work graph"
           meta={
@@ -421,39 +434,50 @@ function ChangeView() {
             <WorkGraph tasks={taskList} selectedId={selectedTask?.id} onSelect={setSelected} />
           )}
         </Section>
-        <Section label="Task">
-          <div
-            className={cn(
-              "bg-kumo-elevated p-4",
-              // The accent bar pairs the inspector with the selected node; none when empty.
-              selectedTask && "shadow-[inset_2px_0_0_var(--color-accent-500)]",
-            )}
-          >
-            <TaskPanel
-              task={selectedTask}
-              changeSets={taskChangeSets}
-              claims={taskClaims}
-              onClose={() => setSelected(undefined)}
-            />
-          </div>
-        </Section>
+        {!endedBeforePlanning && (
+          <Section label="Task">
+            <div
+              className={cn(
+                "bg-kumo-elevated p-4",
+                // The accent bar pairs the inspector with the selected node; none when empty.
+                selectedTask && "shadow-[inset_2px_0_0_var(--color-accent-500)]",
+              )}
+            >
+              <TaskPanel
+                task={selectedTask}
+                changeSets={taskChangeSets}
+                claims={taskClaims}
+                onClose={() => setSelected(undefined)}
+              />
+            </div>
+          </Section>
+        )}
       </div>
 
-      <AgentActivity model={model} ready={ready} compiling={compiling} />
+      {!endedBeforePlanning && (
+        <>
+          <AgentActivity model={model} ready={ready} compiling={compiling} />
 
-      <CandidateSummary
-        changeId={changeId}
-        candidates={candidateList}
-        evidence={evidenceById}
-        criteria={data.acceptanceCriteria}
-        canCompose={
-          !["cancelled", "failed", "completed", "promoting", "releasing", "needs_input"].includes(
-            data.status,
-          )
-        }
-      />
+          <CandidateSummary
+            changeId={changeId}
+            candidates={candidateList}
+            evidence={evidenceById}
+            criteria={data.acceptanceCriteria}
+            canCompose={
+              ![
+                "cancelled",
+                "failed",
+                "completed",
+                "promoting",
+                "releasing",
+                "needs_input",
+              ].includes(data.status)
+            }
+          />
 
-      <ChangeFilesChanged changeId={changeId} />
+          <ChangeFilesChanged changeId={changeId} />
+        </>
+      )}
 
       <ConflictList
         changeId={changeId}
@@ -498,6 +522,9 @@ function ChangeView() {
     </Page>
   );
 }
+
+/** Statuses that end a Change for good; with no Tasks they mean it ended before planning. */
+const ENDED: ReadonlySet<string> = new Set(["cancelled", "failed", "not_selected"]);
 
 /** The recorded request-conflict outcome in words. */
 function outcomeWords(outcome: ChangeOutcome) {

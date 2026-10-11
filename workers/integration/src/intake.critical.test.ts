@@ -126,6 +126,30 @@ describe("intake duplicate cascade", () => {
     expect(outcome.costUsd).toBeCloseTo(0.02);
   });
 
+  it("names the related goal once: a quote of the goal itself is not repeated", async () => {
+    const goal = c1.goal;
+    const quoted = reply("coverage_review", {
+      items: [
+        {
+          itemId: "chg_c1",
+          verdict: "duplicate",
+          quotes: [
+            { sourceId: "chg_c1:goal", quote: goal },
+            { sourceId: "chg_c1:c1", quote: "Each calendar day shows a kanban list" },
+          ],
+        },
+      ],
+    });
+    const { outcome } = await review({
+      request: "Add kanban feature",
+      clef: clef({ item_0: ["already_covered", 0.8] }),
+      replies: { coverage_review: [covered("already_covered"), quoted] },
+    });
+    expect(outcome.clarification?.questions[0]?.text).toBe(
+      `This looks covered by "${goal}": "Each calendar day shows a kanban list". What is different in your request?`,
+    );
+  });
+
   it("never stops a request on Clef alone: both Sonnet orders disagree, so it plans", async () => {
     const { outcome } = await review({
       request: "Add a weekly budget chart to the mission planner with totals per crew member",

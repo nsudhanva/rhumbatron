@@ -519,11 +519,20 @@ export function duplicateDecision(
 
 const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
 
+/** "This looks covered by "<goal>": "<criterion>"; …": the goal once, then the matching criteria. */
 function duplicateQuestion(target: CoverageTarget, votes: (CoverageVote | undefined)[]): string {
+  const canonical = target.id === "canonical";
+  // A quote of the related goal repeats the goal named right before it.
+  const inGoal = (quote: string) => !canonical && normalize(target.goal).includes(normalize(quote));
   const quotes = [
-    ...new Set(votes.flatMap((v) => v?.quotes.map((q) => clip(q.quote.trim(), 160)) ?? [])),
+    ...new Set(
+      votes.flatMap(
+        (v) =>
+          v?.quotes.filter((q) => !inGoal(q.quote)).map((q) => clip(q.quote.trim(), 160)) ?? [],
+      ),
+    ),
   ].slice(0, 3);
-  const what = target.id === "canonical" ? "the current app" : `"${clip(target.goal, 120)}"`;
+  const what = canonical ? "the current app" : `"${clip(target.goal, 120)}"`;
   const quoted = quotes.length > 0 ? `: ${quotes.map((q) => `"${q}"`).join("; ")}` : "";
   return `This looks covered by ${what}${quoted}. What is different in your request?`;
 }

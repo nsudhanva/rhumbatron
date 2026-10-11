@@ -115,7 +115,9 @@ export function SectionLabel({
         {children}
       </Heading>
       {meta && (
-        <div className="flex shrink-0 items-center gap-3 text-[12px] text-kumo-subtle">{meta}</div>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-3 text-[12px] text-kumo-subtle">
+          {meta}
+        </div>
       )}
     </div>
   );

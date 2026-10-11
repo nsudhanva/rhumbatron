@@ -131,6 +131,7 @@ export function ProjectPeople({ projectId, isOwner }: { projectId: string; isOwn
           <div className="flex gap-2">
             <Input
               type="email"
+              aria-label="Invite by email"
               placeholder="colleague@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -152,7 +153,7 @@ export function ProjectPeople({ projectId, isOwner }: { projectId: string; isOwn
 
       {/* Members list */}
       <div className="grid gap-2">
-        <h4 className="type-label text-kumo-subtle">Members</h4>
+        <h3 className="type-label text-kumo-subtle">Members</h3>
         {membersQuery.isPending ? (
           <p className="text-[13px] text-kumo-subtle">Loading members...</p>
         ) : members.length === 0 ? (
@@ -200,7 +201,7 @@ export function ProjectPeople({ projectId, isOwner }: { projectId: string; isOwn
       {/* Pending invitations - Owner only */}
       {isOwner && invitations.length > 0 && (
         <div className="grid gap-2 pt-2 border-t border-kumo-rule">
-          <h4 className="type-label text-kumo-subtle">Pending invitations</h4>
+          <h3 className="type-label text-kumo-subtle">Pending invitations</h3>
           <ul className="divide-y divide-kumo-rule max-h-40 overflow-y-auto">
             {invitations.map((inv) => (
               <li key={inv.id} className="flex items-center justify-between py-2 text-[13px] gap-2">

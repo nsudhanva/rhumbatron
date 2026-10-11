@@ -68,6 +68,11 @@ for (const start of PAGES.filter((p) => !p.path.includes("#"))) {
     const back = page.getByRole("link", { name: /^Back to / });
     if (start.path !== "/") {
       await expect(back).toBeVisible();
+      // The Back link goes to a parent page, never to the page it sits on.
+      const backHref = new URL((await back.getAttribute("href")) as string, page.url());
+      expect(backHref.pathname, "Back link targets the current page").not.toBe(
+        new URL(page.url()).pathname,
+      );
       await back.click();
       await expect(page).not.toHaveURL(startUrl);
       await settle(page);
@@ -85,6 +90,34 @@ test("Work Graph Task node opens the Task on click", async ({ page }) => {
   await node.click({ timeout: 10_000 });
   await expect(page).toHaveURL(new RegExp(`task=${TODO.task}`));
   await expect(page.getByRole("button", { name: "Close Task details" })).toBeVisible();
+});
+
+test("Work Graph Task node opens the Task with Enter", async ({ page }) => {
+  await open(page, `/changes/${TODO.change}`);
+  const node = page
+    .locator(".react-flow__node")
+    .getByRole("button", { name: /Bootstrap Worker app/ });
+  await node.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`task=${TODO.task}`));
+});
+
+test("Product Graph area node opens the area on click", async ({ page }) => {
+  await open(page, `/projects/${TODO.project}/graph`);
+  // The first view selects an area without writing it to the URL; a click writes `area=`.
+  const target = page.locator(".react-flow__node").getByRole("button").last();
+  const name = (await target.getAttribute("aria-label")) ?? "";
+  await target.click({ timeout: 10_000 });
+  await expect(page).toHaveURL(/[?&]area=/);
+  await expect(
+    page.locator(".react-flow__node").getByRole("button", { name, exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Back from the Product Graph goes to the Project overview", async ({ page }) => {
+  await open(page, `/projects/${TODO.project}/graph`);
+  await page.getByRole("link", { name: /^Back to / }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${TODO.project}$`));
 });
 
 test("?task= deep link opens the Task; Close and Back clear it", async ({ page }) => {

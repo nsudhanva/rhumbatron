@@ -92,6 +92,13 @@ test.describe("Project overview", () => {
     await expect(full).toBeVisible();
   });
 
+  test("link-style actions under the title are at least 24px tall", async ({ page }) => {
+    const remove = page.getByRole("button", { name: "Remove app" });
+    test.skip((await remove.count()) === 0, "the fixture has no live app to remove");
+    const box = await remove.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
+  });
+
   test("Needs attention rail lists only what waits on a person", async ({ page }) => {
     const rail = page.getByRole("complementary", { name: "Needs attention" });
     await expect(rail).toBeVisible();
@@ -117,14 +124,19 @@ test.describe("Project overview", () => {
     await goal.fill("");
     await page.getByRole("button", { name: "Submit change" }).click();
     // Native constraint validation (required, min) must not pre-empt the inline errors.
-    const native = await goal.evaluate((el: HTMLTextAreaElement) => el.validationMessage);
-    expect.soft(native, "browser validation bubble instead of an inline error").toBe("");
+    const noValidate = await goal.evaluate((el: HTMLTextAreaElement) => el.form?.noValidate);
+    expect.soft(noValidate, "browser validation bubble instead of an inline error").toBe(true);
     await expect(page.getByRole("alert")).toHaveText("Describe the goal before you submit.", {
       timeout: 5_000,
     });
 
     await goal.fill("test goal that is never submitted");
     await budget.fill("0");
+    await page.getByRole("button", { name: "Submit change" }).click();
+    await expect(page.getByRole("alert")).toHaveText("Set a budget above $0.00.", {
+      timeout: 5_000,
+    });
+    await budget.fill("");
     await page.getByRole("button", { name: "Submit change" }).click();
     await expect(page.getByRole("alert")).toHaveText("Set a budget above $0.00.", {
       timeout: 5_000,

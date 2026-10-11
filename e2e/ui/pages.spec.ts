@@ -25,6 +25,10 @@ for (const mode of ["light", "dark"] as const) {
         await open(page, path);
         await expect(page.locator("html")).toHaveAttribute("data-mode", mode);
         await expect(page.locator("h1")).toHaveCount(1);
+        // "<Page> · <Project or Change> · Rhumbatron"; the notification count may lead.
+        await expect
+          .poll(async () => (await page.title()).replace(/^\(\d+\+?\) /, ""))
+          .toMatch(path === "/" ? /^Projects · Rhumbatron$/ : /^[^·]+ · .+ · Rhumbatron$/);
         const text = (await page.locator("#content").innerText()).trim();
         expect(text.length, "page has content").toBeGreaterThan(80);
 

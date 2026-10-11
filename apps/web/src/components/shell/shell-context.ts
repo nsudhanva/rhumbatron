@@ -96,7 +96,50 @@ export type ShellContext = {
   noChanges: boolean;
   /** Route-derived breadcrumbs, before any page-appended crumbs. */
   trail: Crumb[];
+  /**
+   * Tab title "<Page> · <Project or Change> · Rhumbatron" (the name joins once it loads), or
+   * undefined where the route's own `head` title stays (design, sign-in).
+   */
+  title: string | undefined;
 };
+
+/** Name of the page in the tab title, by section; candidates splits into Candidate and Compare. */
+function pageName(section: ShellSection, routeId: string | undefined): string | undefined {
+  switch (section) {
+    case "projects":
+      return "Projects";
+    case "overview":
+      return "Overview";
+    case "changes":
+      return "Change";
+    case "flight":
+      return "Flight Control";
+    case "candidates":
+      return routeId?.startsWith("/compare/") ? "Compare" : "Candidate";
+    case "other":
+      return undefined;
+    default:
+      return PROJECT_PAGES[section];
+  }
+}
+
+function documentTitle(
+  section: ShellSection,
+  routeId: string | undefined,
+  projectName: string | undefined,
+  changeGoal: string | undefined,
+): string | undefined {
+  const page = pageName(section, routeId);
+  if (!page) return undefined;
+  // Pages of one Change name the Change; Project pages name the Project.
+  const scoped =
+    section === "changes" || section === "flight" || section === "candidates"
+      ? changeGoal && truncate(changeGoal, 48)
+      : section === "projects"
+        ? undefined
+        : projectName;
+  return [page, scoped, "Rhumbatron"].filter(Boolean).join(" · ");
+}
 
 /** The Project of a Change, from a Changes list already in the query cache. No request. */
 function cachedProjectOf(queryClient: QueryClient, changeId: string | undefined) {
@@ -213,5 +256,6 @@ export function useShellContext(): ShellContext {
     latestChange: latest ? { id: latest.id, goal: latest.goal } : undefined,
     noChanges: changes.data?.length === 0,
     trail,
+    title: documentTitle(section, routeId, project.data?.name, change.data?.goal),
   };
 }

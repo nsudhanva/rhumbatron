@@ -24,14 +24,14 @@ import {
   TreeStructure,
   X,
 } from "@phosphor-icons/react";
-import { Link, type LinkOptions } from "@tanstack/react-router";
+import { Link, type LinkOptions, useLocation, useRouter } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { type ShellLiveState, useShellLiveState } from "../../lib/live-status";
 import { type ColorMode, useColorMode } from "../../lib/mode";
 import { setViewMode, useViewMode, type ViewMode } from "../../lib/view-mode";
 import { NotificationBell } from "../notifications/notification-bell";
 import { SkeletonBar } from "../project/feedback";
-import { type Crumb, usePageTrail } from "./page-meta";
+import { type Crumb, useDocumentTitle, usePageTrail } from "./page-meta";
 import {
   changesLink,
   PROJECT_PAGES,
@@ -63,6 +63,7 @@ export type BuildInfo = { service: string; environment: string };
 
 export function AppShell({ build, children }: { build: BuildInfo; children: ReactNode }) {
   const context = useShellContext();
+  useDocumentTitle(context.title);
   return (
     <div
       className={cn(
@@ -414,15 +415,18 @@ function Header({ context }: { context: ShellContext }) {
 }
 
 /**
- * One level up: the nearest linked crumb before the current one (a Candidate goes back to its
- * Change, a Change to the Changes list, a project page to the overview). A real link, so the
+ * One level up: the nearest linked crumb before the current one whose path is not the current
+ * path (a Candidate goes back to its Change, a Change to the Changes list, a project page to the
+ * overview, a project page with a sub-view crumb to the overview too). A real link, so the
  * browser history and "open in new tab" work as usual.
  */
 function BackLink({ crumbs }: { crumbs: Crumb[] }) {
+  const router = useRouter();
+  const pathname = useLocation({ select: (location) => location.pathname });
   const parent = crumbs
     .slice(0, -1)
     .reverse()
-    .find((crumb) => crumb.link);
+    .find((crumb) => crumb.link && router.buildLocation(crumb.link).pathname !== pathname);
   if (!parent?.link || crumbs.length < 2) return null;
   const label = `Back to ${parent.label}`;
   return (

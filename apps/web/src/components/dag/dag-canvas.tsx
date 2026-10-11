@@ -30,18 +30,16 @@ type DagNodeData = {
   spec: DagNodeSpec;
   selected: boolean;
   dimmed: boolean;
-  onSelect: (id: string) => void;
 };
 type DagFlowNode = Node<DagNodeData, "dag">;
 
 function DagNode({ data }: NodeProps<DagFlowNode>) {
-  const { spec, selected, dimmed, onSelect } = data;
+  const { spec, selected, dimmed } = data;
   return (
     <button
       type="button"
       aria-pressed={selected}
       aria-label={`${spec.kicker}: ${spec.title}${spec.meta ? `, ${spec.meta}` : ""}`}
-      onClick={() => onSelect(spec.id)}
       className={cn(
         "grid cursor-pointer gap-1 bg-kumo-base px-3 py-2 text-left transition-[opacity,box-shadow] duration-(--rh-dur-ui) hover:bg-kumo-row-hover",
         BORDER[spec.border],
@@ -193,7 +191,6 @@ export function DagCanvas({
         spec,
         selected: spec.id === selectedId,
         dimmed: lit !== null && !lit.has(spec.id),
-        onSelect,
       },
       draggable: false,
     }));
@@ -236,7 +233,7 @@ export function DagCanvas({
       NODE_HEIGHT,
     );
     return { nodes, edges, height };
-  }, [specs, edgeSpecs, selectedId, onSelect]);
+  }, [specs, edgeSpecs, selectedId]);
 
   return (
     <figure className="grid min-w-0 gap-2">
@@ -248,6 +245,7 @@ export function DagCanvas({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        onNodeClick={onSelect}
       />
       <figcaption className="grid gap-1.5">
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-[12px]" aria-label="Legend">

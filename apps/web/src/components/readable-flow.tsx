@@ -20,7 +20,8 @@ import { useLayoutEffect, useRef } from "react";
  * Graph). The mouse wheel scrolls the page. Ctrl or Cmd + wheel, a trackpad pinch, or the +/-
  * buttons zoom; a drag pans. The first view frames the graph at a readable zoom: when the graph
  * is wider or taller than the canvas at that zoom, it starts at the first (left, top) node and
- * the viewer pans to the rest.
+ * the viewer pans to the rest. Nodes do not drag or take XYFlow selection; a click (or Enter on
+ * the node's button, whose click bubbles to the node) calls onNodeClick with the node id.
  */
 
 /** Smallest zoom of the first view: node titles stay readable. */
@@ -108,6 +109,7 @@ export function ReadableFlow<N extends Node>({
   nodes,
   edges,
   nodeTypes,
+  onNodeClick,
 }: {
   /** Accessible name of the canvas. */
   label: string;
@@ -116,6 +118,8 @@ export function ReadableFlow<N extends Node>({
   nodes: N[];
   edges: Edge[];
   nodeTypes: NodeTypes;
+  /** Opens the clicked node. XYFlow turns pointer events off on nodes without a click handler. */
+  onNodeClick: (id: string) => void;
 }) {
   // Cmd + wheel zooms only while Cmd is held; otherwise the wheel stays with the page.
   // Ctrl + wheel and a pinch arrive as ctrlKey wheel events, which XYFlow zooms on its own.
@@ -137,6 +141,7 @@ export function ReadableFlow<N extends Node>({
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable={false}
+          onNodeClick={(_, node) => onNodeClick(node.id)}
           proOptions={{ hideAttribution: true }}
           colorMode="light"
           nodesFocusable={false}

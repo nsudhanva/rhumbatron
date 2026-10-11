@@ -3,7 +3,8 @@ import { useState } from "react";
 import { deployProjectApp, getProjectApp, removeProjectApp } from "../../lib/api";
 import { Mono } from "../ui/mono";
 
-const LINK = "text-kumo-link underline-offset-2 hover:underline";
+/** Link-style actions: 24px tall at least, the WCAG 2.5.8 target size. */
+const LINK = "inline-flex min-h-6 items-center text-kumo-link underline-offset-2 hover:underline";
 
 /**
  * "Live at <host> · Open app" under the Project title (Phase 16, ADR 0020). Renders nothing where
@@ -117,7 +118,7 @@ export function LiveAppLine({
               <span>Remove the app and delete its data?</span>
               <button
                 type="button"
-                className="text-kumo-danger underline-offset-2 hover:underline"
+                className="inline-flex min-h-6 items-center text-kumo-danger underline-offset-2 hover:underline"
                 onClick={() => remove.mutate()}
               >
                 Remove

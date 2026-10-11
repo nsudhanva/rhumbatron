@@ -38,6 +38,7 @@ import {
 import { getProjectSettings } from "../lib/api-settings";
 import { EMPTY, formatAge, formatNumber, formatUsd, generation } from "../lib/format";
 import { useProjectLive } from "../lib/live";
+import { useAdoptTypedText } from "../lib/pre-hydration";
 
 export const Route = createFileRoute("/projects/$projectId")({ component: ProjectPage });
 
@@ -595,6 +596,11 @@ function NewChange({ projectId }: { projectId: string }) {
   };
   const setGoal = (value: string) => update({ goal: value });
   const setBudget = (value: string) => update({ budget: value });
+  // Text typed before hydration stays when the first live update re-renders the form.
+  const goalRef = useRef<HTMLTextAreaElement>(null);
+  const budgetRef = useRef<HTMLInputElement>(null);
+  useAdoptTypedText(goalRef, goal, setGoal);
+  useAdoptTypedText(budgetRef, budget, setBudget);
   // Shares the Overview's project query; suggestions are cached per Canonical Generation.
   const project = useQuery({
     queryKey: ["project", projectId],
@@ -623,6 +629,8 @@ function NewChange({ projectId }: { projectId: string }) {
     <Section label="New change">
       <form
         className="grid gap-4"
+        // The inline alert below explains a missing goal or budget; the browser bubble must not.
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
           if (!goal.trim()) setInvalid("Describe the goal before you submit.");
@@ -631,6 +639,7 @@ function NewChange({ projectId }: { projectId: string }) {
         }}
       >
         <InputArea
+          ref={goalRef}
           label="Goal"
           description="The outcome in plain language. The planner derives acceptance criteria and protected invariants from it."
           value={goal}
@@ -661,6 +670,7 @@ function NewChange({ projectId }: { projectId: string }) {
                 ? "The Project's default. New expensive work stops at this limit."
                 : "New expensive work stops at this limit."
             }
+            ref={budgetRef}
             type="number"
             min={0.1}
             step={0.1}

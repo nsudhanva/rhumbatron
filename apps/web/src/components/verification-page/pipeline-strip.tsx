@@ -28,7 +28,8 @@ export function PipelineStrip({
 }) {
   const first = stages[0]?.count ?? 0;
   return (
-    <div className="min-w-0 overflow-x-auto">
+    // `relative` keeps the sr-only share text inside the scroller (it would widen the page).
+    <div className="relative min-w-0 overflow-x-auto">
       <ol
         aria-label="Verification pipeline"
         className="grid min-w-[640px] border-t-2 border-kumo-ink"

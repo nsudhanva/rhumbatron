@@ -135,6 +135,17 @@ scripts/                 Bundle, checks, smoke, cleanup, cost report
 | `bun run smoke:models` | Anthropic through AI Gateway: workspace header, one tool call per tier, one prompt cache hit (under 1 cent). |
 | `bun run cleanup:projects` | Archive smoke-test Projects on prod (`--dry-run` lists them only). Needs `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` for the prod Clerk instance. |
 | `bun run cost:report` | Read-only report of usage, caps, and leftover resources (`--alerts-only`). |
+| `bun run test:ui` | Playwright UI suite (`e2e/ui`) against prod, at 1440px and 412px. Signs in as the Clerk prod smoke user. Writes to `e2e/.results`. |
+| `bun run lighthouse` | Lighthouse on every page of the UI suite, mobile and desktop, against prod (`--only=<page>`, `--form=mobile\|desktop`). Writes to `e2e/.lighthouse`. |
+| `bun run journeys prod [A1,A2,...\|all]` | API journeys against prod: real builds through the public API (about $0.15 per build). Removes every Project it creates. |
+
+`test:ui`, `lighthouse`, `journeys`, `smoke:prod`, and `cleanup:projects` sign in as the Clerk prod smoke user. They read `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` from the environment; set them from the Keychain:
+
+```bash
+CLERK_SECRET_KEY=$(security find-generic-password -s rhumbatron-clerk-secret-key-prod -w) \
+CLERK_SMOKE_USER_ID=$(security find-generic-password -s rhumbatron-clerk-smoke-user-id-prod -w) \
+bun run test:ui
+```
 
 ## Deployment
 

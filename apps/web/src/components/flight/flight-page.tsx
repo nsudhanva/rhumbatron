@@ -300,7 +300,7 @@ function HeaderStrip({
   }, [state.tasks]);
   const c = state.counts;
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b-2 border-kumo-divider px-3 py-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b-2 border-kumo-divider px-3 py-2">
       <div className="flex min-w-0 flex-[1_1_320px] items-baseline gap-2">
         <span className="type-kicker shrink-0 text-kumo-accent">Flight Control</span>
         <Heading className="min-w-0 truncate text-[15px] font-bold" title={change.goal}>
@@ -429,7 +429,7 @@ export function FlightPage({
       >
         <div
           ref={chrome.ref}
-          className="z-40 grid min-w-0 bg-kumo-elevated [@media(min-width:1024px)_and_(min-height:720px)]:sticky [@media(min-width:1024px)_and_(min-height:720px)]:top-0"
+          className="z-40 grid min-w-0 grid-cols-[minmax(0,1fr)] bg-kumo-elevated [@media(min-width:1024px)_and_(min-height:720px)]:sticky [@media(min-width:1024px)_and_(min-height:720px)]:top-0"
         >
           <HeaderStrip
             state={state}

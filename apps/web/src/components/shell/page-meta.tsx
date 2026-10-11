@@ -51,3 +51,27 @@ export function usePageMeta({ trail }: { trail?: Crumb[] }) {
 export function usePageTrail(): Crumb[] {
   return useContext(PageMetaContext)?.trail ?? [];
 }
+
+/** The `(n) ` count the notification bell puts in front of the title. */
+const COUNT_PREFIX = /^\(\d+\+?\) /;
+
+/**
+ * Sets the tab title to `title` (the shell passes "<Page> · <Project or Change> · Rhumbatron").
+ * The router writes each route's static `head` title on navigation and the notification bell
+ * prefixes a count; this re-applies the title after either and keeps the bell's prefix.
+ * `undefined` leaves the route's own title.
+ */
+export function useDocumentTitle(title: string | undefined) {
+  useEffect(() => {
+    if (!title) return;
+    const apply = () => {
+      const prefix = COUNT_PREFIX.exec(document.title)?.[0] ?? "";
+      const next = prefix + title;
+      if (document.title !== next) document.title = next;
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [title]);
+}
