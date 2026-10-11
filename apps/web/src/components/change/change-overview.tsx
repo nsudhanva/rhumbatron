@@ -82,8 +82,8 @@ export function ChangeStats({
 }
 
 /**
- * Acceptance criteria as a checklist (DESIGN.md 9.14). The API does not record which criterion
- * a check proved, so every item shows the pending square rather than a claimed tick.
+ * Acceptance criteria as a checklist (DESIGN.md 9.14) before a Candidate is judged: every item
+ * shows the pending square. A judged Candidate shows met or not met (candidate/acceptance-list).
  */
 export function CriteriaList({ items }: { items: string[] }) {
   if (items.length === 0) {

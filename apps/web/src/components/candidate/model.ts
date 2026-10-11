@@ -114,6 +114,7 @@ const KIND_ORDER = [
   "performance",
   "security",
   "browser",
+  "acceptance",
 ];
 
 const kindRank = (kind: string) => {
@@ -231,6 +232,10 @@ const CRITERIA: Record<string, { title: string; detail: string }> = {
   },
   security: { title: "Security", detail: "Denied actions stay denied" },
   browser: { title: "Browser flow", detail: "Share, collaborate and revoke in Browser Run" },
+  acceptance: {
+    title: "Acceptance criteria",
+    detail: "Every criterion of the Change is met, with cited source lines",
+  },
 };
 
 /** Criterion title and one-line explanation for a check. */

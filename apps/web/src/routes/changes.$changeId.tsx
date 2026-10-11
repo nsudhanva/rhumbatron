@@ -1,48 +1,46 @@
 import { Show } from "@clerk/tanstack-react-start";
 import { buttonVariants, cn } from "@cloudflare/kumo";
-import { Airplane } from "@phosphor-icons/react";
+import { Airplane, ArrowSquareOut, CheckCircle, RocketLaunch } from "@phosphor-icons/react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deriveActivity } from "../components/agents/activity-model";
 import { AgentActivity } from "../components/agents/agent-activity";
-import { CandidateList } from "../components/candidate-list";
-import { CancelChange, RaiseBudget } from "../components/change/change-controls";
-import {
-  ChangeStats,
-  CriteriaList,
-  changeSpend,
-  InvariantList,
-} from "../components/change/change-overview";
-import { RequestConflictCard } from "../components/change/request-conflict-card";
+import { candidateLabels } from "../components/candidate/model";
+import { CandidateSummary } from "../components/change/candidate-summary";
+import { CancelChange } from "../components/change/change-controls";
+import { ChangeHeader } from "../components/change/change-header";
+import { ChangeStats, changeSpend, InvariantList } from "../components/change/change-overview";
+import { statusLine } from "../components/change/change-status";
+import { ConflictList } from "../components/change/conflict-list";
+import { Disclosure } from "../components/change/disclosure";
+import { awaitingApproval, NeedsAttention } from "../components/change/needs-attention";
 import { ChangeFilesChanged } from "../components/code/files-changed";
-import { ConflictCard } from "../components/conflict-card";
-import { DeadLetters } from "../components/dead-letters";
-import { SectionError } from "../components/project/feedback";
 import { useEventFeed } from "../components/project/use-event-feed";
 import { TaskPanel } from "../components/task-detail";
 import { EmptyState } from "../components/ui/empty-state";
+import { KeyValue } from "../components/ui/key-value";
 import { Loader } from "../components/ui/loader";
 import { Mono } from "../components/ui/mono";
-import { Page, PageTitle, Section, TwoUp } from "../components/ui/page";
-import { StatusPill } from "../components/ui/status-pill";
-import { Tag } from "../components/ui/tag";
+import { Page, Section } from "../components/ui/page";
 import { WorkGraph } from "../components/work-graph";
 import {
-  type CandidateDetail,
-  type ChangeDetail,
-  type ChangeMeta,
+  type ChangeOutcome,
   type EvidenceRecord,
   getChange,
   getChangeClaims,
   getChangeProgress,
   getConflicts,
+  getDeadLetters,
   getProject,
+  getProjectApp,
   getRequestConflicts,
   listCandidateEvidence,
   listCandidates,
+  listChangeSets,
   listTasks,
 } from "../lib/api";
+import type { CandidateView, ChangeView as ChangeRead } from "../lib/api-change";
 import {
   formatFraction,
   formatNumber,
@@ -51,7 +49,6 @@ import {
   isCompiling,
   isLive,
   lastActiveTask,
-  timeAgo,
 } from "../lib/format";
 import { deltaTouchesChange, type LiveStatus, useProjectLive } from "../lib/live";
 
@@ -64,7 +61,7 @@ const FALLBACK_POLL_MS = 30_000;
  * the tab is visible. One indexed D1 read of the Change's running attempts per poll.
  */
 const PROGRESS_POLL_MS = 5_000;
-const IN_FLIGHT = new Set<CandidateDetail["status"]>(["composing", "composed", "verifying"]);
+const IN_FLIGHT = new Set<CandidateView["status"]>(["composing", "composed", "verifying"]);
 
 /** Module-level so useQueries keeps the combined result stable between renders. */
 function combineEvidence(results: { data: EvidenceRecord[] | undefined; isPending: boolean }[]) {
@@ -96,8 +93,13 @@ function ChangeView() {
   const change = useQuery({
     queryKey: ["change", changeId],
     // The API returns the risk tier and record times with the detail (workers/api changes.ts).
-    queryFn: () => getChange({ data: changeId }) as Promise<ChangeDetail & Partial<ChangeMeta>>,
-    refetchInterval: (query) => (isLive(query.state.data, undefined) ? fallback : false),
+    queryFn: () => getChange({ data: changeId }) as Promise<ChangeRead>,
+    // A Change waiting for an answer has no live work, but the answer can come from another
+    // person, so it keeps the slow poll.
+    refetchInterval: (query) =>
+      isLive(query.state.data, undefined) || query.state.data?.status === "needs_input"
+        ? fallback
+        : false,
     // A demo screen may sit in a background tab; polling still stops once the Change is idle.
     refetchIntervalInBackground: true,
   });
@@ -121,7 +123,7 @@ function ChangeView() {
   });
   const candidates = useQuery({
     queryKey: ["candidates", changeId],
-    queryFn: () => listCandidates({ data: changeId }),
+    queryFn: () => listCandidates({ data: changeId }) as Promise<CandidateView[]>,
     // Verification runs after the Change settles, so this polls while any Candidate is in flight.
     refetchInterval: (query) =>
       query.state.data?.some((c) => IN_FLIGHT.has(c.status)) ? FALLBACK_POLL_MS : false,
@@ -167,6 +169,25 @@ function ChangeView() {
     enabled: !!projectId,
   });
   const isOwner = project.data?.role === "owner";
+  // The live app answers "Live as Sn" and the "Open live app" action, once the Change ships.
+  const shipped = ["releasing", "completed"].includes(change.data?.status ?? "");
+  const projectApp = useQuery({
+    queryKey: ["project-app", projectId],
+    queryFn: () => getProjectApp({ data: projectId ?? "" }),
+    enabled: !!projectId && shipped,
+  });
+  // Same key and read as the DeadLetters block, so "Needs attention" knows whether it has rows.
+  const operator = useQuery({
+    queryKey: ["dead-letters", projectId, changeId],
+    queryFn: () => getDeadLetters({ data: { projectId: projectId ?? "", changeId } }),
+    enabled: !!projectId,
+    refetchInterval: 60_000,
+  });
+  // Same key as Files changed; the Task inspector lists the files of the selected Task.
+  const changeSets = useQuery({
+    queryKey: ["changesets", changeId],
+    queryFn: () => listChangeSets({ data: changeId }),
+  });
   const live = isLive(change.data, tasks.data);
   const status = useProjectLive(projectId, live, (signal) => {
     // Any push can carry events of this Change (claims, routes), so the feed always reads on.
@@ -179,6 +200,7 @@ function ChangeView() {
     void queryClient.invalidateQueries({ queryKey: ["request-conflicts", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["candidates", changeId] });
     void queryClient.invalidateQueries({ queryKey: ["change-progress", changeId] });
+    void queryClient.invalidateQueries({ queryKey: ["changesets", changeId] });
     for (const c of candidates.data ?? []) {
       void queryClient.invalidateQueries({ queryKey: ["candidate-evidence", c.id] });
     }
@@ -263,161 +285,126 @@ function ChangeView() {
   const selectedTask = taskList.find((t) => t.id === selected) ?? lastActiveTask(taskList);
   const spend = changeSpend(taskList);
   const compiling = isCompiling(data.status) && taskList.length === 0;
+  const canAnswer = data.requester?.isYou === true || isOwner;
+  const names = candidateLabels(candidateList);
+  const liveApp = projectApp.data?.app?.status === "ready" ? projectApp.data.app : null;
+  const line = statusLine({
+    change: data,
+    tasks: taskList,
+    candidates: candidateList,
+    canAnswer,
+    liveGeneration: liveApp?.generation ?? null,
+  });
+  const approval = awaitingApproval(candidateList);
+  const promotable = candidateList.find(
+    (c) =>
+      c.status === "verified" &&
+      c.gate?.promotable === true &&
+      (!c.approvalRequired || c.approval?.decision === "granted"),
+  );
+  const operatorIssues =
+    (operator.data?.deadLetters.length ?? 0) + (operator.data?.limits.length ?? 0) > 0;
+  const taskChangeSets = (changeSets.data ?? []).filter((s) => s.taskId === selectedTask?.id);
+  const taskClaims = (claims.data?.claims ?? []).filter(
+    (c) => selectedTask?.assignedAgentId && c.agentId === selectedTask.assignedAgentId,
+  );
+
+  // One primary action at most (DESIGN.md 8.1). Answering happens in the form below the title.
+  const primary =
+    data.status === "needs_input" ? null : approval ? (
+      <Link
+        to="/candidates/$candidateId"
+        params={{ candidateId: approval.id }}
+        className={cn(buttonVariants({ variant: "primary" }), "gap-1.5")}
+      >
+        <CheckCircle size={16} aria-hidden />
+        Review and approve
+      </Link>
+    ) : promotable && !["promoting", "releasing", "completed"].includes(data.status) ? (
+      <Link
+        to="/candidates/$candidateId"
+        params={{ candidateId: promotable.id }}
+        className={cn(buttonVariants({ variant: "primary" }), "gap-1.5")}
+      >
+        <RocketLaunch size={16} aria-hidden />
+        Review and promote
+      </Link>
+    ) : data.status === "completed" && liveApp ? (
+      <a
+        href={liveApp.url}
+        target="_blank"
+        rel="noreferrer"
+        className={cn(buttonVariants({ variant: "primary" }), "gap-1.5")}
+      >
+        <ArrowSquareOut size={16} aria-hidden />
+        Open live app
+      </a>
+    ) : null;
 
   return (
     <Page>
-      <PageTitle
-        size="detail"
-        kicker={
-          <span className="inline-flex flex-wrap items-center gap-2">
-            <span>Change</span>
-            <StatusPill status={data.status} className="tracking-normal normal-case" />
-            {data.riskTier && (
-              <Tag variant="outline" className="tracking-normal normal-case">
-                Risk {data.riskTier}
-              </Tag>
-            )}
-          </span>
-        }
-        title={data.goal}
-        meta={
-          <>
-            <span>
-              Base <Mono>{generation(data.baseGeneration)}</Mono>
-            </span>
-            <span aria-hidden>·</span>
-            <span>
-              Budget{" "}
-              <Mono>
-                {spend
-                  ? formatFraction(formatUsd(spend.costUsd), formatUsd(data.budgetUsd))
-                  : formatUsd(data.budgetUsd)}
-              </Mono>
-            </span>
-            {data.createdAt && (
-              <>
-                <span aria-hidden>·</span>
-                <time dateTime={data.createdAt} title={data.createdAt}>
-                  created {timeAgo(data.createdAt)}
-                </time>
-              </>
-            )}
-            <span aria-hidden>·</span>
-            <Mono subtle>{data.id}</Mono>
-            {liveOpen && <StatusPill status="live" />}
-          </>
-        }
+      <ChangeHeader
+        change={data}
+        line={line}
+        live={liveOpen}
         actions={
           <>
             <CancelChange changeId={data.id} status={data.status} />
             <Link
               to="/changes/$changeId/flight"
               params={{ changeId }}
-              className={cn(buttonVariants({ variant: "primary" }), "gap-1.5")}
+              className={cn(
+                buttonVariants({ variant: primary ? "secondary" : "primary" }),
+                "gap-1.5",
+              )}
             >
               <Airplane size={16} aria-hidden />
               Open Flight Control
             </Link>
+            {primary}
           </>
         }
       />
 
-      {data.status === "failed" && data.blockedReason?.startsWith("Planning failed:") && (
-        <SectionError message={data.blockedReason} className="whitespace-pre-wrap text-sm" />
-      )}
-
-      {data.status === "budget_blocked" && (
-        <RaiseBudget changeId={data.id} budgetUsd={data.budgetUsd} />
-      )}
-
-      <DeadLetters projectId={data.projectId} changeId={data.id} />
-
-      <ChangeStats
-        tasks={taskList}
+      <NeedsAttention
+        change={data}
+        candidates={candidateList}
         conflicts={conflictList}
-        candidates={candidateList}
-        budgetUsd={data.budgetUsd}
+        candidateLabel={(id) => names.get(id) ?? id}
+        canAnswer={canAnswer}
+        hasOperatorIssues={operatorIssues}
       />
-
-      <AgentActivity model={model} ready={ready} compiling={compiling} />
-
-      <TwoUp>
-        <Section
-          label="Acceptance criteria"
-          meta={<Mono subtle>{formatNumber(data.acceptanceCriteria.length)}</Mono>}
-        >
-          <CriteriaList items={data.acceptanceCriteria} />
-        </Section>
-        <Section
-          label="Protected invariants"
-          meta={<Mono subtle>{formatNumber(data.invariants.length)}</Mono>}
-        >
-          <InvariantList items={data.invariants} />
-        </Section>
-      </TwoUp>
-
-      {conflictList.length > 0 && (
-        <Section
-          label="Conflicts"
-          meta={
-            <Mono subtle>
-              {formatNumber(conflictList.filter((c) => c.state !== "resolved").length)} open
-            </Mono>
-          }
-        >
-          <div className="grid gap-4">
-            {conflictList.map((conflict) => (
-              <ConflictCard key={conflict.id} conflict={conflict} />
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {requestConflictList.length > 0 && (
-        <Section
-          label="Conflicting requests"
-          meta={<Mono subtle>{formatNumber(requestConflictList.length)}</Mono>}
-        >
-          <div className="grid gap-4">
-            {requestConflictList.map((rc) => (
-              <RequestConflictCard
-                key={rc.id}
-                conflict={rc}
-                currentChangeId={changeId}
-                projectId={projectId ?? data.projectId}
-                isOwner={isOwner}
-              />
-            ))}
-          </div>
-        </Section>
-      )}
-
-      <CandidateList
-        changeId={changeId}
-        candidates={candidateList}
-        canCompose={
-          !["cancelled", "failed", "completed", "promoting", "releasing"].includes(data.status)
-        }
-      />
-
-      <ChangeFilesChanged changeId={changeId} />
 
       <div className="grid gap-7 min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
         <Section
           label="Work graph"
-          meta={<Mono subtle>{formatNumber(taskList.length)} Tasks</Mono>}
+          meta={
+            taskList.length > 0 && (
+              <Mono subtle>
+                {formatNumber(taskList.filter((t) => t.status === "completed").length)} /{" "}
+                {formatNumber(taskList.length)} Tasks done
+              </Mono>
+            )
+          }
         >
           {compiling ? (
             <p className="flex items-center gap-2 text-[13px]">
               <Loader /> Root Planner is compiling the Work Graph.
             </p>
           ) : taskList.length === 0 ? (
-            <EmptyState what="No Tasks." how="This Change has no Work Graph." />
+            <EmptyState
+              what="No Tasks."
+              how={
+                data.status === "needs_input"
+                  ? "Tasks appear after the questions above are answered."
+                  : "This Change has no Work Graph."
+              }
+            />
           ) : (
             <WorkGraph tasks={taskList} selectedId={selectedTask?.id} onSelect={setSelected} />
           )}
         </Section>
-        <Section label="Task details">
+        <Section label="Task">
           <div
             className={cn(
               "bg-kumo-elevated p-4",
@@ -425,10 +412,73 @@ function ChangeView() {
               selectedTask && "shadow-[inset_2px_0_0_var(--color-accent-500)]",
             )}
           >
-            <TaskPanel task={selectedTask} />
+            <TaskPanel task={selectedTask} changeSets={taskChangeSets} claims={taskClaims} />
           </div>
         </Section>
       </div>
+
+      <AgentActivity model={model} ready={ready} compiling={compiling} />
+
+      <CandidateSummary
+        changeId={changeId}
+        candidates={candidateList}
+        evidence={evidenceById}
+        criteria={data.acceptanceCriteria}
+        canCompose={
+          !["cancelled", "failed", "completed", "promoting", "releasing", "needs_input"].includes(
+            data.status,
+          )
+        }
+      />
+
+      <ChangeFilesChanged changeId={changeId} />
+
+      <ConflictList
+        changeId={changeId}
+        conflicts={conflictList}
+        requestConflicts={requestConflictList}
+        outcomeReason={data.outcome?.reason}
+      />
+
+      <Disclosure label="Details" className="border-t-2 border-kumo-divider pt-1">
+        <ChangeStats
+          tasks={taskList}
+          conflicts={conflictList}
+          candidates={candidateList}
+          budgetUsd={data.budgetUsd}
+        />
+        <KeyValue
+          items={[
+            { label: "Change", value: data.id, mono: true },
+            { label: "Project", value: data.projectId, mono: true },
+            { label: "Base generation", value: generation(data.baseGeneration), mono: true },
+            {
+              label: "Budget",
+              value: spend
+                ? formatFraction(formatUsd(spend.costUsd), formatUsd(data.budgetUsd))
+                : formatUsd(data.budgetUsd),
+              mono: true,
+            },
+            { label: "Risk tier", value: data.riskTier ?? null },
+            { label: "Status", value: data.status, mono: true },
+            { label: "Requester", value: data.requester?.userId ?? null, mono: true },
+            { label: "Outcome", value: data.outcome ? outcomeWords(data.outcome) : null },
+            { label: "Work Graph", value: data.workGraphRef ?? null, mono: true },
+            { label: "Created", value: data.createdAt ?? null, mono: true },
+            { label: "Updated", value: data.updatedAt ?? null, mono: true },
+          ]}
+        />
+        <div className="grid gap-1">
+          <h3 className="type-label text-kumo-subtle">Protected invariants</h3>
+          <InvariantList items={data.invariants} />
+        </div>
+      </Disclosure>
     </Page>
   );
+}
+
+/** The recorded request-conflict outcome in words. */
+function outcomeWords(outcome: ChangeOutcome) {
+  const kind = outcome.kind.replace(/_/g, " ");
+  return outcome.reason ? `${kind}: ${outcome.reason}` : kind;
 }

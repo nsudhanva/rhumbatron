@@ -2,6 +2,7 @@ import { cn } from "@cloudflare/kumo";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { CandidateDetail } from "../../lib/api";
+import type { CandidateView, CriterionAcceptance } from "../../lib/api-change";
 import { EMPTY, formatMs, formatNumber, generation } from "../../lib/format";
 import { ThresholdMeter } from "../ui/meter";
 import { StatusPill } from "../ui/status-pill";
@@ -170,6 +171,27 @@ function approvalCell(candidate: CandidateDetail) {
   };
 }
 
+const ACCEPTANCE_PILL: Record<
+  CriterionAcceptance["status"],
+  { status: string; label: string; family: "ok" | "danger" | "attention" }
+> = {
+  met: { status: "pass", label: "Met", family: "ok" },
+  not_met: { status: "fail", label: "Not met", family: "danger" },
+  unclear: { status: "gap", label: "Unclear", family: "attention" },
+};
+
+const acceptanceOf = (candidate: CandidateDetail) =>
+  (candidate as CandidateView).acceptance ?? null;
+
+/** Union of every Candidate's judged acceptance criteria, in first-seen order. */
+function acceptanceCriteria(items: ComparedCandidate[]): string[] {
+  const seen = new Set<string>();
+  for (const item of items) {
+    for (const a of acceptanceOf(item.candidate) ?? []) seen.add(a.criterion);
+  }
+  return [...seen];
+}
+
 export function ComparisonMatrix({ items }: { items: ComparedCandidate[] }) {
   const budget = items.map((i) => p95Budget(i.candidate)).find((b) => b !== null) ?? null;
   const scale =
@@ -206,7 +228,15 @@ export function ComparisonMatrix({ items }: { items: ComparedCandidate[] }) {
   ) {
     sentences.push(`${winner.label} still needs a human approval before it can promote.`);
   }
+  const selection = items
+    .map((i) => (i.candidate as CandidateView).selection)
+    .find((sel) => sel !== null && sel !== undefined);
+  const selected = items.find((i) => i.candidate.id === selection?.winnerCandidateId);
+  if (selection && selected) {
+    sentences.unshift(`${selected.label} was selected: ${selection.reason}`.replace(/\.?$/, "."));
+  }
   const why = sentences.join(" ");
+  const accepted = acceptanceCriteria(items);
 
   return (
     <div className="grid gap-4">
@@ -283,6 +313,39 @@ export function ComparisonMatrix({ items }: { items: ComparedCandidate[] }) {
                     />
                   </Cell>
                 ))}
+              </tr>
+            ))}
+            {accepted.map((text) => (
+              <tr key={`acceptance:${text}`}>
+                {rowLabel("Acceptance", text)}
+                {items.map(({ candidate }) => {
+                  const judged = acceptanceOf(candidate)?.find((a) => a.criterion === text);
+                  const pill = judged ? ACCEPTANCE_PILL[judged.status] : null;
+                  return (
+                    <Cell key={candidate.id} featured={featured(candidate.id)}>
+                      <ValuePill
+                        value={
+                          judged
+                            ? `${formatNumber(judged.citations.length)} ${
+                                judged.citations.length === 1 ? "citation" : "citations"
+                              }`
+                            : EMPTY
+                        }
+                        pill={
+                          pill ? (
+                            <StatusPill
+                              status={pill.status}
+                              label={pill.label}
+                              family={pill.family}
+                            />
+                          ) : (
+                            <StatusPill status="none" label="Not judged" />
+                          )
+                        }
+                      />
+                    </Cell>
+                  );
+                })}
               </tr>
             ))}
             <tr>
@@ -368,7 +431,9 @@ export function ComparisonMatrix({ items }: { items: ComparedCandidate[] }) {
         <h3 className="type-h6">Why</h3>
         <p className="type-body text-pretty">{why}</p>
         <p className="text-[12px] text-kumo-subtle">
-          Decided by executable evidence; model confidence is not used.
+          {selection
+            ? "Selected by the system from the evidence and the acceptance criteria; model confidence is not used."
+            : "Decided by executable evidence; model confidence is not used."}
         </p>
       </div>
     </div>

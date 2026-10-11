@@ -56,9 +56,11 @@ export function CancelChange({ changeId, status }: { changeId: string; status: s
   }
   return (
     <>
-      <Button variant="ghost" onClick={() => setConfirming(false)} disabled={cancel.isPending}>
-        Keep running
-      </Button>
+      {!cancel.isPending && (
+        <Button variant="ghost" onClick={() => setConfirming(false)}>
+          Keep running
+        </Button>
+      )}
       <Button variant="secondary" loading={cancel.isPending} onClick={() => cancel.mutate()}>
         Confirm cancel
       </Button>
@@ -71,6 +73,7 @@ CancelChange.displayName = "CancelChange";
 export function RaiseBudget({ changeId, budgetUsd }: { changeId: string; budgetUsd: number }) {
   const [budget, setBudget] = useState(String(Math.min(100, Math.max(1, budgetUsd * 2))));
   const next = Number(budget);
+  const [invalid, setInvalid] = useState(false);
   const refresh = useRefreshChange(changeId);
   const raise = useMutation({
     mutationFn: () => raiseChangeBudget({ data: { changeId, budgetUsd: next } }),
@@ -81,7 +84,9 @@ export function RaiseBudget({ changeId, budgetUsd }: { changeId: string; budgetU
       className="grid gap-3"
       onSubmit={(event) => {
         event.preventDefault();
-        raise.mutate();
+        const ok = next >= budgetUsd && next <= 100;
+        setInvalid(!ok);
+        if (ok) raise.mutate();
       }}
     >
       <p className="text-[13px] font-semibold text-accent-700">
@@ -102,15 +107,15 @@ export function RaiseBudget({ changeId, budgetUsd }: { changeId: string; budgetU
             required
           />
         </div>
-        <Button
-          type="submit"
-          variant="secondary"
-          loading={raise.isPending}
-          disabled={!(next >= budgetUsd && next <= 100)}
-        >
+        <Button type="submit" variant="secondary" loading={raise.isPending}>
           Raise budget
         </Button>
       </div>
+      {invalid && (
+        <p role="alert" className="text-[12px] font-semibold text-kumo-danger">
+          Enter a budget from {formatUsd(budgetUsd)} to $100.00. A budget can only go up.
+        </p>
+      )}
       {raise.isError && (
         <SectionError message={`The budget was not raised. ${raise.error.message}`} />
       )}

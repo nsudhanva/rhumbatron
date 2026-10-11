@@ -3,6 +3,7 @@ import { Button, buttonVariants, cn } from "@cloudflare/kumo";
 import { Columns } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { AcceptanceList, acceptanceSummary } from "../components/candidate/acceptance-list";
 import { Banner } from "../components/candidate/banner";
 import {
   type CheckRow,
@@ -37,6 +38,7 @@ import {
   listCandidates,
   listChanges,
 } from "../lib/api";
+import type { CandidateView as CandidateRead } from "../lib/api-change";
 import { EMPTY, formatMs, formatNumber, generation, timeAgo } from "../lib/format";
 
 export const Route = createFileRoute("/candidates/$candidateId")({ component: CandidatePage });
@@ -64,7 +66,7 @@ function CandidateView() {
   const { candidateId } = Route.useParams();
   const candidate = useQuery({
     queryKey: ["candidate", candidateId],
-    queryFn: () => getCandidate({ data: candidateId }),
+    queryFn: () => getCandidate({ data: candidateId }) as Promise<CandidateRead>,
     refetchInterval: (query) => (!query.state.data || isActive(query.state.data) ? POLL_MS : false),
   });
   const active = !candidate.data || isActive(candidate.data);
@@ -162,7 +164,33 @@ function CandidateView() {
 
       <Verdict candidate={data} label={label ?? "This Candidate"} rows={rows} />
 
+      {data.selection && data.selection.winnerCandidateId !== data.id && (
+        <p className="border-y border-kumo-rule py-2 text-[13px] text-pretty">
+          <span className="font-semibold">Not selected.</span>{" "}
+          <Link
+            to="/candidates/$candidateId"
+            params={{ candidateId: data.selection.winnerCandidateId }}
+            className="font-semibold text-kumo-link hover:underline"
+          >
+            {labels.get(data.selection.winnerCandidateId) ?? data.selection.winnerCandidateId}
+          </Link>{" "}
+          was chosen instead: {data.selection.reason}
+        </p>
+      )}
+
       <Stats candidate={data} rows={rows} />
+
+      {data.acceptance && data.acceptance.length > 0 && (
+        <Section
+          label="Acceptance criteria"
+          meta={<Mono subtle>{acceptanceSummary(data.acceptance)}</Mono>}
+        >
+          <AcceptanceList items={data.acceptance} citations />
+          <p className="text-[12px] text-kumo-subtle">
+            Each criterion is judged against the composed source. Quotes are the cited lines.
+          </p>
+        </Section>
+      )}
 
       <Section label="Approval and promotion">
         <CandidatePromotion

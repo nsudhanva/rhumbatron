@@ -1,5 +1,6 @@
 import { GitFork, Warning } from "@phosphor-icons/react";
 import type { ConflictDetail, ConflictIntent, ConflictSignal } from "../lib/api";
+import { Disclosure } from "./change/disclosure";
 import { StatusPill } from "./ui/status-pill";
 import { Tag, type TagVariant } from "./ui/tag";
 
@@ -148,7 +149,34 @@ function IntentColumn({ intent }: { intent: ConflictIntent }) {
   );
 }
 
-export function ConflictCard({ conflict }: { conflict: ConflictDetail }) {
+/** One-line summary of a conflict for a collapsed list row. */
+export function conflictLine(conflict: ConflictDetail) {
+  const [left, right] = conflict.intents;
+  const name = (i: ConflictIntent) => i.title || i.taskKey || "Task";
+  return `${name(left)} vs ${name(right)} on ${conflict.resource}`;
+}
+
+/** The strongest signal's label, for the collapsed row. */
+export function conflictKind(conflict: ConflictDetail) {
+  const strongest = conflict.signals[0];
+  return strongest ? SIGNAL_LABEL[strongest.kind] : null;
+}
+
+/** A person must decide: the model review escalated to a human. */
+export function needsPerson(conflict: ConflictDetail) {
+  return (
+    conflict.state !== "resolved" && (conflict.review as ReviewWithModels).attention === "human"
+  );
+}
+
+export function ConflictCard({
+  conflict,
+  headless = false,
+}: {
+  conflict: ConflictDetail;
+  /** Inside a list row that already names the resource and state: skip the header. */
+  headless?: boolean;
+}) {
   const [left, right] = conflict.intents;
   const step = nextStep(conflict);
   const open = conflict.state !== "resolved";
@@ -157,18 +185,20 @@ export function ConflictCard({ conflict }: { conflict: ConflictDetail }) {
     <article
       aria-label={`Semantic conflict on ${conflict.resource}`}
       className={
-        open
+        open && !headless
           ? "grid gap-4 bg-kumo-elevated p-4 shadow-[inset_2px_0_0_var(--color-accent-500)]"
           : "grid gap-4 bg-kumo-elevated p-4"
       }
     >
-      <header className="flex flex-wrap items-center gap-2">
-        <Warning size={16} className={open ? "shrink-0 text-kumo-accent" : "shrink-0"} />
-        <h3 className="text-[14px] font-extrabold">Semantic conflict</h3>
-        <span className="font-mono text-[12px] break-all">{conflict.resource}</span>
-        {strongest && <Tag variant="outline">{SIGNAL_LABEL[strongest.kind]}</Tag>}
-        <StatusPill status={conflict.state} className="ml-auto" />
-      </header>
+      {!headless && (
+        <header className="flex flex-wrap items-center gap-2">
+          <Warning size={16} className={open ? "shrink-0 text-kumo-accent" : "shrink-0"} />
+          <h3 className="text-[14px] font-extrabold">Semantic conflict</h3>
+          <span className="font-mono text-[12px] break-all">{conflict.resource}</span>
+          {strongest && <Tag variant="outline">{SIGNAL_LABEL[strongest.kind]}</Tag>}
+          <StatusPill status={conflict.state} className="ml-auto" />
+        </header>
+      )}
 
       <div className="grid gap-3 min-[760px]:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
         <IntentColumn intent={left} />
@@ -195,19 +225,22 @@ export function ConflictCard({ conflict }: { conflict: ConflictDetail }) {
       <div className="grid gap-1 text-[13px]">
         <p className="flex flex-wrap items-center gap-2">
           {conflict.recommendedAction === "fork_candidates" && <GitFork size={14} />}
-          <span className="font-semibold">Recommended · {step.label}</span>
+          <span className="font-semibold">Next · {step.label}</span>
           <span className="text-kumo-subtle">{step.detail}</span>
-        </p>
-        <p className="font-mono text-[11px] text-kumo-subtle">
-          decided by {conflict.review.decidedBy}
-          {conflict.challengeId ? ` · challenge ${conflict.challengeId}` : ""}
         </p>
         {conflict.review.rationale && (
           <p className="text-[12px] text-kumo-subtle">{conflict.review.rationale}</p>
         )}
       </div>
 
-      <ModelReviews review={conflict.review as ReviewWithModels} />
+      <Disclosure label="Details" className="border-t border-kumo-rule pt-1">
+        <p className="font-mono text-[11px] break-all text-kumo-subtle">
+          {conflict.id} · decided by {conflict.review.decidedBy}
+          {conflict.challengeId ? ` · challenge ${conflict.challengeId}` : ""}
+        </p>
+        <ModelReviews review={conflict.review as ReviewWithModels} />
+      </Disclosure>
     </article>
   );
 }
+ConflictCard.displayName = "ConflictCard";
