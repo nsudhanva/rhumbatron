@@ -2,6 +2,7 @@ import { Show, SignInButton, SignUpButton, UserButton, useUser } from "@clerk/ta
 import { Button, cn } from "@cloudflare/kumo";
 import {
   Airplane,
+  ArrowLeft,
   CaretUpDown,
   ClockCounterClockwise,
   Code,
@@ -19,7 +20,6 @@ import {
   Robot,
   SealCheck,
   SquaresFour,
-  Stack,
   Sun,
   TreeStructure,
   X,
@@ -30,14 +30,17 @@ import { type ShellLiveState, useShellLiveState } from "../../lib/live-status";
 import { type ColorMode, useColorMode } from "../../lib/mode";
 import { setViewMode, useViewMode, type ViewMode } from "../../lib/view-mode";
 import { NotificationBell } from "../notifications/notification-bell";
+import { SkeletonBar } from "../project/feedback";
 import { type Crumb, usePageTrail } from "./page-meta";
 import {
+  changesLink,
   PROJECT_PAGES,
   type ProjectPage,
   projectPageLink,
   type ShellContext,
   type ShellSection,
   useShellContext,
+  VIEW_SECTIONS,
 } from "./shell-context";
 
 /**
@@ -53,6 +56,8 @@ import {
  * so "/" would be "current" everywhere. Shell links only match their exact path.
  */
 const EXACT = { exact: true } as const;
+/** Sidebar rows: Overview and Changes share a path and differ by the `#changes` hash. */
+const EXACT_WITH_HASH = { exact: true, includeHash: true } as const;
 
 export type BuildInfo = { service: string; environment: string };
 
@@ -94,60 +99,82 @@ type NavItem = {
   label: string;
   icon: Icon;
   section?: ShellSection;
-  link?: LinkOptions;
-  /** Shown as subtle text when the item cannot be opened yet. */
-  unavailable?: string;
+  link: LinkOptions;
+  /** Short mono note on the right, for example which Change the item opens. */
+  hint?: string;
+  /** Full explanation in the tooltip. */
+  title?: string;
 };
 
-const SOON = "Not built yet";
-const NEEDS_PROJECT = "Open a project first";
-
-/** A project-scoped page: linked whenever a project is in context. */
-function projectPageItem(projectId: string | undefined, section: ProjectPage, icon: Icon): NavItem {
+/** A project-scoped page. */
+function projectPageItem(projectId: string, section: ProjectPage, icon: Icon): NavItem {
   return {
     label: PROJECT_PAGES[section],
     icon,
     section,
-    ...(projectId ? { link: projectPageLink(projectId, section) } : { unavailable: NEEDS_PROJECT }),
+    link: projectPageLink(projectId, section),
   };
 }
 
-/** Navigation order follows AGENTS.md 38. */
-function navItems(context: ShellContext): NavItem[] {
-  const { projectId, changeId, candidateId } = context;
-  // Changes are listed on the project overview; a Change in context links to that Change.
-  const changes: Pick<NavItem, "link" | "unavailable"> = changeId
-    ? { link: { to: "/changes/$changeId", params: { changeId } } }
-    : projectId
-      ? { link: { to: "/projects/$projectId", params: { projectId } } }
-      : { unavailable: NEEDS_PROJECT };
-  // Candidates are compared per Change (38.4); a Candidate in context links to that Candidate.
-  const candidates: Pick<NavItem, "link" | "unavailable"> = candidateId
-    ? { link: { to: "/candidates/$candidateId", params: { candidateId } } }
-    : changeId
-      ? { link: { to: "/compare/$changeId", params: { changeId } } }
-      : { unavailable: projectId ? "Open a Change to compare its Candidates" : NEEDS_PROJECT };
+/**
+ * A page of one Change (Flight Control, Candidates): the Change in context, else the newest
+ * Change, else the Changes list where the first one starts. Always a link.
+ */
+function changeScopedItem(
+  context: ShellContext,
+  projectId: string,
+  base: Pick<NavItem, "label" | "icon" | "section">,
+  linkFor: (changeId: string) => LinkOptions,
+): NavItem {
+  if (context.changeId) return { ...base, link: linkFor(context.changeId) };
+  if (context.latestChange) {
+    return {
+      ...base,
+      link: linkFor(context.latestChange.id),
+      hint: "latest",
+      title: `Opens the newest Change: ${context.latestChange.goal}`,
+    };
+  }
+  return {
+    ...base,
+    link: changesLink(projectId),
+    ...(context.noChanges
+      ? { hint: "no changes", title: "No Changes yet. Start one under New change." }
+      : {}),
+  };
+}
+
+/** Navigation order follows AGENTS.md 38. Every item is a link. */
+function navItems(context: ShellContext, projectId: string): NavItem[] {
+  const { candidateId } = context;
   return [
     {
       label: "Overview",
       icon: SquaresFour,
       section: "overview",
-      ...(projectId
-        ? { link: { to: "/projects/$projectId", params: { projectId } } }
-        : { unavailable: NEEDS_PROJECT }),
+      link: { to: "/projects/$projectId", params: { projectId } },
     },
-    { label: "Changes", icon: GitDiff, section: "changes", ...changes },
-    {
-      label: "Flight Control",
-      icon: Airplane,
-      section: "flight",
-      ...(changeId
-        ? { link: { to: "/changes/$changeId/flight", params: { changeId } } }
-        : { unavailable: projectId ? "Open a Change first" : NEEDS_PROJECT }),
-    },
+    { label: "Changes", icon: GitDiff, section: "changes", link: changesLink(projectId) },
+    changeScopedItem(
+      context,
+      projectId,
+      { label: "Flight Control", icon: Airplane, section: "flight" },
+      (changeId) => ({ to: "/changes/$changeId/flight", params: { changeId } }),
+    ),
     projectPageItem(projectId, "graph", Graph),
-    { label: "Candidates", icon: GitFork, section: "candidates", ...candidates },
-    { label: "Environments", icon: Stack, unavailable: SOON },
+    candidateId
+      ? {
+          label: "Candidates",
+          icon: GitFork,
+          section: "candidates",
+          link: { to: "/candidates/$candidateId", params: { candidateId } },
+        }
+      : changeScopedItem(
+          context,
+          projectId,
+          { label: "Candidates", icon: GitFork, section: "candidates" },
+          (changeId) => ({ to: "/compare/$changeId", params: { changeId } }),
+        ),
     projectPageItem(projectId, "agents", Robot),
     projectPageItem(projectId, "events", Pulse),
     projectPageItem(projectId, "verification", SealCheck),
@@ -155,9 +182,12 @@ function navItems(context: ShellContext): NavItem[] {
     projectPageItem(projectId, "code", Code),
     projectPageItem(projectId, "versions", ClockCounterClockwise),
     projectPageItem(projectId, "costs", CurrencyDollar),
-    { label: "Settings", icon: GearSix, unavailable: SOON },
+    projectPageItem(projectId, "settings", GearSix),
   ];
 }
+
+/** Number of skeleton rows while the Project of a Change or Candidate loads. */
+const SKELETON_ROWS = 13;
 
 function Sidebar({ context }: { context: ShellContext }) {
   const [open, setOpen] = useState(false);
@@ -217,13 +247,29 @@ function Sidebar({ context }: { context: ShellContext }) {
           <p className="mt-3 px-4 pb-1 text-[10px] tracking-[0.08em] text-kumo-subtle uppercase">
             Project
           </p>
-          <ul>
-            {navItems(context).map((item) => (
-              <li key={item.label}>
-                <NavRow item={item} current={!!item.section && item.section === section} />
-              </li>
-            ))}
-          </ul>
+          {projectId ? (
+            <ul>
+              {navItems(context, projectId).map((item) => (
+                <li key={item.label}>
+                  <NavRow item={item} current={!!item.section && item.section === section} />
+                </li>
+              ))}
+            </ul>
+          ) : context.resolving ? (
+            <ul aria-busy="true">
+              <li className="sr-only">Loading the project</li>
+              {Array.from({ length: SKELETON_ROWS }, (_, row) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows have no identity
+                <li key={row} aria-hidden className={cn(rowClasses, "border-transparent")}>
+                  <SkeletonBar height={13} className="w-full max-w-[140px]" />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="px-4 py-1.5 text-[13px] text-kumo-subtle">
+              Open a project to see its pages.
+            </p>
+          )}
         </nav>
 
         <div className="mt-auto border-t-2 border-kumo-divider px-4 py-3">
@@ -254,31 +300,12 @@ const rowClasses = "flex items-center gap-2.5 border-l-2 py-[7px] pr-4 pl-[14px]
 
 function NavRow({ item, current }: { item: NavItem; current: boolean }) {
   const IconComponent = item.icon;
-  const content = (
-    <>
-      <IconComponent size={16} aria-hidden className="shrink-0" />
-      <span className="truncate">{item.label}</span>
-    </>
-  );
-  if (!item.link) {
-    return (
-      <span
-        aria-disabled="true"
-        title={item.unavailable}
-        className={cn(rowClasses, "cursor-not-allowed border-transparent text-kumo-subtle")}
-      >
-        {content}
-        {item.unavailable === SOON && (
-          <span className="ml-auto font-mono text-[10px] text-kumo-subtle">soon</span>
-        )}
-      </span>
-    );
-  }
   return (
     <Link
       {...item.link}
-      activeOptions={EXACT}
+      activeOptions={EXACT_WITH_HASH}
       aria-current={current ? "page" : undefined}
+      title={item.title}
       className={cn(
         rowClasses,
         "transition-colors duration-(--rh-dur-ui)",
@@ -287,7 +314,13 @@ function NavRow({ item, current }: { item: NavItem; current: boolean }) {
           : "border-transparent hover:bg-kumo-faint",
       )}
     >
-      {content}
+      <IconComponent size={16} aria-hidden className="shrink-0" />
+      <span className="truncate">{item.label}</span>
+      {item.hint && (
+        <span className="ml-auto shrink-0 font-mono text-[10px] font-normal text-kumo-subtle">
+          {item.hint}
+        </span>
+      )}
     </Link>
   );
 }
@@ -339,18 +372,48 @@ function SignedInIdentity() {
 
 function Header({ context }: { context: ShellContext }) {
   const extra = usePageTrail();
+  const crumbs = [...context.trail, ...extra];
   return (
     <header className="col-start-2 row-start-1 flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b-2 border-kumo-divider bg-kumo-base px-7 py-2 max-[720px]:col-start-1 max-[720px]:row-start-2 max-[720px]:px-4">
-      <Breadcrumbs crumbs={[...context.trail, ...extra]} />
+      <div className="flex min-w-0 items-center gap-2.5">
+        <BackLink crumbs={crumbs} />
+        <Breadcrumbs crumbs={crumbs} />
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         {/* Left of the toggles: when it appears after sign-in, nothing to its right moves. */}
         <Show when="signed-in">
           <NotificationBell />
         </Show>
-        <ViewToggle />
+        {VIEW_SECTIONS.has(context.section) && <ViewToggle />}
         <ModeToggle />
       </div>
     </header>
+  );
+}
+
+/**
+ * One level up: the nearest linked crumb before the current one (a Candidate goes back to its
+ * Change, a Change to the Changes list, a project page to the overview). A real link, so the
+ * browser history and "open in new tab" work as usual.
+ */
+function BackLink({ crumbs }: { crumbs: Crumb[] }) {
+  const parent = crumbs
+    .slice(0, -1)
+    .reverse()
+    .find((crumb) => crumb.link);
+  if (!parent?.link || crumbs.length < 2) return null;
+  const label = `Back to ${parent.label}`;
+  return (
+    <Link
+      {...parent.link}
+      activeOptions={EXACT}
+      activeProps={{}}
+      title={label}
+      aria-label={label}
+      className="grid size-7 shrink-0 place-items-center border border-kumo-divider transition-colors duration-(--rh-dur-ui) hover:bg-kumo-tint pointer-coarse:size-11"
+    >
+      <ArrowLeft size={14} aria-hidden />
+    </Link>
   );
 }
 
@@ -415,12 +478,18 @@ const VIEWS: { value: ViewMode; label: string; title: string }[] = [
   },
 ];
 
-/** Product View / Systems View (AGENTS.md 38.7). Segmented control (8.2), selected in ink. */
+const VIEW_HELP =
+  "Product view shows outcomes; Systems view shows queues, Durable Objects, model routes. Set the default in project Settings.";
+
+/**
+ * Product View / Systems View (AGENTS.md 38.7). Segmented control (8.2), selected in ink. Shown
+ * only on pages that render differently per view (`VIEW_SECTIONS`).
+ */
 function ViewToggle() {
   const view = useViewMode();
   return (
-    <fieldset className="flex border border-kumo-divider">
-      <legend className="sr-only">View</legend>
+    <fieldset className="flex border border-kumo-divider" title={VIEW_HELP}>
+      <legend className="sr-only">View. {VIEW_HELP}</legend>
       {VIEWS.map(({ value, label, title }, index) => {
         const selected = view === value;
         return (

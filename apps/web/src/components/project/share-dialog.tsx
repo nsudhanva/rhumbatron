@@ -47,14 +47,18 @@ export function ProjectShare({ projectId, role }: { projectId: string; role?: st
             </button>
           </header>
 
-          <SharePanelBody projectId={projectId} isOwner={isOwner} />
+          <ProjectPeople projectId={projectId} isOwner={isOwner} />
         </Dialog>
       </Dialog.Root>
     </>
   );
 }
 
-function SharePanelBody({ projectId, isOwner }: { projectId: string; isOwner: boolean }) {
+/**
+ * Members and pending invitations of a Project, with invite, revoke and remove for the owner.
+ * Used by the Share dialog and the People section of Project Settings.
+ */
+export function ProjectPeople({ projectId, isOwner }: { projectId: string; isOwner: boolean }) {
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
@@ -133,12 +137,8 @@ function SharePanelBody({ projectId, isOwner }: { projectId: string; isOwner: bo
               className="grow"
               required
             />
-            <Button
-              type="submit"
-              variant="primary"
-              loading={invite.isPending}
-              disabled={!email.trim()}
-            >
+            {/* The input is required: an empty submit shows the browser's own message. */}
+            <Button type="submit" variant="primary" loading={invite.isPending}>
               Invite
             </Button>
           </div>

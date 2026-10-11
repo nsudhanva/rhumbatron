@@ -17,6 +17,7 @@ import { live } from "./live.ts";
 import { members } from "./members.ts";
 import { notifications } from "./notifications.ts";
 import { productGraph } from "./product-graph.ts";
+import { projectSettings } from "./project-settings.ts";
 import { projects } from "./projects.ts";
 import { releases } from "./releases.ts";
 import { screenshots } from "./screenshots.ts";
@@ -63,6 +64,7 @@ app.route("/", notifications);
 app.route("/", releases);
 app.route("/", apps);
 app.route("/", suggestions);
+app.route("/", projectSettings);
 app.route("/", projects);
 
 app.notFound((c) => fail(c, 404, "not_found", "Route not found"));

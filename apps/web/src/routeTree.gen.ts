@@ -25,6 +25,7 @@ import { Route as ProjectsProjectIdCodeRouteImport } from './routes/projects_.$p
 import { Route as ProjectsProjectIdCostsRouteImport } from './routes/projects_.$projectId.costs'
 import { Route as ProjectsProjectIdEventsRouteImport } from './routes/projects_.$projectId.events'
 import { Route as ProjectsProjectIdGraphRouteImport } from './routes/projects_.$projectId.graph'
+import { Route as ProjectsProjectIdSettingsRouteImport } from './routes/projects_.$projectId.settings'
 import { Route as ProjectsProjectIdVerificationRouteImport } from './routes/projects_.$projectId.verification'
 import { Route as ProjectsProjectIdVersionsRouteImport } from './routes/projects_.$projectId.versions'
 import { Route as ProjectsProjectIdWorkspaceRouteImport } from './routes/projects_.$projectId.workspace'
@@ -110,6 +111,12 @@ const ProjectsProjectIdGraphRoute = ProjectsProjectIdGraphRouteImport.update({
   path: '/projects/$projectId/graph',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsProjectIdSettingsRoute =
+  ProjectsProjectIdSettingsRouteImport.update({
+    id: '/projects_/$projectId/settings',
+    path: '/projects/$projectId/settings',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ProjectsProjectIdVerificationRoute =
   ProjectsProjectIdVerificationRouteImport.update({
     id: '/projects_/$projectId/verification',
@@ -152,6 +159,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId/costs': typeof ProjectsProjectIdCostsRoute
   '/projects/$projectId/events': typeof ProjectsProjectIdEventsRoute
   '/projects/$projectId/graph': typeof ProjectsProjectIdGraphRoute
+  '/projects/$projectId/settings': typeof ProjectsProjectIdSettingsRoute
   '/projects/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
   '/projects/$projectId/versions': typeof ProjectsProjectIdVersionsRoute
   '/projects/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
@@ -174,6 +182,7 @@ export interface FileRoutesByTo {
   '/projects/$projectId/costs': typeof ProjectsProjectIdCostsRoute
   '/projects/$projectId/events': typeof ProjectsProjectIdEventsRoute
   '/projects/$projectId/graph': typeof ProjectsProjectIdGraphRoute
+  '/projects/$projectId/settings': typeof ProjectsProjectIdSettingsRoute
   '/projects/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
   '/projects/$projectId/versions': typeof ProjectsProjectIdVersionsRoute
   '/projects/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
@@ -197,6 +206,7 @@ export interface FileRoutesById {
   '/projects_/$projectId/costs': typeof ProjectsProjectIdCostsRoute
   '/projects_/$projectId/events': typeof ProjectsProjectIdEventsRoute
   '/projects_/$projectId/graph': typeof ProjectsProjectIdGraphRoute
+  '/projects_/$projectId/settings': typeof ProjectsProjectIdSettingsRoute
   '/projects_/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
   '/projects_/$projectId/versions': typeof ProjectsProjectIdVersionsRoute
   '/projects_/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
@@ -221,6 +231,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/costs'
     | '/projects/$projectId/events'
     | '/projects/$projectId/graph'
+    | '/projects/$projectId/settings'
     | '/projects/$projectId/verification'
     | '/projects/$projectId/versions'
     | '/projects/$projectId/workspace'
@@ -243,6 +254,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/costs'
     | '/projects/$projectId/events'
     | '/projects/$projectId/graph'
+    | '/projects/$projectId/settings'
     | '/projects/$projectId/verification'
     | '/projects/$projectId/versions'
     | '/projects/$projectId/workspace'
@@ -265,6 +277,7 @@ export interface FileRouteTypes {
     | '/projects_/$projectId/costs'
     | '/projects_/$projectId/events'
     | '/projects_/$projectId/graph'
+    | '/projects_/$projectId/settings'
     | '/projects_/$projectId/verification'
     | '/projects_/$projectId/versions'
     | '/projects_/$projectId/workspace'
@@ -288,6 +301,7 @@ export interface RootRouteChildren {
   ProjectsProjectIdCostsRoute: typeof ProjectsProjectIdCostsRoute
   ProjectsProjectIdEventsRoute: typeof ProjectsProjectIdEventsRoute
   ProjectsProjectIdGraphRoute: typeof ProjectsProjectIdGraphRoute
+  ProjectsProjectIdSettingsRoute: typeof ProjectsProjectIdSettingsRoute
   ProjectsProjectIdVerificationRoute: typeof ProjectsProjectIdVerificationRoute
   ProjectsProjectIdVersionsRoute: typeof ProjectsProjectIdVersionsRoute
   ProjectsProjectIdWorkspaceRoute: typeof ProjectsProjectIdWorkspaceRoute
@@ -408,6 +422,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectIdGraphRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects_/$projectId/settings': {
+      id: '/projects_/$projectId/settings'
+      path: '/projects/$projectId/settings'
+      fullPath: '/projects/$projectId/settings'
+      preLoaderRoute: typeof ProjectsProjectIdSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projects_/$projectId/verification': {
       id: '/projects_/$projectId/verification'
       path: '/projects/$projectId/verification'
@@ -456,6 +477,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsProjectIdCostsRoute: ProjectsProjectIdCostsRoute,
   ProjectsProjectIdEventsRoute: ProjectsProjectIdEventsRoute,
   ProjectsProjectIdGraphRoute: ProjectsProjectIdGraphRoute,
+  ProjectsProjectIdSettingsRoute: ProjectsProjectIdSettingsRoute,
   ProjectsProjectIdVerificationRoute: ProjectsProjectIdVerificationRoute,
   ProjectsProjectIdVersionsRoute: ProjectsProjectIdVersionsRoute,
   ProjectsProjectIdWorkspaceRoute: ProjectsProjectIdWorkspaceRoute,

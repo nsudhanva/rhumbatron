@@ -51,6 +51,7 @@ Access to a Project does not give permission for each action. A collaborator can
 - Publish an app, remove an app, and roll back.
 - Edit code directly.
 - Provision the Project, run checks, and remove the Project.
+- Rename the Project and set its default Change budget.
 - Retry or dismiss stopped work (dead letters).
 
 ### Fields on Project and Change responses
@@ -82,3 +83,14 @@ Access to a Project does not give permission for each action. A collaborator can
 | `not_selected` | The request lost the conflict check. `winnerChangeId` names the request that won. |
 | `replaces` | The request is a new Change that an owner override made. It replaces `supersedesChangeId`. |
 | `overridden` | The owner chose another request. This request lost. |
+
+## Project settings
+
+The routes are in `workers/api/src/project-settings.ts`. Both routes need a signed-in user. The web page is `/projects/:projectId/settings`.
+
+| Method | Path | Who may call | Result | Main errors |
+|---|---|---|---|---|
+| GET | `/v1/projects/:projectId/settings` | Owner or collaborator | `name`, `slug`, `createdAt`, `role`, `defaultBudgetUsd`, `effectiveDefaultBudgetUsd`, and `limits` (`minBudgetUsd`, `maxBudgetUsd`). | 404 |
+| PATCH | `/v1/projects/:projectId` | Owner | The same body as the GET. Request body: `name` (1 to 80 characters) and `defaultBudgetUsd` (0.5 to 25 USD, or `null` for the built-in default of 3 USD). Send one or both. The same values again write nothing. | 400, 403, 404, 409 (archived Project) |
+
+`projects.default_budget_usd` (migration `0027_project_settings.sql`) stores the default. `POST /v1/projects/:projectId/changes` without `budgetUsd` gives the new Change this default. A request with `budgetUsd` keeps its own budget.

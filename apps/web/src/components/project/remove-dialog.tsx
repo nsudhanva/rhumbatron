@@ -23,6 +23,7 @@ export function ProjectRemove({
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
+  const [mismatch, setMismatch] = useState(false);
   const isOwner = role === "owner";
 
   const members = useQuery({
@@ -40,14 +41,25 @@ export function ProjectRemove({
   const remove = useMutation({
     mutationFn: async () => {
       if (isOwner) await deleteProject({ data: projectId });
-      else await removeProjectMember({ data: { projectId, userId: selfId ?? "" } });
+      else {
+        if (!selfId) throw new Error("Your membership could not be found. Reload and try again.");
+        await removeProjectMember({ data: { projectId, userId: selfId } });
+      }
     },
     onSuccess: done,
   });
 
   if (role !== "owner" && role !== "collaborator") return null;
   const label = isOwner ? "Delete project" : "Leave project";
-  const confirmed = isOwner ? typed === projectName : Boolean(selfId);
+  // A collaborator needs their own member ID; it loads with the members list.
+  const waitingForSelf = !isOwner && members.isPending;
+  const confirm = () => {
+    if (isOwner && typed !== projectName) {
+      setMismatch(true);
+      return;
+    }
+    remove.mutate();
+  };
 
   return (
     <>
@@ -56,6 +68,7 @@ export function ProjectRemove({
         icon={isOwner ? Trash : SignOut}
         onClick={() => {
           setTyped("");
+          setMismatch(false);
           remove.reset();
           setOpen(true);
         }}
@@ -82,10 +95,25 @@ export function ProjectRemove({
               <Input
                 id="delete-project-name"
                 value={typed}
-                onChange={(e) => setTyped(e.target.value)}
+                onChange={(e) => {
+                  setTyped(e.target.value);
+                  setMismatch(false);
+                }}
                 autoComplete="off"
+                aria-invalid={mismatch || undefined}
+                aria-describedby={mismatch ? "delete-project-mismatch" : undefined}
               />
+              {mismatch && (
+                <p id="delete-project-mismatch" className="text-[12px] text-kumo-danger">
+                  The name does not match. Type it exactly as shown to delete the project.
+                </p>
+              )}
             </div>
+          )}
+          {!isOwner && members.isError && (
+            <p className="text-[12px] text-kumo-danger font-medium">
+              Your membership could not load. {members.error.message}
+            </p>
           )}
 
           {remove.isError && (
@@ -93,14 +121,16 @@ export function ProjectRemove({
           )}
 
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" disabled={remove.isPending} onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
+            {/* While the request runs the dialog stays open; the action shows its progress. */}
+            {!remove.isPending && (
+              <Button variant="secondary" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+            )}
             <Button
               variant="destructive"
-              loading={remove.isPending}
-              disabled={!confirmed}
-              onClick={() => remove.mutate()}
+              loading={remove.isPending || waitingForSelf}
+              onClick={confirm}
             >
               {label}
             </Button>

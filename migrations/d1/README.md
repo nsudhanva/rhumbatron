@@ -1,7 +1,7 @@
 # D1 migrations
 
-SQL migrations for the control database (`rhumbatron-control-<env>`). Files `0001_init.sql`
-through `0023` exist today.
+SQL migrations for the control database (`rhumbatron-control-<env>`). Files run in name order
+from `0001_init.sql`; the newest is `0027_project_settings.sql`. A number can be skipped.
 
 - Name files `NNNN_description.sql` (lowercase letters, digits, and underscores). The runner
   rejects other names.

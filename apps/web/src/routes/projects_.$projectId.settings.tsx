@@ -1,0 +1,109 @@
+import { Show, SignInButton } from "@clerk/tanstack-react-start";
+import { Button } from "@cloudflare/kumo";
+import { SignIn } from "@phosphor-icons/react";
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { SectionError, SkeletonBar } from "../components/project/feedback";
+import { ProjectRemove } from "../components/project/remove-dialog";
+import { ProjectPeople } from "../components/project/share-dialog";
+import { DefaultsSection } from "../components/settings/defaults-section";
+import { DisplaySection } from "../components/settings/display-section";
+import { GeneralSection } from "../components/settings/general-section";
+import { EmptyState } from "../components/ui/empty-state";
+import { Page, PageTitle, Section, TwoUp } from "../components/ui/page";
+import { getProjectSettings } from "../lib/api-settings";
+
+/**
+ * Project Settings (AGENTS.md 38, last navigation item): General, People, Defaults, Display and
+ * Danger zone. Owner-only fields are hidden for a collaborator, not disabled; the API enforces
+ * the same rule.
+ */
+export const Route = createFileRoute("/projects_/$projectId/settings")({
+  component: SettingsPage,
+});
+
+function SettingsPage() {
+  return (
+    <>
+      <Show when="signed-in">
+        <SettingsContent />
+      </Show>
+      <Show when="signed-out">
+        <Page>
+          <PageTitle kicker="Project" title="Settings" />
+          <EmptyState
+            what="Sign in to see this project's settings."
+            how="Settings are visible to the project's members."
+            action={
+              <SignInButton>
+                <Button variant="primary" icon={SignIn}>
+                  Sign in
+                </Button>
+              </SignInButton>
+            }
+          />
+        </Page>
+      </Show>
+    </>
+  );
+}
+
+function SettingsContent() {
+  const { projectId } = Route.useParams();
+  const settings = useQuery({
+    queryKey: ["project-settings", projectId],
+    queryFn: () => getProjectSettings({ data: projectId }),
+  });
+  const data = settings.data;
+  const isOwner = data?.role === "owner";
+
+  return (
+    <Page>
+      <PageTitle
+        kicker="Project"
+        title="Settings"
+        meta={data && !isOwner ? <span>Only the project owner can change these.</span> : undefined}
+      />
+
+      {settings.isError ? (
+        <SectionError
+          message={`Settings could not load. ${settings.error.message}`}
+          onRetry={() => settings.refetch()}
+          retrying={settings.isFetching}
+        />
+      ) : !data ? (
+        <Section label="General">
+          <div className="grid gap-2" role="status" aria-label="Loading settings">
+            <SkeletonBar height={13} className="w-1/2" />
+            <SkeletonBar height={13} className="w-1/3" />
+            <SkeletonBar height={13} className="w-2/5" />
+          </div>
+        </Section>
+      ) : (
+        <>
+          <GeneralSection projectId={projectId} settings={data} />
+
+          <Section label="People">
+            <ProjectPeople projectId={projectId} isOwner={isOwner} />
+          </Section>
+
+          <TwoUp>
+            <DefaultsSection projectId={projectId} settings={data} />
+            <DisplaySection />
+          </TwoUp>
+
+          <Section label="Danger zone">
+            <div className="grid justify-items-start gap-3">
+              <p className="max-w-[760px] text-[13px] text-kumo-subtle">
+                {isOwner
+                  ? "Deleting removes the project's source, previews, live app, app data, evidence and request history. It cannot be undone."
+                  : "Leaving removes your access. Your open requests are cancelled; finished ones stay with the project."}
+              </p>
+              <ProjectRemove projectId={projectId} projectName={data.name} role={data.role} />
+            </div>
+          </Section>
+        </>
+      )}
+    </Page>
+  );
+}
