@@ -17,12 +17,13 @@ Phases 0 through 13 and 16 are complete. Prod serves each Project as a live app 
 - Runaway-billing guards (ADR 0019): Durable Object alarm caps, causal wakeup caps, and account budget alerts at 10, 25, and 100 USD.
 - P16, live apps (ADR 0020): each prod Project is a Dynamic Worker app at `<slug>.rhumbatron.com`. A Candidate gets a preview at `<id>--<slug>`. Promotion moves the live pointer and runs a smoke check. Rollback adds a version. Every version keeps a host `v0000001--<slug>`. The Code page shows files, diffs and history, and a human edit becomes a checked Change. The "Remove app" action answers 410. `bun run e2e` covers all of it.
 - Models: Anthropic Claude through AI Gateway (ADR 0021). Haiku and Sonnet. Opus runs on Sonnet unless `ALLOW_OPUS` is true.
-- P17a (Linear HOM-231 through HOM-237): per-Project sharing with verified-email invitations, owner-only actions, one Change per request, serialized scope registration in ProjectRootDO, criteria-level Sonnet review, `priority_wins`, owner override as a linked Change, and the recompose guard.
+- P17a (Linear HOM-231 through HOM-240): per-Project sharing with verified-email invitations, owner-only actions, one Change per request, serialized scope registration in ProjectRootDO, criteria-level Sonnet review, `priority_wins`, owner override as a linked Change, the recompose guard, not-selected notifications, rebase by re-run after a merge conflict, and a required preview smoke check before promotion.
+- Milestone (P17a, prod, 2026-10-10): two accounts sent requests to one shared Project at the same time. Rhumbatron shipped the compatible requests, did not select the conflicting one, and shipped it after the owner override. A designer and a frontend developer then built a recipe app together.
 - Milestone (P16, prod): an agent-driven Change on Acme Live (`https://acme-live.rhumbatron.com`) added `GET /api/health`. Two Tasks ran on Claude. The Candidate passed its checks, got a preview, promoted automatically and went live in under 3 minutes. Model cost was 0.005 USD.
 - Milestone: A real model-driven Change ran end to end on dev (`https://dev.rhumbatron.com`). The Root Planner and four agents on Gemini via Vertex (`MODEL_PROVIDER=vertex`) built shared wishlists on stacked workspaces. The Candidate composed automatically. It passed build, 26 unit tests, contract tests, the Cart invariant check, p95 performance, and 9 authorization security tests. A human approved it, and promotion advanced the Canonical Generation from S0 to S1. Model cost was about 0.91 USD.
 
 ## Active
-- Phase 17a, shared Projects and request priority (ADR 0023, `docs/plans/phase-17a-shared-projects.md`): implemented and deployed to prod on 2026-10-10. A live two-user run is in progress.
+- P17a-11 to P17a-13 (HOM-241 to HOM-243): "Delete project" for the owner and "Leave project" for a collaborator in the web app. A project delete removes all project data. Then remove all existing Projects on prod and dev.
 
 ## Blocked
 - None.
@@ -46,5 +47,7 @@ Phases 0 through 13 and 16 are complete. Prod serves each Project as a live app 
 - CI runs checks only and needs no credentials. Deployment stays local through Terraform.
 
 ## Next
-- P17a: live test of the owner override, notifications for not-selected requests, and protected obligation tests.
-- Connect Workers Builds for Acme Shop Live, promote once, run `bun run smoke:release`.
+- Member focus areas (for example, design or frontend only) with priority by area.
+- Clef-flash as the first pass of the cross-request check, before the Sonnet review.
+- Protected obligation tests: a later Change must not weaken tests that an app promises to keep.
+- WAF and rate limits on the public command endpoints (AGENTS.md section 40.4).
