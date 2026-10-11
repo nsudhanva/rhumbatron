@@ -102,13 +102,16 @@ const RouterLink = forwardRef<
 });
 
 /**
- * `HeadContent` without the router's module preloads. TanStack Start preloads every chunk of the
- * matched routes (about 240 kB gzipped); on a slow link those bytes compete with the stylesheet
- * that gates first paint. The entry script still imports the same chunks.
+ * `HeadContent` with the router's module preloads at low fetch priority. TanStack Start preloads
+ * every chunk of the matched routes (about 240 kB gzipped). At low priority they download in
+ * parallel after the stylesheet and fonts, so first paint is not delayed and the chunks are
+ * cached when the entry script starts after first paint.
  */
 function RouteHead() {
-  const tags = useTags().filter(
-    (tag) => !(tag.tag === "link" && tag.attrs?.rel === "modulepreload"),
+  const tags = useTags().map((tag) =>
+    tag.tag === "link" && tag.attrs?.rel === "modulepreload"
+      ? { ...tag, attrs: { ...tag.attrs, fetchPriority: "low" } }
+      : tag,
   );
   const nonce = useRouter().options.ssr?.nonce;
   return (

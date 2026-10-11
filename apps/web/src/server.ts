@@ -7,10 +7,11 @@ const start = createStartHandler(defaultStreamHandler);
  * Starts the client entry module after the first contentful paint. The server-rendered page is
  * complete without JavaScript, so the stylesheet and fonts get the connection first and the page
  * paints before about 300 kB of JavaScript arrives. The loader puts the same `<script>` element
- * back in the same place, so hydration sees the markup it expects. After 3 s it starts anyway.
+ * back in the same place, so hydration sees the markup it expects. A hidden tab never paints, so
+ * it starts at once there; otherwise it starts after 1.5 s at the latest.
  */
 function entryLoader(src: string): string {
-  return `<script>(function(s){var d=0;function go(){if(d)return;d=1;var m=document.createElement("script");m.type="module";m.setAttribute("async","");m.src=${JSON.stringify(src)};s.replaceWith(m)}var P=window.PerformanceObserver;if(P&&P.supportedEntryTypes&&P.supportedEntryTypes.indexOf("paint")>=0){var o=new P(function(l){if(l.getEntriesByName("first-contentful-paint").length){o.disconnect();go()}});o.observe({type:"paint",buffered:true})}else{requestAnimationFrame(function(){setTimeout(go,0)})}setTimeout(go,3000)})(document.currentScript)</script>`;
+  return `<script>(function(s){var d=0;function go(){if(d)return;d=1;var m=document.createElement("script");m.type="module";m.setAttribute("async","");m.src=${JSON.stringify(src)};s.replaceWith(m)}if(document.visibilityState==="hidden"){go();return}var P=window.PerformanceObserver;if(P&&P.supportedEntryTypes&&P.supportedEntryTypes.indexOf("paint")>=0){var o=new P(function(l){if(l.getEntriesByName("first-contentful-paint").length){o.disconnect();go()}});o.observe({type:"paint",buffered:true})}else{requestAnimationFrame(function(){setTimeout(go,0)})}setTimeout(go,1500)})(document.currentScript)</script>`;
 }
 
 function deferEntryScript(response: Response): Response {

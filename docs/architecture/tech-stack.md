@@ -39,7 +39,7 @@ flowchart LR
 
 | Technology | Used for | Where |
 |---|---|---|
-| TanStack Start 1.168, Router 1.170 | Server-rendered React app and routes. Route loaders read each signed-in page's primary data on the server, and the HTML carries it (ADR 0027, `src/lib/ssr-data.ts`). Clock times and ages print the same on the server and in the hydration (`src/lib/render-time.ts`). The client entry starts after the first contentful paint (`src/server.ts`). Text typed before hydration stays (`src/lib/pre-hydration.ts`) | `apps/web` |
+| TanStack Start 1.168, Router 1.170 | Server-rendered React app and routes. Route loaders read each signed-in page's primary data on the server, and the HTML carries it (ADR 0027, `src/lib/ssr-data.ts`). Clock times and ages print the same on the server and in the hydration (`src/lib/render-time.ts`). The route chunks preload at low fetch priority. The client entry starts after the first contentful paint, at once in a hidden tab, and after 1.5 s at the latest (`src/server.ts`). Text typed before hydration stays (`src/lib/pre-hydration.ts`) | `apps/web` |
 | React 19.3, Vite 8.3 | UI runtime and build | `apps/web` |
 | `@cloudflare/vite-plugin` 1.63 | Builds the web app as a Worker | `apps/web/vite.config.ts` |
 | Tailwind CSS 4.3 | Styling. Below 640px no text is smaller than 12px (ADR 0027) | `apps/web` |
