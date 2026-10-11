@@ -912,15 +912,11 @@ resource "terraform_data" "d1_migrations" {
   }
 }
 
-# Web Analytics (RUM) site of the zone. Rhumbatron measures itself with Analytics Engine and
-# Workers Logs, so Cloudflare does not inject its browser beacon into the pages (`auto_install`).
-import {
-  to = cloudflare_web_analytics_site.zone
-  id = "${var.account_id}/5a3bf80954c74eeb993c9fa614c99d15"
-}
-
-resource "cloudflare_web_analytics_site" "zone" {
-  account_id   = var.account_id
-  zone_tag     = module.dns.zone_id
-  auto_install = false
+# The zone's Web Analytics site stays outside Terraform: the Terraform API token has no Web
+# Analytics edit permission, and the provider updates the resource on every apply.
+removed {
+  from = cloudflare_web_analytics_site.zone
+  lifecycle {
+    destroy = false
+  }
 }
