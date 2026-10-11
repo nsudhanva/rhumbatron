@@ -366,24 +366,26 @@ function Lightbox({ box, onChange }: { box: Box | null; onChange: (box: Box | nu
               {strip.candidate.name}. {strip.check.record?.summary ?? ""}
             </Dialog.Description>
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<CaretLeft aria-hidden />}
-                disabled={count < 2}
-                onClick={() => go(-1)}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<CaretRight aria-hidden />}
-                disabled={count < 2}
-                onClick={() => go(1)}
-              >
-                Next
-              </Button>
+              {count > 1 && (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<CaretLeft aria-hidden />}
+                    onClick={() => go(-1)}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<CaretRight aria-hidden />}
+                    onClick={() => go(1)}
+                  >
+                    Next
+                  </Button>
+                </>
+              )}
               <Button
                 variant="ghost"
                 size="sm"

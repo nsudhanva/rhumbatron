@@ -234,25 +234,27 @@ export function TimelineToolbar({
             </button>
           ))}
         </fieldset>
-        <button
-          type="button"
-          aria-pressed={live && follow}
-          disabled={!live}
-          title={live ? "Keep the right edge at now" : "Following applies to the live view"}
-          onClick={onFollow}
-          className={cn(
-            "inline-flex min-h-6 items-center gap-1.5 border px-2 text-[11px] leading-none transition-colors duration-(--rh-dur-ui) pointer-coarse:min-h-11 disabled:cursor-not-allowed disabled:opacity-45",
-            live && follow
-              ? "border-kumo-ink bg-kumo-ink text-kumo-inverse"
-              : "border-kumo-rule hover:bg-kumo-tint",
-          )}
-        >
-          <span
-            aria-hidden
-            className={cn("size-1.5", live && follow ? "bg-kumo-success" : "bg-tone-400")}
-          />
-          Follow live
-        </button>
+        {/* Following only means something in the live view; elsewhere the control is not shown. */}
+        {live && (
+          <button
+            type="button"
+            aria-pressed={follow}
+            title="Keep the right edge at now"
+            onClick={onFollow}
+            className={cn(
+              "inline-flex min-h-6 items-center gap-1.5 border px-2 text-[11px] leading-none transition-colors duration-(--rh-dur-ui) pointer-coarse:min-h-11",
+              follow
+                ? "border-kumo-ink bg-kumo-ink text-kumo-inverse"
+                : "border-kumo-rule hover:bg-kumo-tint",
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn("size-1.5", follow ? "bg-kumo-success" : "bg-tone-400")}
+            />
+            Follow live
+          </button>
+        )}
       </div>
     </div>
   );

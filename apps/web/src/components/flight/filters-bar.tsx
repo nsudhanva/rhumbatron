@@ -178,9 +178,11 @@ export function FiltersBar() {
         </fieldset>
       )}
 
-      <Button variant="ghost" size="sm" disabled={isDefault} onClick={resetFilters}>
-        Reset filters
-      </Button>
+      {!isDefault && (
+        <Button variant="ghost" size="sm" onClick={resetFilters}>
+          Reset filters
+        </Button>
+      )}
     </search>
   );
 }

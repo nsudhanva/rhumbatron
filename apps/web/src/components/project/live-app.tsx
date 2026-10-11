@@ -46,17 +46,15 @@ export function LiveAppLine({
   });
   const view = query.data;
   if (!view?.enabled) return null;
+  // Once sent, the action becomes plain text: there is nothing more to press.
   const action = (label: string) =>
-    canManage ? (
-      <button
-        type="button"
-        className={LINK}
-        disabled={deploy.isPending}
-        onClick={() => deploy.mutate()}
-      >
-        {deploy.isPending || deploy.isSuccess ? "Queued" : label}
+    !canManage ? null : deploy.isPending || deploy.isSuccess ? (
+      <span role="status">Queued</span>
+    ) : (
+      <button type="button" className={LINK} onClick={() => deploy.mutate()}>
+        {label}
       </button>
-    ) : null;
+    );
 
   const app = view.app;
   if (!app) {
@@ -112,23 +110,23 @@ export function LiveAppLine({
       {canManage && <span aria-hidden>·</span>}
       {!canManage ? null : confirming ? (
         <span className="flex items-center gap-x-3">
-          <span>Remove the app and delete its data?</span>
-          <button
-            type="button"
-            className="text-kumo-danger underline-offset-2 hover:underline"
-            disabled={remove.isPending}
-            onClick={() => remove.mutate()}
-          >
-            {remove.isPending ? "Removing" : "Remove"}
-          </button>
-          <button
-            type="button"
-            className={LINK}
-            disabled={remove.isPending}
-            onClick={() => setConfirming(false)}
-          >
-            Keep
-          </button>
+          {remove.isPending ? (
+            <span role="status">Removing the app</span>
+          ) : (
+            <>
+              <span>Remove the app and delete its data?</span>
+              <button
+                type="button"
+                className="text-kumo-danger underline-offset-2 hover:underline"
+                onClick={() => remove.mutate()}
+              >
+                Remove
+              </button>
+              <button type="button" className={LINK} onClick={() => setConfirming(false)}>
+                Keep
+              </button>
+            </>
+          )}
         </span>
       ) : (
         <button type="button" className={LINK} onClick={() => setConfirming(true)}>

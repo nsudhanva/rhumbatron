@@ -16,6 +16,7 @@ import {
   TaskProgress,
 } from "../components/project/status";
 import { useEventFeed } from "../components/project/use-event-feed";
+import { ProjectTimeline } from "../components/timeline/project-timeline";
 import { DataTable, RowLink, Td, Th, TRow } from "../components/ui/data-table";
 import { EmptyState } from "../components/ui/empty-state";
 import { KeyValue } from "../components/ui/key-value";
@@ -35,6 +36,7 @@ import {
   type ProjectStats as ProjectStatsData,
   provisionProject,
 } from "../lib/api";
+import { getProjectSettings } from "../lib/api-settings";
 import { EMPTY, formatAge, formatNumber, formatUsd, generation } from "../lib/format";
 import { useProjectLive } from "../lib/live";
 
@@ -106,7 +108,10 @@ function Overview() {
   // Live push (AGENTS.md section 39): each delta means new events were projected. The feed reads
   // only rows after its cursor; the stats aggregate refetches at most every 10 seconds.
   const statsAt = useRef(0);
+  // Each live signal also refreshes the execution timeline (it reads only what changed).
+  const [pulse, setPulse] = useState(0);
   const socket = useProjectLive(projectId, true, () => {
+    setPulse((n) => n + 1);
     feed.refresh();
     void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
     void queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
@@ -178,7 +183,9 @@ function Overview() {
         }
       />
 
-      <DeadLetters projectId={projectId} />
+      <div id="operator-actions" className="scroll-mt-6 empty:hidden">
+        <DeadLetters projectId={projectId} />
+      </div>
 
       {project.isError && (
         <SectionError
@@ -196,7 +203,16 @@ function Overview() {
         statsFailed={stats.isError}
       />
 
+      <ProjectTimeline
+        projectId={projectId}
+        changes={changes.data}
+        changesError={changes.isError}
+        pulse={pulse}
+        socketOpen={socket === "open"}
+      />
+
       <Section
+        id="changes"
         label="Changes"
         meta={
           changes.isPending ? (
@@ -309,7 +325,7 @@ function ProjectStats({
   stats: ProjectStatsData | undefined;
   statsFailed: boolean;
 }) {
-  const loading = <SkeletonBar height={34} width={96} />;
+  const loading = <SkeletonBar height={18} width={56} />;
   const active = changes?.filter((c) => ACTIVE_CHANGE_STATUSES.has(c.status));
   const waiting = active?.filter((c) => c.status === "awaiting_approval").length ?? 0;
   const completed = changes?.filter((c) => c.status === "completed").length;
@@ -321,9 +337,9 @@ function ProjectStats({
   const scope =
     changes && changes.length >= CHANGE_LIMIT ? `latest ${CHANGE_LIMIT} changes` : "all changes";
   return (
-    <StatStrip>
+    <StatStrip density="compact">
       <StatCell
-        label="Canonical generation"
+        label="Generation"
         value={generationValue ?? loading}
         footnote={treeSha ? `tree ${treeSha.slice(0, 10)}` : EMPTY}
       />
@@ -346,7 +362,7 @@ function ProjectStats({
       />
       {!statsFailed && (
         <StatCell
-          label="Candidates verified"
+          label="Verified"
           value={stats ? formatNumber(stats.candidates.verified) : loading}
           unit={stats ? `/ ${formatNumber(stats.candidates.total)}` : undefined}
           footnote={
@@ -588,8 +604,10 @@ function RiskCell({ risk }: { risk: string | null }) {
   );
 }
 
-type ChangeDraft = { goal: string; budget: string };
-const DEFAULT_BUDGET = "3";
+/** `budget: null` until the user types one: the field then shows the Project's default budget. */
+type ChangeDraft = { goal: string; budget: string | null };
+/** Used only until the Project settings load (the API applies the same built-in default). */
+const FALLBACK_BUDGET = "3";
 /** Unsent drafts live outside the component so a remount (auth refresh, route re-render) keeps them. */
 const drafts = new Map<string, ChangeDraft>();
 
@@ -602,13 +620,13 @@ function readDraft(projectId: string): ChangeDraft {
       const parsed = JSON.parse(raw) as Partial<ChangeDraft>;
       return {
         goal: typeof parsed.goal === "string" ? parsed.goal : "",
-        budget: typeof parsed.budget === "string" ? parsed.budget : DEFAULT_BUDGET,
+        budget: typeof parsed.budget === "string" ? parsed.budget : null,
       };
     }
   } catch {
     // Storage unavailable or corrupt: start from an empty draft.
   }
-  return { goal: "", budget: DEFAULT_BUDGET };
+  return { goal: "", budget: null };
 }
 
 function writeDraft(projectId: string, draft: ChangeDraft | null) {
@@ -627,11 +645,21 @@ function NewChange({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(() => readDraft(projectId));
-  const { goal, budget } = draft;
+  const [invalid, setInvalid] = useState<string | null>(null);
+  const settings = useQuery({
+    queryKey: ["project-settings", projectId],
+    queryFn: () => getProjectSettings({ data: projectId }),
+    staleTime: 60_000,
+  });
+  const defaultBudget =
+    settings.data !== undefined ? String(settings.data.effectiveDefaultBudgetUsd) : FALLBACK_BUDGET;
+  const goal = draft.goal;
+  const budget = draft.budget ?? defaultBudget;
   const update = (patch: Partial<ChangeDraft>) => {
     const next = { ...readDraft(projectId), ...patch };
     writeDraft(projectId, next);
     setDraft(next);
+    setInvalid(null);
   };
   const setGoal = (value: string) => update({ goal: value });
   const setBudget = (value: string) => update({ budget: value });
@@ -654,7 +682,7 @@ function NewChange({ projectId }: { projectId: string }) {
     mutationFn: () => createChange({ data: { projectId, goal: goal.trim(), budgetUsd } }),
     onSuccess: async ({ id }) => {
       writeDraft(projectId, null);
-      setDraft({ goal: "", budget: DEFAULT_BUDGET });
+      setDraft({ goal: "", budget: null });
       await queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
       await navigate({ to: "/changes/$changeId", params: { changeId: id } });
     },
@@ -665,7 +693,9 @@ function NewChange({ projectId }: { projectId: string }) {
         className="grid gap-4"
         onSubmit={(event) => {
           event.preventDefault();
-          create.mutate();
+          if (!goal.trim()) setInvalid("Describe the goal before you submit.");
+          else if (!(budgetUsd > 0)) setInvalid("Set a budget above $0.00.");
+          else create.mutate();
         }}
       >
         <InputArea
@@ -694,7 +724,11 @@ function NewChange({ projectId }: { projectId: string }) {
         <div className="max-w-56">
           <Input
             label="Budget (USD)"
-            description="New expensive work stops at this limit."
+            description={
+              draft.budget === null && settings.data
+                ? "The Project's default. New expensive work stops at this limit."
+                : "New expensive work stops at this limit."
+            }
             type="number"
             min={0.1}
             step={0.1}
@@ -704,16 +738,16 @@ function NewChange({ projectId }: { projectId: string }) {
             required
           />
         </div>
+        {invalid && (
+          <p role="alert" className="text-[12px] font-semibold text-kumo-danger">
+            {invalid}
+          </p>
+        )}
         {create.isError && (
           <SectionError message={`The change was not submitted. ${create.error.message}`} />
         )}
         <div>
-          <Button
-            type="submit"
-            variant="primary"
-            loading={create.isPending}
-            disabled={!goal.trim() || !(budgetUsd > 0)}
-          >
+          <Button type="submit" variant="primary" loading={create.isPending}>
             Submit change
           </Button>
         </div>

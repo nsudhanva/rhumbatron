@@ -14,7 +14,7 @@ export function PanelFrame({
   label,
   meta,
   focused,
-  tall = false,
+  size = "default",
   className,
   children,
 }: {
@@ -22,8 +22,8 @@ export function PanelFrame({
   label: string;
   meta?: ReactNode;
   focused: boolean;
-  /** The Execution DAG row is taller than the rest. */
-  tall?: boolean;
+  /** `tall`: the Execution DAG. `hero`: the agent swimlanes, the main time view. */
+  size?: "default" | "tall" | "hero";
   className?: string;
   children: ReactNode;
 }) {
@@ -37,9 +37,11 @@ export function PanelFrame({
         "flex min-w-0 scroll-mt-[calc(var(--rh-flight-sticky,0px)+16px)] flex-col bg-kumo-elevated",
         focused
           ? "h-[max(480px,calc(100dvh-var(--rh-flight-chrome,220px)))] rule-ink"
-          : tall
-            ? "h-[420px]"
-            : "h-[360px]",
+          : size === "hero"
+            ? "h-[clamp(480px,62vh,640px)]"
+            : size === "tall"
+              ? "h-[420px]"
+              : "h-[360px]",
         className,
       )}
     >

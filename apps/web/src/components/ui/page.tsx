@@ -127,18 +127,25 @@ export function Section({
   label,
   meta,
   as,
+  id: sectionId,
   children,
   className,
 }: {
   label: ReactNode;
   meta?: ReactNode;
   as?: "h2" | "h3" | "h4";
+  /** Anchor id of the section, for links such as `#changes`. */
+  id?: string;
   children: ReactNode;
   className?: string;
 }) {
   const id = useId();
   return (
-    <section aria-labelledby={id} className={cn("grid min-w-0 content-start gap-3", className)}>
+    <section
+      id={sectionId}
+      aria-labelledby={id}
+      className={cn("grid min-w-0 scroll-mt-6 content-start gap-3", className)}
+    >
       <SectionLabel id={id} meta={meta} {...(as ? { as } : {})}>
         {label}
       </SectionLabel>

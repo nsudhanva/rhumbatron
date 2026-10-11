@@ -57,12 +57,12 @@ import {
  * running bar is real model calls over the per-run call budget, not a timer.
  */
 
-const ROW_H = 44;
+const ROW_H = 56;
 const MARK = 8;
-const MARK_Y = 3;
-const BAR_Y = 14;
-const BAR_H = 15;
-const UNDER_Y = 31;
+const MARK_Y = 4;
+const BAR_Y = 17;
+const BAR_H = 20;
+const UNDER_Y = 39;
 
 type MarkKind =
   | "ready"

@@ -62,7 +62,8 @@ type PanelSpec = {
   Component: Panel;
   /** Columns of the 6-column grid once the grid is at least 800px wide. */
   span: string;
-  tall?: boolean;
+  /** Frame height: the DAG is tall, the agent swimlanes (the timeline) taller still. */
+  size?: "default" | "tall" | "hero";
   meta: (state: FlightState, model: FlightModel) => ReactNode;
 };
 
@@ -75,21 +76,22 @@ const PANELS: PanelSpec[] = [
     label: "Execution DAG",
     Component: DagPanel,
     span: "@min-[800px]:col-span-6",
-    tall: true,
+    size: "tall",
     meta: (s) => `${n(s.counts.tasks)} Tasks · ${n(s.counts.blocked)} blocked`,
   },
   {
     id: "swimlanes",
     label: "Agent swimlanes",
     Component: SwimlanesPanel,
-    span: "@min-[800px]:col-span-3 @min-[1100px]:col-span-4",
+    span: "@min-[800px]:col-span-6",
+    size: "hero",
     meta: (s) => `${n(s.counts.woken)} woken · ${n(s.counts.running)} running`,
   },
   {
     id: "workspace",
     label: "Workspace lanes",
     Component: WorkspacePanel,
-    span: "@min-[800px]:col-span-3 @min-[1100px]:col-span-2",
+    span: "@min-[800px]:col-span-6",
     meta: (s, m) =>
       `${n(Object.keys(m.forks).length)} forks · ${n(Object.values(s.tasks).reduce((sum, t) => sum + t.changeSets.length, 0))} ChangeSets`,
   },
@@ -451,14 +453,14 @@ export function FlightPage({
         >
           <div className="@container min-w-0">
             <div className="grid grid-cols-1 gap-4 @min-[800px]:grid-cols-6">
-              {visible.map(({ id, label, Component, span, tall, meta }) => (
+              {visible.map(({ id, label, Component, span, size, meta }) => (
                 <PanelFrame
                   key={id}
                   id={id}
                   label={label}
                   meta={meta(state, model)}
                   focused={focus === id}
-                  tall={tall ?? false}
+                  size={size ?? "default"}
                   className={focus === id ? "@min-[800px]:col-span-6" : span}
                 >
                   <Component focused={focus === id} />
@@ -497,7 +499,11 @@ export function FlightSkeleton() {
           {PANELS.slice(0, 3).map((p) => (
             <div
               key={p.id}
-              className={cn("bg-kumo-elevated", p.tall ? "h-[420px]" : "h-[360px]", p.span)}
+              className={cn(
+                "bg-kumo-elevated",
+                p.size === "hero" ? "h-[560px]" : p.size === "tall" ? "h-[420px]" : "h-[360px]",
+                p.span,
+              )}
             >
               <div className="h-10 border-b-2 border-kumo-divider" />
               <PanelSkeleton />

@@ -1,5 +1,5 @@
 import { cn } from "@cloudflare/kumo";
-import type { ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 
 /**
  * Stat strip (DESIGN.md 6.2.2, 9.2): 3-5 equal cells with 1px rule-colored gaps and a 2px
@@ -11,14 +11,33 @@ import type { ReactNode } from "react";
  *     <StatCell label="Active changes" value={3} />
  *     <StatCell label="p95" value={164} unit="ms" pill={<StatusPill status="pass" />} />
  *   </StatStrip>
+ *
+ * `density="compact"` sets each cell on one line (label, value, unit, footnote) with 20px
+ * numerals, for a page where the strip is context and another block is the focus.
  */
-export function StatStrip({ children, className }: { children: ReactNode; className?: string }) {
+type Density = "default" | "compact";
+const DensityContext = createContext<Density>("default");
+
+export function StatStrip({
+  children,
+  className,
+  density = "default",
+}: {
+  children: ReactNode;
+  className?: string;
+  density?: Density;
+}) {
   return (
-    <div
-      className={cn("flex flex-wrap gap-px border-y-2 border-kumo-divider bg-kumo-rule", className)}
-    >
-      {children}
-    </div>
+    <DensityContext.Provider value={density}>
+      <div
+        className={cn(
+          "flex flex-wrap gap-px border-y-2 border-kumo-divider bg-kumo-rule",
+          className,
+        )}
+      >
+        {children}
+      </div>
+    </DensityContext.Provider>
   );
 }
 StatStrip.displayName = "StatStrip";
@@ -47,6 +66,40 @@ export function StatCell({
   children?: ReactNode;
   className?: string;
 }) {
+  const density = useContext(DensityContext);
+  if (density === "compact") {
+    return (
+      <div
+        className={cn(
+          "flex min-w-0 flex-[1_1_200px] items-baseline gap-x-2 bg-kumo-base px-3 py-2",
+          className,
+        )}
+      >
+        <p className="type-label shrink-0 text-kumo-subtle">{label}</p>
+        <p className="flex min-w-0 shrink-0 items-baseline gap-1">
+          <span
+            className={cn(
+              "truncate leading-none tabular-nums",
+              mono ? "font-mono text-[16px] font-semibold" : "text-[20px] font-extrabold",
+            )}
+          >
+            {value}
+          </span>
+          {unit && <span className="text-[12px] text-kumo-subtle">{unit}</span>}
+        </p>
+        {pill}
+        {children}
+        {footnote && (
+          <p
+            className="min-w-0 truncate font-mono text-[11px] text-kumo-subtle tabular-nums"
+            title={typeof footnote === "string" ? footnote : undefined}
+          >
+            {footnote}
+          </p>
+        )}
+      </div>
+    );
+  }
   return (
     <div
       className={cn(

@@ -181,38 +181,40 @@ export function Scrubber() {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-kumo-rule px-3 py-2">
       <div className="flex shrink-0 items-center gap-1.5">
-        <Button
-          variant="secondary"
-          size="sm"
-          shape="square"
-          icon={playing ? <Pause size={14} aria-hidden /> : <Play size={14} aria-hidden />}
-          aria-label={playing ? "Pause playback" : "Play recorded facts"}
-          title={playing ? "Pause playback" : "Play recorded facts"}
-          disabled={model.events.length === 0}
-          onClick={play}
-        />
-        {/* Segmented control (DESIGN.md 8.2): speed applies to playback only. */}
-        <fieldset className="flex border border-kumo-divider">
-          <legend className="sr-only">Playback speed</legend>
-          {SPEEDS.map((s, i) => (
-            <button
-              key={s}
-              type="button"
-              aria-pressed={historical && speed === s}
-              disabled={!historical}
-              onClick={() => setSpeed(s)}
-              className={cn(
-                "min-h-6 min-w-8 px-2 font-mono text-[11px] tabular-nums pointer-coarse:min-h-11",
-                i > 0 && "border-l border-kumo-divider",
-                historical && speed === s
-                  ? "bg-kumo-ink text-kumo-inverse"
-                  : "hover:bg-kumo-tint disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent",
-              )}
-            >
-              {s}x
-            </button>
-          ))}
-        </fieldset>
+        {model.events.length === 0 ? (
+          <span className="text-[11px] text-kumo-subtle">No recorded facts to play yet</span>
+        ) : (
+          <Button
+            variant="secondary"
+            size="sm"
+            shape="square"
+            icon={playing ? <Pause size={14} aria-hidden /> : <Play size={14} aria-hidden />}
+            aria-label={playing ? "Pause playback" : "Play recorded facts"}
+            title={playing ? "Pause playback" : "Play recorded facts"}
+            onClick={play}
+          />
+        )}
+        {/* Segmented control (DESIGN.md 8.2): speed applies to playback, so it shows off live. */}
+        {historical && (
+          <fieldset className="flex border border-kumo-divider">
+            <legend className="sr-only">Playback speed</legend>
+            {SPEEDS.map((s, i) => (
+              <button
+                key={s}
+                type="button"
+                aria-pressed={speed === s}
+                onClick={() => setSpeed(s)}
+                className={cn(
+                  "min-h-6 min-w-8 px-2 font-mono text-[11px] tabular-nums pointer-coarse:min-h-11",
+                  i > 0 && "border-l border-kumo-divider",
+                  speed === s ? "bg-kumo-ink text-kumo-inverse" : "hover:bg-kumo-tint",
+                )}
+              >
+                {s}x
+              </button>
+            ))}
+          </fieldset>
+        )}
       </div>
 
       <p className="flex shrink-0 items-baseline gap-2 font-mono text-[12px] tabular-nums">
