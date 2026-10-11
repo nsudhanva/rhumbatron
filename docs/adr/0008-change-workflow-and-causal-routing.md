@@ -1,44 +1,45 @@
 # ADR 0008: ChangeWorkflow, Work Graph persistence, and causal routing
 
-- Status: Accepted. Updated 2026-10-10: the wake consumer now starts AgentDO runs (ADR 0009);
-  command cap (ADR 0019).
-- Date: 2026-10-08
-- Decider: Project owner
-
 ## Context
 
-Phase 5 turns one Change into a Work Graph and wakes only causally affected Agents (AGENTS.md
-sections 21.1, 31). Task state needs idempotent transitions and durable events.
-ProjectRootDO must stay cold (section 13.1).
+One Change becomes a Work Graph, and only causally affected Agents wake (AGENTS.md sections 21.1
+and 31). Task state needs idempotent transitions and durable events. ProjectRootDO stays cold
+(section 13.1).
 
 ## Decision
 
 - `POST /v1/projects/:id/changes` starts `ChangeWorkflow` (Cloudflare Workflows, integration
   Worker) with instance ID = Change ID. `startPlanning: false` skips it (smoke checks).
-- Steps: load, mark compiling, plan (Root Planner on the opus tier through the AI Gateway, one
-  tool call validated by Zod and an acyclicity check, one repair turn, one step retry), persist,
-  record events, dispatch. Every step is idempotent: deterministic Task IDs, `INSERT OR IGNORE`,
-  conditional status updates, stable event and command IDs.
-- Tasks and dependency edges live in D1 (`0003_work_graph.sql`). R2 stores the Work Graph JSON,
-  including planner model, tokens, and cost, under `work-graphs/`.
+- Steps: load, admit the request, mark compiling, plan, compare with other requests of the Project
+  (ADR 0023), persist, record events, dispatch. The Root Planner uses the opus tier through the AI
+  Gateway. It makes one tool call that Zod and an acyclicity check validate. It gets one repair
+  turn and one step retry. The opus tier runs on Sonnet while `ALLOW_OPUS` is not `"true"` (ADR 0021).
+- Every step is idempotent: deterministic Task IDs, `INSERT OR IGNORE`, conditional status
+  updates, stable event and command IDs.
+- Tasks and dependency edges live in D1. R2 stores the Work Graph JSON, including planner model,
+  tokens, and cost, under `work-graphs/`.
 - Change and Task events go to the outbox of the ResourceShardDO that owns `change:<id>`
-  (`appendEvents`, idempotent on event ID). Its alarm publishes to K2 as before.
+  (`appendEvents`, idempotent on event ID). Its alarm publishes to K2.
 - Dispatch marks ready Tasks, records `task.ready`, sends `agent.wake` commands on
   `rhumbatron-agent-wakeups`, then sets `wake_sent_at` (at least once).
-- The agents Worker consumes wakes, drops stale ones (Analytics Engine false-wakeup point),
-  assigns the Task, and records `task.assigned` and `agent.woken`. The Agent Runtime is Phase 6.
-- The event router's `causal-router` subscription runs `routeEvent` (packages/causal-router).
+- The agents Worker consumes wakes and drops stale ones (Analytics Engine false-wakeup point). It
+  assigns the Task, records `task.assigned` and `agent.woken`, and starts a run on the Task's
+  `AgentDO` for a `task_ready` wake (ADR 0009).
+- The event router's `causal-router` subscription runs `routeEvent` (`packages/causal-router`).
   Newly ready Tasks become a `change.dispatch` command on `rhumbatron-integration`. A service
-  binding would create a coordinator → router → integration → coordinator dependency cycle.
-- Ambiguous resource overlaps go to Clef-flash (`@cf/cloudflare/clef-flash`, Workers AI) with
-  an abstain threshold of 0.7. If Clef-flash abstains or the cap is reached, the router wakes the
-  Agent (the safe side). The cap is 200 calls per day in `usage_counters`, far inside the Workers
-  AI free daily allowance.
+  binding would create a coordinator, router, integration, coordinator dependency cycle.
+- The Causal Router caps wake, dispatch, and compose commands at 1,000 per Change per UTC day
+  (`CHANGE_DAILY_COMMAND_CAP`, ADR 0019).
+- Ambiguous resource overlaps go to Clef-flash (`@cf/cloudflare/clef-flash`, Workers AI) with an
+  abstain threshold of 0.7. If Clef-flash abstains or the cap is reached, the router wakes the Agent
+  (the safe side). The cap is 200 calls per day in `usage_counters`, far inside the Workers AI
+  free daily allowance.
 
-## Free-tier budget
+## Budget
 
-About 7 Workflow steps, 1 to 4 model calls (free models), and 3 Queue operations per woken Task
-per Change. Analytics Engine has no billing. Workers AI is capped in code.
+About 7 Workflow steps, 1 to 4 model calls, and 3 Queue operations per woken Task per Change.
+Analytics Engine has no billing. Workers AI is capped in code. Model calls count against the
+monthly Anthropic budget (ADR 0021).
 
 ## Diagram
 
@@ -63,11 +64,3 @@ sequenceDiagram
   R->>Q: agent.wake for affected agents
   R->>Q: change.dispatch on rhumbatron-integration (newly ready Tasks)
 ```
-
-## Update (2026-10-10)
-
-- The wake consumer now starts a run on the Task's `AgentDO` for a `task_ready` wake (ADR 0009).
-- The causal router caps wake, dispatch, and compose commands at 1,000 per Change per UTC day
-  (`CHANGE_DAILY_COMMAND_CAP`, ADR 0019).
-- The Root Planner call follows the environment's provider mode: Gemini on Vertex in dev, free
-  OpenRouter models first in prod (ADR 0007 update, ADR 0016). Dev planner calls are not free.

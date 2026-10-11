@@ -1,17 +1,13 @@
 # ADR 0022: Every Project starts from an empty repository
 
-## Status
-Accepted, 2026-10-10. Replaces the template choice of ADR 0010 and the template parts of ADR 0020.
-
 ## Context
-A Project created with the "empty" template got no Artifacts repository. Every agent tool then
-answered "No source repository for this Project yet": file writes were lost, test Tasks failed
-twice, the Change stopped at the attempt limit, and no live app was provisioned. The owner does
-not want templates or prefilled files in the product.
+Agent tools need a repository to write to. A Project without an Artifacts repository gives agents
+no place for files, test Tasks fail, and no live app can start. The product has no templates and no
+prefilled files.
 
 ## Decision
-- A Project is a name and a slug. `POST /v1/projects` has no `template` field (an old field is
-  ignored). The create form has no template choice.
+- A Project is a name and a slug. `POST /v1/projects` has no `template` field (the API ignores
+  an unknown field). The create form has no template choice.
 - Every new Project gets an Artifacts repository with one commit that holds only `.gitignore`
   (`node_modules`). That commit is Canonical Generation 0. `project.provision` makes it.
 - Seed rule (`workers/integration/src/source-seed.ts`, critical test): seed only when the
@@ -19,7 +15,7 @@ not want templates or prefilled files in the product.
   rule at the write. A repeat never changes a Project with source.
 - Backfill: `POST /v1/projects/:id/provision` (no body) and `POST /v1/projects/:id/app` ("Deploy
   app", prod) both create the empty repository when the source is unassigned.
-  `bun scripts/seed-repo.ts <projectId> <dev|prod> [--user <Clerk user ID or email>]` calls them.
+  `bun scripts/seed-repo.ts <projectId> prod [--user <Clerk user ID or email>]` calls them.
 - The app conventions are instructions, not files (`APP_CONVENTIONS` in
   `packages/protocol/src/app.ts`): a Worker with `src/worker.ts`, static files in `public/`,
   `package.json` scripts `typecheck`, `test`, `contract`, and `dev`, `scripts/contract.ts`

@@ -1,17 +1,11 @@
 # ADR 0015: Advisory Claims for agent runs
 
-- Status: Accepted
-- Date: 2026-10-09
-- Decider: Opus planner (coordinator)
-
 ## Context
 
 ResourceShardDO implements Claims as renewable leases (AGENTS.md section 13.2): one active Claim
 per Project and semantic resource, `claim.*` events in the same transaction as the lease change
-(section 18), and expiry through the shard alarm (section 42.3). Until now only tests called
-`acquireClaim`. Agent runs never took a Claim, so the Claims feed and the Claim packets in the
-agent activity view were always empty. Conflict detection also had no signal that two agents
-worked on one resource at the same time.
+(section 18), and expiry through the shard alarm (section 42.3). Conflict detection needs a signal
+that two agents work on one resource at the same time.
 
 A blocking lock does not fit the product. Parallel agents on one resource, and two Candidate
 futures that implement the same resource two ways, are the point of the demo (sections 4 and
@@ -29,7 +23,8 @@ Claims are advisory leases for agent runs.
 2. **Renew at half-life on existing timers.** The one-minute run check (`checkRun`) and model-call
    boundaries (`beforeModelCall`) tick the renewal. A tick makes a request only when a lease is at
    half-life (60 s, with 10 s slack for a check that fires a little early). There is no new timer
-   and no loop.
+   and no loop. The run check is an interval schedule (`scheduleEvery(60)`). Each fire counts
+   against the AgentDO daily alarm cap (ADR 0019).
 3. **Release at run end.** `finishRun` releases every Claim of the run for success, failure,
    cancel, and timeout. Release is idempotent on both sides. The run only logs a failed release.
    The lease expires on its own.
@@ -43,19 +38,19 @@ Claims are advisory leases for agent runs.
    the Change's Intents and contentions in one request. The detector adds a soft
    `resource_overlap` signal for a contended pair, so the pair is at least `suspected`. Only typed
    Intent fields can make a conflict `confirmed` or fork Candidates.
-6. **Expiry stays the safety net.** An agent that dies stops renewing; the shard alarm marks the
+6. **Expiry is the safety net.** An agent that dies stops renewing; the shard alarm marks the
    Claim `expired` and writes `claim.expired`. Only the owner can renew or release a Claim.
+   An acquire by the agent that already holds the live Claim renews it (`claim.renewed`).
 
 ## Consequences
 
 - The Claims feed shows real `claim.acquired`, `claim.renewed`, `claim.released`, and
   `claim.expired` facts for every run.
-- `claim.contended` is a new Event type. The Claims feed API and its D1 partial index list only the
-  four lifecycle types, so contention shows in the Change event feed but not in the Claims feed
-  until those are extended (a new migration).
+- `claim.contended` is an Event type. The Claims feed API and its D1 partial index list it with the
+  four lifecycle types, so the Claims feed shows contention too.
 - Contention with an agent of another Change stays an event and a `claim_contention` metric. It
   does not enter that Change's conflict pass, because the other Intent is not compared there.
-- Parallel Tasks of one Change that share a resource now produce a `suspected` conflict even when
+- Parallel Tasks of one Change that share a resource produce a `suspected` conflict even when
   both Intents only add. That is the intended signal; it never forks Candidates by itself.
 - Cost per run with R resources and a run of T minutes: about R acquire requests, R per minute for
   renewal, and R release requests to ResourceShardDO, plus the shard alarms that publish the
@@ -73,14 +68,6 @@ Claims are advisory leases for agent runs.
   source. Ownership stays strongly consistent: one active Claim per resource in one shard
   transaction. Per-run Artifact forks already isolate source. Promotion safety comes from
   compare-and-swap with executable evidence (section 36), not from Claims.
-
-## Update (2026-10-10)
-
-- Migration 0014 adds `claim.contended` to the Claims feed query and its D1 partial index. The
-  Claims feed now shows contention too.
-- The one-minute run check is an interval schedule (`scheduleEvery(60)`, ADR 0019 update). It is
-  still the main renewal tick, and each fire counts against the AgentDO daily alarm cap.
-- An acquire by the agent that already holds the live Claim renews it (`claim.renewed`).
 
 ## Diagram
 

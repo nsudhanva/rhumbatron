@@ -1,10 +1,5 @@
 # ADR 0005: Deploy Durable Object Workers with cloudflare_workers_script
 
-- Status: Accepted. Amended by ADR 0012 (the Sandbox Worker deploys through an adapter, not this
-  module). Updated 2026-10-10.
-- Date: 2026-10-08
-- Decider: Project owner
-
 ## Context
 
 AGENTS.md section 11.5 prefers `cloudflare_worker` + `cloudflare_worker_version` +
@@ -14,16 +9,21 @@ AGENTS.md section 11.5 prefers `cloudflare_worker` + `cloudflare_worker_version`
 ## Decision
 
 - Workers that host Durable Object classes use `modules/durable-worker`, built on
-  `cloudflare_workers_script` (full deploy, supports `migrations`). Today: `rhumbatron-coordinator`.
-  Later: `rhumbatron-agents`.
-- All other Workers keep `modules/worker` (version + deployment), which canary rollout needs later.
-- Each migration is a transition from the live tag to the target tag. `old_tag` must
-  equal the live tag, or Cloudflare rejects the upload (412, code 10079). Steady state is
-  `old_tag = new_tag = <live tag>` with no class changes. Never edit an applied tag.
+  `cloudflare_workers_script` (full deploy, supports `migrations`). These are `rhumbatron-coordinator`
+  (`ProjectRootDO`, `ResourceShardDO`, `ProjectViewDO`) and `rhumbatron-agents` (`AgentDO`).
+- All other Workers use `modules/worker` (version and deployment).
+- Two Workers deploy through adapters that do full uploads: `rhumbatron-sandbox-prod` (ADR 0012)
+  and `rhumbatron-apps-prod` (ADR 0020). This module does not deploy them.
+- Each migration is a transition from the live tag to the target tag. `old_tag` must equal the live
+  tag, or Cloudflare rejects the upload (412, code 10079). Steady state is `old_tag = new_tag = v1`
+  with no class changes. An applied tag never changes.
+- `local.bootstrap` in `envs/prod` is `false`. When `true`, the coordinator omits its `EVENT_ROUTER`
+  binding (a binding cycle with the event router), and the first upload uses `new_tag = "v1"` with
+  the classes. A fresh root needs two applies.
 
 ## Consequences
 
-- `cloudflare_workers_script` has no tags attribute, so Durable Object Workers are grouped by name only.
+- `cloudflare_workers_script` has no tags attribute, so Durable Object Workers have name grouping only.
 - Gradual rollout does not apply to Durable Object Workers. Each release is a full deploy.
 - The module declares observability and compatibility flags in full to keep the post-apply plan clean.
 
@@ -33,14 +33,14 @@ Migration tags on a Durable Object Worker (`old_tag`, `new_tag`):
 
 ```mermaid
 stateDiagram-v2
-  [*] --> v1: fresh environment, new_tag v1 with new_sqlite_classes
+  [*] --> v1: fresh root, new_tag v1 with new_sqlite_classes
   v1 --> v1: steady state, old_tag v1 and new_tag v1
   v1 --> v2: add a class, old_tag v1 and new_tag v2 with new_sqlite_classes
   v1 --> rejected: old_tag differs from the live tag
   rejected: 412, code 10079
 ```
 
-First apply of a fresh root (`envs/prod`, `local.bootstrap = true`), then the second apply:
+First apply of a fresh root (`local.bootstrap = true`), then the second apply:
 
 ```mermaid
 flowchart TD
@@ -52,14 +52,3 @@ flowchart TD
   coord --> agents
   router --> second["Second apply, local.bootstrap = false:<br/>coordinator gets EVENT_ROUTER, migrations v1 to v1"]
 ```
-
-## Update (2026-10-10)
-
-- `rhumbatron-agents` now deploys through `modules/durable-worker` (ADR 0009), with migration v1
-  for `AgentDO`. Both Durable Object Workers are in steady state `v1 -> v1` in dev and prod.
-- The `Sandbox` class is in its own Worker, `rhumbatron-sandbox-<env>`.
-  `scripts/sandbox-deploy.ts` (`terraform_data.sandbox_worker`) deploys it in one full upload.
-  This module does not deploy it (ADR 0012).
-- A fresh root needs two applies. `local.bootstrap = true` omits the coordinator's
-  `EVENT_ROUTER` binding (a cycle) and, in `envs/prod`, uploads the first migrations with
-  `new_tag = "v1"` and the classes (ADR 0012, ADR 0017).

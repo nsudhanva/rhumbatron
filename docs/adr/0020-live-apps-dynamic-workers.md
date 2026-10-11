@@ -1,22 +1,15 @@
 # ADR 0020: Live apps on Dynamic Workers
 
-## Status
-Accepted for the runtime, 2026-10-10 (Phase 16 milestone A). The public routing is built but off
-(`local.apps.routing = false` in `envs/prod`) until the owner accepts the route layout in
-"Routing" below.
-
 ## Context
-Phase 16 makes every Project a live application (`docs/plans/phase-16-live-apps.md`). The owner
-decided:
+Every Project is a live application:
 
-- Apps run at `<slug>.rhumbatron.com`; Candidate previews at `<preview-id>--<slug>.rhumbatron.com`.
-- Prod only. Dev keeps building, checking, and promoting Projects, but hosts no apps.
+- Apps run at `<label>.rhumbatron.com`. Candidate previews run at `<preview-id>--<label>.rhumbatron.com`.
 - Generated apps have no real login. When an instruction asks for accounts, agents build a fake
   identity (a demo user picker).
 - User apps never need Terraform. Terraform creates only the one-time foundation.
 
-Workers Builds per Project cannot work (Artifacts connections need a dashboard step, one build at
-a time; ADR 0018). Workers for Platforms adds a $25 base fee. Dynamic Workers are in the frozen
+Workers Builds per Project cannot work (Artifacts connections need a dashboard step, and one build
+runs at a time; ADR 0018). Workers for Platforms adds a $25 base fee. Dynamic Workers are in the frozen
 stack (AGENTS.md section 5.3) and included in Workers Paid: 1,000 unique Dynamic Workers created
 per month, 10 M requests and 30 M CPU-ms shared with Workers.
 
@@ -29,7 +22,7 @@ per month, 10 M requests and 30 M CPU-ms shared with Workers.
   version counts as one Dynamic Worker per day.
 - Host rules (`packages/protocol/src/app.ts`): one label under `rhumbatron.com`, at most 50
   characters, lowercase letters, digits, and single hyphens; `--` separates an 8-character
-  preview id. Reserved labels: `www`, `api`, `dev`, `api-dev`, `clerk`, `accounts`, `clkmail`,
+  preview id. Reserved labels: `www`, `api`, `clerk`, `accounts`, `clkmail`,
   `app`, `apps`, `admin`, `mail`, `status`, `docs`, `static`, `cdn`, and anything starting with
   `rhumbatron`. DKIM hosts contain a dot, so they can never be a label. Slugs are unique per
   organization only, so the label is the slug, else `<slug>-<6 chars of the Project ID>`.
@@ -70,7 +63,7 @@ It is the router's `AppData` entrypoint with `props.storeName`; each store is on
 `AppDataDO`. Production and each preview have separate stores, so a preview never writes
 production data. Limits: keys up to 512 characters, values up to 128 KiB, 10,000 keys.
 
-Durable Object facets were rejected for now. A facet needs the app to export a Durable Object
+Durable Object facets are not used. A facet needs the app to export a Durable Object
 class, and every app request then goes through one Durable Object. With the binding, apps stay
 plain fetch Workers and only storage calls reach a Durable Object. The Acme template keeps its
 in-memory store.
@@ -88,8 +81,8 @@ in-memory store.
   password-hashing library (Clerk, Auth.js, Better Auth, Lucia, Supabase auth, Firebase auth,
   Auth0, Passport, Okta, Amplify, WorkOS, Stytch, Kinde, Descope, bcrypt, argon2), or markup has a
   password field.
-- Clerk cookies on rhumbatron.com, checked 2026-10-10 in the production clerk-js bundle served by
-  `clerk.rhumbatron.com` (the sign-in pages set no cookies on the server):
+- Clerk cookies on rhumbatron.com, as the production clerk-js bundle served by
+  `clerk.rhumbatron.com` sets them (the sign-in pages set no cookies on the server):
   - `__session` and `__session_<suffix>` are set with no `Domain`: host-only on rhumbatron.com.
     App hosts never receive them.
   - `__client_uat` is set on the registrable domain (`Domain=rhumbatron.com`), so browsers send it
@@ -103,26 +96,26 @@ rejected (401). The template's tests cover both cases.
 
 ### Provisioning
 - `project.provision` (integration Worker) runs `provisionApp` after the source is seeded, when
-  the `APPS` binding exists (prod). `app.provision` does the same on request:
-  `POST /v1/projects/:projectId/app` ("Deploy app" on the Project overview) for Projects that
-  predate live apps, or a retry.
+  the `APPS` binding exists. `app.provision` does the same on request:
+  `POST /v1/projects/:projectId/app` ("Deploy app" on the Project overview), for a retry or a
+  Project without an app.
 - `GET /v1/projects/:projectId/app` returns `{ enabled, app }`. `enabled` is false without
-  `APPS_DOMAIN` (dev, or prod while routing is off).
+  `APPS_DOMAIN`.
 - Archiving a Project marks its app `removed` (410 at once). Its cleanup deletes the
   `AppDataDO` stores, the `apps/<project>/` and `app-previews/<project>/` prefixes, and the preview
   and version rows. The production row stays as a tombstone (status `removed`, no commit, no
   bundle), so the hosts keep answering 410, not 404.
 
-### Previews, releases, versions, rollback (milestone B)
-Built 2026-10-10 (P16-10 to P16-15). Runtime data only; no Terraform at release time.
+### Previews, releases, versions, rollback
+These are runtime data. No Terraform runs at release time.
 
-- **Preview (P16-10).** CandidateVerificationWorkflow builds the composed commit after the
+- **Preview.** CandidateVerificationWorkflow builds the composed commit after the
   checks, when the build check passed, and writes the row `preview:<candidate-id 8>` with its
   Candidate and Change. A Change keeps at most 3 previews (the Candidate limit); when full, the
   oldest preview of a stale, rejected, or promoted Candidate makes room, and a preview of a
   Candidate that can still ship is never evicted. A failed preview build marks only the row.
   `GET /v1/candidates/:id/preview` feeds "Open preview" on the Candidate page.
-- **Release (P16-11).** For a Project with an app, promotion starts the release as before, and
+- **Release.** For a Project with an app, promotion starts the release as before, and
   ReleaseWorkflow takes the app path: the bundle of the promoted commit (stored; another commit
   with the same tree; the preview bundle copied from `app-previews/`, which expires after 7 days;
   else a build), then the production pointer moves by compare-and-swap on the row it read, then
@@ -130,75 +123,71 @@ Built 2026-10-10 (P16-10 to P16-15). Runtime data only; no Terraform at release 
   read, no public route needed). The probes are generic: `/` must answer 2xx or 3xx and not a
   router status page ("Nothing built yet", "Building"), plus up to 3 static GET routes (no path
   params) from the app's own route table in the released Candidate's contract Evidence, the
-  routes the Change added first. Without a route table only `/` is probed. The dev Acme Shop Live
-  Workers Builds target also keeps its `/api/products` JSON probe. A late release never moves the pointer back to an older
-  generation. Live apps replace Workers Builds for these Projects (P16-15).
-- **Smoke failure (P16-12).** The pointer moves back to the version it replaced, as a new
+  routes the Change added first. Without a route table only `/` is probed. A Project on the
+  Workers Builds path (ADR 0018) keeps its `/api/products` JSON probe. A late release never moves
+  the pointer back to an older generation. Projects with an app do not use Workers Builds.
+- **Smoke failure.** The pointer moves back to the version it replaced, as a new
   recorded transition (`deployment.completed` with status `restored`), and the release is
   `smoke_failed`. Canonical keeps the promoted generation (AGENTS.md section 42.10).
-- **Versions (P16-13).** Each deployed generation also gets a version row
+- **Versions.** Each deployed generation also gets a version row
   `preview:v<generation, 7 digits>` that points at its production bundle, for example
   `v0000003--acme.rhumbatron.com`. `v` is not a hex digit, so a version id never equals a
   Candidate preview id. A version host has its own data store and its own Dynamic Worker ID
   (`<project>@<commit>#<channel>`), so it never shares production's isolate or data.
-- **Rollback (P16-13).** `POST /v1/projects/:id/rollback` with `{ targetGeneration,
+- **Rollback.** `POST /v1/projects/:id/rollback` with `{ targetGeneration,
   expectedGeneration }` creates a rollback Change and Candidate whose one commit sits on Sn's
   commit with Sk's tree. Its required check reads that commit's tree from Artifacts and compares
   it with Sk's tree. The human gate follows policy for the riskiest Change it undoes. It then
   promotes by the normal compare-and-swap (Sn -> Sn+1) and releases with Sk's stored bundle.
   Nothing in the history is deleted. The tree's file index is pointed at the new commit, so new
   Candidates compose on it.
-- **Stale recomposition (P16-14).** A Candidate that goes stale because canonical advanced is
+- **Stale recomposition.** A Candidate that goes stale because canonical advanced is
   composed again on the new canonical state (same ChangeSets, real merge, full checks), at most
   2 times per lineage, then it is marked blocked. Recompositions do not count against the
   Candidate limit. Triggers: verification finds the base behind, canonical moved during the
   checks, a refused compare-and-swap, or the sweep after each promotion.
 
-### Removal, cost, and retention (milestone D)
-- **Remove app (P16-20).** `DELETE /v1/projects/:id/app` marks every row `removed` (410 on every
+### Removal, cost, and retention
+- **Remove app.** `DELETE /v1/projects/:id/app` marks every row `removed` (410 on every
   host at once) and queues `app.remove`. Cleanup wipes the data stores (`AppBuilder.wipeData`),
   deletes both R2 prefixes and the preview and version rows, then reduces the production row to a
   tombstone (status `removed`, no commit, no bundle): the hosts keep answering 410. The Project
   and its history stay; "Deploy app" revives the tombstone and publishes again on the same label.
-- **Cost (P16-21).** At most 60 app builds per day (`usage_counters` `app-builds`), checked before
+- **Cost.** At most 60 app builds per day (`usage_counters` `app-builds`), checked before
   each build. `bun run cost:report` shows the apps router requests and CPU, builds against the cap,
   ready bundles as an upper bound on Dynamic Workers per month, and bundle bytes in R2 (alert at
   80 %).
-- **Retention (P16-22).** Production bundles under `apps/` have no lifecycle rule: every promoted
+- **Retention.** Production bundles under `apps/` have no lifecycle rule: every promoted
   generation keeps its bundle, so a rollback never rebuilds. `app-previews/` expires after 7 days
   (R2 lifecycle, `envs/prod`); the daily sweep deletes preview rows and their data stores after
   the same 7 days. Version rows are never expired.
 
-### Terraform (envs/prod only)
+### Terraform (`envs/prod`)
 - `terraform_data.apps_worker` runs `scripts/apps-deploy.ts`: one full script upload with the
   bindings from Terraform, including `{ "type": "worker_loader", "name": "LOADER" }` (the shape
   Wrangler 4.149 uploads; provider 5.27 has no such binding type), and the `AppDataDO` migration
   (`v1` first, then the live tag). It turns the workers.dev subdomain off if it is on. It reads
   before it writes and re-runs only when the bundle or config hash changes.
-  `apps_worker_teardown` deletes the Worker on a real destroy only. Replace both with `cloudflare_worker_version` when the
-  provider supports the binding (AGENTS.md section 11.4).
+  `apps_worker_teardown` deletes the Worker on a real destroy only. A `cloudflare_worker_version`
+  resource that supports the binding would replace both (AGENTS.md section 11.4).
 - The integration Worker binds `APPS` (service, entrypoint `AppBuilder`).
 - R2 lifecycle: `app-previews/` expires after 7 days.
-- D1 migration 0018 runs on dev and prod; dev keeps the table empty.
-- With `local.apps.routing = true`: the proxied wildcard record `*` (`AAAA 100::`), the route
-  `*.rhumbatron.com/*` to the apps Worker, the bypass routes below, and `APPS_DOMAIN` on the API.
+- D1 migration `0018_app_deployments.sql` creates the pointer table.
+- `local.apps.routing = true` in `envs/prod` creates the proxied wildcard record `*` (`AAAA 100::`),
+  the route `*.rhumbatron.com/*` to the apps Worker, the bypass routes below, and `APPS_DOMAIN` on
+  the API.
 
 ### Routing
-The plan assumed that Worker custom domains win over a wildcard route. The Workers routes docs
-say the opposite: "Routes can `fetch()` Custom Domains and take precedence if configured on the
-same hostname." So `*.rhumbatron.com/*` alone would capture `api`, `www`, `dev`, and `api-dev`.
-The apex does not match `*.`. The Clerk records are DNS-only, so no Worker route runs on them,
-and explicit DNS records keep priority over the wildcard record.
+Cloudflare's Workers routes docs say that a route can fetch Custom Domains and takes precedence on
+the same hostname. So `*.rhumbatron.com/*` alone would capture `api`, `www`, and `docs`. The apex
+does not match `*.`. The Clerk records are DNS-only, so no Worker route runs on them, and explicit
+DNS records keep priority over the wildcard record.
 
-The same docs say that a route without a Worker "will act to negate any less specific
-patterns", and that the most specific pattern wins. So routing adds one route without a Worker
-per custom-domain host (`api`, `www`, `dev`, `api-dev`), created before the wildcard route. A
-request to those hosts then bypasses route Workers and reaches its custom-domain Worker (an
-origin). This is documented but not yet observed on this zone, so the switch stays off until the
-owner accepts it. After an apply with routing on, check `api.rhumbatron.com/health`,
-`www.rhumbatron.com` (301), `dev.rhumbatron.com`, and `api-dev.rhumbatron.com/health` at once.
-Rollback: set `routing = false` and apply. A new Worker custom domain in the zone needs a new
-bypass host in `local.apps.bypass_hosts`.
+A route without a Worker negates less specific patterns, and the most specific pattern wins. So
+routing adds one route without a Worker per custom-domain host (`local.apps.bypass_hosts`: `api`,
+`www`, and `docs`), created before the wildcard route. A request to those hosts bypasses route
+Workers and reaches its custom-domain Worker. A new Worker custom domain in the zone needs a new
+bypass host in `local.apps.bypass_hosts`. Setting `routing = false` and applying removes the wildcard.
 
 ## Cost
 | Item | Use | Included (Workers Paid) |
@@ -231,7 +220,7 @@ bypass host in `local.apps.bypass_hosts`.
 
 ```mermaid
 flowchart LR
-  user["Browser"] -->|"acme.rhumbatron.com"| route["Route *.rhumbatron.com/*<br/>(bypass: api, www, dev, api-dev)"]
+  user["Browser"] -->|"acme.rhumbatron.com"| route["Route *.rhumbatron.com/*<br/>(bypass: api, www, docs)"]
   route --> router["rhumbatron-apps-prod<br/>router"]
   router -->|"label, channel (10 s cache)"| d1[("D1 app_deployments")]
   router -->|"cold load: bundle.json, assets"| r2[("R2 apps/project/commit")]

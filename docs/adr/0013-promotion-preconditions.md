@@ -1,9 +1,5 @@
 # ADR 0013: Split promotion preconditions between the integration Worker and ProjectRootDO
 
-- Status: Accepted
-- Date: 2026-10-09
-- Decider: Project owner
-
 ## Context
 
 AGENTS.md section 36 lists eight preconditions before one atomic `S<n> -> S<n+1>` transition.
@@ -67,7 +63,7 @@ promoting again repairs it, because the retry is `alreadyPromoted` and re-runs t
 then, a new Candidate's verification waits on its first step (bounded retries) instead of
 composing on a commit that `main` does not hold yet. No Sandbox time is used for the sync.
 
-### Re-wake after promotion (P11-06)
+### Re-wake after promotion
 
 On `canonical.advanced`, the Causal Router marks every other in-flight Candidate of the Project
 with an older base as `stale` (one D1 batch, deterministic). It also marks the promoted Candidate
@@ -82,28 +78,19 @@ that event.
 - A precondition can change between the check and the compare-and-swap (for example a new
   Evidence row). Evidence IDs are stable per check, and a Candidate's Evidence is written only by
   its own verification workflow, which has finished once the Candidate is `verified`.
-- New binding: `INTEGRATION` service binding on the API Worker (Terraform `api_worker`).
-- Not done: separation of duties (an approver may also be the Change author; one-person
-  organizations need this for now), `autoPromoteRiskTiers`, and release after promotion (P11-08).
-
-## Update (2026-10-10)
-
-- Release after promotion is built (ADR 0018). After the canonical `main` sync succeeds, promotion
-  starts `ReleaseWorkflow` for a Project that has a release target. A release never fails or
-  reverses a promotion.
+- The API Worker holds the `INTEGRATION` service binding (Terraform `api_worker`).
+- An approver can also be the Change author. Only the Project owner can approve (ADR 0023).
 - The rules in ProjectRootDO are the pure function `decidePromotion`
   (`workers/coordinator/src/promotion-cas.ts`). The order is: already promoted, generation, tree,
   then policy version.
-
-## Update (2026-10-09, HOM-200)
-
-- `autoPromoteRiskTiers` is built. After the gate, the verification workflow calls the pure function
-  `autoPromoteDecision`. Then it calls `promoteCandidate` with trigger `auto` and actor
-  `system:auto-promotion`. That is the same path and the same preconditions as a manual promote.
-  A plan or policy tier that needs approval is never automatic. An unknown risk tier is never
-  automatic either.
-- Promotion now writes the Change statuses `promoting`, then `releasing` or `completed`. See the
-  change lifecycle page for the full state machine.
+- After the canonical `main` sync succeeds, promotion starts `ReleaseWorkflow` for a Project that
+  has a release path (ADR 0018). A release never fails or reverses a promotion.
+- Auto-promotion: after the gate, the verification workflow calls the pure function
+  `autoPromoteDecision` (`autoPromoteRiskTiers`). Then it calls `promoteCandidate` with trigger
+  `auto` and actor `system:auto-promotion`. That is the same path and the same preconditions as a
+  manual promote. A plan or policy tier that needs approval is never automatic. An unknown risk
+  tier is never automatic either.
+- Promotion writes the Change statuses `promoting`, then `releasing` or `completed`.
 
 ## Diagram
 

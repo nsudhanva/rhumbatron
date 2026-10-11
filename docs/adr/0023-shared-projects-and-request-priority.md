@@ -1,20 +1,11 @@
 # ADR 0023: Shared Projects and request priority
 
-## Status
-Accepted, 2026-10-10. Implemented as Phase 17a (`docs/plans/phase-17a-shared-projects.md`).
-It narrows `phase-17-teams.md` to one tested workflow.
-
 ## Context
-Two people must work in one Project from separate accounts. Both can send requests at the same
-time, and two requests can contradict each other (for example "newest first" and "oldest first").
-The owner must be able to override the other user. The UI must show which requests were selected.
-
-Before this ADR, every API route checked only `canAccessProject`, which returns a Boolean. A second
-user with access could approve, promote, archive and raise budgets. The Change workflow had no
-step that compares one Change with another.
-
-Claude (Opus) wrote the first position. codex and agy reviewed it. Their critiques changed most of
-the design.
+Two people work in one Project from separate accounts. Both can send requests at the same time, and
+two requests can contradict each other (for example "newest first" and "oldest first"). The owner
+can override the other user. The UI shows which requests Rhumbatron selected. Access to a Project
+does not grant every action: API routes check the role of the user. The Change workflow compares
+each Change with the other requests of the Project. See `docs/architecture/shared-projects.md`.
 
 ## Decision
 - Share per Project. Use the D1 table `project_members` (`owner` rank 0, `collaborator` rank 10).
@@ -61,7 +52,7 @@ the design.
 | Clerk Organizations and paid roles | Needs a paid Clerk feature. Adding Bob to Alice's organization exposes her other Projects. Per-Project membership gives owner rank without either cost. |
 | Read other Changes at plan time, with no Root serialization | Two planners can run at the same moment and each sees the other without a scope. Both look independent and both spend model budget. Root serialization makes the order exact. |
 | Haiku or Clef alone confirms a conflict | AGENTS.md 32.3 requires Sonnet review for unclear semantics and forbids Clef-flash from confirming a conflict. A cheap model also cannot stop a Change by itself (rule 45). |
-| agy: promoted criteria become Project invariants, as a backstop for missed conflicts | Deferred. It needs protected tests that an agent cannot edit, and those tests do not exist yet. |
+| Promoted criteria become Project invariants, as a backstop for missed conflicts | It needs protected tests that an agent cannot edit. |
 | Reject the whole Change of the loser | One request that asks for B and C2 would lose B. Partial selection keeps B. |
 | Restart the loser's workflow on override | A workflow instance ID cannot restart. A new linked Change keeps the old record. |
 
@@ -75,5 +66,3 @@ the design.
   The tests of the earlier Change usually fail on the later tree and stop it, but an agent can edit
   those tests. Report such a miss as an incident. Never mark both requests as satisfied without
   Evidence.
-- Later work: protected obligation tests outside agent-editable source (agy's proposal), and
-  rank changes among collaborators.
