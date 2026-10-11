@@ -25,7 +25,7 @@ const CLEF_DAILY_CAP = 200;
 /**
  * Fallback for the `SANDBOX_MONTHLY_SECONDS` binding; mirrors MONTHLY_SECONDS in
  * workers/agents/src/workspace.ts and integration candidate-sandbox.ts. ADR 0017 sets the binding
- * per environment (the 10 h split between dev and prod).
+ * to 15 hours.
  */
 const SANDBOX_MONTHLY_SECONDS = 36_000;
 

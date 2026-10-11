@@ -172,7 +172,7 @@ export class ReleaseWorkflow extends WorkflowEntrypoint<Env, ReleaseParams> {
     if (result.kind === "not_connected") {
       await fail(
         "mark not connected",
-        "Workers Builds has no trigger for the release Worker. Connect it once (ADR 0014, ADR 0018).",
+        "Workers Builds has no trigger for the release Worker. Connect it once (ADR 0018).",
       );
       return { status: "failed", reason: "not_connected" };
     }

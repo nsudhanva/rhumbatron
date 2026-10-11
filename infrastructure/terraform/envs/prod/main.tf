@@ -790,7 +790,7 @@ resource "cloudflare_workers_route" "apps_bypass" {
   pattern = "${each.value}/*"
 }
 
-# Release target for the Acme Shop demo Project (AGENTS.md section 37, ADR 0014). Terraform owns
+# Release target for the Acme Shop demo Project (AGENTS.md section 37, ADR 0018). Terraform owns
 # the Worker; Workers Builds owns its versions after the one-time dashboard connection.
 resource "cloudflare_worker" "acme_shop" {
   account_id = var.account_id
@@ -811,7 +811,7 @@ resource "cloudflare_worker" "acme_shop" {
   }
 
   # Workers Builds runs `wrangler deploy` from the Project's own wrangler.jsonc, which sets the
-  # workers.dev preview setting at runtime (ADR 0014: Builds owns this Worker's deployments).
+  # workers.dev preview setting at runtime (ADR 0018: Builds owns this Worker's deployments).
   lifecycle {
     ignore_changes = [subdomain]
   }

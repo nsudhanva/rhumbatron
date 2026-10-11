@@ -279,7 +279,7 @@ function Attempt({ run }: { run: AgentRunView }) {
           <span className="font-semibold">#{run.attempt}</span>
           <span>{run.escalatedFrom ? `${run.escalatedFrom} → ${run.tier}` : run.tier}</span>
           {run.escalatedFrom && <Tag variant="outline">Escalated</Tag>}
-          {/* Attempts before ADR 0021 that ran on Gemini (Vertex AI, ADR 0016). */}
+          {/* A Decision Receipt that names Vertex AI marks a Gemini attempt. */}
           {run.provider === "google-vertex-ai" && <Tag variant="outline">Gemini</Tag>}
         </p>
         <StatusPill status={run.status} />

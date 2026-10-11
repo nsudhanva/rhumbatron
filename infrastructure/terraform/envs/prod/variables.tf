@@ -76,7 +76,7 @@ variable "anthropic_workspace_id" {
 }
 
 variable "anthropic_monthly_budget_usd" {
-  description = "Anthropic budget in USD per calendar month for this environment, enforced in code on the D1 meter and mirrored to the gateway spend limit. Dev $15 + prod $10 = the approved $25 total (ADR 0021)."
+  description = "Anthropic budget in USD per calendar month for this environment, enforced in code on the D1 meter and mirrored to the gateway spend limit (ADR 0021)."
   type        = number
   default     = 10
 

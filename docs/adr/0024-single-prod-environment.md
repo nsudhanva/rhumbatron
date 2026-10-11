@@ -5,7 +5,7 @@
 Prod is the only remote environment.
 Terraform root `infrastructure/terraform/envs/prod` owns it.
 Terraform root `envs/global` owns the account-wide and zone-wide singletons.
-No remote `dev` environment, no `dev` Terraform root, and no `-dev` Cloudflare resource exist.
+Every Rhumbatron Cloudflare resource has the `-prod` suffix or is a singleton in `envs/global`.
 
 Local work uses `wrangler dev`.
 Every change passes the local checks first. Then Terraform deploys it to prod.
@@ -21,8 +21,7 @@ One environment halves the account-wide use of the free and included limits.
 
 ## Consequences
 
-- No shared remote development environment exists.
-- Prod uses the whole Sandbox and Anthropic caps that ADR 0011 and ADR 0021 state.
+- Prod holds the Sandbox and Anthropic caps that ADR 0011 and ADR 0021 state.
 - The binding drift check compares `wrangler.jsonc` with prod only.
 - `scripts/cleanup-projects.ts` targets prod. It reads `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` from the environment, for the prod Clerk instance.
 - Critical tests prove each injected fault. No script injects a fault into a remote environment.

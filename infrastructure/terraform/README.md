@@ -162,7 +162,7 @@ these scripts or the API directly.
 
 K2 never deletes streams. Vectorize, the Sandbox Worker and the apps Worker delete only on a real destroy, through
 their teardown resources. Artifacts has no adapter: the namespace is created on first use through
-the `ARTIFACTS` binding (ADR 0010). The Workers Builds connection has no API path (ADR 0014,
+the `ARTIFACTS` binding (ADR 0010). The Workers Builds connection has no API path (ADR 0018,
 ADR 0018).
 
 ```mermaid

@@ -25,8 +25,8 @@ import {
  * - one session per check run, closed after at most `BROWSER_SESSION_MS`;
  * - at most `MAX_BROWSER_RUNS_PER_CANDIDATE` runs per Candidate (retries included);
  * - at most the `BROWSER_DAILY_SECONDS` binding (fallback: the constant, 500) per UTC day on this
- *   environment's D1 meter. ADR 0017 splits the 500 s between dev and prod (250 s each), so both
- *   stay under the free 10 minutes together.
+ *   environment's D1 meter. ADR 0017 sets 250 s, under the free
+ *   10 minutes per day.
  *
  * Fixture sign-in: the shop names its user in `x-user-id`. The proxy sets that header to the
  * scenario's current actor (alice owns, bob collaborates), so no page code needs to change.

@@ -110,7 +110,7 @@ await section("workers", async () => {
     "indexer",
     "apps",
     "docs",
-    // Release target: Terraform owns the Worker; Workers Builds owns its versions (ADR 0014).
+    // Release target: Terraform owns the Worker; Workers Builds owns its versions (ADR 0018).
     "acme-shop",
   ].map((c) => `rhumbatron-${c}-${env}`);
   const scripts = await get<{ id: string }[]>("/workers/scripts");

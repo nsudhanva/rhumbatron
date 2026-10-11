@@ -8,7 +8,7 @@ export type SelectedCost = NonNullable<ProjectCost["selected"]>;
 export const TIER_LABEL: Record<Tier, string> = { haiku: "Haiku", sonnet: "Sonnet", opus: "Opus" };
 
 /**
- * Recorded model cost. `$0.00` is a real recorded zero (free models, ADR 0007); a positive amount
+ * Recorded model cost. `$0.00` is a real recorded zero; a positive amount
  * under one cent reads `<$0.01` so it never rounds to a false zero.
  */
 export function formatCost(usd: number | null | undefined) {

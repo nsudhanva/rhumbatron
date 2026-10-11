@@ -6,7 +6,7 @@
  * (set them for the prod Clerk instance), it also runs the authenticated flow:
  * create a Project and a Change, read them back, and check idempotency and the snapshot.
  * Each authenticated run writes about five D1 rows.
- * `--plan` also submits a real goal and waits for the Work Graph: 1 to 4 model calls (ADR 0007).
+ * `--plan` also submits a real goal and waits for the Work Graph: 1 to 4 model calls (ADR 0021).
  * `--sandbox` seeds an Acme Shop project and runs its Bun tests in the Sandbox, then verifies the
  * canonical baseline Candidate (no model calls; a few minutes of the monthly Sandbox budget, ADR 0011),
  * promotes it S0 -> S1, retries the promotion, and checks that a Candidate on S0 is then stale.

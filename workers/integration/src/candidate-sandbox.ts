@@ -13,9 +13,9 @@ export { candidateFork };
  */
 
 /**
- * Hard stop at the monthly Sandbox hours. Same meter as Task workspaces. ADR 0017 splits the
- * approved 20 hours between dev (5) and prod (15) through the `SANDBOX_MONTHLY_SECONDS` binding;
- * this is the fallback when the binding is absent.
+ * Hard stop at the monthly Sandbox hours. Same meter as Task workspaces. ADR 0017 sets 15
+ * hours through the `SANDBOX_MONTHLY_SECONDS` binding; this is the fallback when the binding is
+ * absent.
  */
 const MONTHLY_SECONDS = 36_000;
 

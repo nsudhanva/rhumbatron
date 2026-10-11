@@ -64,8 +64,8 @@ export type LoadedRelease = {
   release: ReleaseRow;
   target: ReleaseTarget | null;
   /**
-   * The Project's live app (prod, ADR 0020). A Project with an app releases by moving its
-   * production pointer; Workers Builds stays only for the legacy dev release target (P16-15).
+   * The Project's live app (ADR 0020). A Project with an app releases by moving its production
+   * pointer; a Project with a `release_targets` row releases through Workers Builds (ADR 0018).
    */
   app: { label: string } | null;
   ctx: ChangeContext;
@@ -100,8 +100,8 @@ const loadTarget = (env: Env, projectId: string) =>
     .first<ReleaseTarget>();
 
 /**
- * Whether a promotion of this Project starts a release: it has a live app (prod, ADR 0020), or
- * the legacy Workers Builds release target (dev Acme Shop Live, ADR 0018).
+ * Whether a promotion of this Project starts a release: it has a live app (ADR 0020), or
+ * a Workers Builds release target (ADR 0018).
  */
 export const hasReleaseTarget = async (env: Env, projectId: string) =>
   (await hasLiveApp(env, projectId)) || (await loadTarget(env, projectId)) !== null;

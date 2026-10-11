@@ -2,8 +2,7 @@ import { ANTHROPIC_PRICES, type AnthropicPrice } from "./models.ts";
 
 /**
  * The model provider (ADR 0021): Anthropic Claude through the AI Gateway on every environment.
- * OpenRouter and Gemini on Vertex AI (ADR 0007, ADR 0016) are removed; old Decision Receipts can
- * still name them. Pure logic only: callers read and write the `usage_counters` rows.
+ * Stored Decision Receipts can also name `openrouter` or `google-vertex-ai`. Pure logic only: callers read and write the `usage_counters` rows.
  */
 
 export type ModelProvider = "anthropic";

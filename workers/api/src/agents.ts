@@ -63,8 +63,8 @@ const RunView = z.object({
   /** Decision Receipt: who routed this attempt and why (section 23.5). */
   decidedBy: z.string().nullable(),
   /**
-   * Model provider of the attempt from its Decision Receipt: `anthropic` since ADR 0021, the
-   * earlier providers on older receipts, null before ADR 0016.
+   * Model provider of the attempt from its Decision Receipt (ADR 0021), or null when the receipt
+   * names none.
    */
   provider: z.enum(["anthropic", "openrouter", "google-vertex-ai"]).nullable(),
   reasons: z.array(z.string()),

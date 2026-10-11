@@ -30,7 +30,6 @@ These runbooks tell operators how to run Rhumbatron environments, infrastructure
 - [ADR 0010: Artifacts project source](../adr/0010-artifacts-project-source.md)
 - [ADR 0011: Sandbox workspaces](../adr/0011-sandbox-workspaces.md)
 - [ADR 0012: Sandbox worker](../adr/0012-sandbox-worker.md)
-- [ADR 0014: Workers Builds connection to Artifacts](../adr/0014-workers-builds-artifacts-connection.md)
 - [ADR 0017: Prod environment](../adr/0017-prod-environment.md)
 - [ADR 0018: Release via Workers Builds](../adr/0018-release-via-workers-builds.md)
 - [ADR 0019: Runaway-billing guards](../adr/0019-runaway-billing-guards.md)

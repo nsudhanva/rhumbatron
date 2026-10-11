@@ -139,7 +139,7 @@ scripts/                 Bundle, checks, smoke, cleanup, cost report
 
 ## Deployment
 
-Terraform is the only way to change Cloudflare control-plane configuration. Never run `wrangler deploy`, make manual dashboard edits, or issue direct REST writes (ADR 0014 documents the one exception).
+Terraform is the only way to change Cloudflare control-plane configuration. Never run `wrangler deploy`, make manual dashboard edits, or issue direct REST writes (ADR 0018 documents the one exception).
 
 Deployment sequence:
 

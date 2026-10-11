@@ -62,7 +62,7 @@ touched). The shop root has no `data-testid="wishlist"`, so the browser check ru
 ## Pipeline
 
 1. `POST /v1/changes/:changeId/fixture-changesets` `{"design": "a" | "b" | "both"}`. The route
-   answers 404 unless `FIXTURES_ENABLED` is `"true"` or `ENVIRONMENT` is `dev` or `local`
+   answers 404 unless `FIXTURES_ENABLED` is `"true"` or `ENVIRONMENT` is `local`
    (`workers/api/src/fixtures.ts`). Terraform sets `FIXTURES_ENABLED = "true"` in prod.
    The route requires auth, Project membership, an active Project, and a Change in `created`
    (unplanned) or `verifying`. It queues `fixture.publish` on the integration Queue. `GET` on the

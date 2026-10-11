@@ -11,5 +11,5 @@ Owns zone settings only: one `cloudflare_zone_setting` per entry of `zone_settin
 
 Output: `zone_settings`.
 
-WAF, rate limits, Access, and Turnstile are not built. Add them only after the protected endpoint
-exists (AGENTS.md section 40.4).
+The module holds zone settings only. WAF, rate-limit, Access, and Turnstile rules belong in this
+module when a public endpoint needs them (AGENTS.md section 40.4).
