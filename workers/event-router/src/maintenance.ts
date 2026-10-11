@@ -6,7 +6,7 @@ import { type CommandEnvelope, RELEASE_STUCK_AFTER_MS } from "@rhumbatron/protoc
  * leftovers. The integration Worker does the work, bounded per message. The same Projects get an
  * `index.purge` for rhumbatron-indexer (stored indexes and vectors), and up to 10 active Projects
  * without a ready index get a backfill `index.build`.
- * Cost per day: two D1 reads and at most 31 Queue messages. Subrequests: 4 on that one tick.
+ * Cost per day: three D1 reads and at most 31 Queue messages. Subrequests: 4 on that one tick.
  */
 
 /** 04:17 UTC: one tick of the every-minute cron. A missed tick skips one day, nothing else. */
@@ -64,8 +64,18 @@ export async function queueMaintenance(
   )
     .bind(MAX_INDEX_BACKFILLS_PER_DAY)
     .all<{ id: string }>();
+  // Archived Projects whose cleanup is done but whose index rows remain: `purgeIndex` deletes those
+  // rows last, so their presence means the vectors or index objects may still exist.
+  const unpurged = await env.DB.prepare(
+    `SELECT p.id FROM projects p WHERE p.status = 'archived' AND p.cleaned_at IS NOT NULL
+       AND (EXISTS (SELECT 1 FROM project_indexes i WHERE i.project_id = p.id)
+            OR EXISTS (SELECT 1 FROM project_vectors v WHERE v.project_id = p.id))
+     ORDER BY p.archived_at LIMIT ?`,
+  )
+    .bind(MAX_CLEANUPS_PER_DAY)
+    .all<{ id: string }>();
   const indexing: CommandEnvelope<Record<string, never>>[] = [
-    ...(rows.results ?? []).map((row) => ({
+    ...[...(rows.results ?? []), ...(unpurged.results ?? [])].map((row) => ({
       commandId: `cmd_${row.id.slice(5)}_index-purge_${day}`,
       commandType: "index.purge",
       projectId: row.id,

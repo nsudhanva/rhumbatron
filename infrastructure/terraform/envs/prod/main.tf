@@ -433,6 +433,10 @@ module "integration_worker" {
     { type = "queue", name = "RELEASE_COMMANDS", queue_name = module.async.queues["release"].name },
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
+    # Project cleanup purges the live view and the Project's AgentDO instances (section 43).
+    { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = module.coordinator_worker.name },
+    # Literal name: the agents Worker is declared after this one.
+    { type = "durable_object_namespace", name = "AGENT", class_name = "AgentDO", script_name = "rhumbatron-agents-${local.environment}" },
     # Candidate composition and checks run in the Project Sandbox (ADR 0012).
     { type = "durable_object_namespace", name = "SANDBOX", class_name = "Sandbox", script_name = local.sandbox_worker.script_name },
     # Self-binding to CandidateVerificationWorkflow (literal name avoids a cycle with the resource).

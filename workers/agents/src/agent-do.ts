@@ -208,49 +208,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.alarmGuard = new AlarmGuard(ctx.storage.sql, ctx.storage, "AgentDO");
-    this.alarmGuard.migrate();
-    ctx.storage.sql.exec(`
-      CREATE TABLE IF NOT EXISTS agent_runs (
-        run_id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        attempt INTEGER NOT NULL,
-        tier TEXT NOT NULL,
-        status TEXT NOT NULL,
-        calls INTEGER NOT NULL DEFAULT 0,
-        checks INTEGER NOT NULL DEFAULT 0,
-        outcome TEXT,
-        input_json TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        started_at TEXT NOT NULL
-      );
-    `);
-    ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS run_reads (run_id TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0)",
-    );
-    // What each run has put on the monthly Anthropic meter so far: reservations plus settlements.
-    ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS run_meter (run_id TEXT PRIMARY KEY, metered_usd REAL NOT NULL DEFAULT 0)",
-    );
-    ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS run_workspaces (run_id TEXT PRIMARY KEY, ws_json TEXT NOT NULL)",
-    );
-    ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS run_workspace_tree (
-        run_id TEXT NOT NULL,
-        path TEXT NOT NULL,
-        content TEXT,
-        deleted INTEGER NOT NULL DEFAULT 0,
-        dirty INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (run_id, path)
-      )`,
-    );
-    ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS run_tool_logs (
-        ordinal INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL,
-        tool TEXT NOT NULL, target TEXT NOT NULL, output TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_run_tool_logs_run ON run_tool_logs (run_id);`,
-    );
+    this.migrate();
     this.runClaims = sqlRunClaimStore(ctx.storage.sql);
     const active = this.activeRun();
     this.prompt = active
@@ -1222,6 +1180,74 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   /** Scheduled after conflict detection: Sonnet, then Opus on escalation. Never throws. */
   async reviewConflicts(job: ConflictReviewJob) {
     await runConflictReviews(this.env, job);
+  }
+
+  /** Creates this instance's tables. Idempotent: the constructor and `purge` both call it. */
+  private migrate() {
+    this.alarmGuard.migrate();
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        run_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        tier TEXT NOT NULL,
+        status TEXT NOT NULL,
+        calls INTEGER NOT NULL DEFAULT 0,
+        checks INTEGER NOT NULL DEFAULT 0,
+        outcome TEXT,
+        input_json TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        started_at TEXT NOT NULL
+      );
+    `);
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS run_reads (run_id TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0)",
+    );
+    // What each run has put on the monthly Anthropic meter so far: reservations plus settlements.
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS run_meter (run_id TEXT PRIMARY KEY, metered_usd REAL NOT NULL DEFAULT 0)",
+    );
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS run_workspaces (run_id TEXT PRIMARY KEY, ws_json TEXT NOT NULL)",
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS run_workspace_tree (
+        run_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        content TEXT,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        dirty INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (run_id, path)
+      )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS run_tool_logs (
+        ordinal INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL,
+        tool TEXT NOT NULL, target TEXT NOT NULL, output TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_run_tool_logs_run ON run_tool_logs (run_id);`,
+    );
+    sqlRunClaimStore(this.ctx.storage.sql);
+  }
+
+  /**
+   * Deletes all storage and alarms of this agent for an archived Project (AGENTS.md section 43):
+   * runs, tool logs, workspace copies, Pi session state, and Agents SDK schedules. Throws when a
+   * stored run belongs to another Project, so a wrong name cannot erase another Project's agent.
+   * Safe to repeat. Tables are created again so a late stale wake fails cleanly, not on SQL.
+   */
+  async purge(projectId: string): Promise<{ purged: boolean }> {
+    const rows = this.ctx.storage.sql
+      .exec<{ input_json: string }>("SELECT input_json FROM agent_runs")
+      .toArray();
+    for (const row of rows) {
+      const owner = (JSON.parse(row.input_json) as { projectId?: string }).projectId;
+      if (owner !== projectId) throw new Error("AgentDO belongs to a different project");
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    this.migrate();
+    return { purged: rows.length > 0 };
   }
 
   /** Conflict and dependency resumes arrive in Phase 9; until then the event is only recorded. */

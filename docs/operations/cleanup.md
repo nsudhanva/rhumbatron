@@ -37,29 +37,49 @@ The script calls `DELETE /v1/projects/:id` for each matched Project with the Cle
 
 ## 2. Project Archiving (`DELETE /v1/projects/:id`)
 
-When a user deletes a Project through the API or UI, the API marks it `archived` in D1. The API then queues `project.cleanup` for the integration Worker (`workers/integration/src/project-cleanup.ts`).
+When a user deletes a Project through the API or UI, the API marks it `archived` in D1 and purges its ProjectRootDO and ProjectViewDO. The API then queues `project.cleanup` for the integration Worker (`workers/integration/src/project-cleanup.ts`). Cleanup deletes everything that the Project created.
 
 ```mermaid
 flowchart TB
-  del[DELETE /v1/projects/:id] --> arch[API: status = archived]
+  del[DELETE /v1/projects/:id] --> arch[API: status = archived, purge root and view]
   arch --> q[integration Queue: project.cleanup]
   q --> f[Delete ws-* and cand-* forks<br/>max 20 per message]
   f --> more{More forks?}
   more -->|yes| q
   more -->|no| canon[Delete canonical repo]
-  canon --> r2[Delete R2 source/ and context/]
-  r2 --> feed[Delete project_events rows]
-  feed --> done[Set cleaned_at]
+  canon --> r2[Delete R2 prefixes of the Project]
+  r2 --> apps[Wait for app removal]
+  apps --> tasks[Per Task, 25 per message:<br/>purge AgentDO, delete Task rows]
+  tasks --> d1[Delete D1 content rows<br/>bounded batches]
+  d1 --> shards[Purge 32 ResourceShardDO shards]
+  shards --> done[Scrub name and slug, set cleaned_at]
   cron[Daily maintenance 04:17 UTC] -.->|re-queue leftovers| q
+  cron -.->|index.purge| idx[Indexer: vectors, index objects, index rows]
 ```
 
 1. **State update**: The API has already set the Project status to `archived` in D1. Cleanup skips a Project that is not archived.
-2. **Order of deletion** (bounded per queue message):
-   - **Workspace and Candidate forks**: Cleanup deletes all active forks (`ws-*` and `cand-*`) that D1 records in `task_runs` and `candidates`. It uses `ARTIFACTS.delete()`.
-   - **Canonical repository**: Cleanup deletes the canonical Project repository in Cloudflare Artifacts (`ARTIFACTS.delete(projectId)`).
-   - **R2 storage**: Cleanup lists and deletes all objects under the prefixes `source/${projectId}/` and `context/${projectId}/`.
-   - **Feed purge**: Cleanup removes the `project_events` rows for the Project and sets `projects.cleaned_at = now()`.
-3. **Kept records**: Project rows stay in D1 with status `archived` and `cleaned_at` set, for the audit history. Evidence objects stay in R2 until the bucket lifecycle rules expire them.
+2. **Order of deletion** (bounded per queue message; each delivery continues where the last one stopped):
+   - **Read model**: Cleanup purges ProjectRootDO and ProjectViewDO again. This is safe to repeat.
+   - **Workspace and Candidate forks**: Cleanup deletes all forks (`ws-*` and `cand-*`) that D1 records in `task_runs` and `candidates`. It uses `ARTIFACTS.delete()`.
+   - **Canonical repository**: Cleanup deletes the canonical Project repository (`ARTIFACTS.delete(projectId)`).
+   - **R2 objects**: Cleanup lists and deletes all objects under these prefixes of the evidence bucket, each followed by the Project ID: `source/`, `context/`, `apps/`, `app-previews/`, `evidence/`, `work-graphs/`, and `workspace/`.
+   - **Live app**: On prod, `removeApp` wipes the app data stores first, and cleanup waits for it. On dev, cleanup removes the preview and version rows itself.
+   - **Tasks and agents**: For each batch of 25 Tasks, cleanup purges the AgentDO of each Task, then deletes the `task_runs`, `decision_receipts`, `task_dependencies`, and `tasks` rows of the batch.
+   - **D1 content rows**: Cleanup deletes the rows of `evidence_index`, `approvals`, `conflicts`, `changesets`, `candidates`, `changes`, `request_conflicts`, `goal_suggestions`, `project_policies`, `project_members`, `project_invitations`, `agents`, `dead_letters`, `releases`, `release_targets`, and `project_events`. It deletes at most 500 rows per statement and 40 statements per message.
+   - **Shards**: Cleanup purges the 32 ResourceShardDO shards (claims, Intents, Challenges, outbox). It does this last, so a late Claim cannot refill a shard.
+   - **Final step**: Cleanup deletes the KV policy copy, replaces the Project name and slug with `Deleted project` and `deleted-<id>`, and sets `cleaned_at`.
+3. **Indexes**: The indexer Worker deletes the Vectorize vectors, the `index/` objects, and the `project_indexes` and `project_vectors` rows (`index.purge`). The daily maintenance sends `index.purge` for an archived Project until no index row remains.
+4. **Kept records**:
+
+| Kept | Reason |
+|---|---|
+| `projects` row (ID, organization, status, generation, timestamps), with name and slug scrubbed | Archive record. The slug is free to use again. |
+| One `app_deployments` row for the production app host | The host keeps answering `410`. The row has the host label and `removed` status only. |
+| `usage_counters` | The monthly Anthropic budget (ADR 0021) and the Sandbox, Browser, and build meters are global rows. A delete cannot free budget. |
+| R2 `events/` audit archive and K2 events | They are shared by all Projects. They expire by lifecycle rule (30 days dev, 365 days prod) and K2 retention (7 days). |
+| Organization, user, and membership rows; `notification_reads`; `processed_events` | They are not Project data. |
+| Project Sandbox container | It keeps no data after its 2-minute sleep. Waking it to destroy it would spend the Sandbox hour cap. |
+| Worker script of a release target (Acme Shop fixture on dev) | It is Terraform-owned. Cleanup deletes the `release_targets` row only. |
 
 ---
 
@@ -90,6 +110,6 @@ Active Projects collect temporary forks while Tasks run and Candidates verify. T
 | Artifacts Forks | `ws-*`, `cand-*` | 7 days post-run | 30 days post-run | `sweepForks` (D1 / Artifacts) |
 | Canonical Repos | `proj_*` | Until project archive | Until project archive | `cleanupProject` |
 | R2 Events Archive | `events/` | 30 days | 365 days | R2 bucket lifecycle rule |
-| R2 Evidence | `evidence/` | 30 days | Indefinite (`null`) | R2 bucket lifecycle rule |
+| R2 Evidence | `evidence/` | 30 days, or on project archive | Indefinite (`null`), or on project archive | R2 bucket lifecycle rule, `cleanupProject` |
 | R2 Temporary | `tmp/` | 7 days | 7 days | R2 bucket lifecycle rule |
-| R2 Source / Context | `source/`, `context/` | Deleted on project archive | Deleted on project archive | `cleanupProject` |
+| R2 Project objects | `source/`, `context/`, `apps/`, `app-previews/`, `evidence/`, `work-graphs/`, `workspace/` | Deleted on project archive | Deleted on project archive | `cleanupProject` |

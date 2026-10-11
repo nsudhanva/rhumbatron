@@ -33,3 +33,11 @@ export function shardKey(
   const index = fnv1a32(`${projectId}\u0000${resource}`) % shardCount;
   return `${projectId}:shard-${String(index).padStart(2, "0")}`;
 }
+
+/** Every shard key of one Project, `shard-00` to `shard-31`. Project cleanup purges each one. */
+export function allShardKeys(projectId: string, shardCount = DEFAULT_SHARD_COUNT): string[] {
+  return Array.from(
+    { length: shardCount },
+    (_, index) => `${projectId}:shard-${String(index).padStart(2, "0")}`,
+  );
+}

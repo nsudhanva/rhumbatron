@@ -42,7 +42,7 @@ Rules:
 - Provisioning stores a file index at `source/<project>/<tree>/index.json` in R2. Agents read that index instead of walking the repo.
 - The same step fills the code store (P16-16). `source/<project>/<tree>/code.json` maps paths to Git blob IDs. The step copies each blob once to `source/<project>/blobs/<blob>`. A promotion copies only the blobs that its previous tree did not have. The code store lists files over 1 MB but does not copy them.
 - The code view uses stored patches. An Agent publish stores the `git diff` of its own work at `source/<project>/patches/changesets/<cs>.patch` and sets `patchRef`. A Candidate composition stores the Candidate-vs-base diff at `source/<project>/patches/candidates/<cand>.patch`. Each patch stops at 512 KB, at a line boundary. R2 metadata records `truncated` and the full size.
-- All of these objects are under `source/<project>/`. No lifecycle rule expires them, and archive cleanup removes them.
+- All of these objects are under `source/<project>/`. No lifecycle rule expires them, and archive cleanup removes them. Archive cleanup also removes `context/`, `evidence/`, `work-graphs/`, `workspace/`, `apps/`, and `app-previews/` objects of the Project, the D1 content rows, and the Durable Object storage of its shards and agents (see `docs/operations/cleanup.md`).
 - A new Project starts at Canonical Generation 0. `AGENTS.md` shows `S1841` for the demo. The code starts at `S0`.
 
 ## Composition and promotion in Git terms

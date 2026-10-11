@@ -549,7 +549,7 @@ async function clearPrefix(bucket: R2Bucket, prefix: string) {
  * the app's hosts keep answering 410 (not 404), and it keeps the label. "Deploy app" revives it
  * (workers/api/src/apps.ts).
  */
-const isAppTombstone = (row: {
+export const isAppTombstone = (row: {
   channel?: string;
   status: string;
   commit_sha: string | null;

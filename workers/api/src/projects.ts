@@ -362,8 +362,14 @@ export const projects = new Hono<AppEnv>()
 
   /**
    * Archives a Project. Irreversible: the Project leaves the list, takes no new Changes,
-   * Candidates, or provisioning, its live view and canonical state are purged, and the integration
-   * Worker deletes its Artifacts repos and R2 source and context objects. Evidence and D1 rows stay.
+   * Candidates, or provisioning, and its live view and canonical state are purged here. The
+   * integration Worker then deletes everything the Project created (`project.cleanup`, see
+   * workers/integration/src/project-cleanup.ts): Artifacts repos, R2 source, context, evidence,
+   * work graph, workspace, and app objects, Durable Object storage (shards and agents), and the
+   * D1 content rows (requests, plans, Evidence summaries, members, invitations). The indexer
+   * deletes the index and vectors. Kept: the `projects` row with name and slug scrubbed, the app
+   * host tombstone that answers 410, the global spend meters (a delete never frees budget), and
+   * the shared R2 `events/` archive, which expires by lifecycle rule.
    * Idempotent: a repeat returns the same archive record and re-queues cleanup until it is done.
    */
   .delete("/v1/projects/:projectId", validate("param", ProjectIdParam), async (c) => {

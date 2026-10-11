@@ -70,6 +70,13 @@
         "class_name": "ProjectRootDO",
         "script_name": "rhumbatron-coordinator"
       },
+      // Project cleanup purges the live view and the Project's AgentDO instances (section 43).
+      {
+        "name": "PROJECT_VIEW",
+        "class_name": "ProjectViewDO",
+        "script_name": "rhumbatron-coordinator"
+      },
+      { "name": "AGENT", "class_name": "AgentDO", "script_name": "rhumbatron-agents" },
       // Candidate composition and checks run in the Project Sandbox (ADR 0012).
       { "name": "SANDBOX", "class_name": "Sandbox", "script_name": "rhumbatron-sandbox" }
     ]

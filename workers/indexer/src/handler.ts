@@ -355,7 +355,7 @@ export async function recordFailure(
     .run();
 }
 
-/** Deletes an archived Project's vectors and index objects. Safe to repeat. */
+/** Deletes an archived Project's vectors, index objects, and index rows. Safe to repeat. */
 export async function purgeIndex(
   deps: Pick<IndexerDeps, "db" | "bucket" | "memory" | "now">,
   projectId: string,
@@ -374,10 +374,10 @@ export async function purgeIndex(
   if (keys.length > 0) await deps.bucket.delete(keys);
   // The manifest goes last, so a failed purge still knows which vectors to delete.
   await deps.bucket.delete([manifestKey]);
+  // The rows go too (AGENTS.md section 43): an archived Project keeps no index record. Their
+  // absence also tells the daily maintenance that this purge is finished.
   await deps.db.batch([
-    deps.db
-      .prepare("UPDATE project_indexes SET status = 'purged' WHERE project_id = ?")
-      .bind(projectId),
+    deps.db.prepare("DELETE FROM project_indexes WHERE project_id = ?").bind(projectId),
     deps.db.prepare("DELETE FROM project_vectors WHERE project_id = ?").bind(projectId),
   ]);
   return { vectors: ids.length, objects: keys.length };

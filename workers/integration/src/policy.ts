@@ -18,7 +18,7 @@ const POLICY_CACHE_TTL_SECONDS = 300;
 /** Edge cache of a KV read. 60 seconds is KV's minimum. */
 const EDGE_CACHE_TTL_SECONDS = 60;
 
-const policyKey = (projectId: string) => `policy:v1:${projectId}`;
+export const policyKey = (projectId: string) => `policy:v1:${projectId}`;
 
 const Snapshot = z.object({ source: z.enum(["d1", "default"]), policy: ProjectPolicy });
 type Snapshot = z.infer<typeof Snapshot>;

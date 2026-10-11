@@ -388,6 +388,23 @@ export class ResourceShardDO extends DurableObject<Env> {
     return this.intents.listChallenges(resource);
   }
 
+  /**
+   * Deletes all storage and the alarm of one shard of an archived Project (AGENTS.md section 43).
+   * Claims, Intents, Challenges, and the outbox go. Unpublished events are dropped: the Project
+   * is gone, so nobody can read them. Throws when the shard holds a Claim of another Project. Safe to repeat. Empty tables
+   * keep later calls on this instance working until it is evicted.
+   */
+  async purge(projectId: string): Promise<{ purged: boolean }> {
+    const foreign = this.sql
+      .exec<{ n: number }>("SELECT COUNT(*) AS n FROM claims WHERE project_id != ?", projectId)
+      .one().n;
+    if (foreign > 0) throw new Error("ResourceShardDO belongs to a different project");
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    this.migrate();
+    return { purged: true };
+  }
+
   /** Expires overdue claims, prunes old finished rows, publishes the outbox, sets the next alarm. */
   override async alarm(): Promise<void> {
     await this.alarms.run(
