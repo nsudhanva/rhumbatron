@@ -427,10 +427,10 @@ const ProductGraph: Spec = {
   data: {
     projectId: "string",
     canonicalGeneration: "integer|null",
-    policyVersion: "string",
-    protectedResources: ["string"],
+    policyVersion: "string|null",
+    protectedResources: "array",
     source: { kind: "string" },
-    fixture: { applied: "boolean" },
+    wiringFiles: "array",
     changes: [{ id: "string", goal: "string", status: "string", createdAt: "string" }],
     nodes: "array",
     edges: "array",
@@ -1833,11 +1833,11 @@ async function run() {
       "invalid_request",
     );
     expectError(
-      "POST releases/inject-failure without a live app is 404",
+      "POST releases/inject-failure before any release is 404",
       await call("POST", `/v1/projects/${projectId}/releases/inject-failure`),
       404,
       "not_found",
-      (j) => same("reason", errorDetails(j)?.reason, "no_app"),
+      (j) => same("reason", errorDetails(j)?.reason, "no_release"),
     );
   }
 
