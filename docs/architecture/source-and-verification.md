@@ -311,7 +311,7 @@ flowchart TB
   REQ["POST /v1/candidates/:id/promote"] --> P0{"Sibling still<br/>verifying?"}
   P0 -->|"yes"| BLK
   P0 -->|"no"| P1{"Candidate verified<br/>and base = canonical?"}
-  P1 -->|"base behind"| STALE["mark stale"]
+  P1 -->|"base behind"| STALE["mark stale, then recompose<br/>or block the Change"]
   P1 -->|"not verified"| BLK["blocked: list every block"]
   P1 -->|"yes"| P2{"Plan present and<br/>every required check passes?"}
   P2 -->|"no"| BLK
@@ -324,7 +324,7 @@ flowchart TB
   CAS -->|"mismatch"| STALE
   CAS -->|"policy mismatch"| BLK
   CAS -->|"match"| ADV["One transaction:<br/>generation + 1, canonical.advanced"]
-  ADV --> SYNC["Fast-forward main,<br/>start release"]
+  ADV --> SYNC["Fast-forward main,<br/>start release,<br/>settle older-base Candidates"]
 ```
 
 Approval rules (`packages/evidence/src/promotion.ts`):

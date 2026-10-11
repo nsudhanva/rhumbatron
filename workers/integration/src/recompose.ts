@@ -292,6 +292,122 @@ export async function recomposeQuietly(env: Env, candidateId: string): Promise<R
 }
 
 /**
+ * Section 42.9 for one Candidate that cannot promote because canonical moved to
+ * `canonicalGeneration`: stale (unless already stale, promoted, or rejected), its Change out of
+ * `awaiting_approval`, then composed again on the new canonical state, or its Change blocked
+ * (`recomposeQuietly`). A Candidate that the event router already marked stale is still composed
+ * again here: the router sweep does not compose. Safe to repeat.
+ */
+export async function markCandidateStale(
+  env: Env,
+  candidateId: string,
+  canonicalGeneration: number,
+): Promise<RecomposeOutcome | null> {
+  const row = await env.DB.prepare(
+    `SELECT c.id, c.change_id, c.status, c.base_generation, ch.project_id, p.org_id, p.slug
+     FROM candidates c JOIN changes ch ON ch.id = c.change_id JOIN projects p ON p.id = ch.project_id
+     WHERE c.id = ?`,
+  )
+    .bind(candidateId)
+    .first<{
+      id: string;
+      change_id: string;
+      status: string;
+      base_generation: number;
+      project_id: string;
+      org_id: string;
+      slug: string;
+    }>();
+  if (!row || ["promoted", "rejected"].includes(row.status)) return null;
+  const now = new Date().toISOString();
+  if (row.status !== "stale") {
+    const reason = `Canonical advanced to S${canonicalGeneration} before promotion from S${row.base_generation}.`;
+    const updated = await env.DB.prepare(
+      `UPDATE candidates SET status = 'stale', status_reason = ?, updated_at = ?
+       WHERE id = ? AND status NOT IN ('stale', 'promoted', 'rejected')`,
+    )
+      .bind(reason, now, row.id)
+      .run();
+    if ((updated.meta.changes ?? 0) > 0) {
+      const ctx: ChangeContext = {
+        projectId: row.project_id,
+        orgId: row.org_id,
+        projectSlug: row.slug,
+        changeId: row.change_id,
+        baseGeneration: row.base_generation,
+      };
+      await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+        await changeEvent(
+          ctx,
+          "candidate.stale",
+          { candidateId: row.id, status: "stale", reason, canonicalGeneration },
+          { key: row.id, actor: ACTOR },
+        ),
+      ]);
+    }
+  }
+  // A Change that waited for a person on this Candidate has no decision pending now.
+  await env.DB.prepare(
+    `UPDATE changes SET status = 'verifying', updated_at = ?
+     WHERE id = ? AND status = 'awaiting_approval'
+       AND NOT EXISTS (SELECT 1 FROM candidates WHERE change_id = ? AND status = 'verified')`,
+  )
+    .bind(now, row.change_id, row.change_id)
+    .run();
+  return recomposeQuietly(env, candidateId);
+}
+
+/** Candidates per stale sweep (bounded work per call). */
+const STALE_SWEEP_LIMIT = 10;
+
+/**
+ * After canonical advanced to `generation` (a promotion, or the event router's
+ * `candidates.recompose` command on `canonical.advanced`): every Candidate of an open Change of the
+ * Project on an older base that no running verification will pick up ends in a new Candidate, a
+ * blocked Change, or nothing (its Change closed). Two kinds:
+ * - `verified`: its verification run already ended (approval or acceptance hold, sibling
+ *   selection, or a blocked promotion). Marked stale here.
+ * - `stale` with nothing else in its Change (no active or promoted Candidate, none on a newer
+ *   base): the event router's sweep marked it stale and does not compose.
+ * Independent of the order against the router sweep. Idempotent per composition key. Never fails
+ * the caller. Returns the Candidates it settled.
+ */
+export async function settleStaleBehind(
+  env: Env,
+  projectId: string,
+  generation: number,
+): Promise<string[]> {
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT c.id FROM candidates c JOIN changes ch ON ch.id = c.change_id
+       WHERE ch.project_id = ? AND c.base_generation < ?
+         AND ch.status IN ('verifying', 'awaiting_approval')
+         AND (c.status = 'verified'
+           OR (c.status = 'stale'
+             AND NOT EXISTS (SELECT 1 FROM candidates n WHERE n.change_id = c.change_id
+               AND (n.base_generation > c.base_generation
+                 OR n.status IN ('composing', 'composed', 'verifying', 'verified', 'promoted')))))
+       ORDER BY c.updated_at LIMIT ?`,
+    )
+      .bind(projectId, generation, STALE_SWEEP_LIMIT)
+      .all<{ id: string }>();
+    const ids = (results ?? []).map((r) => r.id);
+    for (const id of ids) await markCandidateStale(env, id, generation);
+    return ids;
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "candidate.stale_sweep_failed",
+        projectId,
+        generation,
+        message: String(error).slice(0, 200),
+      }),
+    );
+    return [];
+  }
+}
+
+/**
  * Owner recovery (the budget API) for a Change left with only a stale Candidate: compose its
  * newest stale Candidate again on the current canonical state. Only a `verifying` Change, or one
  * this module blocked, and only when no Candidate of the Change is active or promoted. Bounded

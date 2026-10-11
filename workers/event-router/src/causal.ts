@@ -185,6 +185,28 @@ export function composeCommand(
   };
 }
 
+/**
+ * AGENTS.md section 42.9. The `canonical.advanced` sweep below marks older-base Candidates stale
+ * but does not compose. This command asks the integration Worker to settle each one: composed again
+ * on the new canonical state, its Change blocked, or nothing for a closed Change. The command ID
+ * derives from the event; the integration side is idempotent per composition key.
+ */
+export function recomposeCommand(
+  event: EventEnvelope,
+): CommandEnvelope<{ generation: number }> | null {
+  if (event.eventType !== "canonical.advanced") return null;
+  const generation = (event.payload as { toGeneration?: unknown } | null)?.toGeneration;
+  if (typeof generation !== "number") return null;
+  return {
+    commandId: `cmd_${event.eventId.slice(4)}_recompose`,
+    commandType: "candidates.recompose",
+    projectId: event.projectId,
+    attempt: 0,
+    createdAt: new Date().toISOString(),
+    payload: { generation },
+  };
+}
+
 /** Asks Clef-flash whether an ambiguous overlap matters. Abstain or cap reached: wake (safe side). */
 async function decideAmbiguous(
   model: DecisionModel,
@@ -229,7 +251,8 @@ async function decideAmbiguous(
  * of the Project on an older base can never promote: mark it stale, so nobody verifies or approves
  * it further. The promoted Candidate itself is marked promoted, which repairs the D1 mirror if the
  * integration Worker stopped between the compare-and-swap and its own write. A Change left in
- * `awaiting_approval` with no verified Candidate returns to `verifying`. One D1 batch.
+ * `awaiting_approval` with no verified Candidate returns to `verifying`. One D1 batch. This sweep
+ * does not compose: `recomposeCommand` asks the integration Worker to settle each stale Candidate.
  */
 async function settleCandidates(env: Env, events: EventEnvelope[]): Promise<number> {
   const now = new Date().toISOString();
@@ -401,6 +424,16 @@ export async function routeCausalBatch(
     await env.INDEXING.sendBatch(indexing.map((body) => ({ body, contentType: "json" })));
   }
   const staled = await settleCandidates(env, relevant);
+  // After the sweep, so the integration Worker also sees the Candidates it just marked stale. Sent
+  // on every delivery: a redelivered batch finds nothing new to mark, but still settles them.
+  const recomposes = relevant
+    .map(recomposeCommand)
+    .filter((c): c is CommandEnvelope<{ generation: number }> => c !== null);
+  if (recomposes.length > 0) {
+    await env.INTEGRATION_COMMANDS.sendBatch(
+      recomposes.map((body) => ({ body, contentType: "json" })),
+    );
+  }
   return {
     woke: wakeCommands.length,
     dispatched: integrationCommands.length - composes.filter(withinBudget).length,

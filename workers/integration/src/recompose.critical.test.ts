@@ -11,6 +11,7 @@ import {
   recoverStaleCandidates,
   STALE_BLOCKED_REASON,
   STALE_BOUND_REASON,
+  settleStaleBehind,
 } from "./recompose.ts";
 
 const T = "2026-10-10T21:07:38.176Z";
@@ -251,6 +252,78 @@ describe("stale Candidate of a verifying Change (prod chg_2ed2e016)", () => {
     try {
       h.db.prepare("UPDATE changes SET status = 'blocked', blocked_reason = 'Other stop'").run();
       expect(await recoverStaleCandidates(h.env, CHANGE)).toBeNull();
+      expect(h.candidates()).toHaveLength(1);
+    } finally {
+      h.db.close();
+    }
+  });
+});
+
+// Prod chg_5154e643: its only Candidate was verified and held for acceptance (`awaiting_approval`).
+// A parallel Change promoted; the event router's `canonical.advanced` sweep marked the held
+// Candidate stale and returned the Change to `verifying` before the promotion's own sweep ran, and
+// that sweep read only `verified` Candidates. Nothing composed it again or blocked the Change.
+describe("stale sweep after canonical.advanced (prod chg_5154e643)", () => {
+  it("composes a Candidate the router sweep already marked stale", async () => {
+    const h = harness();
+    try {
+      expect(await settleStaleBehind(h.env, PROJECT, 4)).toEqual([STALE]);
+      const [old, next] = h.candidates();
+      expect(old).toMatchObject({ id: STALE, status: "stale" });
+      expect(next).toMatchObject({
+        status: "composing",
+        base_generation: 4,
+        recompose_count: 1,
+        recomposed_from: STALE,
+      });
+      expect(h.commands.map((c) => c.payload.candidateId)).toEqual([next?.id]);
+      expect(h.change()).toMatchObject({ status: "verifying", blocked_reason: null });
+      // The promotion sweep and the router command both run: the second finds nothing to settle.
+      expect(await settleStaleBehind(h.env, PROJECT, 4)).toEqual([]);
+      expect(h.candidates()).toHaveLength(2);
+    } finally {
+      h.db.close();
+    }
+  });
+
+  it("marks a held verified Candidate stale and composes it when it runs first", async () => {
+    const h = harness();
+    try {
+      h.db.exec(`UPDATE candidates SET status = 'verified', status_reason = 'Held for acceptance';
+        UPDATE changes SET status = 'awaiting_approval';`);
+      expect(await settleStaleBehind(h.env, PROJECT, 4)).toEqual([STALE]);
+      expect(h.candidates()[0]).toMatchObject({
+        status: "stale",
+        status_reason: expect.stringContaining("Recomposed as"),
+      });
+      expect(h.candidates()[1]).toMatchObject({ status: "composing", base_generation: 4 });
+      expect(h.change()).toMatchObject({ status: "verifying" });
+      expect(h.events.map((e) => e.eventType)).toEqual(["candidate.stale", "candidate.forked"]);
+    } finally {
+      h.db.close();
+    }
+  });
+
+  it("blocks the Change visibly when the stale Candidate cannot be composed again", async () => {
+    const h = harness();
+    try {
+      h.db.prepare("UPDATE candidates SET recompose_count = 2").run();
+      expect(await settleStaleBehind(h.env, PROJECT, 4)).toEqual([STALE]);
+      expect(h.change()).toMatchObject({ status: "blocked", blocked_reason: STALE_BOUND_REASON });
+    } finally {
+      h.db.close();
+    }
+  });
+
+  it("leaves closed Changes and Changes with an active Candidate alone", async () => {
+    const h = harness();
+    try {
+      h.db.exec(`INSERT INTO candidates (id, change_id, base_generation, status, change_set_ids_json, created_at, updated_at)
+        VALUES ('cand_other', '${CHANGE}', 2, 'verifying', '["cs_1"]', '${T}', '${T}')`);
+      expect(await settleStaleBehind(h.env, PROJECT, 4)).toEqual([]);
+      h.db.exec(`DELETE FROM candidates WHERE id = 'cand_other';
+        UPDATE changes SET status = 'cancelled';`);
+      expect(await settleStaleBehind(h.env, PROJECT, 4)).toEqual([]);
       expect(h.candidates()).toHaveLength(1);
     } finally {
       h.db.close();

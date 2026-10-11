@@ -118,7 +118,7 @@ flowchart TB
   INF -->|"no"| TYPE{"Event type"}
   TYPE -->|"task.completed"| READY["Newly ready Tasks:<br/>change.dispatch"]
   TYPE -->|"verification.started<br/>(work_graph_completed)"| COMP["candidate.create"]
-  TYPE -->|"canonical.advanced"| CA["Wake active agents,<br/>mark old Candidates stale,<br/>index.build"]
+  TYPE -->|"canonical.advanced"| CA["Wake active agents,<br/>mark old Candidates stale,<br/>candidates.recompose,<br/>index.build"]
   TYPE -->|"intent, challenge,<br/>changeset, claim events"| OV{"Resource overlap<br/>with an active agent"}
   OV -->|"exact"| WAKE["agent.wake"]
   OV -->|"prefix only"| CLEF{"Clef-flash<br/>(200 calls per day)"}
@@ -162,7 +162,7 @@ flowchart LR
   INT -->|"agent.wake"| WQ
   ER -->|"agent.wake"| WQ
   API -->|"dead-letter retry"| WQ
-  ER -->|"change.dispatch, candidate.create,<br/>forks.sweep, project.cleanup"| IQ
+  ER -->|"change.dispatch, candidate.create,<br/>candidates.recompose,<br/>forks.sweep, project.cleanup"| IQ
   API -->|"project.provision, project.cleanup,<br/>fixture.publish, dead-letter retry"| IQ
   ER -->|"index.build, index.purge"| XQ
   INT -->|"verification.start, release.start"| VQ

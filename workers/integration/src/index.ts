@@ -31,6 +31,7 @@ import { cleanupProject, FORK_RETENTION_DAYS, sweepForks } from "./project-clean
 import { decideApproval, promoteCandidate } from "./promotion.ts";
 import { provisionProject } from "./provision.ts";
 import { recoverSourceConflicts } from "./rebase.ts";
+import { settleStaleBehind } from "./recompose.ts";
 import { injectReleaseFailure, recoverStuckRelease } from "./release.ts";
 import { requestRollback } from "./rollback.ts";
 import { type SourceSeed, seedOf, seedSourceIfUnassigned } from "./source-seed.ts";
@@ -49,6 +50,7 @@ type ChangeRow = {
 };
 
 const CandidateVerifyPayload = z.object({ candidateId: z.string().regex(/^cand_[a-z0-9]+$/) });
+const CandidatesRecomposePayload = z.object({ generation: z.number().int().positive() });
 
 /**
  * Queue deliveries per message (consumer `max_retries` = 3, plus the first). A bounded command
@@ -150,9 +152,13 @@ async function handleCommand(
     return;
   }
   if (
-    ["project.provision", "app.provision", "candidate.verify", "candidate.create"].includes(
-      command.data.commandType,
-    ) &&
+    [
+      "project.provision",
+      "app.provision",
+      "candidate.verify",
+      "candidate.create",
+      "candidates.recompose",
+    ].includes(command.data.commandType) &&
     (await isArchived(env, command.data.projectId))
   ) {
     return;
@@ -178,6 +184,22 @@ async function handleCommand(
     // Older API deployments queued this after creating the Candidate; createCandidate now starts it.
     const parsed = CandidateVerifyPayload.safeParse(command.data.payload);
     if (parsed.success) await startCandidateVerification(env, parsed.data.candidateId);
+    return;
+  }
+  // Section 42.9: the event router marked older-base Candidates stale after `canonical.advanced`
+  // and does not compose. Each one ends recomposed, its Change blocked, or its Change closed.
+  if (command.data.commandType === "candidates.recompose") {
+    const parsed = CandidatesRecomposePayload.safeParse(command.data.payload);
+    if (!parsed.success) return;
+    const settled = await settleStaleBehind(env, command.data.projectId, parsed.data.generation);
+    console.warn(
+      JSON.stringify({
+        event: "candidates.recompose",
+        projectId: command.data.projectId,
+        generation: parsed.data.generation,
+        settled,
+      }),
+    );
     return;
   }
   // Section 21.1 step 7: the Work Graph completed; compose its Candidates (Causal Router).

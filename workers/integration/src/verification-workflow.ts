@@ -82,8 +82,8 @@ import { storeTreeCode, walkTree } from "./code-store.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
 import { runPreviewSmoke } from "./preview-smoke.ts";
-import { markCandidateStale, promoteCandidate } from "./promotion.ts";
-import { recomposeQuietly } from "./recompose.ts";
+import { promoteCandidate } from "./promotion.ts";
+import { markCandidateStale, recomposeQuietly } from "./recompose.ts";
 import {
   type CheckRunner,
   evaluateAppCheckOutcome,
