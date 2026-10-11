@@ -133,13 +133,12 @@ scripts/                 Bundle, checks, smoke, cleanup, cost report
 | `bun run tf:drift` / `tf:drift:prod` | Post-apply plan that must show zero changes (`global` and `prod`). |
 | `bun run smoke:prod` | Remote smoke check. Public checks always run; the signed-in flow runs when `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` are set. |
 | `bun run smoke:models` | Anthropic through AI Gateway: workspace header, one tool call per tier, one prompt cache hit (under 1 cent). |
-| `bun run smoke:release` | Read-only check of the latest release of the Acme Shop release target. |
 | `bun run cleanup:projects` | Archive smoke-test Projects on prod (`--dry-run` lists them only). Needs `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` for the prod Clerk instance. |
 | `bun run cost:report` | Read-only report of usage, caps, and leftover resources (`--alerts-only`). |
 
 ## Deployment
 
-Terraform is the only way to change Cloudflare control-plane configuration. Never run `wrangler deploy`, make manual dashboard edits, or issue direct REST writes (ADR 0018 documents the one exception).
+Terraform is the only way to change Cloudflare control-plane configuration. Never run `wrangler deploy`, make manual dashboard edits, or issue direct REST writes.
 
 Deployment sequence:
 
@@ -160,7 +159,7 @@ Cost controls ([docs/operations/costs.md](docs/operations/costs.md)):
 - Claude (Anthropic): code stops model work at 100 USD per calendar month in prod (ADR 0021).
 - Account budget alerts at 10, 25, and 100 USD (ADR 0019, `envs/global`).
 - Pause switch: `locals.paused` in `infrastructure/terraform/envs/prod/main.tf` ([pause-resume.md](docs/operations/pause-resume.md)).
-- Live apps on Dynamic Workers release every Project (ADR 0020). A Project with a release target releases through Workers Builds ([release.md](docs/operations/release.md)).
+- Live apps on Dynamic Workers release every Project (ADR 0020, [release.md](docs/operations/release.md)).
 
 ## CI
 

@@ -8,8 +8,8 @@ Every Project is a live application:
   identity (a demo user picker).
 - User apps never need Terraform. Terraform creates only the one-time foundation.
 
-Workers Builds per Project cannot work (Artifacts connections need a dashboard step, and one build
-runs at a time; ADR 0018). Workers for Platforms adds a $25 base fee. Dynamic Workers are in the frozen
+A per-Project Cloudflare build connection cannot work (Artifacts connections need a dashboard
+step, and one build runs at a time). Workers for Platforms adds a $25 base fee. Dynamic Workers are in the frozen
 stack (AGENTS.md section 5.3) and included in Workers Paid: 1,000 unique Dynamic Workers created
 per month, 10 M requests and 30 M CPU-ms shared with Workers.
 
@@ -115,17 +115,16 @@ These are runtime data. No Terraform runs at release time.
   oldest preview of a stale, rejected, or promoted Candidate makes room, and a preview of a
   Candidate that can still ship is never evicted. A failed preview build marks only the row.
   `GET /v1/candidates/:id/preview` feeds "Open preview" on the Candidate page.
-- **Release.** For a Project with an app, promotion starts the release as before, and
-  ReleaseWorkflow takes the app path: the bundle of the promoted commit (stored; another commit
+- **Release.** For a Project with an app, promotion starts the release (see ReleaseWorkflow
+  below): the bundle of the promoted commit (stored; another commit
   with the same tree; the preview bundle copied from `app-previews/`, which expires after 7 days;
   else a build), then the production pointer moves by compare-and-swap on the row it read, then
   the `release-model.ts` smoke probes run through the router (`AppBuilder.probe`, fresh pointer
   read, no public route needed). The probes are generic: `/` must answer 2xx or 3xx and not a
   router status page ("Nothing built yet", "Building"), plus up to 3 static GET routes (no path
   params) from the app's own route table in the released Candidate's contract Evidence, the
-  routes the Change added first. Without a route table only `/` is probed. A Project on the
-  Workers Builds path (ADR 0018) keeps its `/api/products` JSON probe. A late release never moves
-  the pointer back to an older generation. Projects with an app do not use Workers Builds.
+  routes the Change added first. Without a route table only `/` is probed. A late release never moves
+  the pointer back to an older generation.
 - **Smoke failure.** The pointer moves back to the version it replaced, as a new
   recorded transition (`deployment.completed` with status `restored`), and the release is
   `smoke_failed`. Canonical keeps the promoted generation (AGENTS.md section 42.10).
@@ -146,6 +145,63 @@ These are runtime data. No Terraform runs at release time.
   2 times per lineage, then it is marked blocked. Recompositions do not count against the
   Candidate limit. Triggers: verification finds the base behind, canonical moved during the
   checks, a refused compare-and-swap, or the sweep after each promotion.
+
+### ReleaseWorkflow (integration Worker)
+Section 21.3 and 37 of AGENTS.md define the release path: promotion moves canonical `main`, a
+build and deploy follow, a smoke check runs, and release Evidence is recorded. Only a Project
+with a live app releases. A Project without one ends its Change at promotion.
+
+- **Trigger.** Promotion fast-forwards canonical `main` (ADR 0013). After the push lands,
+  promotion starts `ReleaseWorkflow` with instance ID `rel_<project>_<generation>` (one release per
+  generation, section 60). A promotion retry starts nothing new. Starting a release marks any older
+  `queued` or `building` release of the Project `superseded`.
+- **Steps.**
+  1. Confirm that the generation is still canonical (ProjectRootDO). If not, the release is
+     `superseded`. Else emit `build.started`.
+  2. Get the bundle of the promoted commit and emit `build.completed`. A failed build makes the
+     release `failed`, with `deployment.failed`.
+  3. Move the production pointer by compare-and-swap and emit `deployment.completed`. A pointer that
+     does not move makes the release `failed`; a newer live generation makes it `superseded`.
+  4. Smoke check through the router. The check retries once after 10 s.
+  5. Evidence goes to R2 and `evidence_index`, check ID `release-s<generation>`. The API keeps
+     `release-*` rows out of Candidate verification views. They never feed a promotion gate.
+  6. If the smoke check passes, the release is `deployed`. Else the pointer moves back (see Smoke
+     failure above) and the release is `smoke_failed`, with `release.smoke_failed`. A probe without
+     a response is a gap, never a pass (section 34.4.1).
+- **Statuses.** `queued -> building -> deployed | failed | smoke_failed`, and `queued | building ->
+  superseded`. Final states do not change, except that failure injection may move `deployed` to
+  `smoke_failed`. About 8 Workflow steps per release.
+- **Failure semantics (section 42.10).** A failed release never moves the Canonical Generation back
+  and never deletes history. Recovery is a new canonical transition: a new Change and promotion (a
+  fix, or a rollback). No "re-release the same generation" path exists. A Change still `releasing`
+  45 minutes after promotion is stuck and the event router's sweep ends it.
+- **Failure injection.** `POST /v1/projects/:projectId/releases/inject-failure` (`FIXTURES_ENABLED`
+  guard) probes the live app through the router with the normal probes plus a route that does not
+  exist. Its real 404 fails the smoke check through the same path, marked `injected: true`.
+
+```mermaid
+sequenceDiagram
+  participant I as Integration (promotion)
+  participant W as ReleaseWorkflow
+  participant P as ProjectRootDO
+  participant B as AppBuilder (apps Worker)
+  participant D as D1 app_deployments
+  I->>W: create rel_project_generation
+  W->>P: generation still canonical?
+  alt no
+    W->>W: superseded
+  else yes
+    W->>B: bundle of the promoted commit
+    W->>D: move production pointer (compare-and-swap)
+    W->>B: smoke probes through the router
+    alt probes pass
+      W->>W: deployed, Evidence release-sN to R2 and D1
+    else probe fails
+      W->>D: move the pointer back to the replaced version
+      W->>W: smoke_failed
+    end
+  end
+```
 
 ### Removal, cost, and retention
 - **Remove app.** `DELETE /v1/projects/:id/app` marks every row `removed` (410 on every

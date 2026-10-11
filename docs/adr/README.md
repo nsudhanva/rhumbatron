@@ -18,7 +18,6 @@ Architecture Decision Records (ADRs) state each decision, its reason, and its co
 | [0013](./0013-promotion-preconditions.md) | Promotion preconditions split between the integration Worker and ProjectRootDO |
 | [0015](./0015-advisory-claims.md) | Advisory Claims for agent runs |
 | [0017](./0017-prod-environment.md) | Prod environment |
-| [0018](./0018-release-via-workers-builds.md) | Release paths and the Workers Builds path |
 | [0019](./0019-runaway-billing-guards.md) | Runaway-billing guards |
 | [0020](./0020-live-apps-dynamic-workers.md) | Live apps on Dynamic Workers |
 | [0021](./0021-anthropic-model-provider.md) | Anthropic as the model provider |

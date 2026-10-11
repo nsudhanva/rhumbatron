@@ -186,7 +186,7 @@ flowchart LR
 | `verification` | `rhumbatron-integration` | 5 | 3 | 30 s | `dead-letter` |
 | `release` | `rhumbatron-integration` | 5 | 3 | 30 s | `dead-letter` |
 
-Two commands start Workflows: `verification.start` (one per Candidate) and `release.start` (one per promoted generation with a release target).
+Two commands start Workflows: `verification.start` (one per Candidate) and `release.start` (one per promoted generation with a live app).
 Each command carries a stable `commandId` and the idempotency key (Candidate ID or release ID).
 The consumer starts the existing Workflow with that key as the instance ID, so a redelivery finds the running instance.
 The producer starts the Workflow directly only if the send fails (`workers/integration/src/workflow-commands.ts`).

@@ -93,7 +93,7 @@ A preview that is missing or failed is a gap, and the Candidate cannot promote.
 ## Promotion and release
 
 The promotion runs as in [Source and verification](source-and-verification.md#promotion-preconditions).
-Then `ReleaseWorkflow` takes the app path, with about 8 steps and no Workers Builds and no Sandbox:
+Then `ReleaseWorkflow` starts for the Project, with about 8 steps and no Sandbox. A Project without a live app starts no release:
 
 ```mermaid
 sequenceDiagram
@@ -138,9 +138,3 @@ Cleanup then deletes the previews and bundles and wipes the data stores. The pro
 
 Deleting a Project removes all of its data: the live app, the Artifacts repositories, the R2 objects, the D1 rows, and the Durable Object storage.
 The list is in [cleanup.md](../operations/cleanup.md).
-
-## Release target
-
-A promotion starts a release when the Project has a live app or a `release_targets` row.
-A live app uses the path on this page.
-A `release_targets` row sends the promotion through Workers Builds, and `ReleaseWorkflow` observes the build, the deployment, and the smoke check.

@@ -52,8 +52,8 @@ flowchart LR
   AI["modules/ai<br/>AI Gateway"]
   WK["modules/worker<br/>api, web, event-router,<br/>integration, indexer"]
   DW["modules/durable-worker<br/>coordinator, agents"]
-  DIRECT["Direct resources:<br/>3 cloudflare_workflow,<br/>6 cloudflare_queue_consumer,<br/>cloudflare_worker acme_shop"]
-  PH["modules/code-storage,<br/>modules/observability<br/>(no resources)"]
+  DIRECT["Direct resources:<br/>3 cloudflare_workflow,<br/>6 cloudflare_queue_consumer"]
+  PH["modules/observability<br/>(no resources)"]
   GLOB --> DNS
   GLOB --> SEC
   ENV --> DNS

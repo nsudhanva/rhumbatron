@@ -100,7 +100,6 @@ flowchart LR
 | Bun test and project checks | Build, test, contract, security, performance, and invariant checks inside the Sandbox | `workers/integration` |
 | `@rhumbatron/evidence` | Coverage states and citation validation | `packages/evidence` |
 | Dynamic Workers (Worker Loader, `@cloudflare/worker-bundler` 0.2.6) | Run the generated app of a Project at `<slug>.rhumbatron.com` (ADR 0020) | `workers/apps` |
-| Workers Builds | Release of the Acme Shop release target Worker (ADR 0018) | `workers/integration/src/release.ts` |
 
 ## Storage
 
@@ -183,7 +182,7 @@ The caps are 400 agent model calls per day and a monthly Anthropic budget of 100
 | Model providers: Anthropic or OpenAI | Anthropic only |
 | Seven deployables | Nine Workers: the seven, plus `rhumbatron-sandbox` (ADR 0012) and `rhumbatron-apps` (ADR 0020). The docs site is a tenth, assets-only Worker |
 | First-party Terraform resources for new products | `terraform_data` adapters for K2, Vectorize, the Sandbox Worker, and the apps Worker |
-| Workers Builds releases every Project | Dynamic Workers release every Project (ADR 0020). Workers Builds releases only a Project with a `release_targets` row (ADR 0018) |
+| A Cloudflare build service builds and deploys the canonical Artifact | The apps builder bundles it and the live app pointer moves (ADR 0020) |
 | New Projects start from a template | Every Project starts from an empty repository (ADR 0022) |
 | Clerk for authentication | Clerk. Prod uses a production instance |
 | Component library and charts: kumo and Recharts | kumo. No chart library |

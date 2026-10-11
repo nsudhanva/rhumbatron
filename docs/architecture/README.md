@@ -82,7 +82,7 @@ Differences from `AGENTS.md`:
 
 ## Deployables map
 
-There are nine Rhumbatron Workers plus one release target Worker for the Acme Shop demo.
+There are nine Rhumbatron Workers.
 `rhumbatron-apps` runs live apps (ADR 0020). The docs site is a tenth, assets-only Worker.
 Each Worker is named `rhumbatron-<component>-<env>`, where `<env>` is `prod`.
 
@@ -100,8 +100,6 @@ flowchart LR
   AG["rhumbatron-agents"]
   IDX["rhumbatron-indexer"]
   SBX["rhumbatron-sandbox"]
-  SHOP["rhumbatron-acme-shop"]
-  BUILDS["Workers Builds"]
 
   WEB -->|"API service"| API
   API -->|"PROJECT_ROOT, PROJECT_VIEW"| COORD
@@ -116,8 +114,6 @@ flowchart LR
   INT -.->|"agent-wakeups"| AG
   AG -->|"SANDBOX"| SBX
   INT -->|"SANDBOX"| SBX
-  INT -->|"push canonical main"| BUILDS
-  BUILDS -->|"deploy"| SHOP
 ```
 
 The second diagram shows which Worker hosts each Durable Object class and each Workflow class.
@@ -153,17 +149,16 @@ flowchart TB
 | `rhumbatron-api` | Hono product API | `DB`, `EVIDENCE`, `PROJECT_ROOT`, `PROJECT_VIEW`, `AGENTS`, `INTEGRATION`, `INTEGRATION_COMMANDS`, `AGENT_WAKEUPS`, `CHANGE_WORKFLOW` | Custom domain: `api.rhumbatron.com` |
 | `rhumbatron-coordinator` | ProjectRootDO, ResourceShardDO, ProjectViewDO | Own DO classes, `EVENT_ROUTER` (service), K2 producers `EVENTS_00` to `EVENTS_07` | DO alarms only |
 | `rhumbatron-event-router` | K2 pull consumer, causal router, dead-letter consumer | `DB`, `EVIDENCE`, `PROJECT_VIEW`, `RESOURCE_SHARD`, `AGENT_WAKEUPS`, `INTEGRATION_COMMANDS`, `INDEXING`, `AI`, `K2_STREAM_IDS`, `K2_CONSUMER_TOKEN` | Cron `* * * * *`, `nudge` RPC, `rhumbatron-dead-letter` Queue |
-| `rhumbatron-integration` | ChangeWorkflow, CandidateVerificationWorkflow, ReleaseWorkflow, approval and promotion RPC | `DB`, `EVIDENCE`, `AGENT_WAKEUPS`, `RESOURCE_SHARD`, `PROJECT_ROOT`, `SANDBOX`, `CANDIDATE_WORKFLOW`, `RELEASE_WORKFLOW`, `ARTIFACTS`, `BROWSER`, AI Gateway variables, `BUILDS_API_TOKEN` | `rhumbatron-integration` Queue, RPC |
+| `rhumbatron-integration` | ChangeWorkflow, CandidateVerificationWorkflow, ReleaseWorkflow, approval and promotion RPC | `DB`, `EVIDENCE`, `AGENT_WAKEUPS`, `RESOURCE_SHARD`, `PROJECT_ROOT`, `SANDBOX`, `CANDIDATE_WORKFLOW`, `RELEASE_WORKFLOW`, `ARTIFACTS`, `BROWSER`, AI Gateway variables | `rhumbatron-integration` Queue, RPC |
 | `rhumbatron-agents` | AgentDO (Agents SDK `Agent` with Pi harness) | `DB`, `AGENT`, `SANDBOX`, `PROJECT_ROOT`, `RESOURCE_SHARD`, `ARTIFACTS`, `EVIDENCE`, `METRICS`, `AI`, `MEMORY`, AI Gateway variables | `rhumbatron-agent-wakeups` Queue, `sandboxSmoke` RPC |
 | `rhumbatron-indexer` | Symbol, dependency, Product Graph, and vector indexes | `DB`, `EVIDENCE`, `PROJECT_ROOT`, `ARTIFACTS`, `MEMORY`, `AI`, `METRICS` | `rhumbatron-indexing` Queue only |
 | `rhumbatron-sandbox` | `Sandbox` container class from `@cloudflare/sandbox` | Image `docker.io/cloudflare/sandbox:0.12.6`, instance type `basic`, `max_instances` 1 | Cross-script DO binding only |
 | `rhumbatron-apps` | Live apps of Projects on Dynamic Workers (prod only, ADR 0020) | `LOADER` (Worker Loader), `DB`, `EVIDENCE`, `APP_DATA` (DO) | Wildcard route `<slug>.rhumbatron.com` |
-| `rhumbatron-acme-shop` | Release target for the Acme Shop demo | None in Terraform. Workers Builds owns its versions | `workers.dev` URL |
 
 Notes:
 
 - `AGENTS.md` section 12 lists seven deployables. The code adds `rhumbatron-sandbox`, because the provider cannot attach a container to a DO class in another Worker (ADR 0012), and `rhumbatron-apps` (ADR 0020).
-- The release Worker is in Terraform (`cloudflare_worker.acme_shop`). Workers Builds deploys it after a promotion. A Project with a live app releases through the apps Worker (ADR 0020).
+- A Project with a live app releases through the apps Worker (ADR 0020).
 
 ## Reading order
 

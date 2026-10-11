@@ -139,17 +139,17 @@ sequenceDiagram
   INT->>Root: promote(): compare-and-swap
   Root->>Root: generation + 1 and canonical.advanced in one transaction
   INT->>Art: fast-forward canonical main to the composed commit
-  INT->>RW: startRelease (Projects with a release target only)
-  RW->>RW: move the live app pointer, or poll Workers Builds, then smoke check
+  INT->>RW: startRelease (Projects with a live app only)
+  RW->>RW: move the live app pointer, then smoke check
 ```
 
 Notes:
 
 - Promotion is a human action in the UI, except under policy `autoPromoteRiskTiers`. Auto-promotion applies when the verified Candidate needs no human approval and `autoPromoteRiskTiers` lists the Change risk tier (`low` in `policy-1`). Then the CandidateVerificationWorkflow calls the same `promoteCandidate` path with actor `system:auto-promotion`. `canonical.promotion.requested` then records `trigger: "auto"`. All section 36 preconditions still apply. A Candidate that needs approval never promotes automatically (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
-- A Project has a release target when it has a live app or a `release_targets` row. See [Live apps](live-apps.md).
-- The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a release target, else `completed`. The release then ends the Change as `completed` (deployed or superseded) or `failed`.
+- Only a Project with a live app releases. See [Live apps](live-apps.md).
+- The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a live app, else `completed`. The release then ends the Change as `completed` (deployed or superseded) or `failed`.
 - Every end after promotion records `change.completed` or `change.failed`. `build.started` records `releasing`. These Events move ProjectViewDO out of `promoting` (section 13.3).
-- A Change still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change. The integration Worker then marks a queued or building release `failed`. It records a release that never started as a `failed` release row. Then it fails the Change. If the Project has no release target, the Worker completes the Change instead. The reason is on the release row and in the Event. The generation stays promoted. The next promotion releases as usual.
+- A Change still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change. The integration Worker then marks a queued or building release `failed`. It records a release that never started as a `failed` release row. Then it fails the Change. If the Project has no live app, the Worker completes the Change instead. The reason is on the release row and in the Event. The generation stays promoted. The next promotion releases as usual.
 - After `canonical.advanced`, the causal router marks every other in-flight Candidate on an older base `stale`.
 
 ## Status state machines
@@ -177,8 +177,8 @@ stateDiagram-v2
   verifying --> promoting: promotion requested
   awaiting_approval --> promoting: promotion requested
   promoting --> verifying: compare-and-swap refused
-  promoting --> releasing: advanced, release target exists
-  promoting --> completed: advanced, no release target
+  promoting --> releasing: advanced, live app exists
+  promoting --> completed: advanced, no live app
   releasing --> completed: deployed or superseded
   releasing --> failed: release failed or stuck
   created --> cancelled: person cancels
@@ -257,11 +257,11 @@ Rhumbatron never retries a stale Candidate blind (section 42.9). A new Candidate
 
 ```mermaid
 stateDiagram-v2
-  [*] --> queued: promotion with a release target
+  [*] --> queued: promotion with a live app
   queued --> building: generation still canonical
   queued --> superseded: newer generation promoted
   building --> superseded: newer generation promoted
-  building --> failed: no build, build failed, or deploy unconfirmed
+  building --> failed: no bundle, or the pointer did not move
   building --> deployed: smoke check passed
   building --> smoke_failed: smoke check failed
   deployed --> [*]

@@ -61,29 +61,6 @@ A Change that stays `releasing` for 45 minutes is failed by the `release.recover
 
 ---
 
-## 2. Release Target Worker (Workers Builds)
-
-A Project releases through Workers Builds only when D1 `release_targets` holds a row for it. The code and the Terraform Worker shell `rhumbatron-acme-shop-prod` (`cloudflare_worker.acme_shop`) exist. No migration and no code inserts a row for a prod Project, so no prod Project uses this path.
-
-A Project with a live app always takes the live app path.
-
-For a release target, the workflow polls the Workers Builds API for the build of the promoted commit and reads the Worker deployment. It uses the secret `BUILDS_API_TOKEN` on the integration Worker. Terraform loads it from the sensitive variable `builds_api_token` (Keychain item `rhumbatron-cloudflare-builds-token`). The token needs `Workers Builds Configuration Edit` and `Workers Scripts Read`. The Worker sends read-only `GET` requests.
-
-The Builds API rejects `cloudflare_artifacts` request bodies, so the connection of an Artifacts repository to the Worker is a one-time dashboard action under Worker, Settings, Builds.
-
----
-
-## 3. Checking a Release
+## 2. Checking a Release
 
 For a live app, read the release panel on the Candidate page. It shows the status, the version, and the smoke Evidence. `bun run e2e prod` also checks the app routes, versions, code reads, rollback refusals and "Remove app" on a new empty Project.
-
-`bun run smoke:release` checks a Project that has a release target:
-
-```sh
-bun run smoke:release                       # Project with slug acme-shop-live
-bun run smoke:release prod --project <project-id>
-```
-
-- **Credentials**: Set `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID`. Without them, the script reads the Keychain items `rhumbatron-clerk-secret-key-prod` and `rhumbatron-clerk-smoke-user-id-prod`.
-- **Checks**: The release target exists. The latest release that is not superseded is `deployed`. A version and smoke Evidence are recorded. The release URL answers the probes.
-- A Project without a release target fails the first check.

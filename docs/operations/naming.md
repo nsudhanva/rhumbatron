@@ -28,7 +28,6 @@ rhumbatron-<component>-<env>
 | AI Gateway | `rhumbatron-models-prod` | |
 | Artifacts namespace | `rhumbatron-projects-prod` | |
 | Workers | `rhumbatron-<component>-prod` | |
-| Release target Worker | `rhumbatron-acme-shop-prod` | |
 | K2 streams | `rhumbatron_events_00_prod`..`07` | |
 
 K2 streams are the one exception: K2 names allow only letters, digits, and underscores, so they

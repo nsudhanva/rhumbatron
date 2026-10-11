@@ -52,8 +52,6 @@ section 7.3, rule 50), and every account-wide limit is shared with those project
   `local` only.
 - `VITE_CLERK_PUBLISHABLE_KEY` is a `plain_text` binding on the web Worker (ADR 0002).
 - `SANDBOX_MONTHLY_SECONDS` is 72,000 (20 hours). `BROWSER_DAILY_SECONDS` is 960. Both are 80 % of the Workers Paid included allowance.
-- `rhumbatron-acme-shop-prod` is the Worker for the Workers Builds release path (ADR 0018). Terraform
-  creates the Worker. Workers Builds owns its versions.
 
 ### AI Gateway
 
@@ -78,7 +76,6 @@ All come from the Keychain through `scripts/tf.ts` and never enter Git (ADR 0004
 | `TF_VAR_k2_consumer_token` | `rhumbatron-k2-consumer-token-dev` |
 | `TF_VAR_anthropic_api_key` | `rhumbatron-anthropic-api-key` |
 | `TF_VAR_anthropic_workspace_id` | `rhumbatron-anthropic-workspace-id` |
-| `TF_VAR_builds_api_token` | `rhumbatron-cloudflare-builds-token` |
 
 ## Cost
 
@@ -102,7 +99,6 @@ this table when a resource, binding, or code path changes.
 | Analytics Engine | 100,000 points/day | dataset `rhumbatron_metrics_prod` | |
 | Workers Logs | 200,000 events/day | 100 % sampling on all Workers | Cron alone is ~1,440 events/day. |
 | Artifacts | 10,000 ops/month, 1 GB-month | namespace `rhumbatron-projects-prod` | |
-| Workers Builds | 3,000 min/month | `rhumbatron-acme-shop-prod` | Needs a one-time dashboard connection (ADR 0018). |
 
 ## Consequences
 
@@ -119,7 +115,7 @@ flowchart TB
   S[("R2 rhumbatron-terraform-state-global")]
   G["envs/global<br/>zone settings, budget alerts"] --> S
   P["envs/prod"] --> S
-  K["Keychain:<br/>Clerk keys, Anthropic key, K2 consumer,<br/>Builds token"] --> P
+  K["Keychain:<br/>Clerk keys, Anthropic key, K2 consumer"] --> P
   P --> H["rhumbatron.com, www (301 in Worker)<br/>api, docs, apps wildcard"]
   P --> C["Clerk production instance<br/>gateway rhumbatron-models-prod, $10"]
 ```

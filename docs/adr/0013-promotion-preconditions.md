@@ -84,7 +84,7 @@ that event.
   (`workers/coordinator/src/promotion-cas.ts`). The order is: already promoted, generation, tree,
   then policy version.
 - After the canonical `main` sync succeeds, promotion starts `ReleaseWorkflow` for a Project that
-  has a release path (ADR 0018). A release never fails or reverses a promotion.
+  has a live app (ADR 0020). A release never fails or reverses a promotion.
 - Auto-promotion: after the gate, the verification workflow calls the pure function
   `autoPromoteDecision` (`autoPromoteRiskTiers`). Then it calls `promoteCandidate` with trigger
   `auto` and actor `system:auto-promotion`. That is the same path and the same preconditions as a
@@ -136,6 +136,6 @@ sequenceDiagram
   opt ok (advanced or alreadyPromoted)
     I->>A: fast-forward canonical main to the composed commit
     I->>I: write the source index, return sourceSynced
-    I->>W: start rel_project_generation (synced, release target exists)
+    I->>W: start rel_project_generation (synced, live app exists)
   end
 ```

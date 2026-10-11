@@ -66,7 +66,7 @@ flowchart TB
    - **R2 objects**: Cleanup lists and deletes all objects under these prefixes of the evidence bucket, each followed by the Project ID: `source/`, `context/`, `apps/`, `app-previews/`, `evidence/`, `work-graphs/`, and `workspace/`.
    - **Live app**: On prod, `removeApp` wipes the app data stores first, and cleanup waits for it.
    - **Tasks and agents**: For each batch of 25 Tasks, cleanup purges the AgentDO of each Task, then deletes the `task_runs`, `decision_receipts`, `task_dependencies`, and `tasks` rows of the batch.
-   - **D1 content rows**: Cleanup deletes the rows of `evidence_index`, `approvals`, `conflicts`, `changesets`, `candidates`, `changes`, `request_conflicts`, `goal_suggestions`, `project_policies`, `project_members`, `project_invitations`, `agents`, `dead_letters`, `releases`, `release_targets`, and `project_events`. It deletes at most 500 rows per statement and 40 statements per message.
+   - **D1 content rows**: Cleanup deletes the rows of `evidence_index`, `approvals`, `conflicts`, `changesets`, `candidates`, `changes`, `request_conflicts`, `goal_suggestions`, `project_policies`, `project_members`, `project_invitations`, `agents`, `dead_letters`, `releases`, and `project_events`. It deletes at most 500 rows per statement and 40 statements per message.
    - **Shards**: Cleanup purges the 32 ResourceShardDO shards (claims, Intents, Challenges, outbox). It does this last, so a late Claim cannot refill a shard.
    - **Final step**: Cleanup deletes the KV policy copy, replaces the Project name and slug with `Deleted project` and `deleted-<id>`, and sets `cleaned_at`.
 3. **Indexes**: The indexer Worker deletes the Vectorize vectors, the `index/` objects, and the `project_indexes` and `project_vectors` rows (`index.purge`). The daily maintenance sends `index.purge` for an archived Project until no index row remains.
@@ -80,7 +80,6 @@ flowchart TB
 | R2 `events/` audit archive and K2 events | They are shared by all Projects. They expire by lifecycle rule (365 days) and K2 retention (7 days). |
 | Organization, user, and membership rows; `notification_reads`; `processed_events` | They are not Project data. |
 | Project Sandbox container | It keeps no data after its 2-minute sleep. Waking it to destroy it would spend the Sandbox hour cap. |
-| Worker script of a release target (Acme Shop fixture) | It is Terraform-owned. Cleanup deletes the `release_targets` row only. |
 
 ---
 

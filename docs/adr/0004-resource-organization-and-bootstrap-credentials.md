@@ -36,7 +36,7 @@ creates them. The macOS Keychain stores them. Git and Terraform files never hold
 | Terraform state backend key | R2 object read/write on `rhumbatron-terraform-state-global` only. | `rhumbatron-r2-state-access-key-id`, `rhumbatron-r2-state-secret-access-key` |
 
 Other Keychain items: `rhumbatron-cloudflare-account-id`; the Clerk keys (ADR 0002); the Anthropic
-key and workspace ID (ADR 0021); the Builds API token (ADR 0018); the budget alert address (ADR 0019).
+key and workspace ID (ADR 0021); the budget alert address (ADR 0019).
 
 ## Consequences
 
