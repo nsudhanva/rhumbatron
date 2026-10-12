@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import { test as base, expect, type Locator, type Page, type TestInfo } from "@playwright/test";
-import { apiFetch } from "./clerk";
+import { apiFetch } from "./clerk.ts";
 
 /** Read-only fixtures the smoke user owns on prod. */
 export const TODO = {
