@@ -57,7 +57,16 @@ export function useActivityPlayer(events: ActivityEvent[], ready: boolean): Acti
   // Until every source has loaded once, show the recorded state as it is.
   useEffect(() => {
     if (settled.current) return;
-    setState({ ...empty(), ids: new Set(events.map((e) => e.id)), order: events.map((e) => e.id) });
+    // Keep the first state when it already holds these facts: a new state object would render
+    // every consumer again right after hydration for nothing.
+    setState((s) =>
+      s.animated.size === 0 &&
+      s.recent.length === 0 &&
+      s.order.length === events.length &&
+      events.every((e, i) => s.order[i] === e.id)
+        ? s
+        : { ...empty(), ids: new Set(events.map((e) => e.id)), order: events.map((e) => e.id) },
+    );
     if (ready) settled.current = true;
   }, [events, ready]);
 

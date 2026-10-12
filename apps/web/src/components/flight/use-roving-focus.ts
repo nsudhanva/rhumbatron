@@ -174,7 +174,8 @@ export function useRovingFocus({
   snap = 16,
 }: RovingOptions) {
   const base = useId();
-  const [el, setEl] = useState<HTMLElement | null>(null);
+  // A ref, not state: one more render of every lane right after mount would buy nothing.
+  const elRef = useRef<HTMLElement | null>(null);
   const [active, setActiveState] = useState<string | null>(null);
   const [hot, setHot] = useState<string | null>(null);
   const [focus, setFocus] = useState<"none" | "pointer" | "keyboard">("none");
@@ -220,6 +221,7 @@ export function useRovingFocus({
   /** Lands on the item nearest to `x` (screen px), or the first one. */
   const enter = useCallback(
     (x: number | null) => {
+      const el = elRef.current;
       if (!el) return;
       let key: string | null = null;
       if (x !== null) {
@@ -236,18 +238,18 @@ export function useRovingFocus({
       }
       setActive(key ?? firstKey(), true);
     },
-    [el, firstKey, setActive],
+    [firstKey, setActive],
   );
-
-  useEffect(() => {
-    if (!el) return;
-    enterAt.set(el, enter);
-    return () => {
-      enterAt.delete(el);
-    };
-  }, [el, enter]);
+  const enterRef = useRef(enter);
+  enterRef.current = enter;
+  const ref = useCallback((node: HTMLElement | null) => {
+    if (elRef.current) enterAt.delete(elRef.current);
+    elRef.current = node;
+    if (node) enterAt.set(node, (x) => enterRef.current(x));
+  }, []);
 
   const crossGroup = (dir: "up" | "down") => {
+    const el = elRef.current;
     if (!group || !el) return;
     const peers = Array.from(
       document.querySelectorAll<HTMLElement>(`[data-roving-group="${CSS.escape(group)}"]`),
@@ -336,7 +338,7 @@ export function useRovingFocus({
 
   const focused = focus !== "none";
   const containerProps = {
-    ref: setEl,
+    ref,
     tabIndex: 0,
     "aria-activedescendant": focused && active !== null ? itemId(active) : undefined,
     "data-roving-group": group,

@@ -6,6 +6,7 @@ import {
   type CSSProperties,
   type LazyExoticComponent,
   lazy,
+  memo,
   type ReactNode,
   Suspense,
   useEffect,
@@ -26,7 +27,7 @@ import { type FlightContextValue, FlightProvider } from "./flight-context";
 import { type FlightModel, type FlightState, foldFlight, providerName } from "./flight-model";
 import { type FlightTime, type PanelId, useFlightStore, useFlightTime } from "./flight-store";
 import { InspectorDrawer } from "./inspector-drawer";
-import { PanelFrame, PanelSkeleton } from "./panel-frame";
+import { PanelFrame, PanelSkeleton, scrollRoot } from "./panel-frame";
 import type { PanelProps } from "./panel-types";
 import { Scrubber, stepFact } from "./scrubber";
 
@@ -64,6 +65,11 @@ type PanelSpec = {
   span: string;
   /** Frame height: the DAG is tall, the agent swimlanes (the timeline) taller still. */
   size?: "default" | "tall" | "hero";
+  /**
+   * Rendered in the first HTML and hydrated at once: the panels at the top of the page. The other
+   * panels load and render when they come near the view (DeferredBody).
+   */
+  eager?: true;
   meta: (state: FlightState, model: FlightModel) => ReactNode;
 };
 
@@ -77,6 +83,7 @@ const PANELS: PanelSpec[] = [
     Component: DagPanel,
     span: "@min-[800px]:col-span-6",
     size: "tall",
+    eager: true,
     meta: (s) => `${n(s.counts.tasks)} Tasks · ${n(s.counts.blocked)} blocked`,
   },
   {
@@ -85,6 +92,7 @@ const PANELS: PanelSpec[] = [
     Component: SwimlanesPanel,
     span: "@min-[800px]:col-span-6",
     size: "hero",
+    eager: true,
     meta: (s) => `${n(s.counts.woken)} woken · ${n(s.counts.running)} running`,
   },
   {
@@ -256,6 +264,52 @@ function useChromeHeight() {
   return { ref, height };
 }
 
+/** A deferred panel renders once its frame is this close to the visible part of the page. */
+const NEAR_MARGIN = "300px 0px";
+
+/**
+ * The body of one panel. The page re-renders on every fold, chrome resize and socket change;
+ * memo keeps a panel from rendering again unless its own props change (it still renders on a
+ * new Flight context). A panel that is not `eager` shows the frame's skeleton in the server render
+ * and the hydration, then loads its code and renders when its frame comes near the view or when
+ * it is expanded. The frame has a fixed height, so the swap never shifts the layout.
+ */
+const PanelBody = memo(function PanelBody({
+  Component,
+  focused,
+  eager,
+}: {
+  Component: Panel;
+  focused: boolean;
+  eager: boolean;
+}) {
+  const [near, setNear] = useState(eager);
+  // An expanded panel stays rendered after it collapses.
+  if (focused && !near) setNear(true);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (near || !el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        observer.disconnect();
+        setNear(true);
+      },
+      { root: scrollRoot(el), rootMargin: NEAR_MARGIN },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [near]);
+  if (near || focused) return <Component focused={focused} />;
+  return (
+    <div ref={ref} className="h-full">
+      <PanelSkeleton />
+    </div>
+  );
+});
+PanelBody.displayName = "PanelBody";
+
 function Count({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
   return (
     <div className="inline-flex items-baseline gap-1.5">
@@ -389,8 +443,8 @@ export function FlightPage({
   const inFlight = live ? player.inFlight : playing ? playback.inFlight : NONE;
 
   const value = useMemo<FlightContextValue>(
-    () => ({ model, state, ready, socket, animated, inFlight, projectId, changeId }),
-    [model, state, ready, socket, animated, inFlight, projectId, changeId],
+    () => ({ model, state, ready, animated, inFlight, projectId, changeId }),
+    [model, state, ready, animated, inFlight, projectId, changeId],
   );
 
   useFlightKeys(model.events);
@@ -445,7 +499,7 @@ export function FlightPage({
         >
           <div className="@container min-w-0">
             <div className="grid grid-cols-1 gap-4 @min-[800px]:grid-cols-6">
-              {visible.map(({ id, label, Component, span, size, meta }) => (
+              {visible.map(({ id, label, Component, span, size, eager, meta }) => (
                 <PanelFrame
                   key={id}
                   id={id}
@@ -455,7 +509,7 @@ export function FlightPage({
                   size={size ?? "default"}
                   className={focus === id ? "@min-[800px]:col-span-6" : span}
                 >
-                  <Component focused={focus === id} />
+                  <PanelBody Component={Component} focused={focus === id} eager={eager === true} />
                 </PanelFrame>
               ))}
             </div>

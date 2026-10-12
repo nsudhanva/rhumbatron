@@ -41,6 +41,7 @@ import {
   conflictKind,
 } from "./agents-replay";
 import { AgentsReplayStrip } from "./agents-replay-strip";
+import { changesInScope, MAX_CHANGES } from "./agents-scope";
 
 /**
  * Agents graph: Changes, their Tasks with the Work Graph
@@ -58,35 +59,12 @@ import { AgentsReplayStrip } from "./agents-replay-strip";
  * so nothing moves but the state. Live (the default) shows the newest state and follows it.
  */
 
-const MAX_CHANGES = 4;
 const COLUMN = 280;
 const ROW = 118;
 const GROUP_GAP = 56;
 
 const ACTIVE_TASK = new Set(["assigned", "running"]);
 const TIER_LABEL: Record<string, string> = { haiku: "Haiku", sonnet: "Sonnet", opus: "Opus" };
-
-/**
- * Changes in scope: the chosen Change, else Changes with listed agents active in the range, else
- * the newest Change. Person narrows every choice. At most MAX_CHANGES. The route loader reads
- * the Task and conflict lists of the same Changes on the server (`EMPTY_FILTER`).
- */
-export function changesInScope(
-  changes: ChangeSummary[],
-  agents: AgentView[],
-  filter: DagFilter = EMPTY_FILTER,
-): ChangeSummary[] {
-  const byPerson = changes.filter(
-    (c) => filter.person === null || c.requester?.userId === filter.person,
-  );
-  if (filter.changeId) return byPerson.filter((c) => c.id === filter.changeId);
-  const withAgents = new Set(
-    agents.filter((a) => inTimeRange(a.lastActiveAt, filter.range)).map((a) => a.task.changeId),
-  );
-  const active = byPerson.filter((c) => withAgents.has(c.id));
-  const inRange = byPerson.filter((c) => inTimeRange(c.createdAt, filter.range));
-  return (active.length > 0 ? active : inRange.slice(0, 1)).slice(0, MAX_CHANGES);
-}
 
 type Selection =
   | { kind: "change"; change: ChangeSummary }

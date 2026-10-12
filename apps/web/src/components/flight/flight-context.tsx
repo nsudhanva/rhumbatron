@@ -1,5 +1,4 @@
 import { createContext, type ReactNode, useContext } from "react";
-import type { LiveStatus } from "../../lib/live";
 import type { FlightModel, FlightState } from "./flight-model";
 
 /**
@@ -16,7 +15,6 @@ export type FlightContextValue = {
   state: FlightState;
   /** Every source has answered once (or failed). Until then, panels show skeletons, not motion. */
   ready: boolean;
-  socket: LiveStatus;
   /** Facts newly played by the pacing queue since the page settled (animate these only). */
   animated: ReadonlySet<string>;
   /** Facts still in flight (packet travelling, lane flashing). */

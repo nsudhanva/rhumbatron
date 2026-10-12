@@ -75,6 +75,19 @@ export function PanelFrame({
 }
 PanelFrame.displayName = "PanelFrame";
 
+/**
+ * The element that scrolls a panel frame: the nearest scrolling ancestor of the frame (the app
+ * shell's main column), or null for the viewport. The frame body scrolls too, so the search
+ * starts above the frame.
+ */
+export function scrollRoot(el: Element): Element | null {
+  for (let node = el.closest("[data-panel]")?.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+  }
+  return null;
+}
+
 /** Same-height placeholder while a panel's code or first data loads: rows under real rules. */
 export function PanelSkeleton({ rows = 7 }: { rows?: number }) {
   return (

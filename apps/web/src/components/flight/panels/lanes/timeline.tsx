@@ -73,9 +73,10 @@ export function useLiveInstant(): number {
   const ticking = state.live && state.counts.running > 0;
   const now = useNow(ticking);
   const [anchor, setAnchor] = useState<{ at: number; wall: number }>({ at: state.at, wall: 0 });
+  // Anchored only while ticking: a settled fold renders once on mount, not again per lane.
   useEffect(() => {
-    setAnchor({ at: state.at, wall: Date.now() });
-  }, [state.at]);
+    if (ticking) setAnchor({ at: state.at, wall: Date.now() });
+  }, [state.at, ticking]);
   if (!ticking || anchor.wall === 0 || now === 0 || anchor.at !== state.at) return state.at;
   return state.at + Math.max(0, now - anchor.wall);
 }
@@ -148,9 +149,11 @@ export function useTimeScale(viewportWidth: number): TimeScale {
   const start = model.bounds.start;
   const end = Math.max(model.bounds.end, cursor, start + 1_000);
 
+  // Keyed by the plot room, not the raw width: a narrow panel keeps the 240px floor, so its
+  // first measurement leaves the scale (and every memoized lane) as it was.
+  const available = Math.max(240, viewportWidth - LEFT - PAD_L - PAD_R);
   return useMemo(() => {
     const span = end - start;
-    const available = Math.max(240, viewportWidth - LEFT - PAD_L - PAD_R);
     const pxPerMs = zoom === "fit" ? available / span : 100 / MS_PER_100PX[zoom];
     const width = Math.max(available, span * pxPerMs) + PAD_L + PAD_R;
     const x = (t: number) => PAD_L + (Math.min(Math.max(t, start), end) - start) * pxPerMs;
@@ -158,7 +161,7 @@ export function useTimeScale(viewportWidth: number): TimeScale {
     const ticks: { t: number; x: number }[] = [];
     if (step) for (let t = start; t <= end; t += step) ticks.push({ t, x: x(t) });
     return { start, end, cursor, width, x, ticks, zoom, ticking };
-  }, [start, end, cursor, viewportWidth, zoom, ticking]);
+  }, [start, end, cursor, available, zoom, ticking]);
 }
 
 /**

@@ -2,7 +2,7 @@ import { Show, SignInButton } from "@clerk/tanstack-react-start";
 import { Button } from "@cloudflare/kumo";
 import { SignIn } from "@phosphor-icons/react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { changesInScope } from "../components/agents-page/agents-graph";
+import { changesInScope } from "../components/agents-page/agents-scope";
 import { AgentsView } from "../components/agents-page/agents-view";
 import type { DagMode } from "../components/dag/view-toggle";
 import { EmptyState } from "../components/ui/empty-state";

@@ -28,6 +28,7 @@ export const Route = createFileRoute("/changes_/$changeId/flight")({
   }),
   // Server render: every panel's facts are in the first HTML (lib/ssr-data.ts). The Change
   // page's reads plus the two Flight Control adds: the Project workspace and the Decisions.
+  // The top panels render in the HTML; the others render near the view (flight-page.tsx).
   loader: ({ context: { queryClient }, params: { changeId } }) =>
     loadOnServer(queryClient, () =>
       Promise.allSettled([

@@ -1,6 +1,6 @@
 // biome-ignore-all lint/a11y/useFocusableInteractive: listbox options here are aria-activedescendant items of a one-tab-stop composite (use-roving-focus.ts); they are not focusable by design
 import { cn } from "@cloudflare/kumo";
-import { type CSSProperties, useId, useMemo } from "react";
+import { type CSSProperties, memo, useId, useMemo } from "react";
 import { formatDuration, formatNumber } from "../../../lib/format";
 import type { FailureOutcome } from "../../../lib/recovery";
 import { CALLS_PER_RUN } from "../../agents/activity-model";
@@ -75,8 +75,18 @@ const BAR_H = 20;
 const UNDER_Y = 39;
 /** Facts closer than this (px) share one count marker. */
 const GROUP_WITHIN = 12;
-/** Top of a conflict chip's 24px target inside a lane row: below the marker row, above the under row. */
-const CHIP_Y = 16;
+/**
+ * Top of a conflict chip's 24px target inside a lane row (56px). The target spans 8 to 32px, so
+ * the lane's own target keeps a clear 24px band below it (32 to 56px) even where the sticky lane
+ * header covers the start of the track on a narrow screen. The 16px chip draws at 20 to 36px,
+ * over the bar row, below the marker row and above the under row (CHIP_DROP).
+ */
+const CHIP_Y = 8;
+/** The chip draws this far below the bottom of its target (it stays inside the clickable button). */
+const CHIP_DROP = 4;
+/** Stable empties, so a lane without marks or notes keeps its memo. */
+const NO_MARKS: Mark[] = [];
+const NO_NOTES: string[] = [];
 
 type MarkKind =
   | "ready"
@@ -448,10 +458,10 @@ export function SwimlanesPanel({ focused }: PanelProps) {
                   <Lane
                     key={id}
                     task={task}
-                    marks={marks.get(id) ?? []}
+                    marks={marks.get(id) ?? NO_MARKS}
                     scale={scale}
                     hatchId={hatchId}
-                    note={notes.get(id) ?? []}
+                    note={notes.get(id) ?? NO_NOTES}
                     dim={dimmed({ kind: "task", id })}
                     live={state.live}
                   />
@@ -492,7 +502,8 @@ function LanesSkeleton({ focused }: { focused: boolean }) {
 }
 LanesSkeleton.displayName = "LanesSkeleton";
 
-function Lane({
+/** Memoized: a lane renders again only when its own Task, marks, scale or highlight change. */
+const Lane = memo(function Lane({
   task,
   marks,
   scale,
@@ -637,7 +648,7 @@ function Lane({
       )}
     </div>
   );
-}
+});
 Lane.displayName = "Lane";
 
 /** Props a lane hands each of its items (use-roving-focus `itemProps`). */
@@ -941,7 +952,7 @@ Marker.displayName = "Marker";
  */
 function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number> }) {
   const { state, animated } = useFlight();
-  // Chips sit in a bar row between the two lanes (CHIP_Y), never in a marker row, so they never
+  // Chips draw in a bar row between the two lanes (CHIP_Y), never in a marker row, so they never
   // cover a marker or its label. Each takes the free room right or left of its connector, in the
   // row nearest the middle of its span, truncated when room is short.
   const items = useMemo(() => {
@@ -1025,19 +1036,19 @@ function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number>
               type="button"
               onClick={() => useFlightStore.getState().toggle(ref)}
               title={`Conflict on ${c.resource}\n“${c.statements[0]}”\nvs “${c.statements[1]}”`}
-              // 24px tall target around the 16px chip.
-              className="pointer-events-auto absolute flex h-6 items-center font-mono text-[10px] leading-[14px] whitespace-nowrap focus-visible:outline-2 focus-visible:outline-accent-500"
+              // 24px tall target; the 16px chip sits at its bottom, CHIP_DROP px lower.
+              className="group pointer-events-auto absolute flex h-6 items-end font-mono text-[10px] leading-[14px] whitespace-nowrap outline-none"
               style={{ left, top }}
             >
               <span
                 aria-hidden
                 className={cn(
-                  "block truncate border bg-kumo-elevated px-1",
+                  "block truncate border bg-kumo-elevated px-1 group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-accent-500",
                   c.open
                     ? "border-accent-500 text-kumo-accent"
                     : "border-kumo-rule text-kumo-subtle",
                 )}
-                style={{ maxWidth: width }}
+                style={{ maxWidth: width, transform: `translateY(${CHIP_DROP}px)` }}
               >
                 {text}
               </span>
