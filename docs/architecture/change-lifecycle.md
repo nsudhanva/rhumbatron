@@ -53,7 +53,7 @@ sequenceDiagram
   CW->>GW: Root Planner, tool submit_work_graph
   GW-->>CW: WorkGraphPlan (Zod and cycle check)
   CW->>Root: registerScope(), then compare with each earlier request
-  CW->>D1: tasks, task_dependencies, status running (one batch)
+  CW->>D1: tasks, task_dependencies, title, status running (one batch)
   CW->>Shard: change.compiled, task.created (outbox)
   CW->>D1: pending to ready when dependencies are completed
   CW->>Shard: task.ready (outbox)
@@ -63,6 +63,7 @@ sequenceDiagram
 Notes:
 
 - The Root Planner routes to the `opus` tier (`taskKind = plan`, `complexity = large`). With `ALLOW_OPUS` set to `false` (the Terraform default), the `opus` tier runs on Sonnet 5.5 (ADR 0021).
+- The plan has a `title`: a short title for the request, at most 6 words. The planner sees the goal with the clarification answers, so the title names the final request. `parsePlan` cuts the title to 48 characters at a word boundary. A missing title never causes a repair turn. The ChangeWorkflow writes it to D1 `changes.title` with the Tasks. Without a title, the API shows `fallbackTitle(goal)` (`packages/protocol/src/change-title.ts`).
 - The prompt asks for 2 to 8 Tasks. The schema accepts 1 to 12 (`MAX_TASKS_PER_CHANGE`). The planner makes at most two model calls: the plan and one repair turn.
 - A UI Task that calls routes of another Task must depend on that Task. The prompt states the rule. `parsePlan` (`workers/integration/src/root-planner.ts`) also repairs the plan without a model call. A UI Task and an API Task on the same area (first resource segment, `todos` in `todos:ui` and `todos:api`) with no dependency path between them get the edge UI → API.
 - The Work Graph JSON goes to R2 at `work-graphs/<project>/<change>.json`.

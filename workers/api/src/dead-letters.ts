@@ -1,4 +1,4 @@
-import { apiData } from "@rhumbatron/protocol";
+import { apiData, changeTitle } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
@@ -278,7 +278,7 @@ export const deadLetters = new Hono<AppEnv>()
            ORDER BY t.updated_at DESC LIMIT ?`,
         ).bind(...scope, MAX_ROWS),
         c.env.DB.prepare(
-          `SELECT c.id, c.goal, c.status, c.blocked_limit, c.blocked_reason
+          `SELECT c.id, c.goal, c.title, c.status, c.blocked_limit, c.blocked_reason
            FROM changes c
            WHERE c.project_id = ?${byChange} AND c.blocked_limit IS NOT NULL
              AND c.blocked_limit != 'dead_letter'
@@ -300,6 +300,7 @@ export const deadLetters = new Hono<AppEnv>()
       type ChangeBlock = {
         id: string;
         goal: string;
+        title: string | null;
         status: string;
         blocked_limit: string;
         blocked_reason: string | null;
@@ -325,7 +326,7 @@ export const deadLetters = new Hono<AppEnv>()
               scope: "change" as const,
               id: r.id,
               changeId: r.id,
-              title: r.goal,
+              title: changeTitle(r.title, r.goal),
               status: r.status,
               limit: r.blocked_limit,
               reason: r.blocked_reason ?? r.blocked_limit,

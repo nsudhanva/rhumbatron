@@ -2,6 +2,7 @@ import {
   apiData,
   ChangeCommandOutcome,
   ChangeDetail,
+  changeTitle,
   RaiseBudgetRequest,
 } from "@rhumbatron/protocol";
 import { type Context, Hono } from "hono";
@@ -9,7 +10,7 @@ import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { errorBody, fail, respond, validate } from "./http.ts";
 import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
-import { type RequestColumns, requestFields } from "./members.ts";
+import { RELATED_TITLE, type RequestColumns, requestFields } from "./members.ts";
 
 /**
  * `GET /v1/changes/:changeId` with the planned risk tier and record times (AGENTS.md section 16.1).
@@ -39,6 +40,7 @@ type ChangeRow = {
   id: string;
   project_id: string;
   goal: string;
+  title: string | null;
   status: string;
   base_generation: number;
   risk_tier: string | null;
@@ -56,6 +58,7 @@ function toDetail(row: ChangeRow, viewerUserId: string): ChangeDetail {
     id: row.id,
     projectId: row.project_id,
     goal: row.goal,
+    title: changeTitle(row.title, row.goal),
     acceptanceCriteria: JSON.parse(row.acceptance_criteria_json) as string[],
     invariants: JSON.parse(row.invariants_json) as string[],
     status: ChangeDetail.shape.status.parse(row.status),
@@ -92,11 +95,12 @@ export const changeDetail = new Hono<AppEnv>()
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { changeId } = c.req.valid("param");
     const row = await c.env.DB.prepare(
-      `SELECT c.id, c.project_id, c.goal, c.status, c.base_generation, c.risk_tier, c.budget_usd,
-              c.acceptance_criteria_json, c.invariants_json, c.work_graph_ref, c.blocked_reason,
-              c.created_at, c.updated_at, c.created_by, c.requester_rank, c.outcome,
-              c.outcome_reason, c.outcome_winner_change_id, c.outcome_decided_by,
-              c.supersedes_change_id, c.clarification_json, u.display_name, u.email
+      `SELECT c.id, c.project_id, c.goal, c.title, c.status, c.base_generation, c.risk_tier,
+              c.budget_usd, c.acceptance_criteria_json, c.invariants_json, c.work_graph_ref,
+              c.blocked_reason, c.created_at, c.updated_at, c.created_by, c.requester_rank,
+              c.outcome, c.outcome_reason, c.outcome_winner_change_id, c.outcome_decided_by,
+              c.supersedes_change_id, c.clarification_json, u.display_name, u.email,
+              ${RELATED_TITLE}
        FROM changes c LEFT JOIN users u ON u.id = c.created_by WHERE c.id = ?`,
     )
       .bind(changeId)

@@ -1,4 +1,11 @@
-import { ClaimFact, ClaimState, foldClaims, ModelTier, type TaskKind } from "@rhumbatron/protocol";
+import {
+  ClaimFact,
+  ClaimState,
+  changeTitle,
+  foldClaims,
+  ModelTier,
+  type TaskKind,
+} from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
@@ -95,6 +102,7 @@ const AgentView = z.object({
     complexity: z.string().nullable(),
     changeId: z.string(),
     changeGoal: z.string(),
+    changeTitle: z.string(),
   }),
   /** Tier of the latest attempt; null before the first run. */
   tier: ModelTier.nullable(),
@@ -166,6 +174,7 @@ type TaskRow = {
   complexity: string | null;
   updated_at: string;
   goal: string;
+  change_title: string | null;
 };
 
 /** `SELECT r.*` so the 0010 progress columns are read when they exist and skipped otherwise. */
@@ -348,7 +357,7 @@ export const agents = new Hono<AppEnv>().get(
       db
         .prepare(
           `SELECT t.id, t.change_id, t.task_key, t.title, t.kind, t.status, t.assigned_agent_id,
-                  t.risk_tier, t.complexity, t.updated_at, c.goal
+                  t.risk_tier, t.complexity, t.updated_at, c.goal, c.title AS change_title
            FROM changes c JOIN tasks t ON t.change_id = c.id
            WHERE c.project_id = ? AND t.assigned_agent_id IS NOT NULL
            ORDER BY t.updated_at DESC LIMIT ?`,
@@ -441,6 +450,7 @@ export const agents = new Hono<AppEnv>().get(
           complexity: t.complexity,
           changeId: t.change_id,
           changeGoal: t.goal,
+          changeTitle: changeTitle(t.change_title, t.goal),
         },
         tier: last?.tier ?? null,
         attempts: runs.length,

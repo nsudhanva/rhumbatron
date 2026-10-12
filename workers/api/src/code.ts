@@ -11,6 +11,7 @@ import {
   CodeView,
   candidatePatchKey,
   changeSetPatchKey,
+  changeTitle,
   codeBlobKey,
   codeManifestKey,
   MAX_CODE_BLOB_BYTES,
@@ -311,7 +312,7 @@ export const code = new Hono<AppEnv>()
       const [promoted, project] = await c.env.DB.batch([
         c.env.DB.prepare(
           `SELECT c.id, c.change_id, c.promoted_generation, c.composed_commit, c.composed_tree,
-                  c.base_tree, c.change_set_ids_json, c.updated_at, ch.goal,
+                  c.base_tree, c.change_set_ids_json, c.updated_at, ch.goal, ch.title,
                   (SELECT r.started_at FROM releases r
                     WHERE r.project_id = ch.project_id AND r.generation = c.promoted_generation
                     LIMIT 1) AS released_at
@@ -331,6 +332,7 @@ export const code = new Hono<AppEnv>()
         change_set_ids_json: string;
         updated_at: string;
         goal: string;
+        title: string | null;
         released_at: string | null;
       };
       const all = (promoted?.results ?? []) as Row[];
@@ -351,7 +353,7 @@ export const code = new Hono<AppEnv>()
         commit: row.composed_commit,
         live: row.promoted_generation === liveGeneration,
         at: row.released_at ?? row.updated_at,
-        change: { id: row.change_id, goal: row.goal },
+        change: { id: row.change_id, goal: row.goal, title: changeTitle(row.title, row.goal) },
         candidateId: row.id,
         changeSets: idsOf(row).flatMap((id) => byId.get(id) ?? []),
       }));

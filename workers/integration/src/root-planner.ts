@@ -8,6 +8,7 @@ import {
 import {
   APP_CONVENTIONS,
   checkWorkGraph,
+  clampTitle,
   type PlannedTask,
   type RouteRequest,
   WorkGraphPlan,
@@ -24,6 +25,7 @@ const SUBMIT_TOOL = "submit_work_graph";
 
 const SYSTEM_PROMPT = `You are the Root Planner of Rhumbatron, a system where many software agents change one codebase in parallel.
 Turn the user's goal into a small dependency graph of Tasks. Rules:
+- title: a short title for the request, at most 6 words, plain words, no trailing punctuation (for example "Kanban feature" or "React and Tailwind redesign"). When the goal has clarifications, the title names the request with the answers applied.
 - 2 to 8 Tasks. Each Task is one bounded unit of work that one agent can finish and verify alone.
 - Keys are t1, t2, ... in order. dependsOn lists keys that must finish first. No cycles.
 - Tasks that do not depend on each other must not list each other, so they can run in parallel.
@@ -229,7 +231,14 @@ export function parsePlan(
     return { ok: false, errors: ["arguments are not valid JSON"] };
   }
   // Undo harmless encoding slips first, for example `"riskTier": "\"low\""` (seen on prod).
-  const parsed = WorkGraphPlan.safeParse(normalizeToolArgs(json));
+  const normalized = normalizeToolArgs(json);
+  // The title is display text: a missing or bad title never costs a repair turn. Blank means
+  // "no title"; the API then shows `fallbackTitle(goal)`.
+  if (normalized && typeof normalized === "object" && !Array.isArray(normalized)) {
+    const args = normalized as Record<string, unknown>;
+    args.title = clampTitle(typeof args.title === "string" ? args.title : null) ?? "";
+  }
+  const parsed = WorkGraphPlan.safeParse(normalized);
   if (!parsed.success) {
     return {
       ok: false,

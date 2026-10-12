@@ -1,4 +1,4 @@
-import { apiData } from "@rhumbatron/protocol";
+import { apiData, changeTitle } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
@@ -72,6 +72,7 @@ type Usage = z.infer<typeof Usage>;
 const ChangeCost = Usage.extend({
   id: z.string(),
   goal: z.string(),
+  title: z.string(),
   status: z.string(),
   budgetUsd: z.number(),
   createdAt: z.string(),
@@ -190,7 +191,7 @@ export const cost = new Hono<AppEnv>().get(
     const [changeRows, totalRows, meterRows] = await db.batch([
       db
         .prepare(
-          `SELECT id, goal, status, budget_usd, created_at FROM changes
+          `SELECT id, goal, title, status, budget_usd, created_at FROM changes
            WHERE project_id = ? ORDER BY created_at DESC LIMIT ?`,
         )
         .bind(projectId, CHANGE_LIMIT),
@@ -219,6 +220,7 @@ export const cost = new Hono<AppEnv>().get(
     type ChangeRow = {
       id: string;
       goal: string;
+      title: string | null;
       status: string;
       budget_usd: number;
       created_at: string;
@@ -355,6 +357,7 @@ export const cost = new Hono<AppEnv>().get(
           return {
             id: ch.id,
             goal: ch.goal,
+            title: changeTitle(ch.title, ch.goal),
             status: ch.status,
             budgetUsd: ch.budget_usd,
             createdAt: ch.created_at,

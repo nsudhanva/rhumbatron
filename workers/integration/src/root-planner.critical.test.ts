@@ -65,6 +65,17 @@ describe("parsePlan", () => {
     expect(parsePlan(plan([{ ...task("t1"), riskTier: "extreme" }])).ok).toBe(false);
     expect(parsePlan(undefined).ok).toBe(false);
   });
+
+  it("cuts a long title at a word boundary and never rejects a plan for its title", () => {
+    const titled = (title: unknown) =>
+      parsePlan(JSON.stringify({ ...JSON.parse(plan([task("t1")])), title }));
+    expect(titled("Shared wishlists with collaborator links and revocable sharing.")).toMatchObject(
+      { ok: true, plan: { title: "Shared wishlists with collaborator links" } },
+    );
+    expect(titled("Kanban feature")).toMatchObject({ ok: true, plan: { title: "Kanban feature" } });
+    expect(parsePlan(plan([task("t1")]))).toMatchObject({ ok: true, plan: { title: "" } });
+    expect(titled(42)).toMatchObject({ ok: true, plan: { title: "" } });
+  });
 });
 
 describe("bootstrap Task for an empty repository", () => {

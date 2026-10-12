@@ -357,6 +357,7 @@ const ProjectListItem: Spec = {
 const ChangeListItem: Spec = {
   id: "string",
   goal: "string",
+  title: "string",
   status: "string",
   riskTier: "string|null",
   budgetUsd: "number",
@@ -389,6 +390,7 @@ const CostView: Spec = {
       {
         id: "string",
         goal: "string",
+        title: "string",
         status: "string",
         budgetUsd: "number",
         createdAt: "string",
@@ -431,7 +433,9 @@ const ProductGraph: Spec = {
     protectedResources: "array",
     source: { kind: "string" },
     wiringFiles: "array",
-    changes: [{ id: "string", goal: "string", status: "string", createdAt: "string" }],
+    changes: [
+      { id: "string", goal: "string", title: "string", status: "string", createdAt: "string" },
+    ],
     nodes: "array",
     edges: "array",
     counts: {
@@ -448,7 +452,9 @@ const VerificationView: Spec = {
   data: {
     candidates: "array",
     evidence: "array",
-    changes: [{ id: "string", goal: "string", status: "string", riskTier: "string|null" }],
+    changes: [
+      { id: "string", goal: "string", title: "string", status: "string", riskTier: "string|null" },
+    ],
     limit: "integer",
     evidenceTruncated: "boolean",
   },
@@ -467,6 +473,7 @@ const WorkspaceView: Spec = {
       {
         id: "string",
         goal: "string",
+        title: "string",
         status: "string",
         baseGeneration: "integer",
         createdAt: "string",

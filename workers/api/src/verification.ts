@@ -1,4 +1,4 @@
-import { ApprovalView, apiData, EvidenceRecord } from "@rhumbatron/protocol";
+import { ApprovalView, apiData, changeTitle, EvidenceRecord } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
@@ -61,6 +61,7 @@ type CandidateView = z.infer<typeof CandidateView>;
 const ChangeRef = z.object({
   id: z.string(),
   goal: z.string(),
+  title: z.string(),
   status: z.string(),
   riskTier: z.string().nullable(),
 });
@@ -93,6 +94,7 @@ type Row = {
   created_at: string;
   updated_at: string;
   change_goal: string;
+  change_title: string | null;
   change_status: string;
   change_risk_tier: string | null;
   approval_id: string | null;
@@ -161,7 +163,7 @@ export const verification = new Hono<AppEnv>().get(
        SELECT c.id, c.change_id, ch.project_id, c.status, c.status_reason, c.base_generation,
          c.artifact_ref, c.composed_commit, c.composed_tree, c.change_set_ids_json, c.plan_json,
          c.score_json, c.base_tree, c.promoted_generation, c.created_at, c.updated_at,
-         ch.goal AS change_goal, ch.status AS change_status, ch.risk_tier AS change_risk_tier,
+         ch.goal AS change_goal, ch.title AS change_title, ch.status AS change_status, ch.risk_tier AS change_risk_tier,
          a.id AS approval_id, a.decision AS approval_decision, a.approver_user_id AS approval_user_id,
          a.candidate_tree AS approval_tree, a.policy_version AS approval_policy,
          a.reason AS approval_reason, a.created_at AS approval_at
@@ -202,6 +204,7 @@ export const verification = new Hono<AppEnv>().get(
         changes.set(r.change_id, {
           id: r.change_id,
           goal: r.change_goal,
+          title: changeTitle(r.change_title, r.change_goal),
           status: r.change_status,
           riskTier: r.change_risk_tier,
         });

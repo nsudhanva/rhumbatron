@@ -1,5 +1,5 @@
 import { createClerkClient } from "@clerk/backend";
-import { ChangeClarification } from "@rhumbatron/protocol";
+import { ChangeClarification, changeTitle } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
@@ -107,6 +107,8 @@ export type RequestColumns = {
   requester_rank: number | null;
   /** Set while the Change is `needs_input`. A query that does not select it reads null. */
   clarification_json?: string | null;
+  /** Stored title of the clarification's related Change. A query that does not select it reads null. */
+  related_title?: string | null;
   outcome: string | null;
   outcome_reason: string | null;
   outcome_winner_change_id: string | null;
@@ -115,6 +117,10 @@ export type RequestColumns = {
   display_name: string | null;
   email: string | null;
 };
+
+/** Select expression for `related_title` on a Change row aliased `c`. */
+export const RELATED_TITLE = `(SELECT o.title FROM changes o
+  WHERE o.id = json_extract(c.clarification_json, '$.relatedChangeId')) AS related_title`;
 
 const OUTCOMES = new Set([
   "selected",
@@ -125,11 +131,19 @@ const OUTCOMES = new Set([
 ]);
 
 /** The stored clarification, or null when there is none or it does not parse. */
-function clarificationOf(json: string | null | undefined): ChangeClarification | null {
+function clarificationOf(
+  json: string | null | undefined,
+  relatedTitle: string | null | undefined,
+): ChangeClarification | null {
   if (!json) return null;
   try {
     const parsed = ChangeClarification.safeParse(JSON.parse(json));
-    return parsed.success ? parsed.data : null;
+    if (!parsed.success) return null;
+    const { relatedGoal } = parsed.data;
+    return {
+      ...parsed.data,
+      relatedTitle: relatedGoal ? changeTitle(relatedTitle, relatedGoal) : null,
+    };
   } catch {
     return null;
   }
@@ -158,7 +172,7 @@ export function requestFields(row: RequestColumns, viewerUserId: string) {
           }
         : null,
     supersedesChangeId: row.supersedes_change_id,
-    clarification: clarificationOf(row.clarification_json),
+    clarification: clarificationOf(row.clarification_json, row.related_title),
   };
 }
 
@@ -526,7 +540,7 @@ export const members = new Hono<AppEnv>()
     },
   )
 
-  /** Cross-request conflicts and duplicates of one Change, with both goals and the cited criteria. */
+  /** Cross-request conflicts and duplicates of one Change: both goals and titles, and the cited criteria. */
   .get(
     "/v1/changes/:changeId/request-conflicts",
     requireAuth,
@@ -543,9 +557,9 @@ export const members = new Hono<AppEnv>()
       const rows = await c.env.DB.prepare(
         `SELECT r.id, r.verdict, r.round, r.criteria_json, r.review_json, r.policy, r.winner_change_id, r.loser_change_id,
                 r.decided_by, r.decided_at, r.created_at,
-                a.id AS a_id, a.goal AS a_goal, a.status AS a_status, a.created_by AS a_by,
+                a.id AS a_id, a.goal AS a_goal, a.title AS a_title, a.status AS a_status, a.created_by AS a_by,
                 ua.display_name AS a_name, ua.email AS a_email,
-                b.id AS b_id, b.goal AS b_goal, b.status AS b_status, b.created_by AS b_by,
+                b.id AS b_id, b.goal AS b_goal, b.title AS b_title, b.status AS b_status, b.created_by AS b_by,
                 ub.display_name AS b_name, ub.email AS b_email
          FROM request_conflicts r
          JOIN changes a ON a.id = r.change_a LEFT JOIN users ua ON ua.id = a.created_by
@@ -558,6 +572,7 @@ export const members = new Hono<AppEnv>()
       const side = (r: Record<string, string | null>, k: "a" | "b") => ({
         changeId: r[`${k}_id`],
         goal: r[`${k}_goal`],
+        title: changeTitle(r[`${k}_title`], r[`${k}_goal`] ?? ""),
         status: r[`${k}_status`],
         requester: {
           userId: r[`${k}_by`],

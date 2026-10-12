@@ -1,5 +1,5 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
-import { apiData } from "@rhumbatron/protocol";
+import { apiData, changeTitle } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
@@ -103,6 +103,7 @@ const WorkspaceView = z.object({
     z.object({
       id: z.string(),
       goal: z.string(),
+      title: z.string(),
       status: z.string(),
       baseGeneration: z.number().int(),
       createdAt: z.string(),
@@ -177,6 +178,7 @@ function parseDiffStat(diffStat: string, names: string[]) {
 type ChangeRow = {
   id: string;
   goal: string;
+  title: string | null;
   status: string;
   base_generation: number;
   created_at: string;
@@ -250,7 +252,7 @@ const candidateFork = (candidateId: string) => `cand-${candidateId.slice(5)}`;
 async function loadWorkspace(env: Env, projectId: string): Promise<WorkspaceView> {
   const canonical = await projectRoot(env, projectId).getCanonical();
   const changeRows = await env.DB.prepare(
-    `SELECT id, goal, status, base_generation, created_at FROM changes
+    `SELECT id, goal, title, status, base_generation, created_at FROM changes
      WHERE project_id = ? ORDER BY created_at DESC LIMIT ?`,
   )
     .bind(projectId, CHANGE_LIMIT + 1)
@@ -337,6 +339,7 @@ async function loadWorkspace(env: Env, projectId: string): Promise<WorkspaceView
     changes: changes.map((c) => ({
       id: c.id,
       goal: c.goal,
+      title: changeTitle(c.title, c.goal),
       status: c.status,
       baseGeneration: c.base_generation,
       createdAt: c.created_at,

@@ -1,4 +1,4 @@
-import { apiData } from "@rhumbatron/protocol";
+import { apiData, changeTitle } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
@@ -119,7 +119,7 @@ const read = (alias: string, idSql: string) =>
  * re-checks it with compare-and-swap.)
  */
 const VERIFIED_SQL = `
-SELECT c.id AS candidate_id, c.change_id, ch.project_id, p.name AS project_name, ch.goal,
+SELECT c.id AS candidate_id, c.change_id, ch.project_id, p.name AS project_name, ch.goal, ch.title,
        ch.risk_tier, c.base_generation, c.updated_at,
        json_extract(c.plan_json, '$.humanApprovalRequired') AS approval_required,
        json_extract(c.score_json, '$.promotable') AS promotable,
@@ -158,7 +158,7 @@ ORDER BY d.last_seen_at DESC LIMIT ${PER_KIND}`;
  * item. The id carries the limit, so a new stop on the same Change is a new item.
  */
 const blockedPart = (where: string) => `
-SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.status, ch.blocked_limit,
+SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.title, ch.status, ch.blocked_limit,
        ch.blocked_reason, ch.budget_usd, ch.updated_at AS updated_at, r.read_at
 FROM changes ch
 ${MINE("ch.project_id")}
@@ -173,7 +173,7 @@ ORDER BY updated_at DESC LIMIT ${PER_KIND}`;
 
 /** Candidates in a final state within the window: `rejected` and `promoted`. `?2` = since. */
 const finishedCandidates = (status: "rejected" | "promoted", kind: NotificationKind) => `
-SELECT c.id AS candidate_id, c.change_id, ch.project_id, p.name AS project_name, ch.goal,
+SELECT c.id AS candidate_id, c.change_id, ch.project_id, p.name AS project_name, ch.goal, ch.title,
        c.status_reason, c.promoted_generation, c.base_generation, c.updated_at, r.read_at
 FROM candidates c
 CROSS JOIN changes ch ON ch.id = c.change_id
@@ -196,7 +196,7 @@ ORDER BY cf.updated_at DESC LIMIT ${PER_KIND}`;
 
 /** Changes completed within the window. */
 const COMPLETED_SQL = `
-SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.updated_at, r.read_at
+SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.title, ch.updated_at, r.read_at
 FROM changes ch
 ${MINE("ch.project_id")}
 ${read("r", `'change_completed:' || ch.id`)}
@@ -226,7 +226,7 @@ ORDER BY r.finished_at DESC LIMIT ${PER_KIND}`;
  * `?2` = since.
  */
 const NOT_SELECTED_SQL = `
-SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.outcome_reason, ch.updated_at,
+SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.title, ch.outcome_reason, ch.updated_at,
        r.read_at
 FROM changes ch
 ${MINE("ch.project_id")}
@@ -241,7 +241,7 @@ ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
  * holds. The ID carries the round, so a new question of the same Change is a new item.
  */
 const NEEDS_INPUT_SQL = `
-SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.updated_at,
+SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.title, ch.updated_at,
        ch.clarification_json, r.read_at
 FROM changes ch
 ${MINE("ch.project_id")}
@@ -259,6 +259,7 @@ type VerifiedRow = Base & {
   candidate_id: string;
   change_id: string;
   goal: string;
+  title: string | null;
   risk_tier: string | null;
   base_generation: number;
   updated_at: string;
@@ -281,6 +282,7 @@ type DeadLetterRow = Base & {
 type BlockedRow = Base & {
   id: string;
   goal: string;
+  title: string | null;
   status: string;
   blocked_limit: string | null;
   blocked_reason: string | null;
@@ -291,6 +293,7 @@ type FinishedRow = Base & {
   candidate_id: string;
   change_id: string;
   goal: string;
+  title: string | null;
   status_reason: string | null;
   promoted_generation: number | null;
   base_generation: number;
@@ -304,7 +307,7 @@ type ConflictRow = Base & {
   left_summary: string | null;
   right_summary: string | null;
 };
-type CompletedRow = Base & { id: string; goal: string; updated_at: string };
+type CompletedRow = Base & { id: string; goal: string; title: string | null; updated_at: string };
 type NeedsInputRow = CompletedRow & { clarification_json: string | null };
 type ReleaseRow = Base & {
   id: string;
@@ -320,6 +323,7 @@ type ReleaseRow = Base & {
 type NotSelectedRow = Base & {
   id: string;
   goal: string;
+  title: string | null;
   outcome_reason: string | null;
   updated_at: string;
 };
@@ -349,7 +353,7 @@ function verifiedItem(row: VerifiedRow): NotificationView | null {
       severity: "action",
       title: "Approval needed to promote a Candidate",
       body: joinParts(
-        clip(row.goal, 140),
+        changeTitle(row.title, row.goal),
         `Policy requires a human decision for ${tier}-risk Changes`,
       ),
       createdAt: row.updated_at,
@@ -364,7 +368,10 @@ function verifiedItem(row: VerifiedRow): NotificationView | null {
     kind: "promotion_ready",
     severity: "action",
     title: `Ready to promote: S${row.base_generation} → S${next}`,
-    body: joinParts(clip(row.goal, 140), gated ? "Approved" : "Verified, no approval required"),
+    body: joinParts(
+      changeTitle(row.title, row.goal),
+      gated ? "Approved" : "Verified, no approval required",
+    ),
     createdAt:
       row.approval_at && row.approval_at > row.updated_at ? row.approval_at : row.updated_at,
     read: row.promote_read !== null,
@@ -403,7 +410,7 @@ function blockedItem(row: BlockedRow): NotificationView {
       row.status === "budget_blocked"
         ? "Change stopped: budget reached"
         : "Change stopped by a limit",
-    body: joinParts(clip(reason, 160), clip(row.goal, 100)),
+    body: joinParts(clip(reason, 160), changeTitle(row.title, row.goal)),
     href: `/changes/${row.id}`,
     createdAt: row.updated_at,
     read: !!row.read_at,
@@ -421,7 +428,7 @@ function rejectedItem(row: FinishedRow): NotificationView {
     title: "Candidate rejected",
     body: joinParts(
       clip(row.status_reason ?? "Rejected by verification", 160),
-      clip(row.goal, 100),
+      changeTitle(row.title, row.goal),
     ),
     href: `/candidates/${row.candidate_id}`,
     createdAt: row.updated_at,
@@ -439,7 +446,7 @@ function promotedItem(row: FinishedRow): NotificationView {
     kind: "promoted",
     severity: "info",
     title: `Promoted: S${to - 1} → S${to}`,
-    body: clip(row.goal, 160),
+    body: changeTitle(row.title, row.goal),
     href: `/candidates/${row.candidate_id}`,
     createdAt: row.updated_at,
     read: !!row.read_at,
@@ -473,7 +480,7 @@ function completedItem(row: CompletedRow): NotificationView {
     kind: "change_completed",
     severity: "info",
     title: "Change completed",
-    body: clip(row.goal, 160),
+    body: changeTitle(row.title, row.goal),
     href: `/changes/${row.id}`,
     createdAt: row.updated_at,
     read: !!row.read_at,
@@ -528,7 +535,7 @@ function notSelectedItem(row: NotSelectedRow): NotificationView {
     title: "Your request was not selected",
     body: joinParts(
       clip(row.outcome_reason ?? "Another request was chosen instead", 160),
-      clip(row.goal, 100),
+      changeTitle(row.title, row.goal),
     ),
     href: `/changes/${row.id}`,
     createdAt: row.updated_at,
@@ -556,7 +563,7 @@ function needsInputItem(row: NeedsInputRow): NotificationView {
     kind: "request_needs_input",
     severity: "action",
     title,
-    body: joinParts(clip(clarification.summary ?? "", 160), clip(row.goal, 100)),
+    body: joinParts(clip(clarification.summary ?? "", 160), changeTitle(row.title, row.goal)),
     href: `/changes/${row.id}`,
     createdAt: row.updated_at,
     read: !!row.read_at,

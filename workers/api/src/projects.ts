@@ -4,6 +4,8 @@ import {
   Change,
   CreateChangeRequest,
   CreateProjectRequest,
+  changeTitle,
+  fallbackTitle,
   Project,
   type ProjectPolicies,
   Task,
@@ -21,7 +23,7 @@ import {
   type ProjectRole,
   projectRole,
 } from "./identity.ts";
-import { ensureProfile, type RequestColumns, requestFields } from "./members.ts";
+import { ensureProfile, RELATED_TITLE, type RequestColumns, requestFields } from "./members.ts";
 import { changeBudgetUsd } from "./project-settings.ts";
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -53,6 +55,7 @@ type ChangeRow = {
   id: string;
   project_id: string;
   goal: string;
+  title: string | null;
   status: string;
   base_generation: number;
   budget_usd: number;
@@ -84,6 +87,7 @@ function toChange(row: ChangeRow): Change {
     id: row.id,
     projectId: row.project_id,
     goal: row.goal,
+    title: changeTitle(row.title, row.goal),
     acceptanceCriteria: JSON.parse(row.acceptance_criteria_json) as string[],
     invariants: JSON.parse(row.invariants_json) as string[],
     status: Change.shape.status.parse(row.status),
@@ -298,10 +302,10 @@ export const projects = new Hono<AppEnv>()
       return fail(c, 404, "not_found", "Project not found");
     }
     const rows = await c.env.DB.prepare(
-      `SELECT c.id, c.goal, c.status, c.risk_tier, c.budget_usd, c.created_at, c.created_by,
-              c.requester_rank, c.outcome, c.outcome_reason, c.outcome_winner_change_id,
-              c.outcome_decided_by, c.supersedes_change_id, c.clarification_json,
-              u.display_name, u.email,
+      `SELECT c.id, c.goal, c.title, c.status, c.risk_tier, c.budget_usd, c.created_at,
+              c.created_by, c.requester_rank, c.outcome, c.outcome_reason,
+              c.outcome_winner_change_id, c.outcome_decided_by, c.supersedes_change_id,
+              c.clarification_json, u.display_name, u.email, ${RELATED_TITLE},
               (SELECT COUNT(*) FROM tasks t WHERE t.change_id = c.id) AS task_count,
               (SELECT COUNT(*) FROM tasks t WHERE t.change_id = c.id AND t.status = 'completed') AS completed_count
        FROM changes c LEFT JOIN users u ON u.id = c.created_by
@@ -312,6 +316,7 @@ export const projects = new Hono<AppEnv>()
         {
           id: string;
           goal: string;
+          title: string | null;
           status: string;
           risk_tier: string | null;
           budget_usd: number;
@@ -324,6 +329,7 @@ export const projects = new Hono<AppEnv>()
       data: (rows.results ?? []).map((r) => ({
         id: r.id,
         goal: r.goal,
+        title: changeTitle(r.title, r.goal),
         status: r.status,
         riskTier: r.risk_tier,
         budgetUsd: r.budget_usd,
@@ -519,7 +525,7 @@ export const projects = new Hono<AppEnv>()
       // The dashboard projection is eventually consistent (AGENTS.md section 59).
       await projectView(c.env, projectId).applyDelta({
         upsert: {
-          activeChanges: [{ id: changeId, status: "created", label: body.goal.slice(0, 80) }],
+          activeChanges: [{ id: changeId, status: "created", label: fallbackTitle(body.goal) }],
         },
       });
 

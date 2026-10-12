@@ -550,10 +550,12 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         await step.do("stop unselected request", async () => {
           // Keep what was asked for visible on the request, although nothing of it is built.
           await this.env.DB.prepare(
-            `UPDATE changes SET acceptance_criteria_json = ?, invariants_json = ?, risk_tier = ?
+            `UPDATE changes SET title = ?, acceptance_criteria_json = ?, invariants_json = ?,
+               risk_tier = ?
              WHERE id = ? AND status = 'compiling'`,
           )
             .bind(
+              planned.plan.title || null,
               JSON.stringify(planned.plan.acceptanceCriteria),
               JSON.stringify(planned.plan.invariants),
               planned.plan.riskTier,
@@ -704,10 +706,12 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       await this.env.DB.batch([
         ...statements,
         this.env.DB.prepare(
-          `UPDATE changes SET status = 'running', risk_tier = ?, acceptance_criteria_json = ?,
-             invariants_json = ?, work_graph_ref = ?, updated_at = ?
+          `UPDATE changes SET status = 'running', title = ?, risk_tier = ?,
+             acceptance_criteria_json = ?, invariants_json = ?, work_graph_ref = ?, updated_at = ?
            WHERE id = ? AND status = 'compiling'`,
         ).bind(
+          // Blank when the planner gave no usable title: the API then derives one from the goal.
+          plan.title || null,
           plan.riskTier,
           JSON.stringify(plan.acceptanceCriteria),
           JSON.stringify(plan.invariants),

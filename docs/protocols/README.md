@@ -7,6 +7,7 @@ The Zod schemas in `packages/protocol/src` are the protocol source of truth.
 | `event.ts` | Event envelope and Event types (AGENTS.md section 17). |
 | `command.ts` | Queue command envelope (section 20). |
 | `project.ts` | Project, Change, Change statuses, policies, create requests, requesters, request outcomes, and clarifications. |
+| `change-title.ts` | Short Change titles: `clampTitle` for the Root Planner title and `fallbackTitle` for a title from the goal. |
 | `work-graph.ts` | Work Graph, Task, and the agent wake payload. |
 | `conflict.ts` | Intent, Challenge, and conflict reports (sections 26 and 32). |
 | `candidate.ts` | Candidate, Evidence, Verification Plan, acceptance results, Integration Judge verdict, Candidate selection, approval, and promotion (sections 34 and 36). |
@@ -87,7 +88,7 @@ An owner shares a Project with a collaborator by email (`workers/api/src/members
 | DELETE | `/v1/projects/:projectId/members/:userId` | Owner, or a collaborator for their own user ID (leave) | `userId` and `removed: true`. The owner row cannot be removed. A collaborator who leaves gets their open requests cancelled first. | 403, 404 (no such collaborator) |
 | GET | `/v1/invitations` | Signed-in user | Up to 20 pending invitations for the verified emails of the caller. Each item has `projectName` and `invitedBy`. | None |
 | POST | `/v1/invitations/:invitationId/accept` | The invited user | `projectId` and `role`. A repeat by the same user is safe. | 404, 409 (revoked or expired) |
-| GET | `/v1/changes/:changeId/request-conflicts` | Member | Up to 10 cross-request conflicts and duplicates of the Change: verdict, round, both goals, both requesters, the cited criteria or covered quotes, the policy, and the winner. | 404 |
+| GET | `/v1/changes/:changeId/request-conflicts` | Member | Up to 10 cross-request conflicts and duplicates of the Change: verdict, round, both goals and titles, both requesters, the cited criteria or covered quotes, the policy, and the winner. | 404 |
 | POST | `/v1/changes/:changeId/clarify` | Owner, or the requester of the Change | `ClarifyChangeOutcome`: `recorded` with `changeStatus`, `action`, `round`, and `repeated`. | 400 (malformed body, unknown question), 403, 404, 409 (not waiting for an answer) |
 
 An invitation binds to a verified email of the signed-in user. If the email is not a verified email of the user, `accept` returns the same 404 as for a missing invitation. The membership binds to the user ID, not to the email.
@@ -119,10 +120,11 @@ Access to a Project does not give permission for each action. A collaborator can
 | Response | Field | Meaning |
 |---|---|---|
 | `GET /v1/projects` and `GET /v1/projects/:projectId` | `role` | `owner` or `collaborator`. The caller's role in the Project. |
+| Every response that names a Change | `title` | Short display title, at most 48 characters. The Root Planner writes it with the Work Graph (D1 `changes.title`, migration `0028_change_titles.sql`). Before planning, after a planning failure, and for a Change created with `startPlanning: false`, it is `fallbackTitle(goal)`: the first sentence or clause of the goal without opening filler such as "please" or "I want", at most 6 words. The responses are the Change, the Change list, the request-conflict sides, the cost, verification, workspace, and Product Graph Change lists, and the code version `change`. Agent tasks carry it as `changeTitle`. Notification bodies use it in place of the goal. `goal` stays the full request text. |
 | Change list and `GET /v1/changes/:changeId` | `requester` | Who asked for the Change: `userId`, `name`, `rank` (display order only: owner 0, collaborator 10), and `isYou`. |
 | Change list and `GET /v1/changes/:changeId` | `outcome` | How the request ended after the intake gate or the cross-request check. Null when no check decided it. |
 | Change list and `GET /v1/changes/:changeId` | `supersedesChangeId` | Null for every request the API creates. |
-| Change list and `GET /v1/changes/:changeId` | `clarification` | `ChangeClarification` while the Change is `needs_input`, else null: `kind` (`unclear`, `duplicate`, `conflict`), `summary`, `questions` (`id`, `text`, optional `options`), `relatedChangeId`, `relatedGoal`, `askedAt`, `round` (1 to 3). |
+| Change list and `GET /v1/changes/:changeId` | `clarification` | `ChangeClarification` while the Change is `needs_input`, else null: `kind` (`unclear`, `duplicate`, `conflict`), `summary`, `questions` (`id`, `text`, optional `options`), `relatedChangeId`, `relatedGoal`, `relatedTitle` (the related Change's title, added on read), `askedAt`, `round` (1 to 3). |
 
 ### Change statuses for requests
 

@@ -44,6 +44,11 @@ export type PlannedTask = z.infer<typeof PlannedTask>;
 
 /** Root Planner output contract (AGENTS.md section 22.1, P5-02). */
 export const WorkGraphPlan = z.object({
+  /** Cut to MAX_TITLE_CHARS at a word boundary after parsing (`clampTitle`). */
+  title: z
+    .string()
+    .max(200)
+    .describe("A short title for the request, at most 6 words, for example Kanban feature"),
   acceptanceCriteria: z.array(z.string().min(3).max(300)).min(1).max(12),
   invariants: z.array(z.string().min(3).max(300)).max(12),
   riskTier: RiskTier,

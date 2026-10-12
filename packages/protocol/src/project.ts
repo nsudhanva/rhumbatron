@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_TITLE_CHARS } from "./change-title.ts";
 import { CanonicalGeneration, Id, RiskTier, Timestamp } from "./common.ts";
 
 /** URL-safe Project slug, for example `acme-shop`. */
@@ -108,6 +109,8 @@ export const ChangeClarification = z.object({
   questions: z.array(ChangeQuestion).max(3),
   relatedChangeId: Id.nullable(),
   relatedGoal: z.string().nullable(),
+  /** Short title of the related Change. The API adds it on read; the stored JSON has none. */
+  relatedTitle: z.string().nullable().optional(),
   askedAt: Timestamp,
   round: z.number().int().min(1).max(3),
 });
@@ -165,6 +168,8 @@ export const Change = z.object({
   id: Id,
   projectId: Id,
   goal: z.string().min(1).max(4000),
+  /** Short display title: the Root Planner's title, else `fallbackTitle(goal)` (change-title.ts). */
+  title: z.string().min(1).max(MAX_TITLE_CHARS),
   acceptanceCriteria: z.array(z.string()),
   invariants: z.array(z.string()),
   status: ChangeStatus,

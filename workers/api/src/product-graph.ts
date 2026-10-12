@@ -1,6 +1,6 @@
 import { indexKeys, type ProductGraphStore } from "@rhumbatron/context-compiler";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
-import { ProjectPolicy } from "@rhumbatron/protocol";
+import { changeTitle, ProjectPolicy } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
@@ -122,7 +122,7 @@ export type ProductGraph = {
     | { kind: "none" };
   /** Runtime wiring files of the indexed tree, which the graph does not show as areas. */
   wiringFiles: readonly string[];
-  changes: { id: string; goal: string; status: string; createdAt: string }[];
+  changes: { id: string; goal: string; title: string; status: string; createdAt: string }[];
   nodes: ProductGraphNode[];
   edges: ProductGraphEdge[];
   counts: {
@@ -136,7 +136,13 @@ export type ProductGraph = {
   truncated: boolean;
 };
 
-type ChangeRow = { id: string; goal: string; status: string; created_at: string };
+type ChangeRow = {
+  id: string;
+  goal: string;
+  title?: string | null;
+  status: string;
+  created_at: string;
+};
 type TaskRow = {
   id: string;
   change_id: string;
@@ -423,6 +429,7 @@ function deriveProductGraph(input: DeriveInput): ProductGraph {
     changes: input.changes.map((c) => ({
       id: c.id,
       goal: c.goal,
+      title: changeTitle(c.title, c.goal),
       status: c.status,
       createdAt: c.created_at,
     })),
@@ -510,7 +517,7 @@ export const productGraph = new Hono<AppEnv>().get(
 
     const changeRows = await db
       .prepare(
-        `SELECT id, goal, status, created_at FROM changes WHERE project_id = ?
+        `SELECT id, goal, title, status, created_at FROM changes WHERE project_id = ?
          ORDER BY created_at DESC LIMIT ${CHANGE_LIMIT}`,
       )
       .bind(projectId)

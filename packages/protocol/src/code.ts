@@ -319,7 +319,7 @@ export const CodeVersion = z.object({
   live: z.boolean(),
   /** When the generation was promoted (or the Project was created, for S0). */
   at: z.string().nullable(),
-  change: z.object({ id: z.string(), goal: z.string() }).nullable(),
+  change: z.object({ id: z.string(), goal: z.string(), title: z.string() }).nullable(),
   candidateId: z.string().nullable(),
   changeSets: z.array(ChangeSetAttribution),
 });
