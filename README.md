@@ -36,7 +36,25 @@ flowchart LR
 
 ## Built on Cloudflare
 
-Workers, Artifacts, Durable Objects, Sandbox, Dynamic Workers, Workflows, Queues, K2, D1, R2, KV, Vectorize, Workers AI, AI Gateway, and Browser Run. Terraform manages all resources. The agents use Claude Sonnet 5.5 and Claude Haiku 5.5.
+| Cloudflare product | Use in Rhumbatron |
+|---|---|
+| [Workers](https://developers.cloudflare.com/workers/) | Ten Workers: web, API, coordinator, agents, event router, integration, indexer, Sandbox host, live apps, and docs |
+| [Artifacts](https://developers.cloudflare.com/artifacts/) | One Git repository for each Project, and one fork for each agent, Candidate, and edit session |
+| [Durable Objects](https://developers.cloudflare.com/durable-objects/) | Canonical Generation and promotion, Claims and Intents, live views, agent state, and app data |
+| [Sandbox](https://developers.cloudflare.com/sandbox/) | Isolated Linux for agent commands, builds, and tests |
+| [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/) | The live app of each Project and its Candidate previews |
+| [Workflows](https://developers.cloudflare.com/workflows/) | The Change, Candidate verification, and release processes |
+| [Queues](https://developers.cloudflare.com/queues/) | Agent wake-ups, verification, indexing, release, and dead letters |
+| [K2](https://developers.cloudflare.com/k2/) | The durable event log |
+| [D1](https://developers.cloudflare.com/d1/) | Projects, Changes, Tasks, Candidates, and the evidence index |
+| [R2](https://developers.cloudflare.com/r2/) | Evidence reports, context packets, app bundles, and the event archive |
+| [Workers KV](https://developers.cloudflare.com/kv/) | Project policy |
+| [Vectorize](https://developers.cloudflare.com/vectorize/) | Semantic memory of the code and of previous Changes |
+| [Workers AI](https://developers.cloudflare.com/workers-ai/) | Fast decisions, embeddings, and reranking for request intake |
+| [AI Gateway](https://developers.cloudflare.com/ai-gateway/) | Access to the Claude models, with spend limits |
+| [Browser Run](https://developers.cloudflare.com/browser-run/) | Browser checks of Candidate previews |
+
+Terraform manages all Cloudflare resources. The agents use Claude Sonnet 5.5 and Claude Haiku 5.5.
 
 ```mermaid
 flowchart LR
@@ -56,7 +74,21 @@ flowchart LR
   integ -->|release| apps[Dynamic Workers<br/>live apps]
 ```
 
-The [architecture guide](docs/architecture/README.md) gives the details.
+The [architecture guide](https://docs.rhumbatron.com/architecture/) gives the details.
+
+## Documentation
+
+| Topic | Page |
+|---|---|
+| How a request becomes a release | [Change lifecycle](https://docs.rhumbatron.com/architecture/change-lifecycle/) |
+| Agents, models, and model routing | [Agents and models](https://docs.rhumbatron.com/architecture/agents-and-models/) |
+| Git workspaces, Candidates, and checks | [Source and verification](https://docs.rhumbatron.com/architecture/source-and-verification/) |
+| Events, Queues, and the outbox | [Events and commands](https://docs.rhumbatron.com/architecture/events-and-commands/) |
+| Roles, request review, and the Board | [Shared Projects](https://docs.rhumbatron.com/architecture/shared-projects/) |
+| Live apps on Dynamic Workers | [Live apps](https://docs.rhumbatron.com/architecture/live-apps/) |
+| API routes and schemas | [Protocols](https://docs.rhumbatron.com/protocols/) |
+| Deployment and cost limits | [Deploy](https://docs.rhumbatron.com/operations/deploy/), [Costs](https://docs.rhumbatron.com/operations/costs/) |
+| Design decisions | [Architecture decision records](https://docs.rhumbatron.com/adr/) |
 
 ## Try it
 
@@ -78,7 +110,7 @@ bun run dev
 
 Add your Clerk development keys to `apps/web/.env.local`. The web app runs on `localhost:5173` and the API on `localhost:8787`.
 
-The local runtime simulates D1, R2, KV, Queues, Durable Objects, and Workflows. A full agent run needs Artifacts, K2, and Workers AI, so it needs a Cloudflare deployment. To deploy to your own account, follow the [deployment runbook](docs/operations/deploy.md).
+The local runtime simulates D1, R2, KV, Queues, Durable Objects, and Workflows. A full agent run needs Artifacts, K2, and Workers AI, so it needs a Cloudflare deployment. To deploy to your own account, follow the [deployment runbook](https://docs.rhumbatron.com/operations/deploy/).
 
 ## Team
 
