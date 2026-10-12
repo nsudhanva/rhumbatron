@@ -30,6 +30,13 @@ export const changeMeterSql = (alias: string) =>
   `(SELECT count FROM usage_counters WHERE day = '${CHANGE_METER_DAY}'
      AND counter = 'change-usd-micro:' || ${alias}.id)`;
 
+/**
+ * Select expression: the all-time total of one meter in micro-USD, summed over every month.
+ * The user and Project meters survive Project deletion; the Change rows do not.
+ */
+export const meterTotalSql = (prefix: string, idExpr: string) =>
+  `(SELECT COALESCE(SUM(count), 0) FROM usage_counters WHERE counter = '${prefix}' || ${idExpr})`;
+
 /** The monthly rows of one meter counter, for the given months. Missing months are 0. */
 export async function monthlyMeter(
   db: D1Database,

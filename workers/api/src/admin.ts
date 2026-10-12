@@ -30,7 +30,14 @@ import { type AuthVariables, requireAuth } from "./auth.ts";
 import { anthropicMonthlyBudgetUsd, sandboxMonthlySeconds } from "./cost.ts";
 import { fail, respond, validate } from "./http.ts";
 import { requesterName } from "./members.ts";
-import { changeMeterSql, microToUsd, monthList, monthlyMeter, monthOf } from "./spend.ts";
+import {
+  changeMeterSql,
+  meterTotalSql,
+  microToUsd,
+  monthList,
+  monthlyMeter,
+  monthOf,
+} from "./spend.ts";
 
 /**
  * Platform admin routes (ADR 0033, docs/protocols/README.md "Platform admin").
@@ -178,7 +185,8 @@ const USER_COLUMNS = `u.id, u.display_name, u.email, u.access_status, u.monthly_
   (SELECT COUNT(*) FROM changes c WHERE c.created_by = u.id) AS requests,
   (SELECT count FROM usage_counters WHERE day = ?1 AND counter = 'user-usd-micro:' || u.id)
     AS month_micro,
-  (SELECT COALESCE(SUM(${changeMeterSql("c")}), 0) FROM changes c WHERE c.created_by = u.id)
+  MAX(${meterTotalSql("user-usd-micro:", "u.id")},
+    (SELECT COALESCE(SUM(${changeMeterSql("c")}), 0) FROM changes c WHERE c.created_by = u.id))
     AS all_micro`;
 
 type UserRow = {
@@ -484,7 +492,8 @@ export const admin = new Hono<AppEnv>()
            (SELECT COUNT(*) FROM project_members pm WHERE pm.project_id = p.id) AS members,
            (SELECT count FROM usage_counters WHERE day = ?1 AND counter = 'project-usd-micro:' || p.id)
              AS month_micro,
-           (SELECT COALESCE(SUM(${changeMeterSql("c")}), 0) FROM changes c WHERE c.project_id = p.id)
+           MAX(${meterTotalSql("project-usd-micro:", "p.id")},
+             (SELECT COALESCE(SUM(${changeMeterSql("c")}), 0) FROM changes c WHERE c.project_id = p.id))
              AS all_micro,
            (SELECT COUNT(*) FROM changes c WHERE c.project_id = p.id) AS changes,
            (SELECT a.slug FROM app_deployments a WHERE a.project_id = p.id
