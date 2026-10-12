@@ -86,7 +86,7 @@ function splitTitle(markdown: string, source: string): { title: string; body: st
 
 /** Keeps the README parts that describe the product; setup and command tables live elsewhere. */
 function landingBody(readme: string): string {
-  const keep = new Set(["The problem", "How it works", "Design choices", "Built on Cloudflare"]);
+  const keep = new Set(["How it works", "Key Features", "Built on Cloudflare"]);
   const [intro = "", ...rest] = readme.split(/^(?=## )/m);
   const kept = rest.filter((part) => keep.has(/^## (.+)$/m.exec(part)?.[1]?.trim() ?? ""));
   const links = [
