@@ -3,20 +3,33 @@ import { createServerEntry } from "@tanstack/react-start/server-entry";
 
 const start = createStartHandler(defaultStreamHandler);
 
+/** `rel` of a route-chunk preload that waits for the entry loader below. */
+const HELD_PRELOAD = "x-modulepreload";
+
 /**
  * Starts the client entry module after the first contentful paint. The server-rendered page is
- * complete without JavaScript, so the stylesheet and fonts get the connection first and the page
- * paints before about 300 kB of JavaScript arrives. The loader puts the same `<script>` element
- * back in the same place, so hydration sees the markup it expects. A hidden tab never paints, so
- * it starts at once there; otherwise it starts after 1.5 s at the latest.
+ * complete without JavaScript, so the stylesheet and fonts get the connection alone and the page
+ * paints before about 300 kB of JavaScript arrives. The route-chunk preloads start at the same
+ * time: the HTML carries them with an inert `rel` (`deferEntryScript`), and the loader restores
+ * `modulepreload`, so they download in parallel while the entry module loads. The loader puts the
+ * same `<script>` element back in the same place, so hydration sees the markup it expects.
+ *
+ * A hidden tab never paints, so it starts at once there, and when the tab becomes hidden. No
+ * script runs before the paint: a paint that the browser shows late is not followed by script
+ * work that delays it more. After 5 s it starts in any case.
  */
 function entryLoader(src: string): string {
-  return `<script>(function(s){var d=0;function go(){if(d)return;d=1;var m=document.createElement("script");m.type="module";m.setAttribute("async","");m.src=${JSON.stringify(src)};s.replaceWith(m)}if(document.visibilityState==="hidden"){go();return}var P=window.PerformanceObserver;if(P&&P.supportedEntryTypes&&P.supportedEntryTypes.indexOf("paint")>=0){var o=new P(function(l){if(l.getEntriesByName("first-contentful-paint").length){o.disconnect();go()}});o.observe({type:"paint",buffered:true})}else{requestAnimationFrame(function(){setTimeout(go,0)})}setTimeout(go,1500)})(document.currentScript)</script>`;
+  return `<script>(function(s){var d=0;function go(){if(d)return;d=1;var l=document.querySelectorAll('link[rel="${HELD_PRELOAD}"]');for(var i=0;i<l.length;i++)l[i].rel="modulepreload";var m=document.createElement("script");m.type="module";m.setAttribute("async","");m.src=${JSON.stringify(src)};s.replaceWith(m)}function h(){if(document.visibilityState==="hidden")go()}h();document.addEventListener("visibilitychange",h);var P=window.PerformanceObserver;if(P&&P.supportedEntryTypes&&P.supportedEntryTypes.indexOf("paint")>=0){new P(function(e,o){if(e.getEntriesByName("first-contentful-paint").length){o.disconnect();go()}}).observe({type:"paint",buffered:true})}else{requestAnimationFrame(function(){setTimeout(go,0)})}setTimeout(go,5000)})(document.currentScript)</script>`;
 }
 
 function deferEntryScript(response: Response): Response {
   if (!response.headers.get("content-type")?.startsWith("text/html")) return response;
   return new HTMLRewriter()
+    .on('link[rel="modulepreload"]', {
+      element(element) {
+        element.setAttribute("rel", HELD_PRELOAD);
+      },
+    })
     .on('script[type="module"][src^="/assets/"]', {
       element(element) {
         const src = element.getAttribute("src");

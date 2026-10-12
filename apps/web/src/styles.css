@@ -1,6 +1,7 @@
 /*
  * Import order (DESIGN.md section 15.3): Kumo styles, then Tailwind, then the Modernist theme
- * layer. All raw colors and Kumo overrides live in theme.css.
+ * layer. All raw colors and Kumo overrides live in theme.css. XYFlow's base styles come last, in
+ * the same order as their own stylesheet had, so every page loads one render-blocking stylesheet.
  */
 @import "@fontsource/archivo/400.css";
 @import "@fontsource/archivo/600.css";
@@ -8,6 +9,7 @@
 @import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
 @import "./theme.css";
+@import "@xyflow/react/dist/style.css";
 
 /* Tailwind v4 does not scan node_modules. Kumo classes must be sourced explicitly. */
 @source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";

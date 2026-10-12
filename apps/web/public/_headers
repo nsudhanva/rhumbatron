@@ -1,4 +1,5 @@
-# Workers static assets honour this file (copied to dist/client by the build).
+# Workers static assets honour this file (copied to dist/client by the build; the Terraform
+# worker module sends it as the assets `config.headers`).
 # Fingerprinted build output never changes under the same name.
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

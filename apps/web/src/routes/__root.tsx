@@ -103,9 +103,9 @@ const RouterLink = forwardRef<
 
 /**
  * `HeadContent` with the router's module preloads at low fetch priority. TanStack Start preloads
- * every chunk of the matched routes (about 240 kB gzipped). At low priority they download in
- * parallel after the stylesheet and fonts, so first paint is not delayed and the chunks are
- * cached when the entry script starts after first paint.
+ * every chunk of the matched routes (about 240 kB gzipped). In the first HTML the server entry
+ * holds them until the first contentful paint (src/server.ts), so the stylesheet and fonts load
+ * alone; then they download in parallel with the entry script, at low priority.
  */
 function RouteHead() {
   const tags = useTags().map((tag) =>

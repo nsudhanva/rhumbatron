@@ -48,8 +48,13 @@ resource "cloudflare_worker_version" "this" {
     content_type = m.content_type
   }]
 
+  # Static assets read a `_headers` file only from `config.headers` (Wrangler sends it the same
+  # way), so the file in the assets directory sets the response headers of the assets.
   assets = var.assets_directory == null ? null : {
     directory = var.assets_directory
+    config = fileexists("${var.assets_directory}/_headers") ? {
+      headers = file("${var.assets_directory}/_headers")
+    } : null
   }
 
   annotations = {
