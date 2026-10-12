@@ -284,14 +284,36 @@ describe("platform admin check", () => {
     const overview = apiData(AdminOverview).parse(
       await (await call("admin", "/v1/admin/overview")).json(),
     ).data;
-    expect(overview).toMatchObject({ spendUsd: 0.9, users: { total: 4, pending: 1 } });
+    // The environment meter holds 0.9 USD this month; the user and Project meters 0.4 USD.
+    expect(overview).toMatchObject({
+      spendUsd: 0.9,
+      attributedUsd: 0.4,
+      unattributedUsd: 0.5,
+      users: { total: 4, pending: 1 },
+    });
+    const totals = {
+      monthUsd: 0.4,
+      allTimeUsd: 0.4,
+      unattributedMonthUsd: 0.5,
+      unattributedAllTimeUsd: 0.5,
+    };
     const users = apiData(AdminUserList).parse(
       await (await call("admin", "/v1/admin/users?q=alice")).json(),
-    ).data.users;
-    expect(users).toHaveLength(1);
-    expect(users[0]).toMatchObject({ projects: 1, requests: 1, spendAllTimeUsd: 0.4 });
+    ).data;
+    expect(users.users).toHaveLength(1);
+    expect(users.users[0]).toMatchObject({ projects: 1, requests: 1, spendAllTimeUsd: 0.4 });
+    expect(users.totals).toEqual(totals);
+    const projects = apiData(AdminProjectList).parse(
+      await (await call("admin", "/v1/admin/projects")).json(),
+    ).data;
+    expect(projects.totals).toEqual(totals);
+
+    // Whole months: the task_runs rows plus "Other model calls" add up to the environment meter.
+    const today = new Date().toISOString().slice(0, 10);
     const costs = apiData(AdminCosts).parse(
-      await (await call("admin", "/v1/admin/costs?groupBy=model")).json(),
+      await (
+        await call("admin", `/v1/admin/costs?groupBy=model&from=${MONTH}-01&to=${today}`)
+      ).json(),
     ).data;
     expect(costs.rows).toEqual([
       {
@@ -302,10 +324,33 @@ describe("platform admin check", () => {
         inputTokens: 1000,
         outputTokens: 200,
       },
+      {
+        key: "other",
+        label: "Other model calls (no per-call record)",
+        spendUsd: 0.65,
+        calls: null,
+        inputTokens: null,
+        outputTokens: null,
+      },
     ]);
+    expect(costs.totalUsd).toBeCloseTo(0.9, 6);
+
+    // Grouped by user, the rows read the meters (whole months) and add up to the environment meter.
+    const byUser = apiData(AdminCosts).parse(
+      await (await call("admin", "/v1/admin/costs?groupBy=user")).json(),
+    ).data;
+    expect(byUser.rows.map((r) => [r.key, r.spendUsd])).toEqual([
+      ["usr_alice", 0.4],
+      ["unattributed", 0.5],
+    ]);
+    expect(byUser.totalUsd).toBeCloseTo(0.9, 6);
+    expect(byUser.from.endsWith("-01")).toBe(true);
     const csv = await call("admin", "/v1/admin/costs?groupBy=user&format=csv");
     expect(csv.headers.get("content-type")).toContain("text/csv");
-    expect((await csv.text()).split("\n")[1]).toBe("usr_alice,Alice,0.250000,4,1000,200");
+    expect((await csv.text()).split("\n").slice(1, 3)).toEqual([
+      "usr_alice,Alice,0.400000,,,",
+      "unattributed,Not attributed,0.500000,,,",
+    ]);
   });
 
   it("decides access and approves all pending people", async () => {

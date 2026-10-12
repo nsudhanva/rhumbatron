@@ -1,9 +1,9 @@
 import { Show, SignInButton } from "@clerk/tanstack-react-start";
-import { Button, Input, InputArea } from "@cloudflare/kumo";
+import { Button, cn, Input, InputArea } from "@cloudflare/kumo";
 import { SignIn } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetScopeField, budgetPools } from "../components/change/budget-scope";
 import { DeadLetters } from "../components/dead-letters";
 import { EventStream } from "../components/project/event-stream";
@@ -23,7 +23,7 @@ import { DataTable, RowLink, Td, Th, TRow } from "../components/ui/data-table";
 import { EmptyState } from "../components/ui/empty-state";
 import { KeyValue } from "../components/ui/key-value";
 import { Mono } from "../components/ui/mono";
-import { Page, PageTitle, Section, TwoUp } from "../components/ui/page";
+import { Page, PageTitle, Section } from "../components/ui/page";
 import { StatCell, StatStrip } from "../components/ui/stat-strip";
 import { Tag } from "../components/ui/tag";
 import {
@@ -48,7 +48,12 @@ import { asRole, can, needsReview } from "../lib/permissions";
 import { useAdoptTypedText } from "../lib/pre-hydration";
 import { loadOnServer, prefetch, prefetchFeed } from "../lib/ssr-data";
 
+/** `?new=1` opens the New change box and moves focus to it (the "New change" header button). */
+type OverviewSearch = { new?: 1 };
+
 export const Route = createFileRoute("/projects/$projectId")({
+  validateSearch: (search: Record<string, unknown>): OverviewSearch =>
+    search.new === 1 || search.new === "1" || search.new === true ? { new: 1 } : {},
   // Server render: the title, stats, Changes, events and timeline rows are in the first HTML.
   loader: ({ context: { queryClient }, params: { projectId } }) =>
     loadOnServer(queryClient, async () => {
@@ -116,6 +121,12 @@ function ProjectPage() {
 
 function Overview() {
   const { projectId } = Route.useParams();
+  const focusRequest = Route.useSearch({ select: (search) => search.new === 1 });
+  const navigate = useNavigate({ from: Route.fullPath });
+  // The request is handled once: a reload or a later live update does not move focus again.
+  const focusHandled = useCallback(() => {
+    void navigate({ search: {}, replace: true, resetScroll: false });
+  }, [navigate]);
   const [seeding, setSeeding] = useState(false);
   const project = useQuery({
     queryKey: ["project", projectId],
@@ -241,6 +252,16 @@ function Overview() {
         statsFailed={stats.isError}
       />
 
+      {/* A viewer reads the project only, and an archived Project takes no requests: no box. */}
+      {can(project.data?.role, "change.create") && project.data?.status !== "archived" && (
+        <NewChange
+          projectId={projectId}
+          openByDefault={changes.data?.length === 0}
+          focusRequest={focusRequest}
+          onFocusHandled={focusHandled}
+        />
+      )}
+
       <ProjectTimeline
         projectId={projectId}
         changes={changes.data}
@@ -294,50 +315,46 @@ function Overview() {
         />
       </Section>
 
-      <TwoUp>
-        {/* A viewer reads the project only: no request form. */}
-        {can(project.data?.role, "change.create") && <NewChange projectId={projectId} />}
-        <Section label="Canonical source">
-          {project.isPending ? (
-            <div className="grid gap-2">
-              <SkeletonBar height={12} className="w-3/4" />
-              <SkeletonBar height={12} className="w-1/2" />
-              <SkeletonBar height={12} className="w-2/3" />
-            </div>
-          ) : project.data && assigned ? (
-            <KeyValue
-              items={[
-                {
-                  label: "Generation",
-                  value: generation(project.data.canonical.generation),
-                  mono: true,
-                },
-                { label: "Artifact", value: source.artifactRef, mono: true },
-                { label: "Tree", value: source.treeSha, mono: true },
-                { label: "Slug", value: project.data.slug, mono: true },
-                { label: "Project ID", value: project.data.id, mono: true },
-              ]}
+      <Section label="Canonical source">
+        {project.isPending ? (
+          <div className="grid gap-2">
+            <SkeletonBar height={12} className="w-3/4" />
+            <SkeletonBar height={12} className="w-1/2" />
+            <SkeletonBar height={12} className="w-2/3" />
+          </div>
+        ) : project.data && assigned ? (
+          <KeyValue
+            items={[
+              {
+                label: "Generation",
+                value: generation(project.data.canonical.generation),
+                mono: true,
+              },
+              { label: "Artifact", value: source.artifactRef, mono: true },
+              { label: "Tree", value: source.treeSha, mono: true },
+              { label: "Slug", value: project.data.slug, mono: true },
+              { label: "Project ID", value: project.data.id, mono: true },
+            ]}
+          />
+        ) : project.data ? (
+          <>
+            <EmptyState
+              what="No repository yet."
+              how={
+                seeding
+                  ? "Creating the empty repository. This page updates when the source is assigned."
+                  : "Create the empty repository so agents can build the app."
+              }
+              action={seedButton}
             />
-          ) : project.data ? (
-            <>
-              <EmptyState
-                what="No repository yet."
-                how={
-                  seeding
-                    ? "Creating the empty repository. This page updates when the source is assigned."
-                    : "Create the empty repository so agents can build the app."
-                }
-                action={seedButton}
-              />
-              {seed.isError && (
-                <SectionError message={`The repository was not created. ${seed.error.message}`} />
-              )}
-            </>
-          ) : (
-            <p className="text-[13px] text-kumo-subtle">{EMPTY}</p>
-          )}
-        </Section>
-      </TwoUp>
+            {seed.isError && (
+              <SectionError message={`The repository was not created. ${seed.error.message}`} />
+            )}
+          </>
+        ) : (
+          <p className="text-[13px] text-kumo-subtle">{EMPTY}</p>
+        )}
+      </Section>
     </Page>
   );
 }
@@ -642,7 +659,26 @@ function writeDraft(projectId: string, draft: ChangeDraft | null) {
   }
 }
 
-function NewChange({ projectId }: { projectId: string }) {
+/**
+ * The New change box at the top of the Overview. Collapsed, it is one field; focus or text
+ * opens the full form (goal, suggestions, budget, Submit). The goal field is the same element in
+ * both states, so focus and typed text stay when it opens, and the collapsed height is the height
+ * the server renders.
+ *
+ * `openByDefault`: an empty Project leads with the full form. `focusRequest`: the header button
+ * (`?new=1`) opens the form and moves focus to the goal; `onFocusHandled` clears the request.
+ */
+function NewChange({
+  projectId,
+  openByDefault,
+  focusRequest,
+  onFocusHandled,
+}: {
+  projectId: string;
+  openByDefault: boolean;
+  focusRequest: boolean;
+  onFocusHandled: () => void;
+}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(() => readDraft(projectId));
@@ -678,6 +714,38 @@ function NewChange({ projectId }: { projectId: string }) {
   const budgetRef = useRef<HTMLInputElement>(null);
   useAdoptTypedText(goalRef, goal, setGoal);
   useAdoptTypedText(budgetRef, budget, setBudget);
+  // Open while focus is inside the form. A click on a control that takes no focus (Safari
+  // buttons and radios) blurs the goal with no next target: the form stays open for that click.
+  const [focused, setFocused] = useState(false);
+  const pointerInside = useRef(false);
+  useEffect(() => {
+    // Focus that arrived before hydration had no React handler.
+    if (goalRef.current && document.activeElement === goalRef.current) setFocused(true);
+    const release = () => {
+      pointerInside.current = false;
+    };
+    document.addEventListener("pointerup", release);
+    document.addEventListener("pointercancel", release);
+    return () => {
+      document.removeEventListener("pointerup", release);
+      document.removeEventListener("pointercancel", release);
+    };
+  }, []);
+  // A stored draft applies after mount, like the scope: the first client render equals the server HTML.
+  const expanded = openByDefault || focusRequest || focused || (mounted && goal.trim() !== "");
+  useEffect(() => {
+    if (!focusRequest) return;
+    const field = goalRef.current;
+    if (field) {
+      setFocused(true);
+      field.focus({ preventScroll: true });
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      field
+        .closest("section")
+        ?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "nearest" });
+    }
+    onFocusHandled();
+  }, [focusRequest, onFocusHandled]);
   // Shares the Overview's project query; suggestions are cached per Canonical Generation.
   const project = useQuery({
     queryKey: ["project", projectId],
@@ -713,11 +781,21 @@ function NewChange({ projectId }: { projectId: string }) {
     },
   });
   return (
-    <Section label="New change">
+    <Section id="new-change" label="New change">
       <form
-        className="grid gap-4"
+        className="grid max-w-[760px] gap-4"
         // The inline alert below explains a missing goal or budget; the browser bubble must not.
         noValidate
+        onFocus={() => setFocused(true)}
+        onPointerDown={() => {
+          pointerInside.current = true;
+        }}
+        onBlur={(event) => {
+          const next = event.relatedTarget;
+          if (next instanceof Node && event.currentTarget.contains(next)) return;
+          if (!next && pointerInside.current) return;
+          setFocused(false);
+        }}
         onSubmit={(event) => {
           event.preventDefault();
           if (!goal.trim()) setInvalid("Describe the goal before you submit.");
@@ -725,16 +803,25 @@ function NewChange({ projectId }: { projectId: string }) {
           else create.mutate();
         }}
       >
-        <InputArea
-          ref={goalRef}
-          label="Goal"
-          description="The outcome in plain language. The planner derives acceptance criteria and protected invariants from it."
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          rows={4}
-          required
-        />
-        {pills.length > 0 && (
+        {/* Collapsed, the label is for screen readers only; the placeholder shows what to type. */}
+        <div className={cn(!expanded && "[&_label]:sr-only")}>
+          <InputArea
+            ref={goalRef}
+            label="Goal"
+            placeholder="Describe what to build or change…"
+            description={
+              expanded
+                ? "The outcome in plain language. The planner derives acceptance criteria and protected invariants from it."
+                : undefined
+            }
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            rows={expanded ? 4 : 1}
+            className={cn(!expanded && "resize-none")}
+            required
+          />
+        </div>
+        {expanded && pills.length > 0 && (
           <ul className="-mt-2 flex flex-wrap gap-2" aria-label="Suggested goals">
             {pills.map((pill) => (
               <li key={pill}>
@@ -749,31 +836,33 @@ function NewChange({ projectId }: { projectId: string }) {
             ))}
           </ul>
         )}
-        <BudgetScopeField
-          projectId={projectId}
-          scope={scope}
-          onScope={(next) => update({ scope: next })}
-          pools={pools}
-          canSetProjectBudget={can(project.data?.role, "settings.edit")}
-          amountField={
-            <Input
-              label="Budget (USD)"
-              description={
-                draft.budget === null && settings.data
-                  ? "The Project's default. New expensive work stops at this limit."
-                  : "New expensive work stops at this limit."
-              }
-              ref={budgetRef}
-              type="number"
-              min={0.1}
-              step={0.1}
-              className="font-mono"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-              required
-            />
-          }
-        />
+        {expanded && (
+          <BudgetScopeField
+            projectId={projectId}
+            scope={scope}
+            onScope={(next) => update({ scope: next })}
+            pools={pools}
+            canSetProjectBudget={can(project.data?.role, "settings.edit")}
+            amountField={
+              <Input
+                label="Budget (USD)"
+                description={
+                  draft.budget === null && settings.data
+                    ? "The Project's default. New expensive work stops at this limit."
+                    : "New expensive work stops at this limit."
+                }
+                ref={budgetRef}
+                type="number"
+                min={0.1}
+                step={0.1}
+                className="font-mono"
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+                required
+              />
+            }
+          />
+        )}
         {invalid && (
           <p role="alert" className="text-[12px] font-semibold text-kumo-danger">
             {invalid}
@@ -782,16 +871,18 @@ function NewChange({ projectId }: { projectId: string }) {
         {create.isError && (
           <SectionError message={`The change was not submitted. ${create.error.message}`} />
         )}
-        <div>
-          <Button type="submit" variant="primary" loading={create.isPending}>
-            Submit change
-          </Button>
-          {reviewed && (
-            <p className="mt-2 text-[12px] text-kumo-subtle">
-              An admin reviews requests before anything is built.
-            </p>
-          )}
-        </div>
+        {expanded && (
+          <div>
+            <Button type="submit" variant="primary" loading={create.isPending}>
+              Submit change
+            </Button>
+            {reviewed && (
+              <p className="mt-2 text-[12px] text-kumo-subtle">
+                An admin reviews requests before anything is built.
+              </p>
+            )}
+          </div>
+        )}
       </form>
     </Section>
   );

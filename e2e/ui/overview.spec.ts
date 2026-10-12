@@ -112,10 +112,37 @@ test.describe("Project overview", () => {
     }
   });
 
+  test("New change box: top of the page, collapsed, header button opens it", async ({ page }) => {
+    const box = page.locator("section#new-change");
+    const goal = box.getByRole("textbox", { name: "Goal" });
+    // Under the stat strip, above the execution timeline.
+    const timeline = page.locator("section[aria-label='Execution timeline']");
+    const boxTop = (await box.boundingBox())?.y ?? Number.POSITIVE_INFINITY;
+    const timelineTop = (await timeline.boundingBox())?.y ?? 0;
+    expect(boxTop).toBeLessThan(timelineTop);
+    // The fixture has Changes: the box starts as one field.
+    await expect(goal).toHaveAttribute("placeholder", "Describe what to build or change…");
+    await expect(box.getByRole("button", { name: "Submit change" })).toHaveCount(0);
+    // The header button opens the box and moves focus to the goal.
+    await page.getByRole("banner").getByRole("button", { name: "New change" }).click();
+    await expect(goal).toBeFocused();
+    await expect(box.getByRole("button", { name: "Submit change" })).toBeVisible();
+    await expect(page).not.toHaveURL(/[?&]new=/);
+  });
+
+  test("New change button on another Project page opens the Overview box", async ({ page }) => {
+    await open(page, `/projects/${TODO.project}/agents`);
+    await page.getByRole("banner").getByRole("button", { name: "New change" }).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${TODO.project}$`));
+    await expect(page.getByRole("textbox", { name: "Goal" })).toBeFocused();
+  });
+
   test("new Change form: default budget pre-filled, inline errors", async ({ page }) => {
     const goal = page.getByRole("textbox", { name: "Goal" });
     const budget = page.getByRole("spinbutton", { name: "Budget (USD)" });
     await expect(goal).toBeVisible();
+    // Focus opens the collapsed box.
+    await goal.focus();
     // The Project default (Settings, else the built-in default).
     await expect(budget).not.toHaveValue("");
     expect(Number(await budget.inputValue())).toBeGreaterThan(0);

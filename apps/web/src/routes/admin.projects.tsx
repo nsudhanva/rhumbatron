@@ -12,6 +12,7 @@ import {
   TextFilter,
   useDraft,
 } from "../components/admin/filters";
+import { SpendTotalsFoot } from "../components/admin/spend-totals";
 import { formatCost } from "../components/costs-page/cost-format";
 import { SectionError, SkeletonRows } from "../components/project/feedback";
 import { ProjectStatusPill } from "../components/project/status";
@@ -171,6 +172,9 @@ function Projects() {
                 />
               )}
             </tbody>
+            {projects.data && (
+              <SpendTotalsFoot totals={projects.data.totals} noun="Projects" before={6} after={3} />
+            )}
           </DataTable>
           {projects.data && (
             <Pager

@@ -47,9 +47,29 @@ person with a Clerk account can sign in. These requirements apply:
     request pays for: the Root Planner, the intake check, agent runs, conflict reviews, the
     acceptance check, and the Integration Judge. An open reservation counts until it settles.
   - `task_runs`: one row per agent Task attempt, with model calls, tokens, cost, tier, and start
-    time. This is the only per-call record with tokens. The admin cost report groups it by person,
-    Project, model tier, or day. Its `source` text says that the planner, intake, reviews,
-    acceptance, and judge calls are not in the rows, and gives the matching meter total.
+    time. This is the only per-call record with tokens. The Root Planner, the intake check,
+    conflict reviews, the acceptance check, and the Integration Judge write no `task_runs` row.
+  - The user and Project meters start on 2026-10-11 (migration 0031). The environment meter
+    starts earlier and also counts model calls that no request pays for. The difference is
+    "Not attributed". The admin never assigns it to a person or a Project.
+  - Every total adds up to the environment meter:
+    - The Overview gives `spendUsd` (the environment meter this month), `attributedUsd` (the sum
+      of the user meters this month), and `unattributedUsd` (the difference, never below 0).
+    - The Users and Projects lists give `totals`: `monthUsd` and `allTimeUsd` (the sum of every
+      user meter or every Project meter, whatever the filters and the page), and
+      `unattributedMonthUsd` and `unattributedAllTimeUsd` (the environment meter of the same
+      period minus that sum, never below 0). The spend of each row reads its own meter only.
+    - The cost report grouped by user or by Project reads the monthly meters. It snaps the date
+      range to whole months. Without a user or Project filter, a row with key `unattributed`
+      ("Not attributed") holds the environment meter minus the sum of the meters, so the rows add
+      up to the environment meter.
+    - The cost report grouped by model or by day reads `task_runs`. When the range is whole months
+      (the first day of a month to the last day of a month, or to today), a row with key `other`
+      ("Other model calls (no per-call record)") holds the matching meter minus the rows, never
+      below 0. For any other range, `source` gives the meter total and says that no row holds the
+      calls without a `task_runs` row.
+    - A meter row has no call or token counts: `calls`, `inputTokens`, and `outputTokens` are
+      null. The CSV leaves these cells empty.
   - Each response has a `source` text that names the data and what a number covers.
 
 ## Alternatives considered
@@ -68,8 +88,9 @@ person with a Clerk account can sign in. These requirements apply:
 - Each authenticated request reads two primary-key rows more (the user status and the setting)
   in one D1 query. The first request of a new person adds one write. `users.last_seen_at` is
   written at most once per hour per person.
-- The admin cost report reads `task_runs` through `idx_task_runs_started`, at most 366 days and
-  1,000 rows. Lists are pages of 50. The event list uses an index on (column, `seq`) for each
+- The admin cost report reads `task_runs` through `idx_task_runs_started`, or the monthly meters
+  through the `usage_counters` primary key (`day`, `counter`), at most 366 days and 1,000 rows.
+  The list totals read the meters through `idx_usage_counters_counter`. Lists are pages of 50. The event list uses an index on (column, `seq`) for each
   filter: `project_id`, `actor_id`, and `event_type`.
 - The two new `project_events` indexes add two index writes for each feed row. The feed holds at
   most 20,000 rows.

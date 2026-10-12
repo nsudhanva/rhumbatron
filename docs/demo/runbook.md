@@ -38,7 +38,7 @@ R2 and R3 change different parts of the app, so they build in parallel. R4 and R
 | 3 | Share the Project with Bob | Alice | `/projects/$projectId`, Share | The Share dialog shows a pending invitation for Bob. |
 | 4 | Accept the invitation | Bob | `/`, "Shared with you" | The Project opens and shows Members, not Share. Bob sees no Approve, Promote, Share, or Remove button. |
 | 5 | Turn off member review | Alice | `/projects/$projectId/settings` | Turn off "Member requests need review", so the requests of Bob go to the system at once (ADR 0028). |
-| 6 | Send R1 | Alice | `/projects/$projectId`, "New change" | The goal box shows goal suggestions under it. Send R1. |
+| 6 | Send R1 | Alice | `/projects/$projectId`, "New change" | The New change box is at the top of the Overview. The Project has no Changes, so the box is open and shows goal suggestions under the goal. Send R1. |
 | 7 | Show the Work Graph | Alice | `/changes/$changeId` | "Acceptance criteria" and "Protected invariants" from the Root Planner. The first Task bootstraps the app, and every other Task depends on it (ADR 0022). |
 | 8 | Show the agents | Alice | `/changes/$changeId/flight` | Only ready Tasks have active lanes. Pending Tasks stay idle. Each active Task has one Artifacts fork. |
 | 9 | Show Candidate verification | Alice | `/candidates/$candidateId` | The Evidence rows: build, unit, contract, and preview smoke. A check that did not run is a gap, never a pass. |

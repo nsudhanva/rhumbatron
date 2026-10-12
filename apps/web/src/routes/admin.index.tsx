@@ -14,7 +14,8 @@ import { loadForAdmin, prefetch } from "../lib/ssr-data";
 /**
  * Admin overview: the platform meters against their caps (model spend this month, Sandbox time,
  * Browser Run today, app builds today) and the counts of users, Projects, Changes and agents.
- * Every figure comes from the API's recorded meters (`usage_counters`).
+ * Every figure comes from the API's recorded meters (`usage_counters`). The model spend splits
+ * into the sum of the user meters and the rest, which no user meter holds.
  */
 export const Route = createFileRoute("/admin/")({
   loader: ({ context: { queryClient } }) =>
@@ -76,6 +77,10 @@ function Overview() {
               cap={data.capUsd}
               format={formatCost}
             />
+            <p className="font-mono text-[12px] text-kumo-subtle tabular-nums">
+              {formatCost(data.attributedUsd)} attributed to users ·{" "}
+              {formatCost(data.unattributedUsd)} not attributed
+            </p>
           </StatCell>
           <StatCell
             label="Sandbox this month"

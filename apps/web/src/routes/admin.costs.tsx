@@ -1,6 +1,6 @@
 import { buttonVariants, cn } from "@cloudflare/kumo";
 import { DownloadSimple } from "@phosphor-icons/react";
-import type { AdminCosts } from "@rhumbatron/protocol";
+import { type AdminCosts, OTHER_CALLS_COST_KEY, UNATTRIBUTED_COST_KEY } from "@rhumbatron/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AdminPage } from "../components/admin/admin-page";
@@ -43,7 +43,10 @@ const DEFAULT_GROUP: CostGroup = "user";
 
 /**
  * Admin Costs: recorded model spend over a date range, filtered by user and Project, grouped by
- * user, Project, model or day, with totals and a CSV download of the same view.
+ * user, Project, model or day, with totals and a CSV download of the same view. User and Project
+ * views read the monthly meters (whole months); model and day views read `task_runs`. The
+ * "Not attributed" and "Other model calls" rows hold the rest of the environment meter, so the
+ * rows add up to it; they show muted.
  */
 export const Route = createFileRoute("/admin/costs")({
   validateSearch: (search: Record<string, unknown>): CostFilters =>
@@ -93,6 +96,9 @@ function CostsPage() {
   );
 }
 
+/** Rows that no user, Project or `task_runs` row holds: the rest of a meter. */
+const isRestRow = (key: string) => key === UNATTRIBUTED_COST_KEY || key === OTHER_CALLS_COST_KEY;
+
 /** The API reads the last 30 UTC days when the view names no range (at most 366 days). */
 function rangeText(filters: CostFilters): string {
   if (filters.from && filters.to) return `${filters.from} → ${filters.to} UTC`;
@@ -121,7 +127,13 @@ function Costs() {
         />
       ) : (
         <>
-          <Totals data={data} range={rangeText(filters)} />
+          <Totals data={data} range={data ? `${data.from} → ${data.to} UTC` : rangeText(filters)} />
+          {data?.rows.some((row) => isRestRow(row.key)) && (
+            <p className="text-[12px] text-kumo-subtle">
+              Per-user and per-Project meters start on Oct 11, 2026. Earlier spend, and model calls
+              that no request paid for, appear as Not attributed.
+            </p>
+          )}
           <Section
             label={`By ${GROUP_ITEMS[filters.groupBy ?? DEFAULT_GROUP].toLowerCase()}`}
             meta={data ? `${formatNumber(data.rows.length)} rows` : undefined}
@@ -136,7 +148,7 @@ function Costs() {
             )}
           </Section>
           {data && (
-            <footer className="max-w-[760px] border-t border-kumo-rule pt-3 text-[11px] text-kumo-subtle">
+            <footer className="max-w-[760px] border-t border-kumo-rule pt-3 text-[12px] text-kumo-subtle">
               <span className="font-semibold">Source:</span> {data.source}
             </footer>
           )}
@@ -147,8 +159,11 @@ function Costs() {
 }
 
 function Totals({ data, range }: { data: AdminCosts | undefined; range: string }) {
-  const sum = (pick: (row: AdminCosts["rows"][number]) => number) =>
-    data ? data.rows.reduce((total, row) => total + pick(row), 0) : undefined;
+  // A meter row has no call or token counts: the sum is empty when no row has one.
+  const sum = (pick: (row: AdminCosts["rows"][number]) => number | null) => {
+    const counts = (data?.rows ?? []).map(pick).filter((n): n is number => n !== null);
+    return counts.length > 0 ? counts.reduce((total, n) => total + n, 0) : undefined;
+  };
   return (
     <StatStrip>
       <StatCell
@@ -181,15 +196,20 @@ function CostTable({ data, filters }: { data: AdminCosts | undefined; filters: C
         {data ? (
           data.rows.map((row) => {
             const share = data.totalUsd > 0 ? (row.spendUsd / data.totalUsd) * 100 : 0;
-            const label = group === "day" ? row.key : (row.label ?? row.key);
+            const rest = isRestRow(row.key);
+            const label = group === "day" && !rest ? row.key : (row.label ?? row.key);
             return (
-              <TRow key={row.key}>
+              <TRow key={row.key} className={rest ? "text-kumo-subtle" : ""}>
                 <Td className="max-w-[320px]">
                   <TitleCell
                     title={
-                      <RowTitle group={group} rowKey={row.key} label={label} filters={filters} />
+                      rest ? (
+                        <span className="font-normal">{label}</span>
+                      ) : (
+                        <RowTitle group={group} rowKey={row.key} label={label} filters={filters} />
+                      )
                     }
-                    meta={group === "day" || label === row.key ? undefined : row.key}
+                    meta={group === "day" || rest || label === row.key ? undefined : row.key}
                   />
                 </Td>
                 <Td numeric>{formatCost(row.spendUsd)}</Td>

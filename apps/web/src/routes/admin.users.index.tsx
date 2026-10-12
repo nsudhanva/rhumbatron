@@ -13,6 +13,7 @@ import {
   TextFilter,
   useDraft,
 } from "../components/admin/filters";
+import { SpendTotalsFoot } from "../components/admin/spend-totals";
 import { formatCost } from "../components/costs-page/cost-format";
 import { SectionError, SkeletonRows } from "../components/project/feedback";
 import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../components/ui/data-table";
@@ -144,6 +145,9 @@ function Users() {
                 />
               )}
             </tbody>
+            {users.data && (
+              <SpendTotalsFoot totals={users.data.totals} noun="users" before={4} after={3} />
+            )}
           </DataTable>
           {users.data && (
             <Pager

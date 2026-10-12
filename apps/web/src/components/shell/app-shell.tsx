@@ -42,6 +42,7 @@ import { type ShellLiveState, useShellLiveState } from "../../lib/live-status";
 import { type ColorMode, useColorMode } from "../../lib/mode";
 import { NotificationBell } from "../notifications/notification-bell";
 import { SkeletonBar } from "../project/feedback";
+import { NewChangeButton } from "./new-change-button";
 import { type Crumb, useDocumentTitle, usePageTrail } from "./page-meta";
 import {
   changesLink,
@@ -445,6 +446,7 @@ function Header({ context }: { context: ShellContext }) {
       <div className="flex flex-wrap items-center gap-2">
         {/* Left of the mode toggle: when it appears after sign-in, nothing to its right moves. */}
         <Show when="signed-in">
+          {context.projectId && <NewChangeButton projectId={context.projectId} />}
           <NotificationBell />
         </Show>
         <ModeToggle />

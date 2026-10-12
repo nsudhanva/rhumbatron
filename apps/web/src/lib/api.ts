@@ -243,6 +243,8 @@ export type ProjectDetail = {
   name: string;
   slug: string;
   canonical: { generation: number; artifactRef: string; treeSha: string };
+  /** An `archived` Project takes no new Changes. */
+  status?: "active" | "archived";
   role?: ProjectRole | string;
 };
 

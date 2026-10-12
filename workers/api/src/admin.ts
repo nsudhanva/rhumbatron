@@ -4,6 +4,7 @@ import {
   AccessRequestList,
   AccessStatus,
   AdminCostGroup,
+  type AdminCostRow,
   AdminCosts,
   AdminEventList,
   AdminOverview,
@@ -19,7 +20,9 @@ import {
   ChangeStatus,
   changeTitle,
   METER_COUNTER,
+  OTHER_CALLS_COST_KEY,
   PlatformSettings,
+  UNATTRIBUTED_COST_KEY,
   UpdatePlatformSettingsRequest,
 } from "@rhumbatron/protocol";
 import { type Context, Hono } from "hono";
@@ -32,11 +35,16 @@ import { fail, respond, validate } from "./http.ts";
 import { requesterName } from "./members.ts";
 import {
   changeMeterSql,
+  ENVIRONMENT_METER,
+  type ListTotalsRow,
+  listTotals,
+  listTotalsStatement,
   meterTotalSql,
   microToUsd,
   monthList,
   monthlyMeter,
   monthOf,
+  prefixRange,
 } from "./spend.ts";
 
 /**
@@ -176,7 +184,13 @@ const UserParam = z.object({ userId: UserIdSchema });
 /* Users                                                                                      */
 /* ------------------------------------------------------------------------------------------ */
 
-/** Select list of one user row aliased `u`. `?1` is this month (`YYYY-MM`). */
+const USER_METER_PREFIX = METER_COUNTER.user("");
+const PROJECT_METER_PREFIX = METER_COUNTER.project("");
+
+/**
+ * Select list of one user row aliased `u`. `?1` is this month (`YYYY-MM`). Both spend figures read
+ * the user meter, so the rows and the list totals add up to the environment meter.
+ */
 const USER_COLUMNS = `u.id, u.display_name, u.email, u.access_status, u.monthly_budget_usd,
   u.created_at, u.last_seen_at,
   (SELECT COUNT(*) FROM projects p WHERE p.id IN (
@@ -185,9 +199,7 @@ const USER_COLUMNS = `u.id, u.display_name, u.email, u.access_status, u.monthly_
   (SELECT COUNT(*) FROM changes c WHERE c.created_by = u.id) AS requests,
   (SELECT count FROM usage_counters WHERE day = ?1 AND counter = 'user-usd-micro:' || u.id)
     AS month_micro,
-  MAX(${meterTotalSql("user-usd-micro:", "u.id")},
-    (SELECT COALESCE(SUM(${changeMeterSql("c")}), 0) FROM changes c WHERE c.created_by = u.id))
-    AS all_micro`;
+  ${meterTotalSql(USER_METER_PREFIX, "u.id")} AS all_micro`;
 
 type UserRow = {
   id: string;
@@ -259,12 +271,269 @@ function monthsBetween(from: string, to: string): string[] {
   return out;
 }
 
-const csvCell = (value: string | number) => {
+const csvCell = (value: string | number | null) => {
+  if (value === null) return "";
   const text = String(value);
   // A leading formula character runs as a formula in a spreadsheet: prefix it with a quote.
   const safe = /^[=+\-@\t\r]/.test(text) && typeof value === "string" ? `'${text}` : text;
   return /[",\n\r]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 };
+
+/** The first day of the user and Project meters (migration 0031, ADR 0030). */
+const SCOPE_METERS_START = "2026-10-11";
+const NOT_ATTRIBUTED_LABEL = "Not attributed";
+const OTHER_CALLS_LABEL = "Other model calls (no per-call record)";
+const NO_PER_CALL_ROW =
+  "the Root Planner, the intake check, conflict reviews, the acceptance check, and the Integration Judge";
+
+const usd = (micro: number) => `$${microToUsd(micro).toFixed(2)}`;
+const toMicro = (usdValue: number) => Math.round(usdValue * 1_000_000);
+
+/** The last day (`YYYY-MM-DD`) of a month (`YYYY-MM`). */
+const lastDayOf = (month: string) =>
+  isoDay(new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)));
+
+/**
+ * True when the days `from` to `to` are whole calendar months, so a monthly meter covers the same
+ * calls. A range that ends today or later counts the current month to date.
+ */
+const isWholeMonths = (from: string, to: string, today: string) =>
+  from.endsWith("-01") && (to >= today || to === lastDayOf(to.slice(0, 7)));
+
+type CostsQuery = z.infer<typeof CostsQuery>;
+type CostView = Omit<AdminCosts, "source"> & { source: string[] };
+
+/**
+ * The meter that groups a user or Project view, or null when no meter splits the view: the user
+ * meters do not split by Project, and the Project meters do not split by user.
+ */
+function meterGroupOf(query: CostsQuery) {
+  if (query.groupBy === "user" && !query.projectId) {
+    return { prefix: USER_METER_PREFIX, only: query.userId ?? null, noun: "user" } as const;
+  }
+  if (query.groupBy === "project" && !query.userId) {
+    return {
+      prefix: PROJECT_METER_PREFIX,
+      only: query.projectId ?? null,
+      noun: "Project",
+    } as const;
+  }
+  return null;
+}
+
+/**
+ * Cost rows from the monthly user or Project meters, for whole months. Without a user or Project
+ * filter, a "Not attributed" row holds the environment meter minus the sum of the meters, so the
+ * rows add up to the environment meter.
+ */
+async function meterCosts(
+  db: D1Database,
+  group: NonNullable<ReturnType<typeof meterGroupOf>>,
+  range: { from: string; to: string },
+  months: string[],
+): Promise<CostView> {
+  const start = group.prefix.length + 1;
+  const idSql = `substr(m.counter, ${start})`;
+  const [low, high] = prefixRange(group.prefix);
+  const scope = group.only ? "m.counter = ?" : "m.counter >= ? AND m.counter < ?";
+  const scopeParams = group.only ? [`${group.prefix}${group.only}`] : [low, high];
+  const dayIn = `m.day IN (${months.map(() => "?").join(", ")})`;
+  const join =
+    group.noun === "user"
+      ? `LEFT JOIN users u ON u.id = ${idSql}`
+      : `LEFT JOIN projects p ON p.id = ${idSql}`;
+  const label =
+    group.noun === "user"
+      ? `COALESCE(u.display_name, u.email, ${idSql})`
+      : `COALESCE(p.name, ${idSql})`;
+  const [rows, attributed, environment] = await db.batch([
+    db
+      .prepare(
+        `SELECT ${idSql} AS key, ${label} AS label, SUM(m.count) AS micro
+         FROM usage_counters m ${join}
+         WHERE ${dayIn} AND ${scope}
+         GROUP BY m.counter ORDER BY micro DESC, key ASC LIMIT ${COST_ROW_LIMIT}`,
+      )
+      .bind(...months, ...scopeParams),
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(m.count), 0) AS micro FROM usage_counters m
+         WHERE ${dayIn} AND ${scope}`,
+      )
+      .bind(...months, ...scopeParams),
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(m.count), 0) AS micro FROM usage_counters m
+         WHERE ${dayIn} AND m.counter = ?`,
+      )
+      .bind(...months, ENVIRONMENT_METER),
+  ]);
+  const list = (rows?.results ?? []) as { key: string; label: string | null; micro: number }[];
+  const sumOf = (r: D1Result | undefined) =>
+    ((r?.results?.[0] as { micro?: number } | undefined)?.micro ?? 0) as number;
+  const attributedMicro = sumOf(attributed);
+  const environmentMicro = sumOf(environment);
+  const unattributedMicro = Math.max(0, environmentMicro - attributedMicro);
+  const result: AdminCostRow[] = list.map((r) => ({
+    key: r.key,
+    label: r.label ?? r.key,
+    spendUsd: microToUsd(Math.max(0, r.micro)),
+    calls: null,
+    inputTokens: null,
+    outputTokens: null,
+  }));
+  if (!group.only) {
+    result.push({
+      key: UNATTRIBUTED_COST_KEY,
+      label: NOT_ATTRIBUTED_LABEL,
+      spendUsd: microToUsd(unattributedMicro),
+      calls: null,
+      inputTokens: null,
+      outputTokens: null,
+    });
+  }
+  const first = months[0] as string;
+  const last = months[months.length - 1] as string;
+  const snapped = range.from !== `${first}-01` || range.to !== lastDayOf(last);
+  return {
+    rows: result,
+    totalUsd: microToUsd(group.only ? attributedMicro : attributedMicro + unattributedMicro),
+    from: `${first}-01`,
+    to: lastDayOf(last),
+    source: [
+      `The monthly ${group.noun} meters in usage_counters (${group.prefix}<id>, micro-USD): every model call that a request paid for, open reservations included, for the whole months ${first} to ${last}.`,
+      snapped
+        ? `The meters count per month, so the range ${range.from} to ${range.to} is snapped to whole months.`
+        : "",
+      group.only
+        ? `The view shows the one ${group.noun} meter of the filter.`
+        : `"Not attributed" is the environment meter ${ENVIRONMENT_METER} (${usd(environmentMicro)}) minus the sum of the ${group.noun} meters (${usd(attributedMicro)}): model calls that no request paid for, and the spend before the user and Project meters started on ${SCOPE_METERS_START}. The rows add up to the environment meter.`,
+      list.length >= COST_ROW_LIMIT
+        ? `Only the ${COST_ROW_LIMIT} largest ${group.noun} rows are shown; the total counts every meter.`
+        : "",
+      "A meter holds no call or token counts.",
+    ],
+  };
+}
+
+/**
+ * Cost rows from `task_runs` (one row per agent Task attempt). For whole months, an "Other model
+ * calls" row holds the matching meter minus the rows: the calls that write no `task_runs` row.
+ */
+async function taskRunCosts(
+  db: D1Database,
+  query: CostsQuery,
+  range: { from: string; to: string; today: string },
+  months: string[],
+): Promise<CostView> {
+  const { from, to } = range;
+  const group = COST_GROUP[query.groupBy];
+  const params: unknown[] = [`${from}T00:00:00.000Z`, `${addDays(to, 1)}T00:00:00.000Z`];
+  const filters: string[] = [];
+  if (query.userId) {
+    params.push(query.userId);
+    filters.push(`c.created_by = ?${params.length}`);
+  }
+  if (query.projectId) {
+    params.push(query.projectId);
+    filters.push(`c.project_id = ?${params.length}`);
+  }
+  // Starts from idx_task_runs_started: rows read scale with the attempts in the range.
+  const rowsQuery = db
+    .prepare(
+      `SELECT ${group.key} AS key, ${group.label} AS label,
+              COALESCE(SUM(r.cost_usd), 0) AS spend, COALESCE(SUM(r.model_calls), 0) AS calls,
+              COALESCE(SUM(r.input_tokens), 0) AS input_tokens,
+              COALESCE(SUM(r.output_tokens), 0) AS output_tokens
+       FROM task_runs r
+       CROSS JOIN tasks t ON t.id = r.task_id
+       CROSS JOIN changes c ON c.id = t.change_id
+       LEFT JOIN projects p ON p.id = c.project_id
+       LEFT JOIN users u ON u.id = c.created_by
+       WHERE r.started_at >= ?1 AND r.started_at < ?2
+         ${filters.map((f) => `AND ${f}`).join(" ")}
+       GROUP BY ${group.key}
+       ORDER BY ${query.groupBy === "day" ? "key ASC" : "spend DESC"}
+       LIMIT ${COST_ROW_LIMIT}`,
+    )
+    .bind(...params);
+
+  // The meter that covers every model call of the same scope.
+  const meter =
+    query.userId && !query.projectId
+      ? { counter: METER_COUNTER.user(query.userId), name: `user meter ${query.userId}` }
+      : query.projectId && !query.userId
+        ? {
+            counter: METER_COUNTER.project(query.projectId),
+            name: `Project meter ${query.projectId}`,
+          }
+        : !query.userId && !query.projectId
+          ? { counter: ENVIRONMENT_METER, name: `environment meter ${ENVIRONMENT_METER}` }
+          : null;
+  const [rows, meterMonths] = await Promise.all([
+    rowsQuery.all<{
+      key: string | null;
+      label: string | null;
+      spend: number;
+      calls: number;
+      input_tokens: number;
+      output_tokens: number;
+    }>(),
+    meter ? monthlyMeter(db, meter.counter, months) : Promise.resolve(null),
+  ]);
+  const result: AdminCostRow[] = (rows.results ?? []).map((r) => ({
+    key: r.key ?? "unknown",
+    label: r.label ?? r.key ?? "unknown",
+    spendUsd: Math.max(0, r.spend),
+    calls: r.calls,
+    inputTokens: r.input_tokens,
+    outputTokens: r.output_tokens,
+  }));
+  const rowsMicro = result.reduce((sum, r) => sum + toMicro(r.spendUsd), 0);
+  const meterMicro = meterMonths?.reduce((sum, m) => sum + toMicro(m.spendUsd), 0) ?? null;
+  const first = months[0] as string;
+  const last = months[months.length - 1] as string;
+  const source = [
+    `task_runs: one row per agent Task attempt (model calls, tokens, cost), by attempt start, ${from} to ${to} UTC.`,
+    query.groupBy === "model" ? "Grouped by model, the key is the model tier of the attempt." : "",
+    query.groupBy === "user" || query.groupBy === "project"
+      ? `The ${query.groupBy} meters do not split by ${query.groupBy === "user" ? "Project" : "user"}, so these rows read task_runs.`
+      : "",
+  ];
+  if (meter && meterMicro !== null && isWholeMonths(from, to, range.today)) {
+    const otherMicro = meterMicro - rowsMicro;
+    result.push({
+      key: OTHER_CALLS_COST_KEY,
+      label: OTHER_CALLS_LABEL,
+      spendUsd: microToUsd(Math.max(0, otherMicro)),
+      calls: null,
+      inputTokens: null,
+      outputTokens: null,
+    });
+    source.push(
+      `"${OTHER_CALLS_LABEL}" is the ${meter.name} for ${first} to ${last} (${usd(meterMicro)}, every model call, open reservations included) minus these rows (${usd(rowsMicro)}): ${NO_PER_CALL_ROW}, which write no task_runs row${meter.counter === ENVIRONMENT_METER ? ", model calls that no request paid for, and the runs of deleted Projects" : ""}.`,
+      otherMicro < 0
+        ? `The rows hold ${usd(-otherMicro)} more than the meter, so that row is $0.00${meter.counter === ENVIRONMENT_METER ? "" : `: the user and Project meters start on ${SCOPE_METERS_START}`}.`
+        : "The rows add up to the meter.",
+    );
+  } else if (meter && meterMicro !== null) {
+    source.push(
+      `The range is not whole months, so no row holds the calls without a task_runs row (${NO_PER_CALL_ROW}).`,
+      `The ${meter.name} for the whole months ${first} to ${last} is ${usd(meterMicro)}. A range from the first day of a month to the last day of a month (or today) adds that row.`,
+    );
+  } else {
+    source.push(
+      `No single meter covers a user and Project filter together, so no row holds the calls without a task_runs row (${NO_PER_CALL_ROW}).`,
+    );
+  }
+  return {
+    rows: result,
+    totalUsd: result.reduce((sum, r) => sum + r.spendUsd, 0),
+    from,
+    to,
+    source,
+  };
+}
 
 /* ------------------------------------------------------------------------------------------ */
 /* Routes                                                                                      */
@@ -278,14 +547,21 @@ export const admin = new Hono<AppEnv>()
     const now = new Date();
     const month = monthOf(now);
     const day = isoDay(now);
-    const [meters, users, projects, changes, agents] = await db.batch([
+    const [low, high] = prefixRange(USER_METER_PREFIX);
+    const [meters, attributed, users, projects, changes, agents] = await db.batch([
       db
         .prepare(
           `SELECT day, counter, count FROM usage_counters
-           WHERE (day = ?1 AND counter IN ('anthropic-usd-micro', 'sandbox-seconds'))
+           WHERE (day = ?1 AND counter IN ('${ENVIRONMENT_METER}', 'sandbox-seconds'))
               OR (day = ?2 AND counter IN ('browser-seconds', 'app-builds'))`,
         )
         .bind(month, day),
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(count), 0) AS micro FROM usage_counters
+           WHERE day = ?1 AND counter >= ?2 AND counter < ?3`,
+        )
+        .bind(month, low, high),
       db.prepare(
         `SELECT (SELECT COUNT(*) FROM users) AS total,
                 (SELECT COUNT(*) FROM users WHERE access_status = 'pending') AS pending`,
@@ -303,11 +579,15 @@ export const admin = new Hono<AppEnv>()
     const first = <T>(r: D1Result | undefined) => (r?.results?.[0] ?? {}) as T;
     const u = first<{ total?: number; pending?: number }>(users);
     const p = first<{ active?: number; archived?: number }>(projects);
+    const spendMicro = meter(month, ENVIRONMENT_METER);
+    const attributedMicro = first<{ micro?: number }>(attributed).micro ?? 0;
     await audit(c, "overview.read", null);
     return respond(c, apiData(AdminOverview), {
       data: {
         month,
-        spendUsd: microToUsd(meter(month, "anthropic-usd-micro")),
+        spendUsd: microToUsd(spendMicro),
+        attributedUsd: microToUsd(attributedMicro),
+        unattributedUsd: microToUsd(Math.max(0, spendMicro - attributedMicro)),
         capUsd: anthropicMonthlyBudgetUsd(c.env.ANTHROPIC_MONTHLY_BUDGET_USD),
         sandbox: {
           usedSeconds: meter(month, "sandbox-seconds"),
@@ -328,8 +608,9 @@ export const admin = new Hono<AppEnv>()
 
   .get("/v1/admin/users", validate("query", UsersQuery), async (c) => {
     const { q, status, cursor } = c.req.valid("query");
+    const month = monthOf(new Date());
     const where: string[] = [];
-    const params: unknown[] = [monthOf(new Date())];
+    const params: unknown[] = [month];
     if (status) {
       params.push(status);
       where.push(`u.access_status = ?${params.length}`);
@@ -347,14 +628,18 @@ export const admin = new Hono<AppEnv>()
         `(u.created_at < ?${params.length - 1} OR (u.created_at = ?${params.length - 1} AND u.id < ?${params.length}))`,
       );
     }
-    const rows = await c.env.DB.prepare(
-      `SELECT ${USER_COLUMNS} FROM users u
-       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-       ORDER BY u.created_at DESC, u.id DESC LIMIT ${PAGE + 1}`,
-    )
-      .bind(...params)
-      .all<UserRow>();
-    const list = rows.results ?? [];
+    const db = c.env.DB;
+    const [rows, totals] = await db.batch([
+      db
+        .prepare(
+          `SELECT ${USER_COLUMNS} FROM users u
+           ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+           ORDER BY u.created_at DESC, u.id DESC LIMIT ${PAGE + 1}`,
+        )
+        .bind(...params),
+      listTotalsStatement(db, USER_METER_PREFIX, month),
+    ]);
+    const list = (rows?.results ?? []) as UserRow[];
     const page = list.slice(0, PAGE);
     const last = page[page.length - 1];
     await audit(c, "users.list", queryTarget(c));
@@ -362,6 +647,7 @@ export const admin = new Hono<AppEnv>()
       data: {
         users: page.map((r) => userView(r, isPlatformAdmin(c.env, r.id))),
         nextCursor: list.length > PAGE && last ? encodeCursor(last.created_at, last.id) : null,
+        totals: listTotals(totals?.results?.[0] as ListTotalsRow | undefined),
       },
     });
   })
@@ -455,8 +741,9 @@ export const admin = new Hono<AppEnv>()
   .get("/v1/admin/projects", validate("query", ProjectsQuery), async (c) => {
     const { q, ownerId, status, cursor } = c.req.valid("query");
     const db = c.env.DB;
+    const month = monthOf(new Date());
     const where: string[] = [];
-    const params: unknown[] = [monthOf(new Date())];
+    const params: unknown[] = [month];
     if (status) {
       params.push(status);
       where.push(`p.status = ?${params.length}`);
@@ -482,9 +769,25 @@ export const admin = new Hono<AppEnv>()
         `(p.created_at < ?${params.length - 1} OR (p.created_at = ?${params.length - 1} AND p.id < ?${params.length}))`,
       );
     }
-    const rows = await db
-      .prepare(
-        `SELECT p.id, p.name, p.slug, p.status, p.canonical_generation, p.created_at, p.updated_at,
+    type ProjectRow = {
+      id: string;
+      name: string;
+      slug: string;
+      status: string;
+      canonical_generation: number;
+      created_at: string;
+      updated_at: string;
+      owner_id: string | null;
+      members: number;
+      month_micro: number | null;
+      all_micro: number | null;
+      changes: number;
+      app_slug: string | null;
+    };
+    const [rows, totals] = await db.batch([
+      db
+        .prepare(
+          `SELECT p.id, p.name, p.slug, p.status, p.canonical_generation, p.created_at, p.updated_at,
            COALESCE(
              (SELECT pm.user_id FROM project_members pm WHERE pm.project_id = p.id AND pm.role = 'owner'),
              (SELECT m.user_id FROM memberships m WHERE m.org_id = p.org_id AND m.role = 'owner'
@@ -492,33 +795,18 @@ export const admin = new Hono<AppEnv>()
            (SELECT COUNT(*) FROM project_members pm WHERE pm.project_id = p.id) AS members,
            (SELECT count FROM usage_counters WHERE day = ?1 AND counter = 'project-usd-micro:' || p.id)
              AS month_micro,
-           MAX(${meterTotalSql("project-usd-micro:", "p.id")},
-             (SELECT COALESCE(SUM(${changeMeterSql("c")}), 0) FROM changes c WHERE c.project_id = p.id))
-             AS all_micro,
+           ${meterTotalSql(PROJECT_METER_PREFIX, "p.id")} AS all_micro,
            (SELECT COUNT(*) FROM changes c WHERE c.project_id = p.id) AS changes,
            (SELECT a.slug FROM app_deployments a WHERE a.project_id = p.id
               AND a.channel = '${APP_PRODUCTION_CHANNEL}' AND a.status = 'ready') AS app_slug
          FROM projects p
          ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
          ORDER BY p.created_at DESC, p.id DESC LIMIT ${PAGE + 1}`,
-      )
-      .bind(...params)
-      .all<{
-        id: string;
-        name: string;
-        slug: string;
-        status: string;
-        canonical_generation: number;
-        created_at: string;
-        updated_at: string;
-        owner_id: string | null;
-        members: number;
-        month_micro: number | null;
-        all_micro: number | null;
-        changes: number;
-        app_slug: string | null;
-      }>();
-    const list = rows.results ?? [];
+        )
+        .bind(...params),
+      listTotalsStatement(db, PROJECT_METER_PREFIX, month),
+    ]);
+    const list = (rows?.results ?? []) as ProjectRow[];
     const page = list.slice(0, PAGE);
     const ownerIds = [...new Set(page.map((r) => r.owner_id).filter((id): id is string => !!id))];
     const owners = new Map<string, string | null>();
@@ -557,6 +845,7 @@ export const admin = new Hono<AppEnv>()
           }),
         ),
         nextCursor: list.length > PAGE && last ? encodeCursor(last.created_at, last.id) : null,
+        totals: listTotals(totals?.results?.[0] as ListTotalsRow | undefined),
       },
     });
   })
@@ -571,84 +860,16 @@ export const admin = new Hono<AppEnv>()
       return fail(c, 400, "invalid_request", `The range is at most ${MAX_RANGE_DAYS} days`);
     }
     const db = c.env.DB;
-    const group = COST_GROUP[query.groupBy];
-    const params: unknown[] = [`${from}T00:00:00.000Z`, `${addDays(to, 1)}T00:00:00.000Z`];
-    const filters: string[] = [];
-    if (query.userId) {
-      params.push(query.userId);
-      filters.push(`c.created_by = ?${params.length}`);
-    }
-    if (query.projectId) {
-      params.push(query.projectId);
-      filters.push(`c.project_id = ?${params.length}`);
-    }
-    // Starts from idx_task_runs_started: rows read scale with the attempts in the range.
-    const rowsQuery = db
-      .prepare(
-        `SELECT ${group.key} AS key, ${group.label} AS label,
-                COALESCE(SUM(r.cost_usd), 0) AS spend, COALESCE(SUM(r.model_calls), 0) AS calls,
-                COALESCE(SUM(r.input_tokens), 0) AS input_tokens,
-                COALESCE(SUM(r.output_tokens), 0) AS output_tokens
-         FROM task_runs r
-         CROSS JOIN tasks t ON t.id = r.task_id
-         CROSS JOIN changes c ON c.id = t.change_id
-         LEFT JOIN projects p ON p.id = c.project_id
-         LEFT JOIN users u ON u.id = c.created_by
-         WHERE r.started_at >= ?1 AND r.started_at < ?2
-           ${filters.map((f) => `AND ${f}`).join(" ")}
-         GROUP BY ${group.key}
-         ORDER BY ${query.groupBy === "day" ? "key ASC" : "spend DESC"}
-         LIMIT ${COST_ROW_LIMIT}`,
-      )
-      .bind(...params);
-
-    // The meter that covers every model call of the same scope, for the `source` note.
-    const meter =
-      query.userId && !query.projectId
-        ? { counter: METER_COUNTER.user(query.userId), name: `user meter ${query.userId}` }
-        : query.projectId && !query.userId
-          ? {
-              counter: METER_COUNTER.project(query.projectId),
-              name: `Project meter ${query.projectId}`,
-            }
-          : !query.userId && !query.projectId
-            ? { counter: "anthropic-usd-micro", name: "environment meter anthropic-usd-micro" }
-            : null;
     const months = monthsBetween(from, to);
-    const [rows, meterMonths] = await Promise.all([
-      rowsQuery.all<{
-        key: string | null;
-        label: string | null;
-        spend: number;
-        calls: number;
-        input_tokens: number;
-        output_tokens: number;
-      }>(),
-      meter ? monthlyMeter(db, meter.counter, months) : Promise.resolve(null),
-    ]);
-    const result = (rows.results ?? []).map((r) => ({
-      key: r.key ?? "unknown",
-      label: r.label ?? r.key ?? "unknown",
-      spendUsd: Math.max(0, r.spend),
-      calls: r.calls,
-      inputTokens: r.input_tokens,
-      outputTokens: r.output_tokens,
-    }));
-    const totalUsd = result.reduce((sum, r) => sum + r.spendUsd, 0);
-    const meterUsd = meterMonths?.reduce((sum, m) => sum + m.spendUsd, 0) ?? null;
-    const source = [
-      `task_runs: one row per agent Task attempt (model calls, tokens, cost), by attempt start, ${from} to ${to} UTC.`,
-      "Grouped by model, the key is the model tier of the attempt.",
-      "The Root Planner, the intake check, conflict reviews, the acceptance check, and the Integration Judge write no per-call row, so these rows do not include them.",
-      meter && meterUsd !== null
-        ? `The ${meter.name} for ${months[0]} to ${months[months.length - 1]} (whole months, every model call, open reservations included) is $${meterUsd.toFixed(2)}.`
-        : "No single meter covers a user and Project filter together.",
-    ].join(" ");
+    const group = meterGroupOf(query);
+    const view = group
+      ? await meterCosts(db, group, { from, to }, months)
+      : await taskRunCosts(db, query, { from, to, today }, months);
     await audit(c, "costs.read", queryTarget(c));
     if (query.format === "csv") {
       const lines = [
         "key,label,spendUsd,calls,inputTokens,outputTokens",
-        ...result.map((r) =>
+        ...view.rows.map((r) =>
           [r.key, r.label, r.spendUsd.toFixed(6), r.calls, r.inputTokens, r.outputTokens]
             .map(csvCell)
             .join(","),
@@ -656,11 +877,12 @@ export const admin = new Hono<AppEnv>()
       ];
       return c.body(`${lines.join("\n")}\n`, 200, {
         "content-type": "text/csv; charset=utf-8",
-        "content-disposition": `attachment; filename="rhumbatron-costs-${query.groupBy}-${from}-${to}.csv"`,
+        "content-disposition": `attachment; filename="rhumbatron-costs-${query.groupBy}-${view.from}-${view.to}.csv"`,
         "cache-control": "no-store",
       });
     }
-    return respond(c, apiData(AdminCosts), { data: { rows: result, totalUsd, source } });
+    const source = view.source.filter(Boolean).join(" ");
+    return respond(c, apiData(AdminCosts), { data: { ...view, source } });
   })
 
   .get("/v1/admin/events", validate("query", EventsQuery), async (c) => {

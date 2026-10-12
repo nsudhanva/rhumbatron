@@ -26,6 +26,13 @@ export const AdminOverview = z.object({
   month: Month,
   /** Anthropic spend this month on the environment meter, open reservations included. */
   spendUsd: Usd,
+  /** The sum of every user meter this month (`user-usd-micro`). */
+  attributedUsd: Usd,
+  /**
+   * `spendUsd` minus `attributedUsd`, never below 0: model calls that no request paid for, and
+   * spend before the user meters started (2026-10-11).
+   */
+  unattributedUsd: Usd,
   /** The environment's Anthropic budget per calendar month. */
   capUsd: Usd,
   sandbox: z.object({ usedSeconds: Count, capSeconds: Count }),
@@ -53,7 +60,7 @@ export const AdminUser = z.object({
   requests: Count,
   /** The person's meter this month (`user-usd-micro`). */
   spendMonthUsd: Usd,
-  /** The Change meters of every request of the person (`change-usd-micro`). */
+  /** The person's meter summed over every month (`user-usd-micro`). */
   spendAllTimeUsd: Usd,
   monthlyBudgetUsd: z.number().nullable(),
   createdAt: z.string(),
@@ -62,9 +69,24 @@ export const AdminUser = z.object({
 });
 export type AdminUser = z.infer<typeof AdminUser>;
 
+/**
+ * Spend totals of a list, over every row whatever the filters and the page. `monthUsd` and
+ * `allTimeUsd` sum the meters of the list (user or Project meters). The unattributed figures are
+ * the environment meter (`anthropic-usd-micro`) of the same period minus that sum, never below 0.
+ * The two figures of one period add up to the environment meter.
+ */
+export const AdminSpendTotals = z.object({
+  monthUsd: Usd,
+  allTimeUsd: Usd,
+  unattributedMonthUsd: Usd,
+  unattributedAllTimeUsd: Usd,
+});
+export type AdminSpendTotals = z.infer<typeof AdminSpendTotals>;
+
 export const AdminUserList = z.object({
   users: z.array(AdminUser),
   nextCursor: z.string().nullable(),
+  totals: AdminSpendTotals,
 });
 export type AdminUserList = z.infer<typeof AdminUserList>;
 
@@ -106,7 +128,7 @@ export const AdminProject = z.object({
   generation: Count,
   /** The Project meter this month (`project-usd-micro`). */
   spendMonthUsd: Usd,
-  /** The Change meters of every Change of the Project. */
+  /** The Project meter summed over every month (`project-usd-micro`). */
   spendAllTimeUsd: Usd,
   changes: Count,
   /** The production app URL while the app serves. Null otherwise. */
@@ -119,19 +141,29 @@ export type AdminProject = z.infer<typeof AdminProject>;
 export const AdminProjectList = z.object({
   projects: z.array(AdminProject),
   nextCursor: z.string().nullable(),
+  totals: AdminSpendTotals,
 });
 export type AdminProjectList = z.infer<typeof AdminProjectList>;
 
 export const AdminCostGroup = z.enum(["user", "project", "model", "day"]);
 export type AdminCostGroup = z.infer<typeof AdminCostGroup>;
 
+/** `key` of the cost row with the spend of no user or Project meter. */
+export const UNATTRIBUTED_COST_KEY = "unattributed";
+/** `key` of the cost row with the meter spend that has no `task_runs` row. */
+export const OTHER_CALLS_COST_KEY = "other";
+
+/**
+ * One cost row. A meter row (`groupBy` user or project, and the two keys above) has no call or
+ * token counts: `calls`, `inputTokens`, and `outputTokens` are null.
+ */
 export const AdminCostRow = z.object({
   key: z.string(),
   label: z.string(),
   spendUsd: Usd,
-  calls: Count,
-  inputTokens: Count,
-  outputTokens: Count,
+  calls: Count.nullable(),
+  inputTokens: Count.nullable(),
+  outputTokens: Count.nullable(),
 });
 export type AdminCostRow = z.infer<typeof AdminCostRow>;
 
@@ -139,6 +171,9 @@ export type AdminCostRow = z.infer<typeof AdminCostRow>;
 export const AdminCosts = z.object({
   rows: z.array(AdminCostRow),
   totalUsd: Usd,
+  /** The UTC days that the rows cover. A meter view covers whole months. */
+  from: z.string(),
+  to: z.string(),
   source: z.string(),
 });
 export type AdminCosts = z.infer<typeof AdminCosts>;

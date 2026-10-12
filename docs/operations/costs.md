@@ -25,6 +25,11 @@ bun run cost:report --alerts-only
 - It reports account usage and leftover resources (containers, Workflow instances, forks, archived Projects).
 - It compares the prod meters in `usage_counters` with the prod caps. It compares the Anthropic spend of this month with the 100 USD budget.
 - In the web app, the platform admin reads the same meters on `/admin` (`GET /v1/admin/overview` and `GET /v1/admin/costs`). Each person reads their own spend on the Account page (`GET /v1/me/costs`). See [ADR 0033](../adr/0033-platform-admin-and-access.md).
+- The admin totals add up to the Anthropic meter `anthropic-usd-micro`. The user meters (`user-usd-micro:<userId>`) and the Project meters (`project-usd-micro:<projectId>`) start on 2026-10-11 and count only the model calls that a request pays for. The rest of the Anthropic meter shows as "Not attributed": the spend before 2026-10-11, and the model calls that no request pays for.
+  - Overview: the model spend of the month, the part attributed to users, and the part not attributed.
+  - Users and Projects: a footer with the sum of all meters of the list, the "Not attributed" part, and their sum (the Anthropic meter), this month and all time.
+  - Costs grouped by user or by Project: the monthly meters for whole months, plus a "Not attributed" row.
+  - Costs grouped by model or by day: the `task_runs` rows, plus an "Other model calls (no per-call record)" row when the range is whole months. That row holds the Root Planner, the intake check, conflict reviews, the acceptance check, the Integration Judge, the calls that no request pays for, and the runs of deleted Projects. For any other range, the `source` line gives the meter total.
 - The levels are `OK` below 60 %, `WARN` from 60 % to below 85 %, and `ALERT` at 85 % or more. When a line is `ALERT`, the script exits with code 1.
 
 ## 2. Caps
