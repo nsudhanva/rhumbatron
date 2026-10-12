@@ -11,7 +11,8 @@ import { type ForkRow, forksOwnedBy, isProjectId, type OwnedFork } from "./repo-
  * created is deleted. Every delivery purges the ProjectRootDO and ProjectViewDO again (the API
  * did it once; this makes any archive path safe). Then, in this order, and bounded per message:
  *
- * 1. Artifacts: every Workspace and Candidate fork recorded in D1, then the canonical repo.
+ * 1. Artifacts: every Workspace, Candidate, and Code page edit session fork recorded in D1, then
+ *    the canonical repo.
  * 2. R2 (EVIDENCE bucket), one prefix per kind of object, all keyed by Project ID:
  *    `source/` (code manifests, blobs, patches, index pointers), `context/` (Context Packets,
  *    tool logs, conflict packets), `apps/` and `app-previews/` (live app bundles), `evidence/`
@@ -21,7 +22,8 @@ import { type ForkRow, forksOwnedBy, isProjectId, type OwnedFork } from "./repo-
  * 4. Task by Task, 25 per message: the AgentDO of each Task is purged, then the Task's D1 rows.
  * 5. The other D1 content rows (see CONTENT_TABLES): Changes with their goal text, plans,
  *    Candidates, ChangeSets, Evidence summaries, approvals, request conflicts, members and
- *    invitations (email addresses), dead letters, releases, policy, agents, activity feed.
+ *    invitations (email addresses), dead letters, releases, policy, agents, activity feed, and
+ *    Code page edit sessions with their edits and command log.
  * 6. The 32 ResourceShardDO shards, then the KV policy copy, then the `projects` row is scrubbed
  *    (name and slug replaced) and marked `cleaned_at`.
  *
@@ -111,6 +113,7 @@ const purger = (ns: DurableObjectNamespace, name: string) =>
 
 const CHANGES = "SELECT id FROM changes WHERE project_id = ?";
 const CHANGE_CANDIDATES = `SELECT id FROM candidates WHERE change_id IN (${CHANGES})`;
+const CODE_SESSIONS = "SELECT id FROM code_sessions WHERE project_id = ?";
 
 /**
  * D1 content tables of a Project, children before parents (D1 enforces foreign keys). Tasks and
@@ -134,6 +137,9 @@ export const CONTENT_TABLES: readonly { table: string; where: string }[] = [
   { table: "dead_letters", where: "project_id = ?" },
   { table: "releases", where: "project_id = ?" },
   { table: "project_events", where: "project_id = ?" },
+  { table: "code_session_files", where: `session_id IN (${CODE_SESSIONS})` },
+  { table: "code_session_commands", where: `session_id IN (${CODE_SESSIONS})` },
+  { table: "code_sessions", where: "project_id = ?" },
 ];
 
 export type CleanupResult = {
@@ -184,6 +190,12 @@ async function markForksDeleted(db: D1Database, forks: OwnedFork[]) {
          WHERE id IN (SELECT value FROM json_each(?)) AND fork_deleted_at IS NULL`,
       )
       .bind(now, ids("candidate")),
+    db
+      .prepare(
+        `UPDATE code_sessions SET fork_deleted_at = ?
+         WHERE id IN (SELECT value FROM json_each(?)) AND fork_deleted_at IS NULL`,
+      )
+      .bind(now, ids("edit")),
   ]);
 }
 
@@ -193,7 +205,7 @@ async function pendingProjectForks(
   projectId: string,
   limit: number,
 ): Promise<OwnedFork[]> {
-  const [runs, candidates] = await db.batch<ForkRow>([
+  const [runs, candidates, sessions] = await db.batch<ForkRow>([
     db
       .prepare(
         `SELECT 'workspace' AS kind, r.id, c.project_id
@@ -211,8 +223,18 @@ async function pendingProjectForks(
          ORDER BY ca.id LIMIT ?`,
       )
       .bind(projectId, limit),
+    db
+      .prepare(
+        `SELECT 'edit' AS kind, s.id, s.project_id FROM code_sessions s
+         WHERE s.project_id = ? AND s.fork_deleted_at IS NULL ORDER BY s.id LIMIT ?`,
+      )
+      .bind(projectId, limit),
   ]);
-  return forksOwnedBy(projectId, [...(runs?.results ?? []), ...(candidates?.results ?? [])]);
+  return forksOwnedBy(projectId, [
+    ...(runs?.results ?? []),
+    ...(candidates?.results ?? []),
+    ...(sessions?.results ?? []),
+  ]);
 }
 
 /** Deletes up to one page of objects under `prefix`. True when more objects remain. */
@@ -301,7 +323,7 @@ export async function cleanupProject(env: CleanupEnv, projectId: string): Promis
   const now = new Date().toISOString();
   await env.DB.prepare(
     `UPDATE projects SET name = 'Deleted project', slug = 'deleted-' || substr(id, 6),
-       cleaned_at = ?, updated_at = ?
+       default_budget_usd = NULL, member_request_review = 1, cleaned_at = ?, updated_at = ?
      WHERE id = ? AND status = 'archived' AND cleaned_at IS NULL`,
   )
     .bind(now, now, projectId)

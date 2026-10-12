@@ -51,15 +51,25 @@ export type CodeManifest = z.infer<typeof CodeManifest>;
 /* Patches                                                                                     */
 /* ------------------------------------------------------------------------------------------ */
 
+/** A repository path that is safe in a shell command line without quoting. */
+const PLAIN_PATH = /^[\w@+-][\w./@+-]*$/;
+
 /**
  * Shell command for the Sandbox: the size of `git diff from..to` on the first line, then at most
- * MAX_PATCH_BYTES + 1 bytes of it. Both refs must be full commit IDs (validated here).
+ * MAX_PATCH_BYTES + 1 bytes of it. Both refs must be full commit IDs (validated here). `exclude`
+ * leaves files out of the diff (generated build output); each must be a plain path.
  */
-export function patchCommand(from: string, to: string) {
+export function patchCommand(from: string, to: string, exclude: readonly string[] = []) {
   if (!Sha.safeParse(from).success || !(to === "HEAD" || Sha.safeParse(to).success)) {
     throw new Error("invalid patch range");
   }
-  return `f=$(mktemp) && git diff --no-color --no-ext-diff -M ${from} ${to} > "$f" && wc -c < "$f" && head -c ${MAX_PATCH_BYTES + 1} "$f"; rm -f "$f"`;
+  if (exclude.some((path) => !PLAIN_PATH.test(path) || path.split("/").includes(".."))) {
+    throw new Error("invalid excluded path");
+  }
+  const pathspec = exclude.length
+    ? ` -- . ${exclude.map((path) => `':(exclude,literal)${path}'`).join(" ")}`
+    : "";
+  return `f=$(mktemp) && git diff --no-color --no-ext-diff -M ${from} ${to}${pathspec} > "$f" && wc -c < "$f" && head -c ${MAX_PATCH_BYTES + 1} "$f"; rm -f "$f"`;
 }
 
 export type BoundedPatch = { patch: string; bytes: number; truncated: boolean };

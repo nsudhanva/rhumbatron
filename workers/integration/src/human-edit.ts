@@ -5,7 +5,7 @@ import {
   type CodeEditOutcome,
   changeSetPatchKey,
   checkEdit,
-  humanEditIntent,
+  humanEditsIntent,
   patchMetadata,
   sourceIndexKey,
   unifiedFilePatch,
@@ -29,6 +29,9 @@ import { loadProjectPolicy } from "./policy.ts";
  * canonical source sync: no Sandbox time. Names follow the agent convention (`run_<k>`, `cs_<k>`,
  * `ws-<k>`), so fork cleanup (repo-names.ts) and composition (`'run_' || substr(cs.id, 4)`) work
  * unchanged. Safe to repeat with the same `clientRequestId`: the IDs derive from it.
+ *
+ * A Code page edit session (ADR 0029, code-sessions.ts) submits through `recordHumanChange` with
+ * several files: added, changed, and deleted. The record, the events, and composition are the same.
  */
 
 const DIR = "/repo";
@@ -61,23 +64,37 @@ class EditRefused extends Error {
 }
 
 type MemFs = Parameters<typeof git.init>[0]["fs"] & {
-  promises: { writeFile(p: string, c: string): Promise<void> };
+  promises: {
+    writeFile(p: string, c: string): Promise<void>;
+    mkdir(p: string, o?: { recursive?: boolean }): Promise<unknown>;
+    unlink(p: string): Promise<void>;
+  };
 };
+
+/** One file of a human Change: the whole new text, or `null` to delete the file. */
+export type HumanFileOp = { path: string; content: string | null };
 
 const hex = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 
-/** The Change ID: derived from the client request, so a retried save finds its own Change. */
-async function changeIdFor(projectId: string, clientRequestId: string | undefined) {
-  if (!clientRequestId) return `chg_${crypto.randomUUID()}`;
+/**
+ * The Change ID: derived from the client request (a single-file save) or the session ID (an edit
+ * session), so a retried save or submit finds its own Change. The two kinds never share an ID.
+ */
+export async function changeIdFor(
+  projectId: string,
+  key: string | undefined,
+  kind: "human-edit" | "code-session" = "human-edit",
+) {
+  if (!key) return `chg_${crypto.randomUUID()}`;
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(`human-edit\n${projectId}\n${clientRequestId}`),
+    new TextEncoder().encode(`${kind}\n${projectId}\n${key}`),
   );
   return `chg_${hex(new Uint8Array(digest)).slice(0, 32)}`;
 }
 
 /** Commit on canonical `main` for `treeSha`: the source index, else the canonical repo log. */
-async function baseCommitFor(env: Env, projectId: string, treeSha: string) {
+export async function baseCommitFor(env: Env, projectId: string, treeSha: string) {
   const index = await env.EVIDENCE.get(sourceIndexKey(projectId, treeSha));
   const commit = index
     ? ((await index.json().catch(() => null)) as { commit?: string } | null)?.commit
@@ -104,23 +121,48 @@ async function ensureFork(env: Env, projectId: string, fork: string, changeId: s
 
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
+/** One file that the human commit changed, with both versions for the Intent and the patch. */
+type CommittedFile = {
+  path: string;
+  status: "added" | "deleted" | "modified";
+  before: string;
+  after: string;
+  binary: boolean;
+  oldBlob?: string;
+  newBlob?: string;
+};
+
+/** Text of a base blob, or null for binary bytes (a NUL byte, or not UTF-8). */
+function textOf(blob: Uint8Array): string | null {
+  if (blob.includes(0)) return null;
+  try {
+    return decoder.decode(blob);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Commits the new file content on `baseCommit` in the fork and pushes the fork's `main` (a
+ * Commits the file operations on `baseCommit` in the fork and pushes the fork's `main` (a
  * fast-forward from the canonical commit). The author is the person; the token is write-scoped,
  * short-lived, and revoked here.
+ *
+ * `strict` is the single-file save: the file must be a text file of the base tree and must change.
+ * Otherwise (an edit session) a file can be added, changed, or deleted, and an operation that
+ * changes nothing is dropped. No change at all is `no_change`.
  */
-async function commitEdit(
+async function commitChanges(
   env: Env,
   input: {
     fork: string;
     baseCommit: string;
-    path: string;
-    content: string;
+    ops: readonly HumanFileOp[];
+    strict: boolean;
     message: string;
     author: { name: string; email: string };
     commitTime: number;
   },
-) {
+): Promise<{ commit: string; files: CommittedFile[] }> {
   using repo = await env.ARTIFACTS.get(input.fork);
   const info = await repo.info();
   const token = await repo.createToken("write", 600);
@@ -147,31 +189,81 @@ async function commitEdit(
       throw new Error(`fork ${input.fork} main is at ${head.slice(0, 12)}, not the base commit`);
     }
 
-    // The file must be a text blob of the base tree: edits change files, they do not create them.
-    let before: string;
-    let oldBlob: string;
-    try {
-      const read = await git.readBlob({
-        fs,
-        dir: DIR,
-        oid: input.baseCommit,
-        filepath: input.path,
-      });
-      oldBlob = read.oid;
-      if (read.blob.includes(0)) throw new EditRefused(refuse("binary", "This file is binary."));
-      before = decoder.decode(read.blob);
-    } catch (error) {
-      if (error instanceof EditRefused) throw error;
-      throw new EditRefused(refuse("not_a_file", `${input.path} is not a file in this version.`));
+    const files: CommittedFile[] = [];
+    for (const op of input.ops) {
+      let base: { oid: string; text: string | null } | null = null;
+      try {
+        const read = await git.readBlob({
+          fs,
+          dir: DIR,
+          oid: input.baseCommit,
+          filepath: op.path,
+        });
+        base = { oid: read.oid, text: textOf(read.blob) };
+      } catch {
+        base = null;
+      }
+      if (input.strict) {
+        // A single-file save changes a text file of the base tree; it does not create one.
+        if (!base) {
+          throw new EditRefused(refuse("not_a_file", `${op.path} is not a file in this version.`));
+        }
+        if (base.text === null) throw new EditRefused(refuse("binary", "This file is binary."));
+        if (base.text === op.content) {
+          throw new EditRefused(refuse("no_change", "The file is unchanged."));
+        }
+      }
+      if (op.content === null) {
+        if (!base) continue;
+        files.push({
+          path: op.path,
+          status: "deleted",
+          before: base.text ?? "",
+          after: "",
+          binary: base.text === null,
+          oldBlob: base.oid,
+        });
+      } else if (!base) {
+        files.push({
+          path: op.path,
+          status: "added",
+          before: "",
+          after: op.content,
+          binary: false,
+        });
+      } else if (base.text !== op.content) {
+        files.push({
+          path: op.path,
+          status: "modified",
+          before: base.text ?? "",
+          after: op.content,
+          binary: base.text === null,
+          oldBlob: base.oid,
+        });
+      }
     }
-    if (before === input.content) {
-      throw new EditRefused(refuse("no_change", "The file is unchanged."));
-    }
+    if (files.length === 0) throw new EditRefused(refuse("no_change", "Nothing changed."));
 
     await git.writeRef({ fs, dir: DIR, ref: "refs/heads/main", value: head, force: true });
     await git.checkout({ fs, dir: DIR, ref: "main", force: true });
-    await fs.promises.writeFile(`${DIR}/${input.path}`, input.content);
-    await git.add({ fs, dir: DIR, filepath: input.path });
+    for (const file of files) {
+      try {
+        if (file.status === "deleted") {
+          await fs.promises.unlink(`${DIR}/${file.path}`);
+          await git.remove({ fs, dir: DIR, filepath: file.path });
+          continue;
+        }
+        const parent = file.path.includes("/")
+          ? file.path.slice(0, file.path.lastIndexOf("/"))
+          : "";
+        if (parent) await fs.promises.mkdir(`${DIR}/${parent}`, { recursive: true });
+        await fs.promises.writeFile(`${DIR}/${file.path}`, file.after);
+        await git.add({ fs, dir: DIR, filepath: file.path });
+      } catch {
+        // For example a new file under a path that is a file in the base tree.
+        throw new EditRefused(refuse("invalid_path", `${file.path} cannot be written here.`));
+      }
+    }
     const signature = { ...input.author, timestamp: input.commitTime, timezoneOffset: 0 };
     const commit = await git.commit({
       fs,
@@ -187,16 +279,29 @@ async function commitEdit(
     });
     const pushed = await git.push({ fs, http, dir: DIR, url: info.remote, ref: "main", onAuth });
     if (!pushed.ok) throw new Error(`push rejected: ${JSON.stringify(pushed.refs).slice(0, 200)}`);
-    const { oid: newBlob } = await git.readBlob({
-      fs,
-      dir: DIR,
-      oid: commit,
-      filepath: input.path,
-    });
-    return { commit, before, oldBlob, newBlob };
+    for (const file of files) {
+      if (file.status === "deleted") continue;
+      const { oid } = await git.readBlob({ fs, dir: DIR, oid: commit, filepath: file.path });
+      file.newBlob = oid;
+    }
+    return { commit, files };
   } finally {
     await repo.revokeToken(token.id).catch(() => false);
   }
+}
+
+/** `git diff --stat` text of the committed files. */
+function humanDiffStat(changes: readonly { path: string; additions: number; deletions: number }[]) {
+  let additions = 0;
+  let deletions = 0;
+  const lines = changes.map((c) => {
+    additions += c.additions;
+    deletions += c.deletions;
+    return ` ${c.path} | ${c.additions + c.deletions} ${"+".repeat(Math.min(c.additions, 40))}${"-".repeat(Math.min(c.deletions, 40))}`;
+  });
+  const count = changes.length === 1 ? "1 file" : `${changes.length} files`;
+  lines.push(` ${count} changed, ${additions} insertions(+), ${deletions} deletions(-)`);
+  return lines.join("\n");
 }
 
 async function existingOutcome(env: Env, changeId: string, changeSetId: string) {
@@ -214,33 +319,51 @@ async function existingOutcome(env: Env, changeId: string, changeSetId: string) 
   };
 }
 
+/** The row IDs and the fork name of a human Change, all derived from its Change ID. */
+const humanIds = (changeId: string) => {
+  const k = changeId.slice(4);
+  return {
+    taskId: `tsk_${k}_${TASK_KEY}`,
+    runId: `run_${k}`,
+    changeSetId: `cs_${k}`,
+    fork: `ws-${k}`,
+  };
+};
+
+/**
+ * The outcome of a human Change that already exists in this Project (a repeated save or submit),
+ * or null. A repeat never commits or records twice.
+ */
+export async function existingHumanChange(
+  env: Env,
+  projectId: string,
+  changeId: string,
+): Promise<CodeEditOutcome | null> {
+  const ids = humanIds(changeId);
+  const existing = await env.DB.prepare(
+    `SELECT cs.id FROM changesets cs JOIN changes c ON c.id = cs.change_id
+     WHERE cs.id = ? AND c.project_id = ?`,
+  )
+    .bind(ids.changeSetId, projectId)
+    .first<{ id: string }>();
+  return existing ? existingOutcome(env, changeId, ids.changeSetId) : null;
+}
+
 /**
  * Records one human edit as a new Change with one proposed ChangeSet and starts composition. The
  * API authenticated the person and checked Project membership; the size, text, path, and base
  * tree checks run again here against the authoritative canonical state.
  */
 export async function submitHumanEdit(env: Env, input: HumanEditInput): Promise<CodeEditOutcome> {
-  const project = await env.DB.prepare("SELECT org_id, slug, status FROM projects WHERE id = ?")
+  const project = await env.DB.prepare("SELECT status FROM projects WHERE id = ?")
     .bind(input.projectId)
-    .first<{ org_id: string; slug: string; status: string }>();
+    .first<{ status: string }>();
   if (!project) return refuse("not_found", "Project not found");
   if (project.status === "archived") return refuse("archived", "Project is archived");
 
   const changeId = await changeIdFor(input.projectId, input.clientRequestId);
-  const k = changeId.slice(4);
-  const ids = {
-    taskId: `tsk_${k}_${TASK_KEY}`,
-    runId: `run_${k}`,
-    changeSetId: `cs_${k}`,
-    fork: `ws-${k}`,
-  };
-  const existing = await env.DB.prepare(
-    `SELECT cs.id FROM changesets cs JOIN changes c ON c.id = cs.change_id
-     WHERE cs.id = ? AND c.project_id = ?`,
-  )
-    .bind(ids.changeSetId, input.projectId)
-    .first<{ id: string }>();
-  if (existing) return existingOutcome(env, changeId, ids.changeSetId);
+  const existing = await existingHumanChange(env, input.projectId, changeId);
+  if (existing) return existing;
 
   const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
   const canonical = await root.get(root.idFromName(input.projectId)).getCanonical();
@@ -250,21 +373,72 @@ export async function submitHumanEdit(env: Env, input: HumanEditInput): Promise<
   if (!canonical) return refuse("no_source", "The project has no source to edit.");
   const path = checked.path;
 
-  const baseCommit = await baseCommitFor(env, input.projectId, canonical.treeSha);
+  return recordHumanChange(env, {
+    projectId: input.projectId,
+    userId: input.userId,
+    authorName: input.authorName,
+    message: input.message,
+    changeId,
+    ops: [{ path, content: input.content }],
+    strict: true,
+    base: {
+      generation: canonical.generation,
+      commit: await baseCommitFor(env, input.projectId, canonical.treeSha),
+    },
+    goal: `Edit ${path}`,
+    acceptance: [input.message.trim(), `${path} holds the saved content.`],
+    clientRequestId: input.clientRequestId ? `edit-${input.clientRequestId}` : null,
+  });
+}
+
+export type HumanChangeInput = {
+  projectId: string;
+  userId: string;
+  authorName: string | null;
+  message: string;
+  /** From `changeIdFor`: every row ID and the fork name derive from it. */
+  changeId: string;
+  ops: readonly HumanFileOp[];
+  strict: boolean;
+  /** The canonical generation and commit on `main` that the operations apply to. */
+  base: { generation: number; commit: string };
+  goal: string;
+  acceptance: string[];
+  /** Stored in `changes.client_request_id`. */
+  clientRequestId: string | null;
+};
+
+/**
+ * Records a human Change: a new Change, one completed Task and run, the workspace fork of
+ * canonical with one commit of every file operation, the stored patch, and a `proposed`
+ * ChangeSet. Then composition starts. The caller validated paths, sizes, and the base.
+ */
+export async function recordHumanChange(
+  env: Env,
+  input: HumanChangeInput,
+): Promise<CodeEditOutcome> {
+  const project = await env.DB.prepare("SELECT org_id, slug, status FROM projects WHERE id = ?")
+    .bind(input.projectId)
+    .first<{ org_id: string; slug: string; status: string }>();
+  if (!project) return refuse("not_found", "Project not found");
+  if (project.status === "archived") return refuse("archived", "Project is archived");
+  const { changeId } = input;
+  const ids = humanIds(changeId);
+  const baseCommit = input.base.commit;
   const policy = await loadProjectPolicy(env, input.projectId);
   const now = new Date();
   const createdAt = now.toISOString();
   const name = input.authorName?.trim() || null;
   const message = input.message.trim();
 
-  let committed: Awaited<ReturnType<typeof commitEdit>>;
+  let committed: Awaited<ReturnType<typeof commitChanges>>;
   try {
     await ensureFork(env, input.projectId, ids.fork, changeId);
-    committed = await commitEdit(env, {
+    committed = await commitChanges(env, {
       fork: ids.fork,
       baseCommit,
-      path,
-      content: input.content,
+      ops: input.ops,
+      strict: input.strict,
       message: `${message}\n\nEdited by ${name ?? input.userId} on the Rhumbatron Code page.`,
       author: {
         name: name ?? input.userId,
@@ -279,24 +453,32 @@ export async function submitHumanEdit(env: Env, input: HumanEditInput): Promise<
     throw error;
   }
 
-  const intent = humanEditIntent({
-    path,
-    before: committed.before,
-    after: input.content,
+  const paths = committed.files.map((f) => f.path);
+  const intent = humanEditsIntent({
+    files: committed.files.map((f) => ({
+      path: f.path,
+      before: f.binary ? "" : f.before,
+      after: f.binary ? "" : f.after,
+    })),
     message,
     protectedResources: policy.protectedResources,
   });
-  const diff = unifiedFilePatch({
-    path,
-    before: committed.before,
-    after: input.content,
-    oldBlob: committed.oldBlob,
-    newBlob: committed.newBlob,
-  });
+  const diffs = committed.files.map((f) => ({
+    path: f.path,
+    ...unifiedFilePatch({
+      path: f.path,
+      before: f.before,
+      after: f.after,
+      status: f.status,
+      binary: f.binary,
+      ...(f.oldBlob ? { oldBlob: f.oldBlob } : {}),
+      ...(f.newBlob ? { newBlob: f.newBlob } : {}),
+    }),
+  }));
   // The Files changed read model. A failure leaves the ChangeSet without `patchRef`, as for agents.
   let patchRef: string | undefined;
   try {
-    const bounded = boundPatch(diff.patch);
+    const bounded = boundPatch(diffs.map((d) => d.patch).join(""));
     const key = changeSetPatchKey(input.projectId, ids.changeSetId);
     await env.EVIDENCE.put(key, bounded.patch, {
       httpMetadata: { contentType: "text/x-diff; charset=utf-8" },
@@ -320,22 +502,22 @@ export async function submitHumanEdit(env: Env, input: HumanEditInput): Promise<
       fork: ids.fork,
       commit: committed.commit,
       baseCommit,
-      diffStat: ` ${path} | ${diff.additions + diff.deletions} ${"+".repeat(Math.min(diff.additions, 40))}${"-".repeat(Math.min(diff.deletions, 40))}\n 1 file changed, ${diff.additions} insertions(+), ${diff.deletions} deletions(-)`,
-      files: [path],
+      diffStat: humanDiffStat(diffs),
+      files: paths,
       stackedOn: [],
       ...(patchRef ? { patchRef } : {}),
     },
   };
   const outcome = JSON.stringify(declared);
-  const goal = `Edit ${path}`;
+  const goal = input.goal;
   const ctx: ChangeContext = {
     projectId: input.projectId,
     orgId: project.org_id,
     projectSlug: project.slug,
     changeId,
-    baseGeneration: canonical.generation,
+    baseGeneration: input.base.generation,
   };
-  const acceptance = [message, `${path} holds the saved content.`];
+  const acceptance = input.acceptance;
   // One D1 batch is one transaction: the Change never exists without its ChangeSet. On failure
   // no row tracks the fork, so it is removed; a retry forks and commits again.
   await env.DB.batch([
@@ -348,10 +530,10 @@ export async function submitHumanEdit(env: Env, input: HumanEditInput): Promise<
       changeId,
       input.projectId,
       goal,
-      canonical.generation,
+      input.base.generation,
       intent.riskTier,
       BUDGET_USD,
-      input.clientRequestId ? `edit-${input.clientRequestId}` : null,
+      input.clientRequestId,
       input.userId,
       JSON.stringify(acceptance),
       createdAt,
@@ -396,7 +578,7 @@ export async function submitHumanEdit(env: Env, input: HumanEditInput): Promise<
       ids.changeSetId,
       changeId,
       input.userId,
-      canonical.generation,
+      input.base.generation,
       `artifacts://${ids.fork}@${committed.commit}`,
       outcome,
       JSON.stringify(intent.semanticResources),
@@ -430,7 +612,7 @@ export async function submitHumanEdit(env: Env, input: HumanEditInput): Promise<
         changeSetId: ids.changeSetId,
         fork: ids.fork,
         commit: committed.commit,
-        files: [path],
+        files: paths,
         stackedOn: [],
         source: "human",
       },

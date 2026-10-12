@@ -31,10 +31,16 @@ const INFORMATIONAL = new Set([
   "claim.contended",
   "project.created",
   "change.created",
+  "change.proposed",
+  "change.included",
+  "change.declined",
   "verification.check.completed",
   "build.started",
   "deployment.started",
   "preview.ready",
+  "code.session.opened",
+  "code.session.closed",
+  "code.session.submitted",
 ]);
 
 const RESOURCE_EVENTS = new Set([

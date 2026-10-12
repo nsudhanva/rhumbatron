@@ -1,9 +1,9 @@
 import { Show, SignInButton } from "@clerk/tanstack-react-start";
 import { Button, Select } from "@cloudflare/kumo";
-import { PencilSimple, SignIn } from "@phosphor-icons/react";
+import { Code as CodeIcon, PencilSimple, SignIn } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Attribution, ChangeLink } from "../components/code/diff-files";
 import { FileEditor } from "../components/code/file-editor";
 import { FileView, formatBytes } from "../components/code/file-view";
@@ -23,16 +23,24 @@ import {
   getCodeVersions,
   getProject,
 } from "../lib/api";
-import { EMPTY, formatNumber, generation, timeAgo, truncate } from "../lib/format";
+import { changeLabel, EMPTY, formatNumber, generation, timeAgo } from "../lib/format";
+import { can } from "../lib/permissions";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
  * Code (P16-18; AGENTS.md 38.5): the files of any Canonical Generation, with the version history
  * and which agents changed what. Defaults to the live canonical tree. A text file of the live tree
  * can be edited (P16-19): Save creates a new Change that ships only after its checks pass.
+ * An owner or admin can also start an edit session (`edit` in the URL): an IDE with a file tree,
+ * tabs, an editor and a terminal over a fork of the live tree. Submit turns every change into one
+ * Change. The IDE module loads only when a session starts.
  */
 
-type Search = { tree?: string; path?: string };
+type Search = { tree?: string; path?: string; edit?: true };
+
+/** The edit-session IDE, in its own chunk (CodeMirror is a further chunk inside it). */
+const loadIde = () => import("../components/code-ide/code-ide");
+const CodeIde = lazy(loadIde);
 
 export const Route = createFileRoute("/projects_/$projectId/code")({
   validateSearch: (search: Record<string, unknown>): Search => ({
@@ -41,6 +49,9 @@ export const Route = createFileRoute("/projects_/$projectId/code")({
       : {}),
     ...(typeof search.path === "string" && search.path.length > 0 && search.path.length <= 1024
       ? { path: search.path }
+      : {}),
+    ...(search.edit === true || search.edit === "true" || search.edit === "1"
+      ? { edit: true as const }
       : {}),
   }),
   loaderDeps: ({ search }) => ({ tree: search.tree, path: search.path }),
@@ -152,17 +163,58 @@ function CodeContent() {
 
   // The file being edited, by tree and path: opening another file or version leaves the editor.
   const [editing, setEditing] = useState<string | null>(null);
-  const editable = file.data?.live && file.data.content !== null ? file.data : null;
+  // Editing code is for an owner or admin (the API enforces it); everyone else reads.
+  const editable =
+    can(project.data?.role, "code.edit") && file.data?.live && file.data.content !== null
+      ? file.data
+      : null;
   const editingNow = !!editable && editing === `${editable.treeSha}:${editable.path}`;
 
   const open = (next: string) =>
     navigate({ search: (prev) => ({ ...prev, path: next }), replace: true });
+
+  // Edit sessions: owner and admin only (the API enforces it). The IDE renders in the browser only.
+  const canEdit = can(project.data?.role, "code.edit");
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  const startEditing = () =>
+    navigate({ search: ({ tree: _tree, edit: _edit, ...prev }) => ({ ...prev, edit: true }) });
+  const leaveEditing = () => navigate({ search: ({ edit: _edit, ...prev }) => prev });
+
+  if (search.edit && canEdit) {
+    return (
+      <Page>
+        <PageTitle kicker={project.data?.name ?? "Project"} title="Code" />
+        {hydrated ? (
+          <Suspense fallback={<IdeLoading />}>
+            <CodeIde projectId={projectId} initialPath={search.path} onLeave={leaveEditing} />
+          </Suspense>
+        ) : (
+          <IdeLoading />
+        )}
+      </Page>
+    );
+  }
 
   return (
     <Page>
       <PageTitle
         kicker={project.data?.name ?? "Project"}
         title="Code"
+        actions={
+          canEdit && (
+            <Button
+              variant="primary"
+              icon={CodeIcon}
+              title="Edit files and run commands in a fork of the live code; submit them as one Change."
+              onPointerEnter={() => void loadIde()}
+              onFocus={() => void loadIde()}
+              onClick={() => void startEditing()}
+            >
+              Start editing
+            </Button>
+          )
+        }
         meta={
           tree.data && (
             <>
@@ -278,6 +330,20 @@ function CodeContent() {
   );
 }
 
+/** Same frame and height as the IDE while its module loads, so nothing shifts. */
+function IdeLoading() {
+  return (
+    <div
+      aria-busy
+      className="grid h-[clamp(480px,calc(100dvh-200px),1100px)] content-start gap-3 rule-ink bg-kumo-elevated p-4"
+    >
+      <p className="text-[13px] text-kumo-subtle">Loading the editor.</p>
+      <SkeletonBar height={13} className="w-1/3" />
+      <SkeletonBar height={13} className="w-1/2" />
+    </div>
+  );
+}
+
 function ContentsNote({ tree }: { tree: CodeTree | undefined }) {
   if (!tree || tree.contents === "complete") return null;
   return (
@@ -290,7 +356,7 @@ function ContentsNote({ tree }: { tree: CodeTree | undefined }) {
 }
 
 function versionLabel(v: CodeVersion) {
-  const what = v.change ? truncate(v.change.goal, 64) : "Initial source";
+  const what = v.change ? changeLabel(v.change) : "Initial source";
   return `${generation(v.generation)} · ${what}${v.live ? " (live)" : ""}`;
 }
 

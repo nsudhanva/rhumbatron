@@ -43,12 +43,14 @@ Repository names come from D1 row IDs only (`repo-names.ts`):
 | Canonical | The Project ID, `proj_<uuid>` |
 | Task workspace fork | `ws-<run>` for Task run `run_<run>` |
 | Candidate fork | `cand-<id>` for Candidate `cand_<id>` |
+| Code edit session fork | `edit-<hex>` for session `edit_<hex>` (ADR 0029) |
 
 Rules:
 
 - Cleanup does not list the namespace. It deletes only the names that it derives from the rows of one Project. Thus it cannot delete a repository of a different Project.
 - Each Git access uses a repository token that expires after 600 s. The code revokes the token after use.
 - The daily `forks.sweep` command deletes a fork 30 days after its run or Candidate ends (`FORK_RETENTION_DAYS`). It deletes workspace forks of failed runs, of runs without a ChangeSet, and of finished Changes. It deletes the forks of `rejected`, `stale`, and `promoted` Candidates. It deletes a promoted fork only when canonical `main` holds the composed commit.
+- A code edit session deletes its fork when it ends. The daily `forks.sweep` command ends overdue sessions and deletes a session fork that a failed delete left.
 - A new Project starts at Canonical Generation 0 (`S0`) with one commit that holds only `.gitignore` (ADR 0022). `AGENTS.md` uses `S1841` for the demo.
 
 Source objects in R2:
@@ -69,6 +71,7 @@ Source objects in R2:
 
 A Candidate fork starts at the canonical base commit.
 The CandidateVerificationWorkflow merges the ChangeSets in Work Graph order.
+When the composed `package.json` has a `build` script, composition then runs `bun install` and `bun run build` and commits the files the build changed (`Build <candidate>`). See [Live apps](live-apps.md#client-assets-built-by-the-app).
 Promotion moves canonical `main` to the composed commit. The move is fast-forward only.
 
 ```mermaid
@@ -131,15 +134,19 @@ sequenceDiagram
 ```
 
 The fork and the checkout happen at the first workspace tool call of the run.
-`run_command` accepts only `bun install`, `bun test [paths]`, `bun run typecheck|test|bench|contract`, `bunx tsc --noEmit`, `git status|diff|log`, and `ls`.
+`run_command` accepts only `bun install`, `bun test [paths]`, `bun run typecheck|test|bench|contract|build`, `bun run <name>` for a script in the workspace `package.json`, `bunx tsc --noEmit`, `git status|diff|log`, and `ls`.
+After `bun run build` (or `bun run build:<x>`), the workspace discards the files that the build wrote. Composition builds them again.
 
-| Guard | Agent workspace | Candidate checks |
-|---|---|---|
-| Directory | `/workspace/<last 24 characters of the run ID>` | `/workspace/cand-<id>` |
-| Reservation on open | 300 s | 900 s |
-| Idle tail before sleep | 120 s (`sleepAfter` 2 min) | 120 s (`sleepAfter` 2 min) |
-| Concurrency | 4 open workspaces per Change | Checks run one after another in one workflow |
-| Monthly meter | `SANDBOX_MONTHLY_SECONDS`: 72,000 s (20 h) | Same meter |
+| Guard | Agent workspace | Candidate checks | Code edit session |
+|---|---|---|---|
+| Directory | `/workspace/<last 24 characters of the run ID>` | `/workspace/cand-<id>` | `/workspace/edit-<hex>` |
+| Reservation on open | 300 s | 900 s | 480 s for each command. The open starts no Sandbox. |
+| Idle tail before sleep | 120 s (`sleepAfter` 2 min) | 120 s (`sleepAfter` 2 min) | 120 s (`sleepAfter` 2 min) |
+| Concurrency | 4 open workspaces per Change | Checks run one after another in one workflow | One command at a time in each session, one open session per person per Project |
+| Command user | root, allowlisted commands | root | An unprivileged user of the session, any command, 120 s timeout |
+| Monthly meter | `SANDBOX_MONTHLY_SECONDS`: 72,000 s (20 h) | Same meter | Same meter. At the cap: 429 `sandbox_cap`. |
+
+A code edit session (ADR 0029) starts the Sandbox only at its first command. After each command, and when the session ends while the Sandbox is awake, a kill as the session user stops every process of the session. The end also removes the session directory. The Sandbox then sleeps after 2 idle minutes.
 
 A Sandbox loss does not lose committed work.
 The workspace restores from the same fork, base, and stacked merges. Then it compares the result with the recorded start commit (section 42.5).
@@ -170,7 +177,8 @@ flowchart TB
   FK -->|"no Sandbox budget"| RJ
   FK -->|"reserved"| CM{"Merge ChangeSets<br/>in Work Graph order"}
   CM -->|"merge conflict"| RJ
-  CM -->|"merged"| PL["Plan, status verifying,<br/>candidate.composed"]
+  CM -->|"merged"| BD["build script in package.json:<br/>bun install, bun run build,<br/>commit the output"]
+  BD --> PL["Plan, status verifying,<br/>candidate.composed"]
   PL --> CK["One step per check:<br/>Evidence to D1 and R2"]
   CK --> PV["Live app only: publish preview,<br/>run preview-smoke"]
   PV --> GT{"gateRequiredChecks"}
@@ -181,9 +189,11 @@ flowchart TB
 ```
 
 - A rejection by `checkCompatibility` or by the merge records `composition` Evidence with the reason.
+- A composition build that fails records the `build` Evidence (`fail`, `checked_supported`, the output tail). The `build` check then does not run again. A passing composition build leaves the `build` check to its normal runner.
+- The Candidate patch leaves out the files that the composition build generated.
 - A check step that throws records status `error` with coverage `not_checked`. A record that took longer than the check timeout is the gap `timed_out`. A gap is never a pass (section 34.4.1).
 - The Sandbox meter settles after the last check, before preview publication and the gate.
-- The preview publishes only when the `build` check passed.
+- The preview publishes only when the `build` check (check ID `build`) passed.
 - After selection, a Change with no Candidate that can ship ends as `failed`. See [Change lifecycle](change-lifecycle.md#change-status).
 
 ### Where checks run
@@ -212,6 +222,7 @@ flowchart LR
   T3["Task touches authorization"] --> SEC["security and a human gate"]
   T4["UI files and risk high or critical"] --> BRW["browser"]
   T5["Project has a live app"] --> LIVE["contract, preview-smoke"]
+  T6["package.json has a build script"] --> CA["client-assets"]
 ```
 
 - Verification uses the Project's policy: the D1 `project_policies` row (migration 0017), read once per run through `policyForRun` (`workers/integration/src/policy.ts`). This applies to the plan, to the approval gate, to the auto-promotion tiers, and to the protected resources of `checkCompatibility`. Without a row, verification uses `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`), which protects no resource.
@@ -222,10 +233,12 @@ flowchart LR
 - UI files are files under `public/` or with the extension `.tsx`, `.jsx`, `.html`, or `.css`.
 - An invariant that keeps existing endpoint behavior adds `contract` and `unit`. Another app-behavior invariant adds `unit`. An invariant that no test can prove (for example email delivery or uptime) becomes a required procedure check. It stays a visible gap.
 - A Change with acceptance criteria gets the optional `acceptance` check (see below).
+- A composed `package.json` with a `build` script adds the required `client-assets` check. Client sources are the files under `src/client/` and the `src/` paths that the build script files name (a named file also adds its directory, except `src/` itself). When a client source changed but no script or style that `public/index.html` references differs from the base, the check fails: the live app would serve the old bundle. No changed client source passes. A page without `public/index.html`, or without a local script or style, passes with that reason.
 
 | Check ID | Kind | Command or procedure | Timeout |
 |---|---|---|---|
-| `build` | build | Dynamic Worker: bundle the app with `@cloudflare/worker-bundler` and load it. Sandbox: `bun run typecheck` | 120 s (30 s in the Dynamic Worker) |
+| `build` | build | Dynamic Worker: bundle the app with `@cloudflare/worker-bundler` and load it. Sandbox: `bun run typecheck`. A failed composition build is the result | 120 s (30 s in the Dynamic Worker) |
+| `client-assets` | build | Only with a `build` script. Composition compares the composed commit with the base (see above). No runner | 30 s |
 | `unit` | unit | Dynamic Worker: the project tests. Sandbox: `bun test` | 180 s (30 s in the Dynamic Worker) |
 | `contract` | contract | Compare the route table of the base and of the Candidate with the declared contract changes. Dynamic Worker extraction, or `bun run contract` in the Sandbox | 120 s (30 s in the Dynamic Worker) |
 | `protected-invariant-cart` | protected-invariant | `bun test test/cart.invariant.test.ts` | 120 s |

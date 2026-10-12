@@ -80,7 +80,10 @@ const refuse = (reason: Refusal["reason"], detail: string): Refusal => ({
   detail,
 });
 
-/** A repository-relative file path, or null. No `..`, no absolute path, nothing under `.git`. */
+/**
+ * A repository-relative file path, or null. No `..`, no absolute path, and no `.git` part at any
+ * depth in any letter case (git refuses such a path in a tree).
+ */
 export function normalizeEditPath(path: string): string | null {
   const clean = path.replace(/^\.\//, "");
   if (!clean || clean.length > MAX_PATH) return null;
@@ -89,7 +92,7 @@ export function normalizeEditPath(path: string): string | null {
   for (let i = 0; i < clean.length; i++) if (clean.charCodeAt(i) < 0x20) return null;
   const parts = clean.split("/");
   if (parts.some((p) => p === "" || p === "." || p === "..")) return null;
-  if (parts[0] === ".git") return null;
+  if (parts.some((p) => p.toLowerCase() === ".git")) return null;
   return clean;
 }
 
@@ -225,6 +228,50 @@ export function humanEditIntent(input: {
   };
 }
 
+const RISK_ORDER: readonly RiskTier[] = ["low", "medium", "high", "critical"];
+
+/**
+ * The Intent of a human ChangeSet with several files (a Code page edit session, ADR 0029): the
+ * Intent of each file (`humanEditIntent`), merged. Resources, files, and contract and data changes
+ * are the union in file order; the risk is the highest. An added file has `before` empty; a
+ * deleted file has `after` empty.
+ */
+export function humanEditsIntent(input: {
+  files: readonly { path: string; before: string; after: string }[];
+  message: string;
+  protectedResources?: readonly string[];
+}): HumanEditIntent {
+  const parts = input.files.map((file) =>
+    humanEditIntent({
+      ...file,
+      message: input.message,
+      ...(input.protectedResources ? { protectedResources: input.protectedResources } : {}),
+    }),
+  );
+  const union = (pick: (part: HumanEditIntent) => string[]) => [...new Set(parts.flatMap(pick))];
+  const riskTier = parts.reduce<RiskTier>(
+    (top, part) =>
+      RISK_ORDER.indexOf(part.riskTier) > RISK_ORDER.indexOf(top) ? part.riskTier : top,
+    "low",
+  );
+  const firstLine = input.message.trim().split("\n")[0]?.trim() ?? "";
+  const only = input.files.length === 1 ? input.files[0]?.path : undefined;
+  return {
+    summary: (firstLine || (only ? `Edit ${only}` : `Edit ${input.files.length} files`)).slice(
+      0,
+      200,
+    ),
+    semanticResources: union((p) => p.semanticResources),
+    expectedFiles: input.files.map((f) => f.path),
+    expectedContractChanges: union((p) => p.expectedContractChanges),
+    expectedDataChanges: union((p) => p.expectedDataChanges),
+    assumptions: ["A person wrote this edit on the Code page; checks decide whether it ships."],
+    riskTier,
+    touchesAuthorization: parts.some((p) => p.touchesAuthorization),
+    touchesMigration: parts.some((p) => p.touchesMigration),
+  };
+}
+
 /* ------------------------------------------------------------------------------------------ */
 /* One-file unified diff                                                                       */
 /* ------------------------------------------------------------------------------------------ */
@@ -308,9 +355,13 @@ function printLine(prefix: string, line: string): string[] {
     : [`${prefix}${line}`];
 }
 
+const NO_BLOB = "0000000";
+
 /**
- * `git diff`-style patch of one modified file (what `splitPatch` and the Files changed view read).
- * Empty when nothing changed. A very large rewrite is shown as one hunk that replaces the file.
+ * `git diff`-style patch of one file (what `splitPatch` and the Files changed view read). Empty
+ * when a modified file did not change. A very large rewrite is shown as one hunk that replaces the
+ * file. `status` `added` or `deleted` writes the git mode header and `/dev/null`; `binary` writes
+ * git's "Binary files differ" line in place of hunks.
  */
 export function unifiedFilePatch(input: {
   path: string;
@@ -318,15 +369,20 @@ export function unifiedFilePatch(input: {
   after: string;
   oldBlob?: string;
   newBlob?: string;
+  status?: "added" | "deleted" | "modified";
+  binary?: boolean;
 }): { patch: string; additions: number; deletions: number } {
-  const a = toLines(input.before);
-  const b = toLines(input.after);
+  const status = input.status ?? "modified";
+  const a = input.binary ? [] : toLines(input.before);
+  const b = input.binary ? [] : toLines(input.after);
   const ops = myers(a, b, MAX_DIFF_EDITS) ?? [
     ...a.map((line): Op => ({ kind: "del", line })),
     ...b.map((line): Op => ({ kind: "add", line })),
   ];
   const changed = ops.flatMap((op, i) => (op.kind === "eq" ? [] : [i]));
-  if (changed.length === 0) return { patch: "", additions: 0, deletions: 0 };
+  if (changed.length === 0 && status === "modified") {
+    return { patch: "", additions: 0, deletions: 0 };
+  }
 
   // Hunks: changed ops plus CONTEXT_LINES of equal lines around them, merged when they touch.
   const spans: [number, number][] = [];
@@ -349,10 +405,18 @@ export function unifiedFilePatch(input: {
   }
 
   const out = [`diff --git a/${input.path} b/${input.path}`];
-  if (input.oldBlob && input.newBlob) {
-    out.push(`index ${input.oldBlob.slice(0, 7)}..${input.newBlob.slice(0, 7)} 100644`);
+  if (status === "added") out.push("new file mode 100644");
+  if (status === "deleted") out.push("deleted file mode 100644");
+  const oldId = status === "added" ? NO_BLOB : input.oldBlob?.slice(0, 7);
+  const newId = status === "deleted" ? NO_BLOB : input.newBlob?.slice(0, 7);
+  if (oldId && newId) out.push(`index ${oldId}..${newId}${status === "modified" ? " 100644" : ""}`);
+  const from = status === "added" ? "/dev/null" : `a/${input.path}`;
+  const to = status === "deleted" ? "/dev/null" : `b/${input.path}`;
+  if (input.binary) {
+    out.push(`Binary files ${from} and ${to} differ`);
+    return { patch: `${out.join("\n")}\n`, additions: 0, deletions: 0 };
   }
-  out.push(`--- a/${input.path}`, `+++ b/${input.path}`);
+  out.push(`--- ${from}`, `+++ ${to}`);
   let additions = 0;
   let deletions = 0;
   for (const [start, end] of spans) {

@@ -30,7 +30,7 @@ Only the owner can delete a Project. `DELETE /v1/projects/:id` sets the Project 
 flowchart TB
   del[DELETE /v1/projects/:id] --> arch[API: status archived,<br/>purge root and view]
   arch --> q[integration Queue: project.cleanup]
-  q --> f[Delete ws-* and cand-* forks<br/>20 per message]
+  q --> f[Delete ws-*, cand-*, and edit-* forks<br/>20 per message]
   f --> more{More forks?}
   more -->|yes| q
   more -->|no| canon[Delete canonical repo]
@@ -47,12 +47,12 @@ flowchart TB
 Cleanup skips a Project that is not `archived`. Each queue message does a bounded part of the work. The next delivery continues where the last one stopped. Every step is safe to repeat. The order is:
 
 1. Purge `ProjectRootDO` and `ProjectViewDO` again. Mark every `app_deployments` row `removed`.
-2. Delete every Workspace fork (`ws-*`) and Candidate fork (`cand-*`) that `task_runs` and `candidates` record, 20 per message.
+2. Delete every Workspace fork (`ws-*`), Candidate fork (`cand-*`), and code edit session fork (`edit-*`) that `task_runs`, `candidates`, and `code_sessions` record, 20 per message.
 3. Delete the canonical repository (`ARTIFACTS.delete(projectId)`).
 4. Delete every object in the evidence bucket under these prefixes, each followed by the Project ID: `source/`, `context/`, `apps/`, `app-previews/`, `evidence/`, `work-graphs/`, and `workspace/`.
 5. Wait until `removeApp` on the apps Worker has wiped the app data stores.
 6. For each batch of 25 Tasks, purge the `AgentDO` of each Task, then delete the `task_dependencies`, `decision_receipts`, `task_runs`, and `tasks` rows.
-7. Delete the rows of `evidence_index`, `approvals`, `conflicts`, `changesets`, `candidates`, `change_decisions`, `changes`, `request_conflicts`, `goal_suggestions`, `project_policies`, `project_members`, `project_invitations`, `agents`, `dead_letters`, `releases`, and `project_events`. Each statement deletes at most 500 rows. Each message runs at most 40 statements.
+7. Delete the rows of `evidence_index`, `approvals`, `conflicts`, `changesets`, `candidates`, `change_decisions`, `changes`, `request_conflicts`, `goal_suggestions`, `project_policies`, `project_members`, `project_invitations`, `agents`, `dead_letters`, `releases`, `project_events`, `code_session_files`, `code_session_commands`, and `code_sessions`. Each statement deletes at most 500 rows. Each message runs at most 40 statements.
 8. Purge the 32 `ResourceShardDO` shards (Claims, Intents, Challenges, outbox). This step is last, so a late Claim cannot fill a shard again.
 9. Delete the KV policy copy. Set the name to `Deleted project` and the slug to `deleted-<id>`. Set `cleaned_at`.
 
@@ -64,7 +64,7 @@ Cleanup keeps these records:
 |---|---|
 | The `projects` row (ID, organization, status, generation, timestamps), with the name and slug scrubbed | Archive record. The slug is free to use again. |
 | One `app_deployments` row for the production app host | The host answers `410`. The row has the host label and the `removed` status only. |
-| `usage_counters` | The Anthropic, Sandbox, Browser Run, and build meters are global rows. A deletion cannot free budget. |
+| `usage_counters` | The Anthropic, Sandbox, Browser Run, and build meters are global rows. A deletion cannot free budget. The budget meters of the Project and its Changes (`project-usd-micro:<id>`, `change-usd-micro:<id>`) hold only an ID and an amount, and they stay. |
 | The R2 `events/` archive and K2 events | All Projects share them. The R2 lifecycle rule deletes `events/` after 365 days. K2 keeps events for 7 days. |
 | Organization, user, and membership rows; `notification_reads`; `processed_events` | They are not Project data. |
 | The Project Sandbox container | It keeps no data after its 2-minute sleep. To wake it only to destroy it uses Sandbox hours. |
@@ -75,6 +75,7 @@ Cleanup keeps these records:
 
 - Workspace forks (`ws-*`): runs that failed, runs that completed without a ChangeSet, and runs of a Change that is `completed`, `cancelled`, or `failed`.
 - Candidate forks (`cand-*`): Candidates that are `rejected`, `stale`, or `promoted`. A promoted fork is deleted only after the sweep confirms that canonical `main` contains the composed commit.
+- Code edit sessions: the sweep ends each open session that is 10 minutes idle or 2 hours old (`expireCodeSessions` in `workers/integration/src/code-sessions.ts`, at most 50 sessions and 50 left forks per run). It deletes the session fork and the edits. It also deletes a session fork that a failed delete left. A session also ends at its next request after a limit.
 
 The sweep deletes at most 20 repositories per message. It sets `fork_deleted_at` in D1, so a retry deletes nothing twice.
 
@@ -85,6 +86,7 @@ The event router cron queues one `forks.sweep` each day at 04:17 UTC (`workers/e
 | Resource | Scope | Retention | Managed by |
 |---|---|---|---|
 | Artifacts forks | `ws-*`, `cand-*` | 30 days after the run or Candidate finishes | `sweepForks` |
+| Code edit session forks | `edit-*` | Until the session ends (at most 2 hours, or the next daily sweep) | `endSession`, `expireCodeSessions` |
 | Canonical repositories | One per Project, named by the Project ID | Until the Project is deleted | `cleanupProject` |
 | R2 event archive | `events/` | 365 days | R2 lifecycle rule (`envs/prod`, `modules/state`) |
 | R2 Evidence | `evidence/` | Until the Project is deleted | `cleanupProject` |

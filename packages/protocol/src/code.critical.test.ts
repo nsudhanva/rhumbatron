@@ -78,6 +78,15 @@ describe("patch bounds", () => {
     expect(() => patchCommand("HEAD~1; rm -rf /", "HEAD")).toThrow();
     expect(() => patchCommand(SHA, "$(id)")).toThrow();
   });
+
+  it("leaves out only plain generated paths", () => {
+    expect(patchCommand(SHA, "HEAD", ["public/app.js"])).toContain(
+      `${SHA} HEAD -- . ':(exclude,literal)public/app.js' >`,
+    );
+    expect(() => patchCommand(SHA, "HEAD", ["public/a b.js"])).toThrow();
+    expect(() => patchCommand(SHA, "HEAD", ["x'; rm -rf /"])).toThrow();
+    expect(() => patchCommand(SHA, "HEAD", ["../etc/passwd"])).toThrow();
+  });
 });
 
 describe("splitPatch", () => {

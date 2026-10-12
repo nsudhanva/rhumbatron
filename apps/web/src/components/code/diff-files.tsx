@@ -3,7 +3,7 @@ import { CaretRight } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 import type { ChangeSetAttribution, CodeDiff, DiffFile } from "../../lib/api";
-import { formatNumber } from "../../lib/format";
+import { changeLabel, formatNumber } from "../../lib/format";
 import { EmptyState } from "../ui/empty-state";
 import { AddsDels } from "../workspace-page/fork-tree";
 import { highlightLines, TOKEN_CLASS, type Token } from "./highlight";
@@ -217,7 +217,11 @@ export function DiffFiles({
 DiffFiles.displayName = "DiffFiles";
 
 /** Link to a ChangeSet's Change, for history rows. */
-export function ChangeLink({ change }: { change: { id: string; goal: string } }) {
+export function ChangeLink({
+  change,
+}: {
+  change: { id: string; goal: string; title?: string | null };
+}) {
   return (
     <Link
       to="/changes/$changeId"
@@ -225,7 +229,7 @@ export function ChangeLink({ change }: { change: { id: string; goal: string } })
       className="text-kumo-link hover:underline"
       title={change.goal}
     >
-      {change.goal}
+      {changeLabel(change)}
     </Link>
   );
 }

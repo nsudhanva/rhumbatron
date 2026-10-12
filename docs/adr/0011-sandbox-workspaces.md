@@ -21,8 +21,9 @@ Sandbox.
   environment variable, never from git config. On `complete_task`, the run commits and pushes to
   its fork. The result is a ChangeSet row (`changesets`) and a `changeset.proposed` event.
 - `run_command` accepts only these commands: `bun install` (also with `--frozen-lockfile`),
-  `bun test`, `bun run typecheck|test|bench|contract`, `bunx tsc --noEmit`, `git status|diff|log`,
-  and `ls`. It rejects shell metacharacters.
+  `bun test`, `bun run typecheck|test|bench|contract|build`, `bun run <name>` for a script in the
+  workspace `package.json`, `bunx tsc --noEmit`, `git status|diff|log`, and `ls`. It rejects shell
+  metacharacters. A workspace build does not keep its output; Candidate composition builds it.
 - A Change can have at most 4 open coding Sandboxes (`maxActiveSandboxesPerChange`, section 44).
   The workspace refuses an open above that limit before any fork. It also refuses an open when the
   monthly meter has no room. The agent then declares its Intent without code changes.
