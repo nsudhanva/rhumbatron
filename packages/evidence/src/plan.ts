@@ -32,12 +32,20 @@ export type BuildVerificationPlanInput = {
   /** APPS is available and the Project has an app, including its pending first deployment. */
   liveAppEnabled?: boolean;
   /**
+   * The composed package.json has a `build` script, so composition ran `bun run build`. Adds the
+   * required `client-assets` check: changed client sources must change the served assets.
+   */
+  clientBuild?: boolean;
+  /**
    * Change acceptance criteria the acceptance check judges against the Candidate patch. The check
    * is optional for the gate; selection and auto-promotion read it (ADR 0026). The caller
    * leaves out criteria that other checks already cover (quality gate, latency, kept behavior).
    */
   acceptanceCriteria?: readonly string[];
 };
+
+/** Check ID of the freshness rule for built client assets (kind `build`, no runner). */
+export const CLIENT_ASSETS_CHECK_ID = "client-assets";
 
 /** One Haiku call, one Sonnet retry on invalid output, plus Evidence upload. */
 export const ACCEPTANCE_CHECK_TIMEOUT_MS = 180_000;
@@ -165,6 +173,24 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
       required: true,
       expected: exit0,
       evidenceOutput: [...STD],
+    });
+  }
+  if (input.clientBuild) {
+    checks.push({
+      checkId: CLIENT_ASSETS_CHECK_ID,
+      kind: "build",
+      reason: "The app builds its client: changed client sources must change the served assets.",
+      procedure:
+        "After the composition build, compare the composed commit with the base. When a client " +
+        "source (src/client/ or a src/ path that the build script names) changed, a script or " +
+        "style that public/index.html references must have changed too.",
+      timeoutMs: 30_000,
+      required: true,
+      expected: {
+        kind: "procedure",
+        description: "Changed client sources change the assets public/index.html references",
+      },
+      evidenceOutput: ["report.json", "stdout.txt"],
     });
   }
   if (wanted.has("targeted")) {

@@ -1,3 +1,4 @@
+import { CLIENT_ASSETS_CHECK_ID } from "@rhumbatron/evidence";
 import type { AppCheckResult, VerificationCheck } from "@rhumbatron/protocol";
 import { type CheckOutcome, classifyContract } from "./candidate-composer.ts";
 
@@ -19,6 +20,8 @@ export function isAppCheckerEligible(
 ): boolean {
   if (!hasAppsBinding) return false;
   if (check.checkId === "protected-invariant-cart") return false;
+  // Composition already decided it: the workflow records it with no runner.
+  if (check.checkId === CLIENT_ASSETS_CHECK_ID) return false;
   return check.kind === "build" || check.kind === "unit" || check.kind === "contract";
 }
 

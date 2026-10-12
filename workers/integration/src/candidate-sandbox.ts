@@ -1,6 +1,15 @@
 import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
 import { boundPatch, candidatePatchKey, patchCommand, patchMetadata } from "@rhumbatron/protocol";
-import type { CheckRun, ComposeSource } from "./candidate-composer.ts";
+import {
+  APP_BUILD_COMMAND,
+  APP_BUILD_TIMEOUT_MS,
+  type AppBuildRun,
+  appBuildScript,
+  buildInputs,
+  buildScriptFiles,
+  clientAssetsOutcome,
+} from "./app-build.ts";
+import type { CheckOutcome, CheckRun, ComposeSource } from "./candidate-composer.ts";
 import { recordSourceConflict } from "./rebase.ts";
 import { candidateFork } from "./repo-names.ts";
 
@@ -189,13 +198,127 @@ export async function forkCandidate(env: CandidateEnv, projectId: string, candid
 }
 
 export type Composition =
-  | { ok: true; commit: string; tree: string; merged: string[] }
+  | {
+      ok: true;
+      commit: string;
+      tree: string;
+      merged: string[];
+      /** Present when package.json has a `build` script: the composition build ran. */
+      appBuild?: AppBuildRun;
+      /** The `client-assets` freshness result. Present with `appBuild`. */
+      clientAssets?: CheckOutcome;
+    }
   | { ok: false; changeSetId: string; files: string[]; detail: string };
+
+/** Characters of build output kept for Evidence. */
+const BUILD_OUTPUT_CHARS = 4_000;
+/** Bytes of public/index.html and of build script files read for the freshness rule. */
+const READ_CAP = 64_000;
+const buildMessage = (candidateId: string) => `Build ${candidateId}`;
+
+/** One file of a commit, or null when it does not exist or is too large. */
+async function showFile(sandbox: Sandbox, dir: string, commit: string, path: string) {
+  const run = await exec(sandbox, `git show ${commit}:${path}`, {
+    cwd: dir,
+    timeoutMs: GIT_TIMEOUT_MS,
+    raw: true,
+  });
+  return run.exitCode === 0 && run.output.length <= READ_CAP ? run.output : null;
+}
+
+async function changedFiles(sandbox: Sandbox, dir: string, from: string, to: string) {
+  const out = await must(sandbox, `git diff --name-only --no-renames ${from} ${to}`, dir);
+  return out.split("\n").filter(Boolean);
+}
+
+/**
+ * The composition build (AGENTS.md section 37): when package.json has a `build` script, runs
+ * `bun run build` in the merged checkout and commits the files it changed on top of the merges.
+ * Returns null when there is no build script. A failed build commits nothing; its result becomes
+ * the `build` Evidence. A retried step reuses the build commit it pushed before, so the push
+ * stays a fast-forward even when the build output is not byte-stable.
+ */
+async function buildComposedApp(
+  sandbox: Sandbox,
+  dir: string,
+  input: { candidateId: string; mergeHead: string; date: Record<string, string> },
+): Promise<AppBuildRun | null> {
+  const pkg = await exec(sandbox, "cat package.json", {
+    cwd: dir,
+    timeoutMs: GIT_TIMEOUT_MS,
+    raw: true,
+  });
+  if (!appBuildScript(pkg.exitCode === 0 ? pkg.output : null)) return null;
+  const startedAt = new Date().toISOString();
+  const run = await exec(sandbox, APP_BUILD_COMMAND, { cwd: dir, timeoutMs: APP_BUILD_TIMEOUT_MS });
+  const completedAt = new Date().toISOString();
+  const output = run.output.slice(-BUILD_OUTPUT_CHARS);
+  if (run.exitCode !== 0) {
+    // Keep the pushed commit to the merges only: drop whatever the failed build wrote.
+    await exec(sandbox, "git reset -q --hard && git clean -fdq", {
+      cwd: dir,
+      timeoutMs: GIT_TIMEOUT_MS,
+    });
+    return {
+      exitCode: run.exitCode,
+      timedOut: run.timedOut,
+      ...(run.error ? { error: run.error } : {}),
+      output,
+      generated: [],
+      startedAt,
+      completedAt,
+    };
+  }
+  const status = await must(sandbox, "git status --porcelain -uall", dir);
+  if (status) {
+    await must(
+      sandbox,
+      `git add -A && git commit -q -m "${buildMessage(input.candidateId)}"`,
+      dir,
+      input.date,
+    );
+    const earlier = await exec(sandbox, "git log -1 --format=%P%x09%s origin/main", {
+      cwd: dir,
+      timeoutMs: GIT_TIMEOUT_MS,
+    });
+    if (earlier.output.trim() === `${input.mergeHead}\t${buildMessage(input.candidateId)}`) {
+      await must(sandbox, "git reset -q --hard origin/main", dir);
+    }
+  }
+  return {
+    exitCode: 0,
+    timedOut: false,
+    output,
+    generated: await changedFiles(sandbox, dir, input.mergeHead, "HEAD"),
+    startedAt,
+    completedAt,
+  };
+}
+
+/** The `client-assets` rule over the composed commit (see `clientAssetsOutcome`). */
+async function clientAssets(
+  sandbox: Sandbox,
+  dir: string,
+  input: { baseCommit: string; commit: string },
+): Promise<CheckOutcome> {
+  const script = appBuildScript(await showFile(sandbox, dir, input.commit, "package.json")) ?? "";
+  const texts: string[] = [];
+  for (const path of buildScriptFiles(script)) {
+    const text = await showFile(sandbox, dir, input.commit, path);
+    if (text) texts.push(text);
+  }
+  return clientAssetsOutcome({
+    changed: await changedFiles(sandbox, dir, input.baseCommit, input.commit),
+    indexHtml: await showFile(sandbox, dir, input.commit, "public/index.html"),
+    inputs: buildInputs(texts),
+  });
+}
 
 /**
  * Clones the Candidate fork at the base commit, merges each ChangeSet commit in Work Graph order
- * (`--no-ff`), pushes the result, and installs dependencies. Commit dates are fixed per Candidate,
- * so a retried step produces the same commits and the push is a no-op.
+ * (`--no-ff`), installs dependencies, runs the app build when package.json has a `build` script
+ * and commits its output, then pushes the result. Commit dates are fixed per Candidate, so a
+ * retried step produces the same merge commits and the push is a no-op.
  */
 export async function composeCandidate(
   env: CandidateEnv,
@@ -288,6 +411,16 @@ export async function composeCandidate(
       }
       merged.push(source.id);
     }
+    const mergeHead = await must(sandbox, "git rev-parse HEAD", dir);
+    const install = await exec(sandbox, "bun install", { cwd: dir, timeoutMs: INSTALL_TIMEOUT_MS });
+    if (install.exitCode !== 0) {
+      throw new Error(`bun install failed: ${install.error ?? install.output.slice(-300)}`);
+    }
+    const appBuild = await buildComposedApp(sandbox, dir, {
+      candidateId: input.candidateId,
+      mergeHead,
+      date,
+    });
     await must(
       sandbox,
       `git -c "http.extraHeader=$GIT_AUTH" push -q origin HEAD:main`,
@@ -296,12 +429,16 @@ export async function composeCandidate(
     );
     const commit = await must(sandbox, "git rev-parse HEAD", dir);
     const tree = await must(sandbox, "git rev-parse HEAD^{tree}", dir);
-    await storeCandidatePatch(env, sandbox, dir, { ...input, commit });
-    const install = await exec(sandbox, "bun install", { cwd: dir, timeoutMs: INSTALL_TIMEOUT_MS });
-    if (install.exitCode !== 0) {
-      throw new Error(`bun install failed: ${install.error ?? install.output.slice(-300)}`);
-    }
-    return { ok: true, commit, tree, merged };
+    await storeCandidatePatch(env, sandbox, dir, { ...input, commit }, appBuild?.generated ?? []);
+    if (!appBuild) return { ok: true, commit, tree, merged };
+    return {
+      ok: true,
+      commit,
+      tree,
+      merged,
+      appBuild,
+      clientAssets: await clientAssets(sandbox, dir, { baseCommit: input.baseCommit, commit }),
+    };
   } finally {
     for (const revoke of revokes) await revoke();
   }
@@ -309,18 +446,20 @@ export async function composeCandidate(
 
 /**
  * Stores `git diff base..composed` for the Files changed view (P16-17), bounded by
- * MAX_PATCH_BYTES. A read model only: a failure is logged and composition continues. Repeated
- * steps write the same bytes to the same key.
+ * MAX_PATCH_BYTES. Files that the composition build generated stay out of it. A read model
+ * only: a failure is logged and composition continues. Repeated steps write the same bytes to
+ * the same key.
  */
 async function storeCandidatePatch(
   env: CandidateEnv,
   sandbox: Sandbox,
   dir: string,
   input: { projectId: string; candidateId: string; baseCommit: string; commit: string },
+  generated: readonly string[],
 ) {
   if (!env.EVIDENCE) return;
   try {
-    const run = await exec(sandbox, patchCommand(input.baseCommit, input.commit), {
+    const run = await exec(sandbox, patchCommand(input.baseCommit, input.commit, generated), {
       cwd: dir,
       timeoutMs: GIT_TIMEOUT_MS,
       raw: true,

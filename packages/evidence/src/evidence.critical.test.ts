@@ -56,6 +56,22 @@ describe("buildVerificationPlan", () => {
     expect(ids(plan("low", {}))).not.toContain("preview-smoke");
   });
 
+  it("requires client-assets only when the app has a build script", () => {
+    const built = buildVerificationPlan({
+      candidateId: "cand_b",
+      riskTier: "low",
+      policy,
+      touches,
+      clientBuild: true,
+    });
+    expect(built.requiredCheckIds).toEqual(["build", "client-assets", "unit"]);
+    expect(built.checks.find((c) => c.checkId === "client-assets")).toMatchObject({
+      kind: "build",
+      required: true,
+    });
+    expect(ids(plan("low", {}))).not.toContain("client-assets");
+  });
+
   it("high risk with UI requires security, browser, and a human gate", () => {
     const p = plan("high", { ui: true });
     expect(ids(p)).toEqual(

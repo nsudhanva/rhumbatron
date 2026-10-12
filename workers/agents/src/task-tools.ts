@@ -80,7 +80,7 @@ const RunCommandArgs = Type.Object({
     minLength: 2,
     maxLength: 200,
     description:
-      "One of: bun install, bun test [paths], bun run typecheck|test|bench, bunx tsc --noEmit, git status|diff|log, ls.",
+      "One of: bun install, bun test [paths], bun run typecheck|test|bench|contract|build, bun run <a script in package.json>, bunx tsc --noEmit, git status|diff|log, ls.",
   }),
 });
 

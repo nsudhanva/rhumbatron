@@ -63,8 +63,8 @@ const monthlySeconds = (configured?: string) => {
 const OPEN_RESERVATION_SECONDS = 300;
 /** Idle time billed after the last command, until the Sandbox sleeps. Below the open reservation. */
 const SLEEP_TAIL_SECONDS = 120;
-/** Increment when ALLOWED or FORBIDDEN_CHARS changes. */
-const COMMAND_ALLOWLIST_VERSION = 2;
+/** Increment when ALLOWED, FIXED_SCRIPTS, RUN_SCRIPT, or FORBIDDEN_CHARS changes. */
+const COMMAND_ALLOWLIST_VERSION = 3;
 const WORKSPACE_TOOLS = [
   "list_files",
   "read_file",
@@ -82,12 +82,49 @@ const MAX_OUTPUT_CHARS = 12_000;
 const ALLOWED = [
   /^bun install( --frozen-lockfile)?$/,
   /^bun test( [\w./-]+)*$/,
-  /^bun run (typecheck|test|bench|contract)$/,
   /^bunx tsc --noEmit$/,
   /^git (status|diff|log)( [\w./:=-]+)*$/,
   /^ls( -[al]+)?( [\w./-]+)?$/,
 ];
+/**
+ * `bun run <name>`: these names always, any other name only when it is a script in the
+ * workspace package.json. A script runs in the same Sandbox, with the same network policy, as
+ * `bun test`.
+ */
+const FIXED_SCRIPTS = new Set(["typecheck", "test", "bench", "contract", "build"]);
+const RUN_SCRIPT = /^bun run ([\w:][\w:.-]*)$/;
+/** Scripts whose output files the workspace discards: composition builds them (section 37). */
+const BUILD_SCRIPT = /^build(:[\w:.-]+)?$/;
 const FORBIDDEN_CHARS = /[;&|`$<>\\\n]/;
+const ALLOWED_TEXT =
+  "bun install, bun test [paths], bun run typecheck|test|bench|contract|build, bun run <a script in package.json>, bunx tsc --noEmit, git status|diff|log, ls";
+
+/** The script `bun run <name>` names, or null for another command. */
+const runScriptName = (cmd: string) => RUN_SCRIPT.exec(cmd)?.[1] ?? null;
+
+/** Script names of a package.json text. Empty when it is absent or not valid JSON. */
+export function packageScripts(packageJson: string | null | undefined): string[] {
+  if (!packageJson) return [];
+  try {
+    const scripts = (JSON.parse(packageJson) as { scripts?: unknown } | null)?.scripts;
+    return scripts && typeof scripts === "object" && !Array.isArray(scripts)
+      ? Object.keys(scripts)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** True when the command is on the allowlist. `scripts` are the package.json script names. */
+export function commandAllowed(cmd: string, scripts: readonly string[] = []): boolean {
+  if (FORBIDDEN_CHARS.test(cmd)) return false;
+  const script = runScriptName(cmd);
+  if (script !== null) return FIXED_SCRIPTS.has(script) || scripts.includes(script);
+  return ALLOWED.some((re) => re.test(cmd));
+}
+
+/** True for `bun run build` and `bun run build:<x>`: their output files are not kept. */
+export const isBuildCommand = (cmd: string) => BUILD_SCRIPT.test(runScriptName(cmd) ?? "");
 
 const month = () => new Date().toISOString().slice(0, 7);
 
@@ -844,12 +881,17 @@ export async function runCommand(
   tree?: WorkspaceTree,
 ): Promise<string> {
   const cmd = command.trim();
-  if (FORBIDDEN_CHARS.test(cmd) || !ALLOWED.some((re) => re.test(cmd))) {
-    return `Not allowed: ${cmd}\nAllowed: bun install, bun test [paths], bun run typecheck|test|bench, bunx tsc --noEmit, git status|diff|log, ls.`;
-  }
+  const notAllowed = `Not allowed: ${cmd}\nAllowed: ${ALLOWED_TEXT}.`;
+  const script = runScriptName(cmd);
+  // `bun run <name>` with another name passes only when package.json defines it (checked below).
+  if (script === null && !commandAllowed(cmd)) return notAllowed;
 
   if (ws.filesInWorker) {
     const activeTree = tree ?? getWorkspaceTree(undefined, ws.runId);
+    const pkg = activeTree.get("package.json");
+    if (!commandAllowed(cmd, packageScripts(pkg && !pkg.deleted ? pkg.content : null))) {
+      return notAllowed;
+    }
     const sandbox = sandboxFor(env, ws.projectId);
 
     // Lazily start the Sandbox container only when run_command is called:
@@ -932,7 +974,9 @@ export async function runCommand(
     }
 
     // Execute the command:
+    const before = isBuildCommand(cmd) ? await statusPaths(sandbox, ws.dir) : null;
     const result = await run(sandbox, cmd, ws.dir);
+    const discarded = before ? await discardOutputs(sandbox, ws.dir, before) : [];
 
     // After command runs, read back any files the command changed:
     const statusResult = await run(sandbox, "git status --porcelain", ws.dir);
@@ -959,14 +1003,61 @@ export async function runCommand(
       }
     }
 
-    return `exit ${result.exitCode}\n${result.output}`;
+    return `exit ${result.exitCode}\n${result.output}${discardedNote(discarded)}`;
   }
 
   // Fallback: Sandbox path
   const restored = await ensureCheckout(env, ws);
-  const result = await run(sandboxFor(env, ws.projectId), cmd, ws.dir);
-  return `${restored ? RESTORED_NOTE : ""}exit ${result.exitCode}\n${result.output}`;
+  const sandbox = sandboxFor(env, ws.projectId);
+  if (script !== null && !FIXED_SCRIPTS.has(script)) {
+    const pkg = await sandbox.readFile(`${ws.dir}/package.json`).catch(() => null);
+    const text = pkg && "content" in pkg ? String(pkg.content) : null;
+    if (!commandAllowed(cmd, packageScripts(text))) return notAllowed;
+  }
+  const before = isBuildCommand(cmd) ? await statusPaths(sandbox, ws.dir) : null;
+  const result = await run(sandbox, cmd, ws.dir);
+  const discarded = before ? await discardOutputs(sandbox, ws.dir, before) : [];
+  return `${restored ? RESTORED_NOTE : ""}exit ${result.exitCode}\n${result.output}${discardedNote(discarded)}`;
 }
+
+/** A path safe in a shell command line without quoting. */
+const PLAIN_PATH = /^[\w@+-][\w./@+-]*$/;
+
+/** `git status --porcelain -uall` as path -> status code. Quoted (unusual) paths are left out. */
+async function statusPaths(sandbox: Sandbox, dir: string): Promise<Map<string, string>> {
+  const status = await run(sandbox, "git status --porcelain -uall", dir);
+  const out = new Map<string, string>();
+  for (const line of status.output.split("\n")) {
+    if (line.length < 4) continue;
+    const path = line.slice(3).trim();
+    if (!path.includes(" -> ") && !path.startsWith('"')) out.set(path, line.slice(0, 2));
+  }
+  return out;
+}
+
+/**
+ * Discards the files a build command wrote that were unchanged before it: tracked files go back
+ * to HEAD, new files are removed. Composition runs the build again and commits its output, so a
+ * ChangeSet never carries build output (two sibling ChangeSets would conflict on it).
+ */
+async function discardOutputs(
+  sandbox: Sandbox,
+  dir: string,
+  before: Map<string, string>,
+): Promise<string[]> {
+  const after = await statusPaths(sandbox, dir);
+  const written = [...after].filter(([path]) => !before.has(path) && PLAIN_PATH.test(path));
+  const added = written.filter(([, code]) => code === "??").map(([path]) => path);
+  const changed = written.filter(([, code]) => code !== "??").map(([path]) => path);
+  if (changed.length) await run(sandbox, `git checkout -q HEAD -- ${changed.join(" ")}`, dir);
+  if (added.length) await run(sandbox, `rm -f ${added.join(" ")}`, dir);
+  return [...changed, ...added];
+}
+
+const discardedNote = (paths: readonly string[]) =>
+  paths.length
+    ? `\nBuild output not kept (${paths.slice(0, 10).join(", ")}${paths.length > 10 ? ", ..." : ""}): composition runs bun run build and commits it.`
+    : "";
 
 /* ------------------------------------------------------------------------------------------ */
 /* File Access Tools                                                                          */
