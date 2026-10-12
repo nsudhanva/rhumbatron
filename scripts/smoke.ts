@@ -12,6 +12,7 @@
  * promotes it S0 -> S1, retries the promotion, and checks that a Candidate on S0 is then stale.
  * Every Project a run creates is archived at the end, which queues deletion of its Artifacts repos.
  */
+import { signIn } from "./lib/clerk-session.ts";
 
 const hosts: Record<string, { web: string; api: string }> = {
   prod: { web: "https://rhumbatron.com", api: "https://api.rhumbatron.com" },
@@ -79,19 +80,9 @@ await expectStatus("web sign-in", `${target.web}/sign-in`, 200);
 const secretKey = process.env.CLERK_SECRET_KEY;
 const smokeUserId = process.env.CLERK_SMOKE_USER_ID;
 
-async function clerk<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`https://api.clerk.com/v1${path}`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${secretKey}`, "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(`Clerk ${path} returned ${response.status}`);
-  return (await response.json()) as T;
-}
-
 if (secretKey && smokeUserId) {
-  const session = await clerk<{ id: string }>("/sessions", { user_id: smokeUserId });
-  const { jwt } = await clerk<{ jwt: string }>(`/sessions/${session.id}/tokens`, {});
+  const session = await signIn(secretKey, smokeUserId);
+  const jwt = await session.token();
   const headers = { authorization: `Bearer ${jwt}`, "content-type": "application/json" };
   const slug = `smoke-${Date.now()}`;
 
@@ -204,7 +195,7 @@ if (secretKey && smokeUserId) {
     };
     // Clerk session tokens live 60 seconds; mint one per read while waiting for the planner.
     const fresh = async () => {
-      const { jwt: token } = await clerk<{ jwt: string }>(`/sessions/${session.id}/tokens`, {});
+      const token = await session.token();
       return { authorization: `Bearer ${token}` };
     };
     let status = "created";
@@ -236,7 +227,7 @@ if (secretKey && smokeUserId) {
 
   if (process.argv.includes("--sandbox")) {
     const fresh = async () => {
-      const { jwt: token } = await clerk<{ jwt: string }>(`/sessions/${session.id}/tokens`, {});
+      const token = await session.token();
       return { authorization: `Bearer ${token}`, "content-type": "application/json" };
     };
     // The Acme Shop fixture Project (internal route; the product creates empty repositories).
@@ -470,7 +461,7 @@ if (secretKey && smokeUserId) {
   // Cleanup (AGENTS.md section 43): archive every Project this run created. The integration Worker
   // then deletes their Artifacts repos and R2 source objects; Evidence expires by lifecycle rule.
   const freshHeaders = async () => {
-    const { jwt: token } = await clerk<{ jwt: string }>(`/sessions/${session.id}/tokens`, {});
+    const token = await session.token();
     return { authorization: `Bearer ${token}` };
   };
   const toArchive = createdProjects.filter((id) => id !== "missing");
@@ -498,7 +489,7 @@ if (secretKey && smokeUserId) {
     !!remaining && archived.length > 0 && !remaining.some((p) => archived.includes(p.id)),
   );
 
-  await clerk(`/sessions/${session.id}/revoke`, {});
+  await session.close();
 } else {
   console.log("skip  authenticated checks (CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID not set)");
 }

@@ -110,7 +110,7 @@ bun run dev
 
 Add your Clerk development keys to `apps/web/.env.local`. The web app runs on `localhost:5173` and the API on `localhost:8787`.
 
-The local runtime simulates D1, R2, KV, Queues, Durable Objects, and Workflows. A full agent run needs Artifacts, K2, and Workers AI, so it needs a Cloudflare deployment. To deploy to your own account, follow the [deployment runbook](https://docs.rhumbatron.com/operations/deploy/).
+`bun run dev` runs the web app and the API on your computer, with no Cloudflare account. Wrangler keeps local copies of the database, the file storage, and the queues in the `.wrangler` folder. The agents cannot build apps on your computer, because they need Artifacts, K2, and Workers AI, which run only on Cloudflare. To use the agents, deploy to your own Cloudflare account with the [deployment runbook](https://docs.rhumbatron.com/operations/deploy/).
 
 ## Team
 
