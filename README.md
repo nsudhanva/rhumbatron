@@ -38,6 +38,24 @@ flowchart LR
 
 Workers, Artifacts, Durable Objects, Sandbox, Dynamic Workers, Workflows, Queues, K2, D1, R2, KV, Vectorize, Workers AI, AI Gateway, and Browser Run. Terraform manages all resources. The agents use Claude Sonnet 5.5 and Claude Haiku 5.5.
 
+```mermaid
+flowchart LR
+  user[Browser] --> web[rhumbatron-web]
+  web --> api[rhumbatron-api]
+  api --> cw[ChangeWorkflow<br/>planner]
+  cw --> router[event router<br/>causal wake-ups]
+  router -->|ready Tasks| agent[AgentDO<br/>agent loop]
+  agent -->|fork, commit| art[(Artifacts)]
+  agent -->|shell| sbx[Sandbox]
+  agent -->|ChangeSet| integ[integration<br/>compose + verify]
+  integ --> ev[(Evidence<br/>D1 + R2)]
+  integ -->|compare-and-swap| root[ProjectRootDO]
+  root -->|outbox| k2[(K2 events)]
+  k2 --> router
+  router --> view[ProjectViewDO] --> web
+  integ -->|release| apps[Dynamic Workers<br/>live apps]
+```
+
 The [architecture guide](docs/architecture/README.md) gives the details.
 
 ## Try it
