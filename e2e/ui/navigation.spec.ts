@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { expect, open, PAGES, settle, showNav, TODO, test } from "./support";
+import { expect, open, PAGES, resolvePath, settle, showNav, TODO, test } from "./support";
 
 /**
  * C2: from every page, every sidebar link and every breadcrumb link opens its page; browser
@@ -14,7 +14,7 @@ const samePlace = (a: string, b: string) => {
 for (const start of PAGES.filter((p) => !p.path.includes("#"))) {
   test(`sidebar and breadcrumbs from ${start.name}`, async ({ page, problems }) => {
     test.setTimeout(240_000);
-    await open(page, start.path);
+    await open(page, await resolvePath(page, start.path));
     const startUrl = page.url();
     await showNav(page);
     const sidebar = page.locator("#shell-nav nav[aria-label='Main'] a");

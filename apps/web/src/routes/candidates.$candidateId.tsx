@@ -125,22 +125,29 @@ function CandidateView() {
   if (!candidate.data) {
     if (candidate.isError) {
       return (
-        <Banner
-          family="danger"
-          title="The Candidate did not load"
-          action={
-            <Button
-              size="sm"
-              variant="secondary"
-              className="ring-current"
-              onClick={() => candidate.refetch()}
-            >
-              Retry
-            </Button>
-          }
-        >
-          {candidate.error.message}
-        </Banner>
+        <>
+          <PageTitle
+            size="detail"
+            kicker="Candidate"
+            title={<span className="font-mono text-[0.75em] break-all">{candidateId}</span>}
+          />
+          <Banner
+            family="danger"
+            title="The Candidate did not load"
+            action={
+              <Button
+                size="sm"
+                variant="secondary"
+                className="ring-current"
+                onClick={() => candidate.refetch()}
+              >
+                Retry
+              </Button>
+            }
+          >
+            {candidate.error.message}
+          </Banner>
+        </>
       );
     }
     return <CandidateSkeleton label="Loading Candidate" />;

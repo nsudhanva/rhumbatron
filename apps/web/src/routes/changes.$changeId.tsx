@@ -25,7 +25,7 @@ import { EmptyState } from "../components/ui/empty-state";
 import { KeyValue } from "../components/ui/key-value";
 import { Loader } from "../components/ui/loader";
 import { Mono } from "../components/ui/mono";
-import { Page, Section } from "../components/ui/page";
+import { Page, PageTitle, Section } from "../components/ui/page";
 import { WorkGraph } from "../components/work-graph";
 import {
   type ChangeOutcome,
@@ -284,6 +284,11 @@ function ChangeView() {
   if (change.isError) {
     return (
       <Page>
+        <PageTitle
+          size="detail"
+          kicker="Change"
+          title={<span className="font-mono text-[0.75em] break-all">{changeId}</span>}
+        />
         <p className="bg-accent-100 px-3 py-2 text-[13px] font-semibold text-kumo-danger">
           {change.error.message}
         </p>

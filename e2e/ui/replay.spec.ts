@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import type { Page } from "@playwright/test";
-import { evidence, expect, open, TODO, test } from "./support";
+import { evidence, expect, hydrated, open, settle, TODO, test } from "./support";
 
 /**
  * Replay controller (components/replay) on the timeline and the Agents graph, and the Events
@@ -63,33 +63,43 @@ test("Events filters: the URL and the list follow them, Clear resets", async ({ 
     .poll(async () => (await types()).every((t) => /^(project|change|task)\./.test(t.trim())))
     .toBe(true);
 
-  await page.getByRole("searchbox", { name: "Search" }).fill("change.created");
-  await expect(page).toHaveURL(/[?&]q=change\.created/);
+  // Search for a Planning type in the loaded page: the oldest types (change.created) can sit
+  // beyond the 50 newest events of a long-lived Project.
+  const query = (await types()).map((t) => t.trim()).find(Boolean) ?? "";
+  expect(query, "a Planning event is loaded").toMatch(/^(project|change|task)\./);
+  const escaped = query.replace(/\./g, "\\.");
+  await page.getByRole("searchbox", { name: "Search" }).fill(query);
+  await expect(page).toHaveURL(new RegExp(`[?&]q=${escaped}`));
   await expect(page.getByText("2 filters", { exact: true })).toBeVisible();
   await expect
     .poll(async () => {
       const shown = await types();
-      return shown.length > 0 && shown.every((t) => t.trim() === "change.created");
+      return shown.length > 0 && shown.every((t) => t.trim() === query);
     })
     .toBe(true);
   await expect(page.getByText(/\d+ of \d+ loaded events match the filter/)).toBeVisible();
 
   // A filtered URL opens filtered.
   await page.reload();
-  await expect(page.getByRole("searchbox", { name: "Search" })).toHaveValue("change.created");
+  await settle(page);
+  await expect(page.getByRole("searchbox", { name: "Search" })).toHaveValue(query);
   await expect(group.getByRole("button", { name: /^Planning/ })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
 
+  // The reloaded page is server-rendered: wait for hydration before the clicks below.
+  const clear = page.getByRole("button", { name: "Clear", exact: true });
+  await hydrated(clear);
+
   // Load older keeps the filter.
   const older = page.getByRole("button", { name: "Load older" });
   if (await older.isVisible()) {
     await older.click();
-    await expect(page).toHaveURL(/[?&]q=change\.created/);
+    await expect(page).toHaveURL(new RegExp(`[?&]q=${escaped}`));
   }
 
-  await page.getByRole("button", { name: "Clear", exact: true }).click();
+  await clear.click();
   await expect(page).not.toHaveURL(/[?&](q|group)=/);
   await expect(page.getByRole("searchbox", { name: "Search" })).toHaveValue("");
   await expect

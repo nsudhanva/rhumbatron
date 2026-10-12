@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { evidence, expect, open, REAL, TODO, test } from "./support";
+import { evidence, expect, open, resolvePath, TODO, test } from "./support";
 
 /** C4 (states on fixtures) and C5 (Candidate, compare one and several). Read-only. */
 test.describe("Change page", () => {
@@ -36,7 +36,7 @@ test.describe("Change page", () => {
   });
 
   test("withdrawn duplicate: cancelled with the outcome reason", async ({ page }) => {
-    await open(page, `/changes/${REAL.withdrawnDuplicate}`);
+    await open(page, await resolvePath(page, "/changes/{withdrawnDuplicate}"));
     await expect(page.getByText(/Cancelled|Withdrawn/).first()).toBeVisible();
     await expect(page.getByText(/Withdrawn by the requester/).first()).toBeVisible();
     // A withdrawn request has no answer form and no Cancel.
@@ -45,7 +45,7 @@ test.describe("Change page", () => {
   });
 
   test("withdrawn unclear request shows no live controls", async ({ page }) => {
-    await open(page, `/changes/${REAL.withdrawnUnclear}`);
+    await open(page, await resolvePath(page, "/changes/{withdrawnUnclear}"));
     await expect(page.getByText(/Cancelled|Withdrawn/).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Build it as it is" })).toHaveCount(0);
     // Ended before planning: no section that could only stay empty; Details stays.
@@ -87,7 +87,7 @@ test.describe("Candidate and compare", () => {
   });
 
   test("compare with several Candidates shows the evidence matrix", async ({ page }, info) => {
-    await open(page, `/compare/${REAL.change}`);
+    await open(page, await resolvePath(page, "/compare/{compareMany}"));
     await expect(page.getByRole("heading", { name: /Evidence matrix/i })).toBeVisible();
     await expect(page.getByText(/\d+ Evidence records/)).toBeVisible();
     const text = await page.locator("#content").innerText();

@@ -162,7 +162,7 @@ export function ProjectBoardView({ projectId }: { projectId: string }) {
                   className="flex items-baseline justify-between gap-2 bg-kumo-base px-3 py-2"
                 >
                   <span className="type-h6">{COLUMN_LABEL[column]}</span>
-                  <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+                  <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">
                     {data ? formatNumber(counts[column]) : ""}
                   </span>
                 </h2>
@@ -258,7 +258,7 @@ function LaneRow({
             </span>
             <span className="text-[14px] font-semibold">{personName(p)}</span>
             <Tag variant="neutral">{p.role ? ROLE_LABEL[p.role] : "Left the project"}</Tag>
-            <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+            <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">
               {formatNumber(p.counts.proposed)} proposed · {formatNumber(p.counts.active)} active ·{" "}
               {formatNumber(p.counts.shipped)} shipped · {formatNumber(p.counts.notBuilt)} not built
             </span>

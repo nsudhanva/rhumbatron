@@ -125,7 +125,8 @@ test("Code: browse a file, Edit opens CodeMirror, Cancel leaves it", async ({ pa
       .getByText(/createApp|Hono/)
       .first(),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Edit" }).click();
+  // "Edit" edits the open file; "Start editing" opens an edit session of the whole Project.
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.locator(".cm-editor")).toBeVisible();
   await expect(page.locator(".cm-content")).toHaveAttribute("contenteditable", "true");
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -148,7 +149,8 @@ test("Settings: sections, members, every input named", async ({ page }) => {
     [...document.querySelectorAll("#content input, #content textarea")]
       .filter((el) => {
         const input = el as HTMLInputElement;
-        if (input.type === "hidden") return false;
+        // Hidden inputs (Base UI Select keeps an aria-hidden one for forms) have no role.
+        if (input.type === "hidden" || input.getAttribute("aria-hidden") === "true") return false;
         const labelled =
           input.labels?.length ||
           input.getAttribute("aria-label") ||

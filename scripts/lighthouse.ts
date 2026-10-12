@@ -15,7 +15,7 @@ import * as chromeLauncher from "chrome-launcher";
 import lighthouse from "lighthouse";
 import desktopConfig from "lighthouse/core/config/desktop-config.js";
 import { signInPage } from "../e2e/ui/clerk.ts";
-import { PAGES } from "../e2e/ui/support.ts";
+import { FIXTURE_ABOUT, type FixtureKey, findFixture, PAGES } from "../e2e/ui/support.ts";
 
 const BASE = "https://rhumbatron.com";
 const OUT = "e2e/.lighthouse";
@@ -56,10 +56,20 @@ try {
       const context = browser.contexts()[0] ?? (await browser.newContext());
       const page = await context.newPage();
       await signInPage(page, BASE);
+      // Run-time fixtures (`{key}` in a path) resolve once, signed in.
+      for (const q of pages) {
+        const key = /\{(\w+)\}/.exec(q.path)?.[1] as FixtureKey | undefined;
+        if (!key) continue;
+        const id = await findFixture(page, key);
+        if (id) q.path = q.path.replace(`{${key}}`, id);
+        else
+          console.log(`${q.name}: skipped, no Project of the smoke user has ${FIXTURE_ABOUT[key]}`);
+      }
       await page.close();
       await browser.close();
       signedIn = true;
     }
+    if (p.path.includes("{")) continue;
     for (const form of forms) {
       const result = await lighthouse(
         `${BASE}${p.path}`,

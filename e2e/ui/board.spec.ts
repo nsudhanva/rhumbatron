@@ -10,7 +10,10 @@ test("Board: columns, lanes, By person and By stage", async ({ page }, info) => 
   await expect(page.getByRole("heading", { name: "Board", level: 1 })).toBeVisible();
   const board = page.getByTestId("board");
   for (const column of COLUMNS) {
-    await expect(board.getByRole("heading", { name: column, exact: true })).toBeAttached();
+    // The column heading reads "<Stage> <count>" once the board loads.
+    await expect(
+      board.getByRole("heading", { name: new RegExp(`^${column}( \\d+)?$`) }),
+    ).toBeAttached();
   }
   const view = page.getByRole("group", { name: "Board view" });
   await expect(view.getByRole("button", { name: "By person" })).toHaveAttribute(

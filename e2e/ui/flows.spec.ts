@@ -85,7 +85,8 @@ test.describe("@desktop-only writes on a fresh Project", () => {
       test.skip(true, "a new Project has no files to edit");
     }
     await files.first().click();
-    await page.getByRole("button", { name: "Edit" }).click();
+    // "Edit" edits the open file; "Start editing" opens an edit session of the whole Project.
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
     const editor = page.locator(".cm-content");
     await expect(editor).toBeVisible();
     // Save with no edit explains why.

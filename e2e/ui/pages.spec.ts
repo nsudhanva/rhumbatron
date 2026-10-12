@@ -7,6 +7,7 @@ import {
   isNarrow,
   open,
   PAGES,
+  resolvePath,
   test,
 } from "./support";
 
@@ -20,8 +21,9 @@ for (const mode of ["light", "dark"] as const) {
       await page.addInitScript((m) => localStorage.setItem("rh-mode", m), mode);
     });
 
-    for (const { name, path } of PAGES) {
+    for (const { name, path: template } of PAGES) {
       test(`${name} loads clean`, async ({ page, problems }, info) => {
+        const path = await resolvePath(page, template);
         await open(page, path);
         await expect(page.locator("html")).toHaveAttribute("data-mode", mode);
         await expect(page.locator("h1")).toHaveCount(1);
