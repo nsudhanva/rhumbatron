@@ -13,7 +13,10 @@
     "ENVIRONMENT": "local",
     "SERVICE_NAME": "rhumbatron-api",
     "CLERK_AUTHORIZED_PARTIES": "http://localhost:5173",
-    "CLERK_ALLOW_MISSING_AZP": "true"
+    "CLERK_ALLOW_MISSING_AZP": "true",
+    // Platform admin user IDs, a JSON array (ADR 0033). Terraform sets var.platform_admin_user_ids.
+    // Local development has no platform admin.
+    "PLATFORM_ADMIN_USER_IDS": "[]"
   },
   "d1_databases": [
     {

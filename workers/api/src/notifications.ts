@@ -1,6 +1,7 @@
 import { apiData, changeTitle } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
+import { isPlatformAdmin } from "./access.ts";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { respond, validate } from "./http.ts";
 import { ensureIdentity } from "./identity.ts";
@@ -15,11 +16,16 @@ import { ensureIdentity } from "./identity.ts";
  * Access: every query joins `memberships` on the caller's user ID, the same rule as
  * `canAccessProject`, so a user never sees another tenant's rows. Archived Projects are skipped.
  *
- * Cost: one D1 batch of 15 capped SELECTs per read (list and count share it), plus the 3-statement
- * `ensureIdentity` batch. Each SELECT starts from a rare state (verified Candidates, open dead
+ * Cost: one D1 batch of 16 capped SELECTs per read, 17 for a platform admin (list and count share
+ * it), plus the 3-statement `ensureIdentity` batch. Each SELECT starts from a rare state (verified Candidates, open dead
  * letters, blocked Changes, confirmed conflicts, requests that need input or review) or a 7-day window through an index, so rows read
  * scale with open and recent items, not with history. Marking read writes one row per new mark.
  * Promotion still re-checks everything: a notification is a pointer, never a gate.
+ *
+ * Platform access (ADR 0033): a platform admin also gets `access_request` for each pending person
+ * (one more SELECT through `idx_users_access_created`). Each person gets `access_decided` for 7
+ * days after an admin decides their access (one primary-key read). These items have no Project:
+ * `projectId` is empty and `projectName` is "Rhumbatron".
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -42,6 +48,8 @@ const NotificationKind = z.enum([
   "request_declined",
   "request_choice_needed",
   "request_choice_made",
+  "access_request",
+  "access_decided",
 ]);
 type NotificationKind = z.infer<typeof NotificationKind>;
 
@@ -733,16 +741,82 @@ function choiceMadeItem(row: ChoiceRow): NotificationView {
   };
 }
 
+/** Pending people, for a platform admin only. `?1` = the admin (read marks). */
+const ACCESS_REQUEST_SQL = `
+SELECT u.id, u.display_name, u.email, u.created_at, r.read_at
+FROM users u
+${read("r", `'access_request:' || u.id`)}
+WHERE u.access_status = 'pending'
+ORDER BY u.created_at DESC LIMIT ${PER_KIND}`;
+
+/** The caller's own access decision, within the window. `?1` = user, `?2` = since. */
+const ACCESS_DECIDED_SQL = `
+SELECT u.id, u.access_status, u.access_decided_at, r.read_at
+FROM users u
+${read("r", `'access_decided:' || u.id`)}
+WHERE u.id = ?1 AND u.access_decided_at >= ?2 AND u.access_status IN ('approved', 'declined')`;
+
+type AccessRequestRow = {
+  id: string;
+  display_name: string | null;
+  email: string | null;
+  created_at: string;
+  read_at: string | null;
+};
+type AccessDecidedRow = {
+  id: string;
+  access_status: string;
+  access_decided_at: string;
+  read_at: string | null;
+};
+
+/** Platform items have no Project. */
+const PLATFORM = { projectId: "", projectName: "Rhumbatron" };
+
+function accessRequestItem(row: AccessRequestRow): NotificationView {
+  const who = row.display_name ?? row.email ?? row.id;
+  return {
+    ...PLATFORM,
+    id: `access_request:${row.id}`,
+    kind: "access_request",
+    severity: "action",
+    title: "A person waits for access",
+    body: joinParts(who, row.email && row.email !== who ? row.email : null),
+    href: "/admin/access",
+    createdAt: row.created_at,
+    read: !!row.read_at,
+  };
+}
+
+function accessDecidedItem(row: AccessDecidedRow): NotificationView {
+  return {
+    ...PLATFORM,
+    id: `access_decided:${row.id}`,
+    kind: "access_decided",
+    severity: "info",
+    title:
+      row.access_status === "approved"
+        ? "Your account was approved"
+        : "Your account was not approved",
+    body: row.access_status === "approved" ? "You can now use Rhumbatron" : "",
+    href: "/",
+    createdAt: row.access_decided_at,
+    read: !!row.read_at,
+  };
+}
+
 const RANK: Record<NotificationSeverity, number> = { action: 0, attention: 1, info: 2 };
 
 /**
  * Every notification the user can see, action items first, each group newest first.
- * One D1 batch. `now` sets the 7-day window for finished work.
+ * One D1 batch. `now` sets the 7-day window for finished work. `platformAdmin` comes from the
+ * session check (`isPlatformAdmin`), never from the request.
  */
 export async function deriveNotifications(
   db: D1Database,
   userId: string,
   now: Date,
+  platformAdmin = false,
 ): Promise<NotificationView[]> {
   const since = new Date(now.getTime() - RECENT_DAYS * 86_400_000).toISOString();
   // Each statement binds only the ordinals it declares: ?1 user, ?2 window start.
@@ -764,6 +838,8 @@ export async function deriveNotifications(
     declined,
     choiceNeeded,
     choiceMade,
+    accessDecided,
+    accessRequests,
   ] = await db.batch([
     userOnly(VERIFIED_SQL),
     userOnly(DEAD_LETTER_SQL),
@@ -780,6 +856,8 @@ export async function deriveNotifications(
     statement(reviewedPart("declined")),
     userOnly(CHOICE_NEEDED_SQL),
     statement(CHOICE_MADE_SQL),
+    statement(ACCESS_DECIDED_SQL),
+    ...(platformAdmin ? [userOnly(ACCESS_REQUEST_SQL)] : []),
   ]);
   const rows = <T>(result: D1Result | undefined) => (result?.results ?? []) as T[];
   const items: NotificationView[] = [
@@ -800,6 +878,8 @@ export async function deriveNotifications(
     ...rows<NotSelectedRow>(declined).map((row) => reviewedItem(row, "declined")),
     ...rows<ChoiceRow>(choiceNeeded).map(choiceNeededItem),
     ...rows<ChoiceRow>(choiceMade).map(choiceMadeItem),
+    ...rows<AccessDecidedRow>(accessDecided).map(accessDecidedItem),
+    ...rows<AccessRequestRow>(accessRequests).map(accessRequestItem),
   ];
   return items.sort(
     (a, b) =>
@@ -825,10 +905,13 @@ export async function markNotificationsRead(
   userId: string,
   ids: string[] | "all",
   now: Date,
+  platformAdmin = false,
 ): Promise<number> {
   const targets =
     ids === "all"
-      ? (await deriveNotifications(db, userId, now)).filter((i) => !i.read).map((i) => i.id)
+      ? (await deriveNotifications(db, userId, now, platformAdmin))
+          .filter((i) => !i.read)
+          .map((i) => i.id)
       : [...new Set(ids)];
   const at = now.toISOString();
   const cutoff = new Date(now.getTime() - READ_RETENTION_DAYS * 86_400_000).toISOString();
@@ -855,14 +938,24 @@ export async function markNotificationsRead(
 export const notifications = new Hono<AppEnv>()
   .get("/v1/notifications/count", requireAuth, async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
-    const items = await deriveNotifications(c.env.DB, userId, new Date());
+    const items = await deriveNotifications(
+      c.env.DB,
+      userId,
+      new Date(),
+      isPlatformAdmin(c.env, userId),
+    );
     return respond(c, apiData(CountView), { data: countNotifications(items) });
   })
 
   .get("/v1/notifications", requireAuth, validate("query", ListQuery), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { limit } = c.req.valid("query");
-    const items = await deriveNotifications(c.env.DB, userId, new Date());
+    const items = await deriveNotifications(
+      c.env.DB,
+      userId,
+      new Date(),
+      isPlatformAdmin(c.env, userId),
+    );
     return respond(c, apiData(z.object({ items: z.array(NotificationView), ...CountView.shape })), {
       data: { items: items.slice(0, limit), ...countNotifications(items) },
     });
@@ -871,6 +964,12 @@ export const notifications = new Hono<AppEnv>()
   .post("/v1/notifications/read", requireAuth, validate("json", ReadBody), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { ids } = c.req.valid("json");
-    const marked = await markNotificationsRead(c.env.DB, userId, ids, new Date());
+    const marked = await markNotificationsRead(
+      c.env.DB,
+      userId,
+      ids,
+      new Date(),
+      isPlatformAdmin(c.env, userId),
+    );
     return respond(c, apiData(z.object({ marked: z.number().int() })), { data: { marked } });
   });

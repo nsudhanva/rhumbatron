@@ -13,6 +13,7 @@ import {
   MAX_EDIT_BYTES,
 } from "@rhumbatron/protocol";
 import { createServerFn } from "@tanstack/react-start";
+import { apiErrorMessage } from "./access";
 
 /**
  * Code page edit sessions (`/v1/code/sessions`, docs/protocols/README.md): server functions over
@@ -90,7 +91,7 @@ async function call<T>(
     return {
       ok: false,
       status: response.status,
-      message: json.error?.message ?? `API returned ${response.status}`,
+      message: apiErrorMessage(response.status, json.error),
       reason: typeof reason === "string" ? reason : (json.error?.code ?? null),
     };
   }

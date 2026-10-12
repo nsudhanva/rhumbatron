@@ -1,6 +1,6 @@
 # Shared Projects and simultaneous requests
 
-This page covers Project membership and roles, request review, the intake gate, the comparison of simultaneous requests, and first-come conflicts between people.
+This page covers platform access, Project membership and roles, request review, the intake gate, the comparison of simultaneous requests, and first-come conflicts between people.
 A role decides who can act. It never decides between two requests. The system compares them. In a conflict between two people, the person who asked first chooses (ADR 0025, ADR 0028, ADR 0032).
 
 Main source files:
@@ -12,6 +12,9 @@ Main source files:
 | `migrations/d1/0029_roles_and_request_review.sql` | The roles `owner`, `admin`, `member`, `viewer`; invitation roles; `projects.member_request_review`; the `review_*` columns on `changes` |
 | `migrations/d1/0032_change_assumptions.sql` | `changes.assumptions_json`: the details that the Root Planner decided |
 | `migrations/d1/0033_first_come_choices.sql` | `request_choices`: one first-come question per earlier and later request |
+| `migrations/d1/0035_platform_admin_and_access.sql` | `users.access_status`, `platform_settings`, `admin_audit` |
+| `workers/api/src/access.ts` | The access gate, `isPlatformAdmin`, and the admin audit rows |
+| `workers/api/src/admin.ts` | The `/v1/admin/*` routes |
 | `packages/protocol/src/first-come.ts` | `conflictPolicy`, `firstComeStep`, `canChooseFirstCome`, `RequestWait`, `ChooseRequest` |
 | `packages/protocol/src/roles.ts` | `ProjectRole`, the permission matrix `PERMISSIONS`, `can`, `needsReview`, `canInvite`, `canChangeRole`, `canRemoveMember`, `deniedMessage` |
 | `workers/api/src/identity.ts` | `projectRole`, `canAccessProject` |
@@ -28,6 +31,36 @@ Main source files:
 | `workers/integration/src/first-come.ts` | `askFirstRequester`, `advanceFirstCome`, `chooseFirstCome`, `wakeAfterFirst` |
 | `workers/integration/src/change-workflow.ts` | The steps `intake review` and `check other requests`, the wait for an answer, and the first-come wait |
 | `workers/integration/src/change-commands.ts` | `clarifyChange`, `closeNeedsInput`, `cancelChange`, `includeChange`, `declineChange`, `recordProposal` |
+
+## Access gate
+
+Before a person can open any Project, the platform must approve them (ADR 0033).
+`users.access_status` holds `approved`, `pending`, or `declined`.
+`requireAuth` runs the gate after it verifies the Clerk session.
+
+1. The gate reads the status of the user and the setting `signup_approval_required` in one D1 query.
+2. The first request of a new person creates the user row. While the setting is `"true"`, the row is `pending`. Otherwise it is `approved`.
+3. A platform admin (a user ID in `PLATFORM_ADMIN_USER_IDS`) is always approved.
+4. A person who is `pending` or `declined` gets 403 `approval_required` with `details.status`. Only `GET /v1/me` answers. It returns `accessStatus`, so the web can show one full-page message and no Project data. Sign-out is a Clerk action in the browser.
+5. A platform admin approves or declines each pending person, or approves all of them (`/v1/admin/*`). Turning the setting off approves nobody.
+
+The API decides admin rights from the session user ID only. A request field never names an admin.
+Each platform admin gets the notification `access_request` while a person is pending. The person gets `access_decided` after the decision.
+Project roles apply only after the gate: an approved person sees only the Projects that they own or that another person shares with them.
+
+```mermaid
+flowchart TD
+  R["Authenticated request"] --> S{"Session valid?"}
+  S -- no --> U["401 unauthorized"]
+  S -- yes --> N{"User row exists?"}
+  N -- no --> C["Create the row:<br/>pending while approval is on,<br/>else approved; admin approved"]
+  N -- yes --> A{"Approved or<br/>platform admin?"}
+  C --> A
+  A -- yes --> P["Route runs; Project roles apply"]
+  A -- no --> M{"GET /v1/me?"}
+  M -- yes --> P
+  M -- no --> F["403 approval_required"]
+```
 
 ## Membership
 

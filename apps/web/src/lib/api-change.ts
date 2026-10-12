@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
+import { apiErrorMessage } from "./access";
 import type { CandidateDetail, ChangeDetail, ChangeMeta } from "./api";
 
 /**
@@ -83,10 +84,10 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
   );
   const json = (await response.json().catch(() => ({}))) as {
     data?: T;
-    error?: { message?: string };
+    error?: { code?: string; message?: string };
   };
   if (!response.ok || json.data === undefined) {
-    throw new ApiError(response.status, json.error?.message ?? `API returned ${response.status}`);
+    throw new ApiError(response.status, apiErrorMessage(response.status, json.error));
   }
   return json.data;
 }

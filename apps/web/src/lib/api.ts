@@ -9,6 +9,7 @@ import type {
   ProjectRole,
 } from "@rhumbatron/protocol";
 import { createServerFn } from "@tanstack/react-start";
+import { apiErrorMessage } from "./access";
 import type { BudgetScope, ChangeBudget, ProjectBudget } from "./api-budget";
 
 /**
@@ -212,10 +213,10 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
   );
   const json = (await response.json().catch(() => ({}))) as {
     data?: T;
-    error?: { message?: string };
+    error?: { code?: string; message?: string };
   };
   if (!response.ok || json.data === undefined) {
-    throw new ApiError(response.status, json.error?.message ?? `API returned ${response.status}`);
+    throw new ApiError(response.status, apiErrorMessage(response.status, json.error));
   }
   return json.data;
 }
@@ -1092,7 +1093,11 @@ export type NotificationKind =
   /** To the earlier requester: a later request conflicts and waits for their choice (ADR 0032). */
   | "request_choice_needed"
   /** To the later requester: the earlier requester applies their request after theirs. */
-  | "request_choice_made";
+  | "request_choice_made"
+  /** To platform admins: a new person waits for access (ADR 0033); links to /admin/access. */
+  | "access_request"
+  /** To that person: a platform admin approved or declined their access. */
+  | "access_decided";
 
 /** `action`: needs a person until its condition clears. `attention`: stopped or rejected work. */
 export type NotificationSeverity = "action" | "attention" | "info";

@@ -27,6 +27,10 @@ function setup(roles: Record<string, string>, rpcResult: unknown = { status: "ok
   const statement = (sql: string, args: unknown[] = []) => ({
     bind: (...next: unknown[]) => statement(sql, next),
     first: async () => {
+      // The access gate (access.ts): every caller is an approved user.
+      if (sql.includes("access_status")) {
+        return { status: "approved", last_seen_at: new Date().toISOString() };
+      }
       if (sql.includes("FROM code_sessions")) return { project_id: "proj_1", user_id: "usr_owner" };
       if (sql.includes("member_role")) {
         const role = roles[String(args[1])];

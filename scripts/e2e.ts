@@ -43,7 +43,9 @@ import {
   CodeView,
   FeedPage,
   HealthResponse,
+  Me,
   MembersResponse,
+  MyCosts,
   Project,
   ProjectApp,
   ProjectReleases,
@@ -969,6 +971,11 @@ async function run() {
     ["GET", `/v1/tasks/${unknownTask}/workspace`],
     ["GET", "/v1/notifications"],
     ["GET", "/v1/notifications/count"],
+    ["GET", "/v1/me"],
+    ["GET", "/v1/me/costs"],
+    ["GET", "/v1/admin/overview"],
+    ["GET", "/v1/admin/users"],
+    ["PATCH", "/v1/admin/settings"],
     ["POST", "/v1/notifications/read"],
     ["POST", `/v1/dead-letters/${unknownDeadLetter}/retry`],
     ["POST", `/v1/dead-letters/${unknownDeadLetter}/dismiss`],
@@ -1698,6 +1705,63 @@ async function run() {
       "not_found",
     );
   }
+
+  // Platform access and admin (ADR 0033). The smoke user is approved and is not a platform
+  // admin: every admin route answers 403 forbidden, and nothing changes.
+  expect("GET /v1/me has the access fields", await call("GET", "/v1/me"), 200, apiData(Me), (j) => {
+    const me = (j as { data: Me }).data;
+    return (
+      same("platformAdmin", me.platformAdmin, false) ??
+      same("accessStatus", me.accessStatus, "approved")
+    );
+  });
+  expect(
+    "GET /v1/me/costs",
+    await call("GET", "/v1/me/costs?months=6"),
+    200,
+    apiData(MyCosts),
+    (j) => {
+      const costs = (j as { data: MyCosts }).data;
+      return (
+        same("months", costs.months.length, 6) ??
+        same("current month last", costs.months[5]?.month, new Date().toISOString().slice(0, 7)) ??
+        (costs.byChange.length <= 50 ? null : `byChange has ${costs.byChange.length} rows`) ??
+        (costs.source.length > 0 ? null : "source is empty")
+      );
+    },
+  );
+  expectError(
+    "GET /v1/me/costs months=13 is 400",
+    await call("GET", "/v1/me/costs?months=13"),
+    400,
+    "invalid_request",
+  );
+  const adminRoutes: [string, string, unknown?][] = [
+    ["GET", "/v1/admin/overview"],
+    ["GET", "/v1/admin/users"],
+    ["GET", "/v1/admin/users/usr_e2e_unknown"],
+    ["GET", "/v1/admin/projects"],
+    ["GET", "/v1/admin/costs"],
+    ["GET", "/v1/admin/costs?format=csv"],
+    ["GET", "/v1/admin/events"],
+    ["GET", "/v1/admin/settings"],
+    ["PATCH", "/v1/admin/settings", { signupApprovalRequired: false }],
+    ["GET", "/v1/admin/access-requests"],
+    ["POST", "/v1/admin/users/usr_e2e_unknown/access", { decision: "approve" }],
+    ["POST", "/v1/admin/access-requests/approve-all", {}],
+  ];
+  const notForbidden: string[] = [];
+  for (const [method, path, body] of adminRoutes) {
+    const r = await call(method, path, body === undefined ? {} : { body });
+    const code = (r.json as { error?: { code?: string } } | undefined)?.error?.code;
+    if (r.status !== 403 || code !== "forbidden")
+      notForbidden.push(`${method} ${path} -> ${r.status}`);
+  }
+  report(
+    `${adminRoutes.length} admin routes answer 403 forbidden to a user who is not a platform admin`,
+    notForbidden.length === 0,
+    notForbidden.slice(0, 4).join("; "),
+  );
 
   // Notifications.
   expect("GET /v1/notifications", await call("GET", "/v1/notifications?limit=5"), 200, {

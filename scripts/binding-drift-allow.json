@@ -75,7 +75,7 @@
     {
       "worker": "workers/api",
       "side": "terraform-only",
-      "names": ["ANTHROPIC_MONTHLY_BUDGET_USD", "SANDBOX_MONTHLY_SECONDS"],
+      "names": ["ANTHROPIC_MONTHLY_BUDGET_USD", "BROWSER_DAILY_SECONDS", "SANDBOX_MONTHLY_SECONDS"],
       "reason": "Cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
     },
     {

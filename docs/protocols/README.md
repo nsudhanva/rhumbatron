@@ -20,10 +20,11 @@ The Zod schemas in `packages/protocol/src` are the protocol source of truth.
 | `app.ts`, `code.ts`, `code-edit.ts` | Live app deployments and preview hosts, the code store keys, and human code edits. |
 | `code-session.ts` | Code page edit sessions: limits, expiry, requests, responses, and refusal reasons (ADR 0029). |
 | `activity.ts`, `suggestions.ts` | The Project event feed, Claim state, run progress, Project stats, and the goal suggestion pills. |
+| `admin.ts` | Platform access (`AccessStatus`), the admin responses, the platform settings, the access decisions, and the user costs (`MyCosts`) (ADR 0033). |
 
 ## API routes
 
-The API Worker (`workers/api/src`) serves `https://api.rhumbatron.com`. Every route except `/health` and `/v1/version` needs a signed-in user. The API reads the role of the caller from D1 (`identity.ts`). It never reads the role from the client. A caller with no access to the Project gets 404.
+The API Worker (`workers/api/src`) serves `https://api.rhumbatron.com`. Every route except `/health` and `/v1/version` needs a signed-in user. A person who is not approved gets 403 `approval_required` on every route except `GET /v1/me` (see [Platform admin and access](#platform-admin-and-access)). The API reads the role of the caller from D1 (`identity.ts`). It never reads the role from the client. A caller with no access to the Project gets 404.
 
 The roles are `owner`, `admin`, `member`, and `viewer`. `can(role, action)` in `packages/protocol/src/roles.ts` is the one permission matrix (see [Roles and permissions](#roles-and-permissions)). The Access column uses these values:
 
@@ -43,8 +44,10 @@ The roles are `owner`, `admin`, `member`, and `viewer`. `can(role, action)` in `
 | DELETE | `/v1/projects/:projectId` | Owner | `projects.ts` |
 | GET | `/v1/changes/:changeId/tasks` | Any role | `projects.ts` |
 | GET, PATCH | `/v1/projects/:projectId/settings`, `/v1/projects/:projectId` | Any role (GET), Manager (PATCH) | `project-settings.ts` |
-| GET | `/v1/me` | Signed-in user | `budgets.ts` |
+| GET | `/v1/me` | Signed-in user, also a person who is not approved | `budgets.ts` |
+| GET | `/v1/me/costs` | Signed-in user (their own spend) | `budgets.ts` |
 | PATCH | `/v1/me/budget` | Signed-in user (their own budget) | `budgets.ts` |
+| GET, PATCH, POST | `/v1/admin/*` (see [Platform admin and access](#platform-admin-and-access)) | Platform admin | `admin.ts` |
 | GET | `/v1/changes/:changeId` | Any role | `changes.ts` |
 | POST | `/v1/changes/:changeId/cancel` | Manager, or the requester of the Change (Contributor) | `changes.ts` |
 | POST | `/v1/changes/:changeId/budget` | Manager | `changes.ts` |
@@ -225,7 +228,7 @@ The routes and helpers are in `workers/api/src/budgets.ts`. The schemas are in `
 | POST | `/v1/projects/:projectId/changes` | The body can set `budgetScope`: `change` (default), `project`, or `account`. `budgetUsd` caps only scope `change`; without it the Project default applies. Scope `project` needs a Project monthly budget, and scope `account` needs a monthly budget of the requester. | 400 with `details.reason` `no_budget_set` |
 | GET | `/v1/changes/:changeId` | The Change has `budget`: `scope`, `capUsd` (null for `project` and `account`), `spentUsd`, and `blockedBy` (`change_budget`, `project_budget`, `account_budget`, `monthly_model_spend`, or null). | 404 |
 | GET | `/v1/projects/:projectId/cost` | Adds `projectBudget`: `capUsd` (or null), `spentUsd`, and `month` (`YYYY-MM`). Each Change row has `budgetScope`. | 404 |
-| GET | `/v1/me` | `userId`, `name`, `email`, `monthlyBudgetUsd` (or null), `monthSpendUsd` (this month, across every Project), and `month`. | 401 |
+| GET | `/v1/me` | `userId`, `name`, `email`, `monthlyBudgetUsd` (or null), `monthSpendUsd` (this month, across every Project), `month`, `platformAdmin`, and `accessStatus` (`approved`, `pending`, or `declined`). | 401 |
 | PATCH | `/v1/me/budget` | Body `{ monthlyBudgetUsd: number \| null }` (1 to 100 USD). Returns the same body as `GET /v1/me`. A higher or removed budget resumes the caller's Changes that their budget stopped. | 400 |
 
 `users.monthly_budget_usd` and `changes.budget_scope` (migration `0031_budget_scopes.sql`) store the user budget and the scope.
@@ -273,3 +276,47 @@ D1 tables (migration `0030_code_sessions.sql`):
 | `code_session_commands` | Audit log: `session_id`, `command`, `cwd`, `exit_code`, `duration_ms`, and `at`. It never holds the output. |
 
 Events: `code.session.opened` (`baseGeneration`, `baseTree`), `code.session.closed` (`reason`: `discarded`, `idle`, `max_age`, or `archived`; `status`), and `code.session.submitted` (`changeId`). The causal router treats them as informational.
+
+## Platform admin and access
+
+The routes are in `workers/api/src/admin.ts`, `workers/api/src/access.ts`, and `workers/api/src/budgets.ts`. The schemas are in `packages/protocol/src/admin.ts`. See [ADR 0033](../adr/0033-platform-admin-and-access.md) and [Shared Projects, Access gate](../architecture/shared-projects.md#access-gate).
+
+A platform admin is a user ID in the `PLATFORM_ADMIN_USER_IDS` binding (Terraform `platform_admin_user_ids`). The API compares it with the user ID of the verified session. Every `/v1/admin/*` route answers 403 `forbidden` to anyone else. Every admin read and write adds one `admin_audit` row. Each JSON response is `{ data }`.
+
+| Method | Path | Result | Main errors |
+|---|---|---|---|
+| GET | `/v1/me/costs?months=6` | The caller's own spend. `months` (1 to 12): `{ month, spendUsd }`, oldest first, from the meter `user-usd-micro`. `byProject` and `byChange` (top 50): the Change meter `change-usd-micro` of each request that the caller created this month. `source` says what each number covers. | 400 |
+| GET | `/v1/admin/overview` | `month`, `spendUsd` and `capUsd` (the Anthropic meter and budget of the month), `sandbox` (`usedSeconds`, `capSeconds`, this month), `browser` (`usedSecondsToday`, `capSecondsPerDay`), `appVersions` (`used`: app builds today, each one new app version; `cap`: the daily build cap), `users` (`total`, `pending`), `projects` (`active`, `archived`), `changes.active` (not in a final status), and `agents.active` (Tasks `assigned` or `running`). | 403 |
+| GET | `/v1/admin/users?q=&status=&cursor=` | `users` (pages of 50, newest first): `userId`, `name`, `email`, `accessStatus`, `projects`, `requests`, `spendMonthUsd` (meter `user-usd-micro`), `spendAllTimeUsd` (the Change meters of the person's requests), `monthlyBudgetUsd`, `createdAt`, `lastActiveAt` (to the hour). `nextCursor`. `q` matches the email, the name, or the user ID. | 400, 403 |
+| GET | `/v1/admin/users/:userId` | The list fields, with `projects` as `{ projectId, name, role, spendUsd }` (the person's requests in the Project), `recentChanges` (20 newest: `changeId`, `projectId`, `projectName`, `title`, `status`, `spendUsd`, `createdAt`), and `monthly` (12 months). | 403, 404 |
+| GET | `/v1/admin/projects?q=&ownerId=&status=&cursor=` | `projects` (pages of 50, newest first): `projectId`, `name`, `slug`, `status`, `owner` (`userId`, `name`), `members`, `generation`, `spendMonthUsd` (meter `project-usd-micro`), `spendAllTimeUsd` (the Change meters), `changes`, `liveAppUrl` (null while no production app serves), `createdAt`, `updatedAt`. `nextCursor`. | 400, 403 |
+| GET | `/v1/admin/costs?from=&to=&userId=&projectId=&groupBy=user\|project\|model\|day&format=json\|csv` | `rows` (`key`, `label`, `spendUsd`, `calls`, `inputTokens`, `outputTokens`), `totalUsd`, and `source`. The rows come from `task_runs` (one row per agent Task attempt) in the UTC days `from` to `to` (default: the last 30 days, at most 366). `model` groups by model tier. `source` names the calls without a per-call row (planner, intake, conflict reviews, acceptance check, judge) and gives the meter total of the same scope. `format=csv` returns `text/csv` with the same columns. | 400, 403 |
+| GET | `/v1/admin/events?userId=&projectId=&type=&from=&to=&cursor=` | `events` (pages of 50, newest first, from `project_events` of all Projects): `seq`, `projectId`, `projectName`, `changeId`, `eventType`, `actorKind`, `actorId`, `actorName`, `occurredAt`, `summary`. `nextCursor` is a `seq`. `userId` filters on the actor. | 400, 403 |
+| GET | `/v1/admin/settings` | `signupApprovalRequired`, `updatedAt`, `updatedBy`. | 403 |
+| PATCH | `/v1/admin/settings` | Body `{ signupApprovalRequired: boolean }`. Returns the same body as the GET. Turning the switch off approves nobody. | 400, 403 |
+| GET | `/v1/admin/access-requests` | `users`: the pending people (`userId`, `name`, `email`, `requestedAt`), newest first, at most 200. | 403 |
+| POST | `/v1/admin/users/:userId/access` | Body `{ decision: "approve" \| "decline" }`. Returns `userId` and `accessStatus`. The same decision again writes only the audit row. | 400, 403, 404, 409 (decline of a platform admin) |
+| POST | `/v1/admin/access-requests/approve-all` | `approved`: the number of pending people that became approved. | 403 |
+
+The 403 body of the access gate is `{ error: { code: "approval_required", message, details: { status: "pending" | "declined" } } }`.
+
+Notifications (derived on each read, like all other items):
+
+| Kind | Audience | Severity | `href` |
+|---|---|---|---|
+| `access_request` | Each platform admin, while the person is `pending`. ID `access_request:<userId>`. | `action` | `/admin/access` |
+| `access_decided` | The person, for 7 days after the decision. ID `access_decided:<userId>`. | `info` | `/` |
+
+These items have no Project: `projectId` is an empty string and `projectName` is "Rhumbatron".
+
+D1 (migration `0035_platform_admin_and_access.sql`):
+
+| Table or column | Content |
+|---|---|
+| `platform_settings` | `key`, `value`, `updated_at`, `updated_by`. Key `signup_approval_required` holds `"true"` or `"false"`. A missing row means false. |
+| `users.access_status` | `approved` (default; existing users), `pending`, or `declined`. |
+| `users.access_decided_by`, `users.access_decided_at` | The admin and the time of the last access decision. |
+| `users.last_seen_at` | The last authenticated request, written at most once per hour. |
+| `admin_audit` | `id`, `admin_user_id`, `action` (for example `users.list`, `access.decide`, `settings.update`), `target`, `at`. Rows older than 365 days are deleted. |
+
+Indexes: `users (access_status, created_at)`, `users (created_at)`, `admin_audit (at)`, `changes (created_by, created_at)`, `projects (created_at)`, `task_runs (started_at)`, `project_events (actor_id, seq)`, and `project_events (event_type, seq)`.

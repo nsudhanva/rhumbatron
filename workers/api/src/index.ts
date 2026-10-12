@@ -2,6 +2,7 @@ import { HealthResponse, VersionResponse } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { activity } from "./activity.ts";
+import { admin } from "./admin.ts";
 import { agents } from "./agents.ts";
 import { apps } from "./apps.ts";
 import { board } from "./board.ts";
@@ -46,6 +47,7 @@ app.get("/v1/version", (c) =>
 );
 
 // Before `projects`: these handlers answer first, so their own requireAuth runs only once.
+app.route("/", admin);
 app.route("/", members);
 app.route("/", firstCome);
 app.route("/", board);

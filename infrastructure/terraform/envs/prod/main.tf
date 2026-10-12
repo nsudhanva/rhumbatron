@@ -198,9 +198,12 @@ module "api_worker" {
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
     # Starts one ChangeWorkflow per Change.
     { type = "workflow", name = "CHANGE_WORKFLOW", workflow_name = cloudflare_workflow.change.workflow_name, class_name = "ChangeWorkflow", script_name = module.integration_worker.name },
-    # The Costs page shows this environment's caps (ADR 0017).
+    # The Costs page and the admin overview show this environment's caps (ADR 0017).
     local.cap_bindings.sandbox,
+    local.cap_bindings.browser,
     local.cap_bindings.anthropic,
+    # Platform admins (ADR 0033): the API checks the session user ID against this JSON array.
+    { type = "plain_text", name = "PLATFORM_ADMIN_USER_IDS", text = jsonencode(var.platform_admin_user_ids) },
     ],
     # Live apps (ADR 0020): the API shows an app URL only while the routes serve it.
     local.apps.routing ? [{ type = "plain_text", name = "APPS_DOMAIN", text = local.apps.domain }] : [],

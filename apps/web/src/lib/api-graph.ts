@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
+import { apiErrorMessage } from "./access";
 
 /**
  * Graph reads over the API Worker (service binding `API`), on the web Worker with the user's Clerk
@@ -20,10 +21,10 @@ async function call<T>(path: string): Promise<T> {
   );
   const json = (await response.json().catch(() => ({}))) as {
     data?: T;
-    error?: { message?: string };
+    error?: { code?: string; message?: string };
   };
   if (!response.ok || json.data === undefined) {
-    throw new Error(json.error?.message ?? `API returned ${response.status}`);
+    throw new Error(apiErrorMessage(response.status, json.error));
   }
   return json.data;
 }

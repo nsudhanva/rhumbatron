@@ -38,12 +38,12 @@ const SANDBOX_MONTHLY_SECONDS = 36_000;
 /** Fallback for the `ANTHROPIC_MONTHLY_BUDGET_USD` binding (ADR 0021). */
 const ANTHROPIC_MONTHLY_BUDGET_USD = 10;
 
-const anthropicMonthlyBudgetUsd = (configured?: string) => {
+export const anthropicMonthlyBudgetUsd = (configured?: string) => {
   const n = Number(configured);
   return configured && Number.isFinite(n) && n >= 0 ? n : ANTHROPIC_MONTHLY_BUDGET_USD;
 };
 
-const sandboxMonthlySeconds = (configured?: string) => {
+export const sandboxMonthlySeconds = (configured?: string) => {
   const n = Number(configured);
   return configured && Number.isInteger(n) && n > 0 ? n : SANDBOX_MONTHLY_SECONDS;
 };

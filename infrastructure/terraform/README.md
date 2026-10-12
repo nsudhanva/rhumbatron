@@ -61,9 +61,12 @@ the adapters below.
 | Clerk instance | development | production (ADR 0017) |
 | Anthropic budget per calendar month | - | $100 |
 | `ALLOW_OPUS` | - | `false` |
+| Platform admins (`PLATFORM_ADMIN_USER_IDS`, a JSON array) | `[]` | `var.platform_admin_user_ids` (ADR 0033) |
 | `www` | none | Custom domain of the prod web Worker; the Worker returns 301 to the apex |
 
 Prod is the only remote environment. Local work uses `wrangler dev`.
+
+`var.platform_admin_user_ids` (`envs/prod/variables.tf`) lists the Rhumbatron user IDs (`usr_<Clerk user ID>`) of the platform admins. The default is `["usr_user_3KVgK2jUomozHjWQw7kPaVopRLq"]`. The value is not secret. Terraform sets it on the API Worker as the plain_text binding `PLATFORM_ADMIN_USER_IDS`. The API checks the session user ID against it. A change of the list needs a plan and an apply.
 
 Each hostname is one label deep, so Universal SSL covers it.
 

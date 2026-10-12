@@ -5,6 +5,8 @@ export const ApiErrorCode = z.enum([
   "invalid_request",
   "unauthorized",
   "forbidden",
+  /** The signed-in person waits for, or was refused, platform access (ADR 0033). */
+  "approval_required",
   "not_found",
   "conflict",
   /** A usage cap refuses the request (for example the monthly Sandbox seconds). */

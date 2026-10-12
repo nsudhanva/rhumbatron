@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { isBlocked } from "./access";
 import {
   type CandidateDetail,
   type ChangeDetail,
@@ -10,6 +11,7 @@ import {
   listChanges,
   listProjectEvents,
 } from "./api";
+import { getMe, ME_KEY, type Me } from "./api-budget";
 
 /**
  * Server-rendered page data (docs/architecture/tech-stack.md, "Server-rendered data").
@@ -31,6 +33,8 @@ export async function loadOnServer(
   load: () => Promise<unknown>,
 ): Promise<void> {
   if (typeof window !== "undefined") return;
+  // A pending or declined account sees only the access gate: no page reads at all.
+  if (isBlocked(signedInUser(queryClient)?.accessStatus)) return;
   try {
     await load();
   } catch {
@@ -43,6 +47,33 @@ export async function loadOnServer(
       .getQueryCache()
       .findAll({ fetchStatus: "fetching" })
       .map((query) => query.promise),
+  );
+}
+
+/**
+ * Reads `GET /v1/me` into the cache before any page loader runs (the root route's `beforeLoad`).
+ * The access gate, the Admin link and the admin pages read it from there. Server only.
+ */
+export async function loadSignedInUser(queryClient: QueryClient): Promise<void> {
+  if (typeof window !== "undefined") return;
+  await prefetch(queryClient, ME_KEY, () => getMe());
+}
+
+/** The signed-in user from the cache; undefined when signed out or not read yet. */
+function signedInUser(queryClient: QueryClient): Me | undefined {
+  return queryClient.getQueryData<Me>(ME_KEY);
+}
+
+/**
+ * `loadOnServer` for an admin page: the reads run only for a platform admin, so a non-admin's
+ * server render calls no admin route and sees "Not found" (components/admin/admin-page.tsx).
+ */
+export function loadForAdmin(
+  queryClient: QueryClient,
+  load: () => Promise<unknown>,
+): Promise<void> {
+  return loadOnServer(queryClient, () =>
+    signedInUser(queryClient)?.platformAdmin ? load() : Promise.resolve(),
   );
 }
 

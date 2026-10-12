@@ -1,4 +1,11 @@
-import { Show, SignInButton, SignUpButton, UserButton, useUser } from "@clerk/tanstack-react-start";
+import {
+  Show,
+  SignInButton,
+  SignUpButton,
+  UserButton,
+  useAuth,
+  useUser,
+} from "@clerk/tanstack-react-start";
 import { Button, cn } from "@cloudflare/kumo";
 import {
   Airplane,
@@ -20,13 +27,16 @@ import {
   Pulse,
   Robot,
   SealCheck,
+  ShieldCheck,
   SquaresFour,
   Sun,
   TreeStructure,
   X,
 } from "@phosphor-icons/react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, type LinkOptions, useLocation, useRouter } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
+import { getMe, ME_KEY } from "../../lib/api-budget";
 import { changeLabel } from "../../lib/format";
 import { type ShellLiveState, useShellLiveState } from "../../lib/live-status";
 import { type ColorMode, useColorMode } from "../../lib/mode";
@@ -287,8 +297,11 @@ function Sidebar({ context }: { context: ShellContext }) {
           )}
         </nav>
 
-        <div className="mt-auto border-t-2 border-kumo-divider px-4 py-3">
-          <Identity />
+        <div className="mt-auto border-t-2 border-kumo-divider">
+          <AdminLink current={section === "admin"} />
+          <div className="px-4 py-3">
+            <Identity />
+          </div>
         </div>
       </div>
     </aside>
@@ -346,6 +359,25 @@ function NavRow({ item, current }: { item: NavItem; current: boolean }) {
         </span>
       )}
     </Link>
+  );
+}
+
+/** The Admin area, above the identity; only for a platform admin (`GET /v1/me`). */
+function AdminLink({ current }: { current: boolean }) {
+  const { isSignedIn } = useAuth();
+  const me = useQuery({
+    queryKey: ME_KEY,
+    queryFn: () => getMe(),
+    enabled: isSignedIn === true,
+  });
+  if (isSignedIn === false || !me.data?.platformAdmin) return null;
+  return (
+    <div className="border-b border-kumo-rule py-1">
+      <NavRow
+        item={{ label: "Admin", icon: ShieldCheck, link: { to: "/admin" } }}
+        current={current}
+      />
+    </div>
   );
 }
 

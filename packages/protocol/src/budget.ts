@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AccessStatus } from "./admin.ts";
 
 /**
  * Budget scopes (ADR 0030, docs/operations/costs.md). A Change draws on its own cap (`change`),
@@ -43,7 +44,10 @@ export const ProjectBudget = z.object({
 });
 export type ProjectBudget = z.infer<typeof ProjectBudget>;
 
-/** `GET /v1/me` and the reply of `PATCH /v1/me/budget`. `monthSpendUsd` covers every Project. */
+/**
+ * `GET /v1/me` and the reply of `PATCH /v1/me/budget`. `monthSpendUsd` covers every Project.
+ * `platformAdmin` and `accessStatus` come from the API access gate (ADR 0033).
+ */
 export const Me = z.object({
   userId: z.string(),
   name: z.string().nullable(),
@@ -51,6 +55,8 @@ export const Me = z.object({
   monthlyBudgetUsd: z.number().nullable(),
   monthSpendUsd: z.number().nonnegative(),
   month: z.string().regex(/^\d{4}-\d{2}$/),
+  platformAdmin: z.boolean(),
+  accessStatus: AccessStatus,
 });
 export type Me = z.infer<typeof Me>;
 

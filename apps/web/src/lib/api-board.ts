@@ -13,6 +13,7 @@ import {
   type RequestWait,
 } from "@rhumbatron/protocol";
 import { createServerFn } from "@tanstack/react-start";
+import { apiErrorMessage } from "./access";
 
 export type { BoardAgent, BoardCard, BoardColumn, BoardPerson, FirstComeChoice, RequestWait };
 export type ProjectBoard = BoardResponse;
@@ -48,10 +49,10 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
   );
   const json = (await response.json().catch(() => ({}))) as {
     data?: T;
-    error?: { message?: string };
+    error?: { code?: string; message?: string };
   };
   if (!response.ok || json.data === undefined) {
-    throw new ApiError(response.status, json.error?.message ?? `API returned ${response.status}`);
+    throw new ApiError(response.status, apiErrorMessage(response.status, json.error));
   }
   return json.data;
 }

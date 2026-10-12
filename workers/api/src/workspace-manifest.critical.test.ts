@@ -48,11 +48,14 @@ function setup(member = true) {
   const statement = (sql: string) => ({
     bind: () => statement(sql),
     first: async () =>
-      sql.startsWith("SELECT t.change_id")
-        ? { project_id: "proj_1", change_id: "chg_1" }
-        : member
-          ? { member: 1, org_member: 1 }
-          : null,
+      // The access gate (access.ts): the caller is an approved user.
+      sql.includes("access_status")
+        ? { status: "approved", last_seen_at: new Date().toISOString() }
+        : sql.startsWith("SELECT t.change_id")
+          ? { project_id: "proj_1", change_id: "chg_1" }
+          : member
+            ? { member: 1, org_member: 1 }
+            : null,
   });
   const env = {
     DB: { prepare: statement, batch: async () => [] },

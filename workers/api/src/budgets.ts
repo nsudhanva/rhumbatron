@@ -1,24 +1,33 @@
 import {
+  AccessStatus,
   apiData,
   type BudgetScope,
   budgetBlockedBy,
   CHANGE_METER_DAY,
   type ChangeBudget,
+  changeTitle,
   METER_COUNTER,
   Me,
+  MyCosts,
   POOL_SCOPE_CHANGE_CEILING_USD,
   UpdateMyBudgetRequest,
 } from "@rhumbatron/protocol";
 import { type Context, Hono } from "hono";
+import { z } from "zod";
+import { isPlatformAdmin } from "./access.ts";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { errorBody, respond, validate } from "./http.ts";
 import { ensureIdentity } from "./identity.ts";
 import { ensureProfile, requesterName } from "./members.ts";
+import { changeMeterSql, microToUsd, monthList, monthlyMeter } from "./spend.ts";
 
 /**
  * Budget scopes (ADR 0030, docs/operations/costs.md):
  *
- * - `GET /v1/me`: the caller's monthly budget and this month's model spend across Projects.
+ * - `GET /v1/me`: the caller's monthly budget, this month's model spend across Projects, and the
+ *   platform access fields (`platformAdmin`, `accessStatus`, ADR 0033).
+ * - `GET /v1/me/costs?months=6`: the caller's own spend per month, and this month per Project and
+ *   per request.
  * - `PATCH /v1/me/budget`: body `{ monthlyBudgetUsd: number | null }` ($1 to $100). A raise
  *   resumes the caller's Changes that their budget stopped.
  * - Helpers for Change creation (`resolveBudgetScope`), the Change read (`changeBudget`), the
@@ -27,6 +36,8 @@ import { ensureProfile, requesterName } from "./members.ts";
  * The spend figures read the `usage_counters` meters that model calls reserve and settle
  * (packages/model-router/src/budget-meters.ts); an open reservation counts until it settles.
  * Cost: `GET /v1/me` is 2 D1 reads; the PATCH adds 1 write and, on a raise, one RPC.
+ * `GET /v1/me/costs` is 2 D1 queries: the month meters, and the caller's requests of this month
+ * (at most 500, through `idx_changes_created_by_created`) with one Change meter lookup each.
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -157,18 +168,24 @@ export function changeBudget(row: ChangeBudgetColumns): ChangeBudget {
 async function readMe(env: Env, userId: string): Promise<Me> {
   const month = currentMonth();
   const [user, spend] = await env.DB.batch([
-    env.DB.prepare("SELECT display_name, email, monthly_budget_usd FROM users WHERE id = ?").bind(
-      userId,
-    ),
+    env.DB.prepare(
+      "SELECT display_name, email, monthly_budget_usd, access_status FROM users WHERE id = ?",
+    ).bind(userId),
     env.DB.prepare("SELECT count FROM usage_counters WHERE day = ? AND counter = ?").bind(
       month,
       METER_COUNTER.user(userId),
     ),
   ]);
   const row = user?.results?.[0] as
-    | { display_name: string | null; email: string | null; monthly_budget_usd: number | null }
+    | {
+        display_name: string | null;
+        email: string | null;
+        monthly_budget_usd: number | null;
+        access_status: string | null;
+      }
     | undefined;
   const count = (spend?.results?.[0] as { count: number } | undefined)?.count ?? 0;
+  const platformAdmin = isPlatformAdmin(env, userId);
   return {
     userId,
     name: row ? requesterName(row.display_name, row.email) : null,
@@ -176,6 +193,77 @@ async function readMe(env: Env, userId: string): Promise<Me> {
     monthlyBudgetUsd: row?.monthly_budget_usd ?? null,
     monthSpendUsd: count / 1_000_000,
     month,
+    platformAdmin,
+    // Unknown stored values read as declined: the gate refuses them too.
+    accessStatus: platformAdmin
+      ? "approved"
+      : AccessStatus.catch("declined").parse(row?.access_status),
+  };
+}
+
+const MyCostsQuery = z.object({
+  months: z.coerce.number().int().min(1).max(12).default(6),
+});
+
+/** Requests of this month read per call. A person sends far fewer in one month. */
+const MONTH_CHANGE_LIMIT = 500;
+const BY_CHANGE_LIMIT = 50;
+
+const MY_COSTS_SOURCE =
+  "Months: your meter user-usd-micro, every model call that your requests paid for in each " +
+  "calendar month (UTC) across Projects, open reservations included. Months before the budget " +
+  "meters existed read 0. This month by Project and by request: the Change meter " +
+  "change-usd-micro of each request you created this month, all of its model calls (planner, " +
+  "intake, agent runs, reviews, acceptance check, judge) to date. A request from an earlier month " +
+  "that still spends counts in the month total only.";
+
+/** `GET /v1/me/costs`: the caller's own spend. */
+async function readMyCosts(db: D1Database, userId: string, months: number): Promise<MyCosts> {
+  const now = new Date();
+  const list = monthList(now, months);
+  const monthStart = `${list[list.length - 1]}-01T00:00:00.000Z`;
+  const [monthly, changeRows] = await Promise.all([
+    monthlyMeter(db, METER_COUNTER.user(userId), list),
+    db
+      .prepare(
+        `SELECT c.id, c.project_id, p.name AS project_name, c.title, c.goal,
+                ${changeMeterSql("c")} AS micro
+         FROM changes c JOIN projects p ON p.id = c.project_id
+         WHERE c.created_by = ? AND c.created_at >= ?
+         ORDER BY c.created_at DESC LIMIT ?`,
+      )
+      .bind(userId, monthStart, MONTH_CHANGE_LIMIT)
+      .all<{
+        id: string;
+        project_id: string;
+        project_name: string;
+        title: string | null;
+        goal: string;
+        micro: number | null;
+      }>(),
+  ]);
+  const changes = (changeRows.results ?? []).map((r) => ({
+    changeId: r.id,
+    projectId: r.project_id,
+    projectName: r.project_name,
+    title: changeTitle(r.title, r.goal),
+    spendUsd: microToUsd(r.micro),
+  }));
+  const byProject = new Map<string, { projectId: string; name: string; spendUsd: number }>();
+  for (const ch of changes) {
+    const entry = byProject.get(ch.projectId) ?? {
+      projectId: ch.projectId,
+      name: ch.projectName,
+      spendUsd: 0,
+    };
+    entry.spendUsd += ch.spendUsd;
+    byProject.set(ch.projectId, entry);
+  }
+  return {
+    months: monthly,
+    byProject: [...byProject.values()].sort((a, b) => b.spendUsd - a.spendUsd),
+    byChange: changes.sort((a, b) => b.spendUsd - a.spendUsd).slice(0, BY_CHANGE_LIMIT),
+    source: MY_COSTS_SOURCE,
   };
 }
 
@@ -189,6 +277,12 @@ export const budgets = new Hono<AppEnv>()
       await profile; // No ExecutionContext (tests): finish inline.
     }
     return respond(c, apiData(Me), { data: await readMe(c.env, userId) });
+  })
+
+  .get("/v1/me/costs", requireAuth, validate("query", MyCostsQuery), async (c) => {
+    const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+    const { months } = c.req.valid("query");
+    return respond(c, apiData(MyCosts), { data: await readMyCosts(c.env.DB, userId, months) });
   })
 
   .patch("/v1/me/budget", requireAuth, validate("json", UpdateMyBudgetRequest), async (c) => {

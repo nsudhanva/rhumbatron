@@ -1,5 +1,6 @@
 import { verifyToken } from "@clerk/backend";
 import { createMiddleware } from "hono/factory";
+import { accessGate } from "./access.ts";
 import { fail } from "./http.ts";
 
 export type AuthVariables = {
@@ -39,6 +40,7 @@ function logRejection(reason: string, message: string) {
 /**
  * Requires a valid Clerk session token in `Authorization: Bearer <token>`.
  * The azp check runs here (not in verifyToken), so the azp policy can accept backend-minted tokens.
+ * Then the access gate (access.ts) refuses a person who is not approved, except on `GET /v1/me`.
  */
 export const requireAuth = createMiddleware<{ Bindings: Env; Variables: AuthVariables }>(
   async (c, next) => {
@@ -71,6 +73,8 @@ export const requireAuth = createMiddleware<{ Bindings: Env; Variables: AuthVari
       return fail(c, 401, "unauthorized", "Invalid session token");
     }
     c.set("authSubject", subject);
+    const refused = await accessGate(c, subject);
+    if (refused) return refused;
     await next();
   },
 );

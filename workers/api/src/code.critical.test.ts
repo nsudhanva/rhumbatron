@@ -47,6 +47,10 @@ function setup(options: { member?: boolean; manifest?: boolean; patchRef?: boole
   const statement = (sql: string) => ({
     bind: () => statement(sql),
     first: async () => {
+      // The access gate (access.ts): the caller is an approved user.
+      if (sql.includes("access_status")) {
+        return { status: "approved", last_seen_at: new Date().toISOString() };
+      }
       if (sql.includes("JOIN memberships")) return member ? { member: 1, org_member: 1 } : null;
       if (sql.includes("FROM changesets cs JOIN changes")) return { project_id: "proj_1" };
       return null;

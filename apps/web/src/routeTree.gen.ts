@@ -11,12 +11,20 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountRouteImport } from './routes/account'
+import { Route as AdminExportCostsRouteImport } from './routes/admin-export.costs'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
+import { Route as AdminAccessRouteImport } from './routes/admin.access'
+import { Route as AdminCostsRouteImport } from './routes/admin.costs'
+import { Route as AdminEventsRouteImport } from './routes/admin.events'
+import { Route as AdminProjectsRouteImport } from './routes/admin.projects'
 import { Route as CandidatesCandidateIdRouteImport } from './routes/candidates.$candidateId'
 import { Route as ChangesChangeIdRouteImport } from './routes/changes.$changeId'
 import { Route as CompareChangeIdRouteImport } from './routes/compare.$changeId'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
+import { Route as AdminUsersIndexRouteImport } from './routes/admin.users.index'
+import { Route as AdminUsersUserIdRouteImport } from './routes/admin.users.$userId'
 import { Route as ChangesChangeIdFlightRouteImport } from './routes/changes_.$changeId.flight'
 import { Route as LiveProjectsProjectIdRouteImport } from './routes/live.projects.$projectId'
 import { Route as ProjectsProjectIdAgentsRouteImport } from './routes/projects_.$projectId.agents'
@@ -39,6 +47,36 @@ const IndexRoute = IndexRouteImport.update({
 const AccountRoute = AccountRouteImport.update({
   id: '/account',
   path: '/account',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminExportCostsRoute = AdminExportCostsRouteImport.update({
+  id: '/admin-export/costs',
+  path: '/admin-export/costs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminAccessRoute = AdminAccessRouteImport.update({
+  id: '/admin/access',
+  path: '/admin/access',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminCostsRoute = AdminCostsRouteImport.update({
+  id: '/admin/costs',
+  path: '/admin/costs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminEventsRoute = AdminEventsRouteImport.update({
+  id: '/admin/events',
+  path: '/admin/events',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminProjectsRoute = AdminProjectsRouteImport.update({
+  id: '/admin/projects',
+  path: '/admin/projects',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CandidatesCandidateIdRoute = CandidatesCandidateIdRouteImport.update({
@@ -69,6 +107,16 @@ const SignInSplatRoute = SignInSplatRouteImport.update({
 const SignUpSplatRoute = SignUpSplatRouteImport.update({
   id: '/sign-up/$',
   path: '/sign-up/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersIndexRoute = AdminUsersIndexRouteImport.update({
+  id: '/admin/users/',
+  path: '/admin/users/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersUserIdRoute = AdminUsersUserIdRouteImport.update({
+  id: '/admin/users/$userId',
+  path: '/admin/users/$userId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChangesChangeIdFlightRoute = ChangesChangeIdFlightRouteImport.update({
@@ -145,12 +193,19 @@ const EvidenceCandidateIdCheckIdNRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/admin-export/costs': typeof AdminExportCostsRoute
+  '/admin/access': typeof AdminAccessRoute
+  '/admin/costs': typeof AdminCostsRoute
+  '/admin/events': typeof AdminEventsRoute
+  '/admin/projects': typeof AdminProjectsRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/compare/$changeId': typeof CompareChangeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/admin/': typeof AdminIndexRoute
+  '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/changes/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
@@ -163,17 +218,25 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
   '/projects/$projectId/versions': typeof ProjectsProjectIdVersionsRoute
   '/projects/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
+  '/admin/users/': typeof AdminUsersIndexRoute
   '/evidence/$candidateId/$checkId/$n': typeof EvidenceCandidateIdCheckIdNRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/admin-export/costs': typeof AdminExportCostsRoute
+  '/admin/access': typeof AdminAccessRoute
+  '/admin/costs': typeof AdminCostsRoute
+  '/admin/events': typeof AdminEventsRoute
+  '/admin/projects': typeof AdminProjectsRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/compare/$changeId': typeof CompareChangeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/admin': typeof AdminIndexRoute
+  '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/changes/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
@@ -186,18 +249,26 @@ export interface FileRoutesByTo {
   '/projects/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
   '/projects/$projectId/versions': typeof ProjectsProjectIdVersionsRoute
   '/projects/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
+  '/admin/users': typeof AdminUsersIndexRoute
   '/evidence/$candidateId/$checkId/$n': typeof EvidenceCandidateIdCheckIdNRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/admin-export/costs': typeof AdminExportCostsRoute
+  '/admin/access': typeof AdminAccessRoute
+  '/admin/costs': typeof AdminCostsRoute
+  '/admin/events': typeof AdminEventsRoute
+  '/admin/projects': typeof AdminProjectsRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/compare/$changeId': typeof CompareChangeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/admin/': typeof AdminIndexRoute
+  '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/changes_/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects_/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
@@ -210,6 +281,7 @@ export interface FileRoutesById {
   '/projects_/$projectId/verification': typeof ProjectsProjectIdVerificationRoute
   '/projects_/$projectId/versions': typeof ProjectsProjectIdVersionsRoute
   '/projects_/$projectId/workspace': typeof ProjectsProjectIdWorkspaceRoute
+  '/admin/users/': typeof AdminUsersIndexRoute
   '/evidence/$candidateId/$checkId/$n': typeof EvidenceCandidateIdCheckIdNRoute
 }
 export interface FileRouteTypes {
@@ -217,12 +289,19 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/account'
+    | '/admin-export/costs'
+    | '/admin/access'
+    | '/admin/costs'
+    | '/admin/events'
+    | '/admin/projects'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/compare/$changeId'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/admin/'
+    | '/admin/users/$userId'
     | '/changes/$changeId/flight'
     | '/live/projects/$projectId'
     | '/projects/$projectId/agents'
@@ -235,17 +314,25 @@ export interface FileRouteTypes {
     | '/projects/$projectId/verification'
     | '/projects/$projectId/versions'
     | '/projects/$projectId/workspace'
+    | '/admin/users/'
     | '/evidence/$candidateId/$checkId/$n'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/account'
+    | '/admin-export/costs'
+    | '/admin/access'
+    | '/admin/costs'
+    | '/admin/events'
+    | '/admin/projects'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/compare/$changeId'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/admin'
+    | '/admin/users/$userId'
     | '/changes/$changeId/flight'
     | '/live/projects/$projectId'
     | '/projects/$projectId/agents'
@@ -258,17 +345,25 @@ export interface FileRouteTypes {
     | '/projects/$projectId/verification'
     | '/projects/$projectId/versions'
     | '/projects/$projectId/workspace'
+    | '/admin/users'
     | '/evidence/$candidateId/$checkId/$n'
   id:
     | '__root__'
     | '/'
     | '/account'
+    | '/admin-export/costs'
+    | '/admin/access'
+    | '/admin/costs'
+    | '/admin/events'
+    | '/admin/projects'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/compare/$changeId'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/admin/'
+    | '/admin/users/$userId'
     | '/changes_/$changeId/flight'
     | '/live/projects/$projectId'
     | '/projects_/$projectId/agents'
@@ -281,18 +376,26 @@ export interface FileRouteTypes {
     | '/projects_/$projectId/verification'
     | '/projects_/$projectId/versions'
     | '/projects_/$projectId/workspace'
+    | '/admin/users/'
     | '/evidence/$candidateId/$checkId/$n'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountRoute: typeof AccountRoute
+  AdminExportCostsRoute: typeof AdminExportCostsRoute
+  AdminAccessRoute: typeof AdminAccessRoute
+  AdminCostsRoute: typeof AdminCostsRoute
+  AdminEventsRoute: typeof AdminEventsRoute
+  AdminProjectsRoute: typeof AdminProjectsRoute
   CandidatesCandidateIdRoute: typeof CandidatesCandidateIdRoute
   ChangesChangeIdRoute: typeof ChangesChangeIdRoute
   CompareChangeIdRoute: typeof CompareChangeIdRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+  AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
   ChangesChangeIdFlightRoute: typeof ChangesChangeIdFlightRoute
   LiveProjectsProjectIdRoute: typeof LiveProjectsProjectIdRoute
   ProjectsProjectIdAgentsRoute: typeof ProjectsProjectIdAgentsRoute
@@ -305,6 +408,7 @@ export interface RootRouteChildren {
   ProjectsProjectIdVerificationRoute: typeof ProjectsProjectIdVerificationRoute
   ProjectsProjectIdVersionsRoute: typeof ProjectsProjectIdVersionsRoute
   ProjectsProjectIdWorkspaceRoute: typeof ProjectsProjectIdWorkspaceRoute
+  AdminUsersIndexRoute: typeof AdminUsersIndexRoute
   EvidenceCandidateIdCheckIdNRoute: typeof EvidenceCandidateIdCheckIdNRoute
 }
 
@@ -322,6 +426,48 @@ declare module '@tanstack/react-router' {
       path: '/account'
       fullPath: '/account'
       preLoaderRoute: typeof AccountRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin-export/costs': {
+      id: '/admin-export/costs'
+      path: '/admin-export/costs'
+      fullPath: '/admin-export/costs'
+      preLoaderRoute: typeof AdminExportCostsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/': {
+      id: '/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/access': {
+      id: '/admin/access'
+      path: '/admin/access'
+      fullPath: '/admin/access'
+      preLoaderRoute: typeof AdminAccessRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/costs': {
+      id: '/admin/costs'
+      path: '/admin/costs'
+      fullPath: '/admin/costs'
+      preLoaderRoute: typeof AdminCostsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/events': {
+      id: '/admin/events'
+      path: '/admin/events'
+      fullPath: '/admin/events'
+      preLoaderRoute: typeof AdminEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/projects': {
+      id: '/admin/projects'
+      path: '/admin/projects'
+      fullPath: '/admin/projects'
+      preLoaderRoute: typeof AdminProjectsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/candidates/$candidateId': {
@@ -364,6 +510,20 @@ declare module '@tanstack/react-router' {
       path: '/sign-up/$'
       fullPath: '/sign-up/$'
       preLoaderRoute: typeof SignUpSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/users/': {
+      id: '/admin/users/'
+      path: '/admin/users'
+      fullPath: '/admin/users/'
+      preLoaderRoute: typeof AdminUsersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/users/$userId': {
+      id: '/admin/users/$userId'
+      path: '/admin/users/$userId'
+      fullPath: '/admin/users/$userId'
+      preLoaderRoute: typeof AdminUsersUserIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/changes_/$changeId/flight': {
@@ -463,12 +623,19 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
+  AdminExportCostsRoute: AdminExportCostsRoute,
+  AdminAccessRoute: AdminAccessRoute,
+  AdminCostsRoute: AdminCostsRoute,
+  AdminEventsRoute: AdminEventsRoute,
+  AdminProjectsRoute: AdminProjectsRoute,
   CandidatesCandidateIdRoute: CandidatesCandidateIdRoute,
   ChangesChangeIdRoute: ChangesChangeIdRoute,
   CompareChangeIdRoute: CompareChangeIdRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
+  AdminIndexRoute: AdminIndexRoute,
+  AdminUsersUserIdRoute: AdminUsersUserIdRoute,
   ChangesChangeIdFlightRoute: ChangesChangeIdFlightRoute,
   LiveProjectsProjectIdRoute: LiveProjectsProjectIdRoute,
   ProjectsProjectIdAgentsRoute: ProjectsProjectIdAgentsRoute,
@@ -481,6 +648,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsProjectIdVerificationRoute: ProjectsProjectIdVerificationRoute,
   ProjectsProjectIdVersionsRoute: ProjectsProjectIdVersionsRoute,
   ProjectsProjectIdWorkspaceRoute: ProjectsProjectIdWorkspaceRoute,
+  AdminUsersIndexRoute: AdminUsersIndexRoute,
   EvidenceCandidateIdCheckIdNRoute: EvidenceCandidateIdCheckIdNRoute,
 }
 export const routeTree = rootRouteImport

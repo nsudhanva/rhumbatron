@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
+import type { AccessStatus } from "@rhumbatron/protocol";
 import { createServerFn } from "@tanstack/react-start";
+import { apiErrorMessage } from "./access";
 
 /**
  * Budget scopes (docs/operations/costs.md): which budget a Change draws on, the Project and
@@ -34,7 +36,10 @@ export type ChangeBudget = {
 /** `projectBudget` of the cost read. `capUsd` is null when the Project has no monthly budget. */
 export type ProjectBudget = { capUsd: number | null; spentUsd: number; month: string };
 
-/** `GET /v1/me`: the signed-in user with their monthly budget and this month's spend. */
+/**
+ * `GET /v1/me`: the signed-in user with their monthly budget, this month's spend, admin rights and
+ * access status. `GET /v1/me` answers for every account, also one that is not approved.
+ */
 export type Me = {
   userId: string;
   name: string | null;
@@ -45,6 +50,10 @@ export type Me = {
   monthSpendUsd: number;
   /** `YYYY-MM`. */
   month: string;
+  /** A platform admin sees the Admin area (the API decides, from the session user). */
+  platformAdmin: boolean;
+  /** Pending and declined accounts see only the access gate page (lib/access.ts). */
+  accessStatus: AccessStatus;
 };
 
 /** The API accepts a monthly budget (Project or personal) from $1 to $100, or null. */
@@ -65,10 +74,10 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
   );
   const json = (await response.json().catch(() => ({}))) as {
     data?: T;
-    error?: { message?: string };
+    error?: { code?: string; message?: string };
   };
   if (!response.ok || json.data === undefined) {
-    throw new Error(json.error?.message ?? `API returned ${response.status}`);
+    throw new Error(apiErrorMessage(response.status, json.error));
   }
   return json.data;
 }

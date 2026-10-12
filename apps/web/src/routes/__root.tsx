@@ -16,6 +16,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { type AnchorHTMLAttributes, forwardRef, type ReactNode, useEffect } from "react";
+import { AccessGate } from "../components/shell/access-gate";
 import { AppShell } from "../components/shell/app-shell";
 import { PageMetaProvider } from "../components/shell/page-meta";
 import { LiveStatusProvider } from "../lib/live-status";
@@ -27,6 +28,7 @@ import {
   renderNow,
   TIME_ZONE_BOOT_SCRIPT,
 } from "../lib/render-time";
+import { loadSignedInUser } from "../lib/ssr-data";
 import appCss from "../styles.css?url";
 
 // Build and environment are shown on every page, in the status bar.
@@ -70,6 +72,9 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
     ],
   }),
+  // Server render: the signed-in user (`GET /v1/me`) is read before every page loader, so a
+  // pending or declined account gets the access gate and no page data (lib/ssr-data.ts).
+  beforeLoad: ({ context: { queryClient } }) => loadSignedInUser(queryClient),
   loader: () => getBuildInfo(),
   component: RootComponent,
 });
@@ -78,9 +83,11 @@ function RootComponent() {
   const build = Route.useLoaderData();
   return (
     <RootDocument>
-      <AppShell build={build}>
-        <Outlet />
-      </AppShell>
+      <AccessGate>
+        <AppShell build={build}>
+          <Outlet />
+        </AppShell>
+      </AccessGate>
     </RootDocument>
   );
 }

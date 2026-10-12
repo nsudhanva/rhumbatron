@@ -12,7 +12,12 @@ function setup(options: { member?: boolean } = {}) {
   const statement = (sql: string) => ({
     bind: () => statement(sql),
     first: async () =>
-      sql.includes("JOIN memberships") && member ? { member: 1, org_member: 1 } : null,
+      // The access gate (access.ts): the caller is an approved user.
+      sql.includes("access_status")
+        ? { status: "approved", last_seen_at: new Date().toISOString() }
+        : sql.includes("JOIN memberships") && member
+          ? { member: 1, org_member: 1 }
+          : null,
     run: async () => ({ meta: { changes: 0 } }),
   });
   const getCanonical = vi.fn(async () => ({

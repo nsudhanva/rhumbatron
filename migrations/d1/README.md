@@ -1,7 +1,7 @@
 # D1 migrations
 
 This directory holds the SQL migrations for the control database (`rhumbatron-control-<env>`). The files run in name order
-from `0001_init.sql`. The newest file is `0033_first_come_choices.sql`. The sequence can skip a number.
+from `0001_init.sql`. The newest file is `0035_platform_admin_and_access.sql`. The sequence can skip a number.
 
 - Name files `NNNN_description.sql` (lowercase letters, digits, and underscores). The runner
   rejects other names.

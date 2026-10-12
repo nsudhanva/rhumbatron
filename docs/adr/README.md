@@ -33,3 +33,4 @@ The [architecture pages](../architecture/README.md) describe how the system work
 | [0030](./0030-budget-scopes.md) | Budget scopes for requests, Projects, and users |
 | [0031](./0031-ci-cd.md) | CI/CD: checks on pull requests, Terraform deploy on each push to main |
 | [0032](./0032-first-come-conflicts.md) | First-come conflicts between requests of different people |
+| [0033](./0033-platform-admin-and-access.md) | Platform admin, sign-up approval, and user costs |

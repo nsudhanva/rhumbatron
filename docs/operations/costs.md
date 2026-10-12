@@ -24,6 +24,7 @@ bun run cost:report --alerts-only
 - `scripts/cost-report.ts` reads the account usage with `CLOUDFLARE_MONITOR_TOKEN` (read-only, Keychain `rhumbatron-cloudflare-monitor-token`). It reads the D1 meters with `CLOUDFLARE_D1_TOKEN` (Keychain `rhumbatron-cloudflare-api-token`). It never writes.
 - It reports account usage and leftover resources (containers, Workflow instances, forks, archived Projects).
 - It compares the prod meters in `usage_counters` with the prod caps. It compares the Anthropic spend of this month with the 100 USD budget.
+- In the web app, the platform admin reads the same meters on `/admin` (`GET /v1/admin/overview` and `GET /v1/admin/costs`). Each person reads their own spend on the Account page (`GET /v1/me/costs`). See [ADR 0033](../adr/0033-platform-admin-and-access.md).
 - The levels are `OK` below 60 %, `WARN` from 60 % to below 85 %, and `ALERT` at 85 % or more. When a line is `ALERT`, the script exits with code 1.
 
 ## 2. Caps
@@ -56,6 +57,7 @@ flowchart LR
 - Cap: `960` seconds per UTC day. This value is 80 % of the 10 included browser hours per month.
 - One session per check, closed after at most 55 seconds. At most 2 browser runs per Candidate (`workers/integration/src/check-semantics.ts`).
 - Only a Change with risk `high` or `critical` that touches pages gets the browser check (`packages/evidence/src/plan.ts`).
+- The API Worker reads the binding only to show the cap on the admin overview (ADR 0033).
 
 ### Anthropic (`ANTHROPIC_MONTHLY_BUDGET_USD`)
 

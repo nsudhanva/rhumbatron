@@ -86,6 +86,17 @@ variable "anthropic_monthly_budget_usd" {
   }
 }
 
+variable "platform_admin_user_ids" {
+  description = "Rhumbatron user IDs (usr_<Clerk user ID>) of the platform admins. The API Worker reads them from PLATFORM_ADMIN_USER_IDS and checks the session user ID (ADR 0033)."
+  type        = list(string)
+  default     = ["usr_user_3KVgK2jUomozHjWQw7kPaVopRLq"]
+
+  validation {
+    condition     = alltrue([for id in var.platform_admin_user_ids : can(regex("^usr_[A-Za-z0-9_]+$", id))])
+    error_message = "Each platform admin ID is usr_ followed by the Clerk user ID."
+  }
+}
+
 variable "allow_opus" {
   description = "true lets the opus tier run Claude Opus 5.5; false (default) runs it on Sonnet 5.5 and records the downgrade (ADR 0021)."
   type        = bool

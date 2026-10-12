@@ -49,6 +49,7 @@ export type ShellSection =
   | "changes"
   | "flight"
   | "candidates"
+  | "admin"
   | ProjectPage
   | "other";
 
@@ -56,6 +57,7 @@ export type ShellSection =
 function sectionFor(routeId: string | undefined): ShellSection {
   const path = routeId?.replace(/_(?=\/|$)/g, "") ?? "";
   if (path === "/") return "projects";
+  if (path === "/admin" || path.startsWith("/admin/")) return "admin";
   if (path === "/projects/$projectId") return "overview";
   if (path.startsWith("/changes/") && path.endsWith("/flight")) return "flight";
   if (path.startsWith("/changes/$changeId")) return "changes";
@@ -113,6 +115,7 @@ function pageName(section: ShellSection, routeId: string | undefined): string | 
       return "Flight Control";
     case "candidates":
       return routeId?.startsWith("/compare/") ? "Compare" : "Candidate";
+    case "admin":
     case "other":
       return undefined;
     default:
@@ -253,7 +256,9 @@ export function useShellContext(): ShellContext {
 
   const section = sectionFor(routeId);
 
-  const trail: Crumb[] = [{ label: "Projects", link: { to: "/" } }];
+  // The admin pages set their own trail (components/admin/admin-page.tsx); it does not start at
+  // Projects, and a non-admin sees only "Not found".
+  const trail: Crumb[] = section === "admin" ? [] : [{ label: "Projects", link: { to: "/" } }];
   if (projectId) {
     trail.push({
       label: project.data?.name ?? "Project",

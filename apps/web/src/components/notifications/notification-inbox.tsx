@@ -59,6 +59,8 @@ const ICONS: Record<NotificationKind, Icon> = {
   request_declined: XCircle,
   request_choice_needed: ArrowsSplit,
   request_choice_made: PlayCircle,
+  access_request: UserCheck,
+  access_decided: CheckSquare,
 };
 
 /**
