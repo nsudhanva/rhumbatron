@@ -1,0 +1,152 @@
+# Production deploy. Every push to main runs the checks in ci.yml, then plans and applies
+# Terraform for envs/global and envs/prod, checks for drift, and runs the smoke checks.
+# Terraform is the only deploy path.
+#
+# The secrets live in the `production` environment, which only main can use. Pull requests and
+# forks never see them.
+name: production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      allow_destructive:
+        description: Apply a plan that deletes stateful resources (D1, R2, KV, Queues, Durable Object classes)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One deploy at a time. A newer push waits for the running deploy and replaces any queued one.
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+  LEFTHOOK: "0"
+  TERRAFORM_VERSION: 1.16.5
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: terraform apply (global, prod) and smoke
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: production
+      url: https://rhumbatron.com
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TF_VAR_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_STATE_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_STATE_SECRET_ACCESS_KEY }}
+      TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+      TF_VAR_clerk_secret_key: ${{ secrets.CLERK_SECRET_KEY }}
+      TF_VAR_clerk_publishable_key: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+      TF_VAR_k2_consumer_token: ${{ secrets.K2_CONSUMER_TOKEN }}
+      TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      TF_VAR_anthropic_workspace_id: ${{ secrets.ANTHROPIC_WORKSPACE_ID }}
+      ALLOW_DESTRUCTIVE: ${{ inputs.allow_destructive && 'true' || 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      # Terraform reads the bundle paths and hashes from dist/bundles/manifest.json.
+      - name: Bundle Workers and the docs site
+        run: bun run cf:bundle
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      # backend.hcl is not in Git: it names the R2 state endpoint, which contains the account ID.
+      - name: Write the R2 backend configuration
+        run: |
+          set -euo pipefail
+          for root in global prod; do
+            cat > "infrastructure/terraform/envs/${root}/backend.hcl" <<EOF
+          bucket    = "rhumbatron-terraform-state-global"
+          endpoints = { s3 = "https://${TF_VAR_account_id}.r2.cloudflarestorage.com" }
+          EOF
+          done
+
+      - name: Terraform init
+        run: |
+          set -euo pipefail
+          bun scripts/tf.ts global init -backend-config=backend.hcl -no-color
+          bun scripts/tf.ts prod init -backend-config=backend.hcl -no-color
+
+      # -detailed-exitcode: 0 means no changes, 2 means changes. The guard reads the saved plan.
+      - name: Plan global
+        id: plan_global
+        run: |
+          set -uo pipefail
+          bun scripts/tf.ts global plan -out=global.tfplan -lock-timeout=5m -detailed-exitcode -no-color
+          code=$?
+          if [ "$code" -eq 1 ]; then exit 1; fi
+          echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          bun scripts/tf.ts global show -json global.tfplan > "$RUNNER_TEMP/global.json"
+          bun scripts/plan-guard.ts "$RUNNER_TEMP/global.json" global
+
+      - name: Plan prod
+        id: plan_prod
+        run: |
+          set -uo pipefail
+          bun scripts/tf.ts prod plan -out=prod.tfplan -lock-timeout=5m -detailed-exitcode -no-color
+          code=$?
+          if [ "$code" -eq 1 ]; then exit 1; fi
+          echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          bun scripts/tf.ts prod show -json prod.tfplan > "$RUNNER_TEMP/prod.json"
+          bun scripts/plan-guard.ts "$RUNNER_TEMP/prod.json" prod
+
+      - name: Apply global
+        if: steps.plan_global.outputs.changes == 'true'
+        run: bun scripts/tf.ts global apply -lock-timeout=5m -no-color global.tfplan
+
+      # D1 migrations run inside this apply, before the Worker versions that need them.
+      - name: Apply prod
+        if: steps.plan_prod.outputs.changes == 'true'
+        run: bun scripts/tf.ts prod apply -lock-timeout=5m -no-color prod.tfplan
+
+      - name: Drift check (a second plan must show no changes)
+        run: |
+          set -euo pipefail
+          bun scripts/tf.ts global plan -detailed-exitcode -lock-timeout=5m -no-color > /dev/null
+          bun scripts/tf.ts prod plan -detailed-exitcode -lock-timeout=5m -no-color > /dev/null
+
+      - name: Smoke checks
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_SMOKE_USER_ID: ${{ secrets.CLERK_SMOKE_USER_ID }}
+        run: bun run smoke:prod
+
+      - name: Remove plan files and backend configuration
+        if: always()
+        run: |
+          rm -f infrastructure/terraform/envs/*/*.tfplan infrastructure/terraform/envs/*/backend.hcl
+          rm -f "$RUNNER_TEMP"/global.json "$RUNNER_TEMP"/prod.json

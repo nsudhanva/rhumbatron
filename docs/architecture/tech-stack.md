@@ -151,7 +151,7 @@ flowchart LR
 | Lefthook 2.2, commitlint 21 | Pre-commit, commit-msg, and pre-push hooks | `lefthook.yml` |
 | Gitleaks | Secret scan in the pre-commit hook and `bun run check:secrets` | `lefthook.yml` |
 | `scripts/check-guardrails.ts` | Enforces Terraform-only deploys and no `wrangler deploy` | `scripts` |
-| GitHub Actions | One `ci` workflow: lint, binding drift, typecheck, critical tests, build, bundle, Terraform fmt and validate. It never deploys | `.github/workflows/ci.yml` |
+| GitHub Actions | `ci` checks each pull request. `production` deploys each push to `main` through Terraform (ADR 0031) | `.github/workflows/ci.yml`, `.github/workflows/production.yml` |
 | Astro 7.3, Starlight 0.42, Mermaid 12.1 | This documentation site at `docs.rhumbatron.com`. Each diagram renders when it comes near the viewport | `apps/docs` |
 
 ## Model routing
@@ -198,5 +198,5 @@ Each row names one area and the choice that the code makes in it.
 | Components and charts | kumo. No chart library |
 | Tracing | No OpenTelemetry or Cloudflare tracing. Durable Object Workers set `traces.enabled = false` |
 | Edge protection | No WAF, rate limiting, Turnstile, or Access. The AI Gateway has a request rate limit |
-| CI/CD | One `ci.yml`. Deployment runs locally through Terraform |
+| CI/CD | `ci.yml` for checks and `production.yml` for the Terraform deploy on each push to `main` |
 | Agent runtime | `AgentDO` implements `AgentRuntime` and runs Pi through `PiHarness` of the Agents SDK (ADR 0009) |

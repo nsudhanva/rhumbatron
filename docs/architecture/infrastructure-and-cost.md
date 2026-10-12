@@ -114,8 +114,7 @@ Rules:
 
 ### Deployment loop
 
-Deployment runs on a developer machine. `.github/workflows/ci.yml` runs checks only.
-Rhumbatron never uses `wrangler deploy`.
+Each push to `main` deploys through `.github/workflows/production.yml` (ADR 0031). The workflow runs the checks, then plans and applies Terraform, checks for drift, and runs the smoke checks. A developer machine can run the same steps. Rhumbatron never uses `wrangler deploy`.
 
 ```mermaid
 flowchart LR

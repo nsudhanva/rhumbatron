@@ -13,7 +13,7 @@ Phase 17a - Shared Projects
 - Candidate composition and verification (build, unit, contract, protected invariants, performance, security, browser, acceptance, preview smoke), coverage states, and D1 and R2 Evidence.
 - Candidate selection (ADR 0026). Sibling Candidates wait for each other, and Evidence ranks them. The Integration Judge breaks ties with cited Evidence. The acceptance check gates auto-promotion.
 - Approval policy, promotion preconditions, `ProjectRootDO` compare-and-swap, `canonical.advanced`, and stale Candidate recomposition.
-- Phase 14: `.github/workflows/ci.yml` runs checks only and holds no deploy credentials.
+- Phase 14, CI/CD (ADR 0031): `ci.yml` checks each pull request. `production.yml` deploys each push to `main` through Terraform, with a plan guard, a drift check, and the smoke checks.
 - Phase 16, live apps (ADR 0020): previews, the production pointer, the release smoke check, version hosts, rollback, and app removal.
 - Phase 17a, shared Projects (ADR 0023, ADR 0025, ADR 0028): invitations, the owner, admin, member, and viewer roles, member request review, the intake gate, `needs_input` with clarify answers, and the system arbiter. Project deletion for the owner, Leave project for the other roles, and the Settings page.
 - The dead-letter consumer with Retry and Dismiss, the per-Change limits on Agents, Sandboxes, and attempts, and the runaway-billing guards (ADR 0019).
@@ -42,7 +42,7 @@ Phase 17a - Shared Projects
 - Artifacts holds the canonical source of managed Projects (ADR 0010).
 - Models: Anthropic Claude Haiku 5.5 and Sonnet 5.5. The opus tier runs on Sonnet 5.5 unless `ALLOW_OPUS` is `true` (ADR 0021). Workers AI Clef-flash makes cheap bounded decisions.
 - The owner and admin roles cover administration only. The system decides between requests and asks the requester when it cannot decide (ADR 0025).
-- CI runs checks only. Deployment runs locally through Terraform.
+- Each push to `main` deploys through Terraform in GitHub Actions. The deploy secrets are in the `production` environment, which only `main` can use.
 
 ## Next
 - Open issues of the Linear project `Rhumbatron`.

@@ -35,7 +35,7 @@ bun run cf:bundle
 
 ## 2. Deploy
 
-Run the local checks first (`bun run check`). Every deploy goes to prod.
+Every deploy goes to prod. A push to `main` deploys automatically (see [Automatic deploy](#automatic-deploy)). The steps below do the same deploy from a developer machine. Run the local checks first (`bun run check`).
 
 ### Prod
 
@@ -63,6 +63,50 @@ bun run tf global apply global.tfplan
 ```
 
 `bun run tf:drift` checks `global` and `prod` together.
+
+## Automatic deploy
+
+`.github/workflows/production.yml` runs on each push to `main` (ADR 0031):
+
+1. It runs all checks from `ci.yml`.
+2. It bundles the Workers and the docs site.
+3. It writes `backend.hcl` from the account ID and runs `terraform init` for `envs/global` and `envs/prod`.
+4. It plans both roots. `scripts/plan-guard.ts` stops the deploy when a plan deletes a D1 database, an R2 bucket, a KV namespace, a Queue, a Workflow, a Worker, a DNS record, a teardown adapter, or a Durable Object class.
+5. It applies each root that has changes. The D1 migrations run inside the prod apply, before the Worker versions that need them.
+6. It plans both roots again. Any change fails the deploy as drift.
+7. It runs `bun run smoke:prod`.
+
+Only one deploy runs at a time. A newer push waits, and replaces any deploy that is still in the queue.
+
+To apply a destructive plan on purpose, run the workflow manually from the Actions tab and select `allow_destructive`.
+
+The deploy secrets are in the GitHub environment `production`. Only `main` can use that environment.
+
+| Secret | Use |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Terraform provider and the Terraform adapters |
+| `CLOUDFLARE_ACCOUNT_ID` | `TF_VAR_account_id` and the R2 state endpoint |
+| `R2_STATE_ACCESS_KEY_ID`, `R2_STATE_SECRET_ACCESS_KEY` | Terraform state in R2 |
+| `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY` | Clerk production instance |
+| `CLERK_SMOKE_USER_ID` | Signed-in smoke checks |
+| `K2_CONSUMER_TOKEN` | K2 consumer for the event router |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_WORKSPACE_ID` | Model calls through AI Gateway |
+| `ALERT_EMAIL` | Account budget alerts (`envs/global`) |
+
+### Migration rules
+
+`bun run check:migrations` runs in CI. It enforces these rules:
+
+- Migrations are append-only. Do not edit, rename, or delete a migration file.
+- A new migration has the next number in `NNNN_description.sql`.
+- The old Workers keep serving until the apply deploys the new versions. Every migration must therefore work with the code that runs before it. Add columns and tables first. Remove them in a later migration, after no code reads them.
+- A migration with `DROP TABLE`, `DROP COLUMN`, or `RENAME` needs the line `-- destructive: reviewed`.
+
+### When a deploy fails
+
+- A failed check or a plan guard stops the deploy before Terraform changes anything.
+- A failed apply leaves the resources that it already changed. Fix the cause and push again. Terraform continues from the current state.
+- A failed smoke check leaves the new versions live. Push a fix, or revert the commit and push.
 
 ## 3. Configuration switches
 

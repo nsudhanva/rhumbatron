@@ -1,35 +1,37 @@
-# Continuous integration (AGENTS.md section 45 and Phase 14, ci.yml only).
-# Checks only: no secrets, no Cloudflare credentials, no remote Terraform state, no deploy step.
-# Remote changes still go through `terraform plan` and `terraform apply` on a developer machine.
+# Checks for every pull request, and the first stage of the production deploy (production.yml
+# calls this workflow). It uses no secrets and no remote Terraform state.
 name: ci
 
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   TURBO_TELEMETRY_DISABLED: "1"
-  # Git hooks are a local gate; CI runs the same checks as explicit steps.
+  # Git hooks are a local gate. CI runs the same checks as explicit steps.
   LEFTHOOK: "0"
+  TERRAFORM_VERSION: 1.16.5
 
 jobs:
-  check:
-    name: lint, typecheck, critical tests, build, bundle, terraform validate
+  checks:
+    name: lint, types, tests, guards, bundles, terraform
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
+        with:
+          # The migration guard and the secret scan compare against earlier commits.
+          fetch-depth: 0
 
-      - name: Setup Bun (version from package.json packageManager)
+      - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -41,14 +43,36 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
+      - name: Cache Turborepo
+        uses: actions/cache@v6
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
+
       - name: Install
         run: bun install --frozen-lockfile
 
       - name: Lint
         run: bun run lint
 
-      - name: Binding drift
+      - name: Guardrails (Terraform-only deploys, names)
+        run: bun run check:guardrails
+
+      - name: Binding drift (wrangler.jsonc against Terraform)
         run: bun run check:bindings
+
+      - name: Demo fixtures are current
+        run: bun run check:fixtures
+
+      - name: Dependency hygiene (knip, sherif)
+        run: bun run check:deps
+
+      # Pull request: compare with the base branch. Push: compare with the commit before the push.
+      - name: D1 migrations are append-only and safe
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bun run check:migrations
 
       - name: Typecheck
         run: bun run typecheck
@@ -59,28 +83,26 @@ jobs:
       - name: Build
         run: bun run build
 
-      # Local bundling only (dry run). Terraform reads dist/bundles/manifest.json during validate.
-      - name: Bundle Workers
+      - name: Bundle Workers and the docs site
         run: bun run cf:bundle
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: 1.16.4
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
-      - name: Terraform fmt
-        run: terraform fmt -check -recursive infrastructure/terraform
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v6
 
-      # -backend=false: no R2 state and no credentials. Validate never contacts Cloudflare.
-      - name: Terraform validate
+      # fmt, validate with -backend=false, and tflint on every root. Never contacts Cloudflare.
+      - name: Terraform checks
         env:
-          AWS_ACCESS_KEY_ID: ""
-          AWS_SECRET_ACCESS_KEY: ""
-        run: |
-          set -euo pipefail
-          for dir in bootstrap envs/global envs/prod modules/worker modules/durable-worker; do
-            echo "== ${dir}"
-            terraform -chdir="infrastructure/terraform/${dir}" init -backend=false -input=false -no-color
-            terraform -chdir="infrastructure/terraform/${dir}" validate -no-color
-          done
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun run tf:check
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_ENABLE_COMMENTS: "false"

@@ -31,3 +31,4 @@ The [architecture pages](../architecture/README.md) describe how the system work
 | [0028](./0028-roles-and-request-review.md) | Project roles and member request review |
 | [0029](./0029-code-edit-sessions.md) | Code page edit sessions with a terminal |
 | [0030](./0030-budget-scopes.md) | Budget scopes for requests, Projects, and users |
+| [0031](./0031-ci-cd.md) | CI/CD: checks on pull requests, Terraform deploy on each push to main |
