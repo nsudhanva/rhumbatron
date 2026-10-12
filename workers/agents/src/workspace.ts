@@ -33,7 +33,7 @@ import { type StackSource, stackedOn } from "./stack.ts";
  *   container starts.
  *
  * Otherwise (the default):
- * - Falls back to the original Sandbox container checkout for all file tools and commands.
+ * - All file tools and commands run on a checkout in the Sandbox container.
  */
 
 const DIR = "/repo";
@@ -542,8 +542,8 @@ export async function openWorkspace(
     sql?: SqlStorage;
   },
 ): Promise<WorkspaceRef | WorkspaceRefused> {
-  // Off by default until the Worker-side path is proven live (it failed to publish on prod: fork
-  // not found before use, stale ref on push). Opt in with AGENT_FILES_IN_WORKER = "true".
+  // Off by default: the Worker-side path is not proven on prod. Opt in with
+  // AGENT_FILES_IN_WORKER = "true".
   const filesInWorker = env.AGENT_FILES_IN_WORKER === "true";
   const fork = `ws-${input.runId.slice(4)}`;
   const dir = `/workspace/${input.runId.slice(-24)}`;

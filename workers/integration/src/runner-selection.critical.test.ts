@@ -3,9 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateAppCheckOutcome,
   evaluateContractAppCheck,
-  initialRunnerForCheck,
   isAppCheckerEligible,
-  planNeedsSandbox,
 } from "./runner-selection.ts";
 
 describe("runner selection eligibility", () => {
@@ -17,7 +15,6 @@ describe("runner selection eligibility", () => {
     ];
     for (const check of checks) {
       expect(isAppCheckerEligible(check, true)).toBe(true);
-      expect(initialRunnerForCheck(check, true)).toBe("dynamic-worker");
     }
   });
 
@@ -31,7 +28,6 @@ describe("runner selection eligibility", () => {
     ];
     for (const check of sandboxChecks) {
       expect(isAppCheckerEligible(check, true)).toBe(false);
-      expect(initialRunnerForCheck(check, true)).toBe("sandbox");
     }
   });
 
@@ -47,7 +43,6 @@ describe("runner selection eligibility", () => {
     ];
     for (const check of allChecks) {
       expect(isAppCheckerEligible(check, false)).toBe(false);
-      expect(initialRunnerForCheck(check, false)).toBe("sandbox");
     }
   });
 });
@@ -246,94 +241,5 @@ describe("contract check evaluation", () => {
       runner: "sandbox",
       fallbackReason: "Base contract script failed.",
     });
-  });
-});
-
-describe("planNeedsSandbox", () => {
-  it("returns false when all checks are build/unit/contract and AppChecker succeeds", () => {
-    const checks: Pick<VerificationCheck, "kind" | "checkId">[] = [
-      { checkId: "build", kind: "build" },
-      { checkId: "unit", kind: "unit" },
-      { checkId: "contract", kind: "contract" },
-    ];
-    const results = new Map<string, AppCheckResult>([
-      ["build", { supported: true } as AppCheckResult],
-      ["unit", { supported: true } as AppCheckResult],
-      ["contract", { supported: true } as AppCheckResult],
-    ]);
-    expect(planNeedsSandbox(checks, true, results)).toBe(false);
-  });
-
-  it("returns true when any check needs Sandbox", () => {
-    // 1. Performance check present
-    expect(
-      planNeedsSandbox(
-        [
-          { checkId: "build", kind: "build" },
-          { checkId: "performance", kind: "performance" },
-        ],
-        true,
-      ),
-    ).toBe(true);
-
-    // 2. Cart invariant present
-    expect(
-      planNeedsSandbox(
-        [
-          { checkId: "build", kind: "build" },
-          { checkId: "protected-invariant-cart", kind: "protected-invariant" },
-        ],
-        true,
-      ),
-    ).toBe(true);
-
-    // 3. Security check present
-    expect(
-      planNeedsSandbox(
-        [
-          { checkId: "build", kind: "build" },
-          { checkId: "security", kind: "security" },
-        ],
-        true,
-      ),
-    ).toBe(true);
-
-    // 4. Browser check present
-    expect(
-      planNeedsSandbox(
-        [
-          { checkId: "build", kind: "build" },
-          { checkId: "browser", kind: "browser" },
-        ],
-        true,
-      ),
-    ).toBe(true);
-
-    // 5. Dev environment (hasAppsBinding is false)
-    expect(
-      planNeedsSandbox(
-        [
-          { checkId: "build", kind: "build" },
-          { checkId: "unit", kind: "unit" },
-        ],
-        false,
-      ),
-    ).toBe(true);
-
-    // 6. AppChecker returned supported: false (fallback needed)
-    const fallbackResults = new Map<string, AppCheckResult>([
-      ["build", { supported: true } as AppCheckResult],
-      ["unit", { supported: false } as AppCheckResult],
-    ]);
-    expect(
-      planNeedsSandbox(
-        [
-          { checkId: "build", kind: "build" },
-          { checkId: "unit", kind: "unit" },
-        ],
-        true,
-        fallbackResults,
-      ),
-    ).toBe(true);
   });
 });

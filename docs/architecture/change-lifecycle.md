@@ -26,7 +26,7 @@ When an owner or admin includes the request, the Change becomes `created` at the
 The ChangeWorkflow runs the intake gate, calls the Root Planner, and compares the plan with the other open requests.
 Then it stores the Work Graph and dispatches the ready Tasks.
 An unclear, duplicate, or conflicting request waits for its requester (`needs_input`).
-A request that conflicts with an earlier request of another person waits for that person's choice (`awaiting_choice`, then `queued`, ADR 0032). It plans again after the earlier request promotes or ends.
+A request that conflicts with an earlier request of another person waits for that person's choice (`awaiting_choice`, ADR 0032). After "apply theirs", the request is `queued`, and it plans again after the earlier request promotes or ends.
 The intake gate reads the request as a change to the current app: the canonical file paths, the `package.json` name and description, the start of the `README.md`, and recent request titles.
 It asks only when two readings build materially different products. Each question has its own answer, with the readings as options and "Something else". Small details, such as colors, sizes, and defaults, go to the Root Planner as assumptions.
 The intake gate asks at most one round. After an answer, or after "Build it as it is", the request goes to planning.
@@ -72,7 +72,7 @@ sequenceDiagram
     CW->>D1: request_choices row, status awaiting_choice
     User->>API: POST /v1/changes/:id/choose (the earlier requester)
     API->>CW: integration RPC chooseFirstCome, event first_come
-    CW->>GW: after the earlier request ends: Root Planner on the current tree
+    CW->>GW: apply theirs or moot: Root Planner on the current tree
   end
   CW->>D1: tasks, task_dependencies, title, assumptions, status running (one batch)
   CW->>Shard: change.compiled, task.created (outbox)
@@ -92,7 +92,7 @@ Notes:
 - Change Events go to the ResourceShardDO that owns `change:<id>`. This keeps ProjectRootDO cold.
 - The API writes the Change to ProjectViewDO directly.
 - The intake gate records `change.intake.reviewed` and an `INTAKE` Decision Receipt in D1 `change_decisions`. An answer records `change.clarification.answered`.
-- An `awaiting_choice` or `queued` Change waits for the event `first_come` and runs `advanceFirstCome` after each wake: every 6 hours while the choice is open, every hour while queued. After 7 days without a choice, the Change is `not_selected`.
+- An `awaiting_choice` or `queued` Change waits for the event `first_come`. It runs `advanceFirstCome` after each wake, and at the latest every 6 hours while the choice is open and every hour while queued. After 7 days without a choice, the Change is `not_selected`.
 - A `needs_input` Change waits for the event `clarification` and reads D1 once a day. After 7 days without an answer, the Change is `cancelled`. The intake gate asks at most one round. The request comparison can ask more. After 3 answered rounds in total, the Change plans without another question.
 
 ## Part 2: from a wake to a published ChangeSet
@@ -192,7 +192,13 @@ Notes:
 - `candidate.create` waits while a conflict review reserved in the last 10 minutes is still open. The last Queue delivery composes anyway.
 - A verified Candidate does not promote while a sibling on the same base still composes or verifies. A winner that does not meet every acceptance criterion never auto-promotes. Its Change goes to `awaiting_approval`. See [Source and verification](source-and-verification.md#sibling-candidates-and-selection).
 - Auto-promotion applies when the winner needs no human approval, meets every acceptance criterion, and the Project's policy `autoPromoteRiskTiers` lists the Change risk tier. The policy is the D1 `project_policies` row. Without a row, the policy is `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`). It lists `low` and `medium` in `autoPromoteRiskTiers`, and `high` and `critical` in `humanGateRiskTiers`. The CandidateVerificationWorkflow then calls `promoteCandidate` with actor `system:auto-promotion`, and `canonical.promotion.requested` records `trigger: "auto"`. Every promotion precondition applies (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
-- These Candidates always wait for a person: a `high` or `critical` Change, an authorization change at any tier (the plan sets `humanApprovalRequired`), a winner with an acceptance shortfall, and a tier that a stored policy does not list as automatic. A destructive migration has the tier `critical` (Root Planner), so it waits too.
+- These Candidates always wait for a person:
+  - a `high` or `critical` Change;
+  - an authorization change at any tier (the plan sets `humanApprovalRequired`);
+  - a winner with an acceptance shortfall;
+  - a Change without a risk tier, or with a tier that a stored policy does not list as automatic.
+
+  A destructive migration has the tier `critical` (Root Planner), so it waits too.
 - A Candidate that waits for a person is never silent. The Change goes to `awaiting_approval`. The Candidate status reason states why. `approval.requested` records `reason` and `trigger` (`policy` or `acceptance`). The inbox tells the owner, the admins, and the requester. The Change page shows the reason under Needs attention. An owner or admin approves the Candidate (when approval is required), then ships it with Ship on the Change page or Promote on the Candidate page. Both call `POST /v1/candidates/:id/promote`.
 - The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a live app, else `completed`. The release ends the Change as `completed` (deployed or superseded) or `failed`. See [Live apps](live-apps.md#promotion-and-release).
 - Every end after promotion records `change.completed` or `change.failed`. The projector maps `build.started` to `releasing`. These Events move ProjectViewDO out of `promoting`.
@@ -257,10 +263,10 @@ The pure rules are in `workers/integration/src/change-status.ts`.
 
 | Rule | Source |
 |---|---|
-| A person can cancel a Change in `proposed`, `created`, `compiling`, `needs_input`, `awaiting_choice`, `queued`, `running`, `verifying`, `awaiting_approval`, `budget_blocked`, or `blocked`. A Change with a promoted Candidate cannot be cancelled. | `CANCELLABLE_FROM`, `cancelChange` in `change-commands.ts` |
+| A person can cancel a Change in `proposed`, `created`, `compiling`, `needs_input`, `awaiting_choice`, `queued`, `running`, `verifying`, `awaiting_approval`, `budget_blocked`, or `blocked`. Nobody can cancel a Change with a promoted Candidate. | `CANCELLABLE_FROM` in `change-status.ts`, `CANCEL_FROM` and `cancelChange` in `change-commands.ts` |
 | Only an owner or admin moves a `proposed` Change: include to `created`, decline to `declined`. Each update has a guard on `proposed`. A repeat returns the stored result. | `includeChange`, `declineChange` in `change-commands.ts` |
 | A later conflicting request of the same requester makes the earlier Change `not_selected` from any of these statuses, and also from `failed` or `completed`, when the earlier Change has no promoted Candidate. See [Shared Projects](shared-projects.md#the-same-requester-asks-twice). | `request-check.ts` |
-| Only the earlier requester moves an `awaiting_choice` Change, with a choice. `advanceFirstCome` applies each step with a guard on `awaiting_choice` or `queued`. See [Shared Projects](shared-projects.md#first-come-requests-of-two-people). | `firstComeStep`, `advanceFirstCome` in `first-come.ts` |
+| Only the earlier requester chooses for an `awaiting_choice` Change. The system records `expired` after 7 days, or `moot` when the earlier request ends without a build. The later requester can withdraw the Change. `advanceFirstCome` applies each step with a guard on `awaiting_choice` or `queued`. See [Shared Projects](shared-projects.md#first-come-requests-of-two-people). | `firstComeStep`, `advanceFirstCome` in `first-come.ts` |
 | A merge conflict makes the Change re-run the conflicting Tasks on the new base. After 2 re-runs the Change is `blocked` with the reason "The request could not be merged with newer changes twice. Submit it again." | `MAX_REBASE_RERUNS` in `rebase.ts` |
 | The Change ends as `failed` when every Candidate on the newest base is `rejected` for a reason other than a merge conflict or a cancel, and no Candidate of the Change is `composing`, `verifying`, `verified`, or `promoted`. `blocked_reason` starts with "No Candidate passed its required checks:" and quotes the Candidate reasons. `change.failed` records it with `phase: "verification"`. | `verificationDeadEnd` |
 | A refused compare-and-swap returns the Change to its status before `promoting`. | `leavePromoting` in `promotion.ts` |

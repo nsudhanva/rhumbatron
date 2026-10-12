@@ -114,8 +114,8 @@ An invitation binds to a verified email of the signed-in user. If the email is n
 
 `clarify` takes one of these bodies:
 
-- `{ answers: [{ questionId, text }] }`: 1 to 3 answers to questions of the open round. The text is a picked option or free text. A question without an answer becomes a planner assumption. The Change returns to `compiling` with the answers in its goal context.
-- `{ action: "proceed_anyway" }`: the Change plans without another question in this round.
+- `{ answers: [{ questionId, text }] }`: 1 to 3 answers to questions of the open round. The text is a picked option or free text. The Root Planner decides the part that an unanswered question leaves open. The Change returns to `compiling` with the answers in its goal context.
+- `{ action: "proceed_anyway" }`: the Change plans without the intake gate and without another question.
 - `{ action: "withdraw" }`: the Change is cancelled with the reason "Withdrawn by the requester".
 
 A repeat of the caller's last command returns `repeated: true`. The intake gate asks at most one round. A Change gets at most 3 rounds of questions in total. A Change that gets no answer for 7 days is cancelled.

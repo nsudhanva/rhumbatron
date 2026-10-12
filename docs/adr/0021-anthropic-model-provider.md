@@ -17,7 +17,7 @@ Cloudflare documentation for the Anthropic endpoint does not mention custom head
   The key is the `ANTHROPIC_API_KEY` `secret_text` binding. The workspace ID is the
   `ANTHROPIC_WORKSPACE_ID` `plain_text` binding (not a secret). Both come from the Keychain
   (`rhumbatron-anthropic-api-key`, `rhumbatron-anthropic-workspace-id`) through `scripts/tf.ts`.
-  `MODEL_PROVIDER` is `anthropic`. No fallback to another provider exists.
+  Anthropic is the only provider. No fallback to another provider exists.
 - Tier mapping (`packages/model-router/src/models.ts`):
 
   | Tier | Model | Effort |

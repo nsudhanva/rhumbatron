@@ -7,8 +7,6 @@ interface Env {
   ANTHROPIC_WORKSPACE_ID: string;
   /** This environment's Anthropic budget in USD per calendar month (ADR 0021). Default 10. */
   ANTHROPIC_MONTHLY_BUDGET_USD?: string;
-  /** "anthropic", the only provider (ADR 0021). Informational: code does not branch on it. */
-  MODEL_PROVIDER?: string;
   /** "true" enables Opus; otherwise the opus tier runs on Sonnet (ADR 0021). */
   ALLOW_OPUS?: string;
   /** Sandbox seconds per calendar month on this environment's meter (ADR 0017). Default 36000. */

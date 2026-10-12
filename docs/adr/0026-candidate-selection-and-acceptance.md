@@ -3,8 +3,8 @@
 ## Context
 
 The fork rule can give one Change several Candidates on the same base generation. Each Candidate
-has its own CandidateVerificationWorkflow. If the first Candidate that passes its gate promotes,
-its siblings go stale. Then the fastest Candidate wins, even when a sibling is better. For example,
+has its own CandidateVerificationWorkflow. When the first Candidate that passes its gate promotes,
+its siblings go stale. The fastest Candidate then wins, also when a sibling is better. For example,
 a Change asks for a calendar with a kanban list per day. The kanban Candidate verifies one second
 before the calendar Candidate and ships alone. Without a check of the request, no Evidence shows
 the loss. See [Source and verification](../architecture/source-and-verification.md).
@@ -36,12 +36,12 @@ the loss. See [Source and verification](../architecture/source-and-verification.
   `fork_required` (the review said `needs_more_evidence`), the fork rule adds a third Candidate
   with both sides and the ChangeSets that need both. This Candidate gives the Evidence that the
   review asks for. A `confirmed` conflict keeps two Candidates.
-- Complementary Tasks integrate and never fork (`packages/conflict/src/integrate.ts`). A
-  `confirmed` or `fork_required` conflict between two Tasks of one Change, where no resource of one
-  equals, contains, or is contained in a resource of the other (`todos:api` and `todos:ui`), has
-  the fork decision `integrate`. Each side alone is incomplete, so rival Candidates ship half of
-  the request.
-  - Composition makes the dependent Task depend on the other Task. The dependent Task is chosen in
+- Complementary Tasks integrate and never fork (`packages/conflict/src/integrate.ts`). Two Tasks
+  of one Change are complementary when no resource of one equals, contains, or is contained in a
+  resource of the other (`todos:api` and `todos:ui`). A `confirmed` or `fork_required` conflict
+  between them has the fork decision `integrate`. Each side alone is incomplete, so rival
+  Candidates ship half of the request.
+  - Composition makes the dependent Task depend on the other Task. Code picks the dependent Task in
     this order: an existing dependency path decides; else the UI Task; else the Task whose Intent
     uses the contract of the other; else the higher Task key.
   - The dependent Task runs again once on a stacked workspace with the ChangeSet of the other
@@ -65,14 +65,16 @@ the loss. See [Source and verification](../architecture/source-and-verification.
   - The Evidence is `pass` only when each criterion is met. In all other cases it is `fail` with
     `checked_supported`. A model error or a refused call is a gap.
   - Criteria that other checks cover (quality gate, latency, kept behavior) are not judged.
-- Acceptance gates auto-promotion. It does not decide whether a Candidate can promote. A shortfall
-  does not reject a Candidate. It ranks the Candidate (criteria met is the second sort key). A winner that meets each criterion auto-promotes
-  when policy allows (the default policy `policy-1` allows `low` and `medium` risk). A winner
-  with a criterion that is not met or unclear, or with no acceptance result, gets the human gate
-  in its plan. The Change moves to `awaiting_approval`, and
-  `approval.requested` states the reason ("Best candidate meets 2 of 3 criteria; not met: calendar
-  view. Approve to ship it or cancel the change."). A failed required executable check makes a
-  Candidate unpromotable.
+- Acceptance gates auto-promotion. It does not decide whether a Candidate can promote.
+  - A shortfall does not reject a Candidate. It ranks the Candidate (criteria met is the second
+    sort key).
+  - A winner that meets each criterion auto-promotes when policy allows. The default policy
+    `policy-1` allows `low` and `medium` risk.
+  - A winner with a criterion that is not met or unclear, or with no acceptance result, gets the
+    human gate in its plan. The Change moves to `awaiting_approval`. `approval.requested` states
+    the reason ("Best candidate meets 2 of 3 criteria; not met: calendar view. Approve to ship it
+    or cancel the change.").
+  - A failed required executable check makes a Candidate unpromotable.
 
 ## Alternatives considered
 

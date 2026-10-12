@@ -4,7 +4,6 @@
 import { describe, expect, it } from "vitest";
 import {
   CANCELLABLE_FROM,
-  canCancel,
   changeAfterPromotion,
   changeAfterRelease,
   PROMOTABLE_FROM,
@@ -32,9 +31,11 @@ describe("change status transitions", () => {
   });
 
   it("cannot cancel once promotion has started", () => {
-    for (const status of ["promoting", "releasing"]) expect(canCancel(status)).toBe(false);
-    for (const status of ["running", "verifying", "awaiting_approval", "budget_blocked"]) {
-      expect(canCancel(status)).toBe(true);
+    for (const status of ["promoting", "releasing"] as const) {
+      expect(CANCELLABLE_FROM).not.toContain(status);
+    }
+    for (const status of ["running", "verifying", "awaiting_approval", "budget_blocked"] as const) {
+      expect(CANCELLABLE_FROM).toContain(status);
     }
   });
 

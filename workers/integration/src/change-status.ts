@@ -47,9 +47,6 @@ export const CANCELLABLE_FROM: readonly ChangeStatus[] = [
   "blocked",
 ];
 
-export const canCancel = (status: string) =>
-  (CANCELLABLE_FROM as readonly string[]).includes(status);
-
 /**
  * Status after `canonical.advanced`. With a live app, the Change is `releasing` until its
  * release finishes. Without one, promotion is the end of the Change (ADR 0013, ADR 0020).

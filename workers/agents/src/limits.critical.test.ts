@@ -8,7 +8,6 @@ import {
   blockChangeOnBudget,
   changeMeters,
   meteredComplete,
-  monthSpentUsd,
   nextStep,
   readChangeBudgets,
   refusedMeter,
@@ -362,11 +361,11 @@ describe("monthly Anthropic budget", () => {
     expect(await reserveSpend(d1, MONTH, 4, 10)).toBe(true);
     // Exactly at the budget: one more micro-dollar is refused, and nothing is written.
     expect(await reserveSpend(d1, MONTH, 0.000001, 10)).toBe(false);
-    expect(await monthSpentUsd(d1, MONTH)).toBe(10);
-    // The 4 USD call cost 1.25: settling frees the rest for the next call.
+    // The 4 USD call cost 1.25: settling frees the rest for the next call. 7.25 is spent, so
+    // exactly 2.75 fits and one more micro-dollar does not.
     await settleSpend(d1, MONTH, 4, 1.25);
-    expect(await monthSpentUsd(d1, MONTH)).toBeCloseTo(7.25, 6);
     expect(await reserveSpend(d1, MONTH, 2.75, 10)).toBe(true);
+    expect(await reserveSpend(d1, MONTH, 0.000001, 10)).toBe(false);
     expect(await reserveSpend(d1, "2026-11", 2.75, 10)).toBe(true);
   });
 

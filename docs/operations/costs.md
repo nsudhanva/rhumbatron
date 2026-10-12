@@ -80,7 +80,7 @@ A person selects the budget that pays for a request ([ADR 0030](../adr/0030-budg
 - Meters in `usage_counters`, in micro-USD: `change-usd-micro:<changeId>` (`day` = `total`), `project-usd-micro:<projectId>` and `user-usd-micro:<userId>` (`day` = `YYYY-MM`), and `anthropic-usd-micro`. Each meter counts every call, also when no cap is set.
 - Every model call that a Change pays for reserves its estimate on all meters of the Change in one D1 batch, all or nothing. The call then settles each meter to the exact cost. These calls are the agent runs, the Root Planner, the intake review, the request review, conflict review, context compaction, the acceptance check, and the Integration Judge (`packages/model-router/src/budget-meters.ts`).
 - When a meter refuses, Rhumbatron sends no call. A Change in `compiling` or `running` becomes `budget_blocked` with `blocked_limit` `change_budget`, `project_budget`, `account_budget`, or `monthly_model_spend`. When several meters refuse, `blocked_limit` names the narrowest budget. `blocked_reason` names the budget, its amount, the month, and who can raise it. Example: "Stopped: the project budget of $100.00 for October is used up. An owner or admin can raise it in Settings."
-- During verification, a refused acceptance check is a gap that names the budget. The Candidate then goes to a person. A refused Integration Judge call sends the choice to a person.
+- During verification, a refused acceptance check is a gap that names the budget. The Candidate then goes to a person. A refused Integration Judge call sends the Candidate selection to a person.
 - A higher budget resumes the stopped Changes:
   - A higher Change budget on the Change page resumes that Change.
   - A higher Project budget in Settings resumes all Changes of the Project that the Project budget stopped.
@@ -92,7 +92,6 @@ A person selects the budget that pays for a request ([ADR 0030](../adr/0030-budg
 - Agent model calls: 400 per UTC day (`AGENT_DAILY_CALL_CAP` in `packages/model-router/src/budget.ts`).
 - Model calls per Task run: 16 for Haiku, 32 for Sonnet and Opus (`MAX_CALLS_PER_RUN`).
 - Clef-flash on Workers AI: 200 calls per UTC day on the shared counter `clef-flash`. The event router, the agents, and the intake gate use it. Workers AI includes 10,000 Neurons per day.
-- `MODEL_PROVIDER`: `anthropic`. Terraform rejects any other value.
 - `ALLOW_OPUS`: `false`. The opus tier runs on Sonnet 5.5, and the Decision Receipt records the downgrade. Set `allow_opus = true` only with the owner's approval.
 
 ### Live apps

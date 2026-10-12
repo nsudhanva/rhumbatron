@@ -25,9 +25,7 @@ import {
 } from "./members.ts";
 
 /**
- * `GET /v1/changes/:changeId` with the planned risk tier and record times.
- * Mounted before `projects` (through activity.ts), so this handler answers and the older handler
- * in projects.ts, which returns the same fields minus these three, is no longer reached.
+ * `GET /v1/changes/:changeId` returns one Change with its planned risk tier and record times.
  *
  * `POST /v1/changes/:changeId/cancel`, `/budget`, `/include`, and `/decline` are a person's
  * commands on one Change (ADR 0028). The integration Worker owns the

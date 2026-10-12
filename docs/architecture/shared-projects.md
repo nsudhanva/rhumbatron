@@ -111,7 +111,7 @@ stateDiagram-v2
 ```
 
 - Create: the API inserts the Change with status `proposed` and `review_state = 'proposed'`. The integration Worker records `change.proposed` (`recordProposal`). The owner and the admins get the notification `request_proposed`.
-- Include: `POST /v1/changes/:changeId/include` (`change.review`). `includeChange` moves the Change to `created` at the current Canonical Generation, stores who decided and when, records `change.included`, and starts the ChangeWorkflow with the Change ID as instance ID, as for a request without review. A repeat returns the same result and starts no second workflow. The requester gets `request_included`.
+- Include: `POST /v1/changes/:changeId/include` (`change.review`). `includeChange` moves the Change to `created` at the current Canonical Generation and stores who decided and when. It records `change.included` and starts the ChangeWorkflow with the Change ID as instance ID, as for a request without review. A repeat returns the same result and starts no second workflow. The requester gets `request_included`.
 - Decline: `POST /v1/changes/:changeId/decline` with an optional `reason` (up to 500 characters). The Change becomes `declined` with `outcome = declined` and the reason. `declined` is terminal. The event is `change.declined`. The requester gets `request_declined`.
 - Withdraw: the requester sends `POST /v1/changes/:changeId/cancel`. The Change becomes `cancelled`. Its `review.state` stays `proposed`, because nobody decided.
 - An include or a decline on a Change that is not `proposed` returns `409`. A repeat of the same decision returns `repeated: true`.
@@ -179,7 +179,7 @@ Each text has a packet ID: `<changeId>:goal`, `<changeId>:c1`, and so on.
 2. Keep up to 10 items with a cosine similarity of 0.55 or more. If the embedding call fails, keep the items that share a non-generic word with the goal.
 3. Order the shortlist with `@cf/baai/bge-reranker-base`. Keep 5.
 
-The current app is one more target when its source is readable and has a `package.json`.
+The current app is one more target when its source is readable and not empty.
 Its packet items are `canonical:files` (up to 60 paths), `canonical:deps` (dependency names of the root `package.json`), and `canonical:stack` (hints such as `react` or `angularjs`).
 Cosine similarity only selects targets. It never decides.
 
@@ -244,7 +244,7 @@ Small details are never questions. The Root Planner records the details it decid
 
 A question sets the Change to `needs_input`.
 `clarification_json` holds the `ChangeClarification`: `kind` (`unclear`, `duplicate`, or `conflict`), `summary`, up to 3 `questions`, `relatedChangeId`, `relatedGoal`, `askedAt`, and `round` (1 to 3).
-Each question has its own answer. A question with `options` shows the readings as choices, plus "Something else" with a text field. The form sends an answer for each question that the person answered. A question with no answer becomes a planner assumption.
+Each question has its own answer. A question with `options` shows the readings as choices, plus "Something else" with a text field. The form sends an answer for each question that the person answered. The Root Planner decides the part that an unanswered question leaves open.
 The requester gets the notification `request_needs_input`.
 
 The workflow waits for the event `clarification`.
@@ -400,13 +400,13 @@ The comparison records `conflict.reviewed` on the later Change, with the policy.
 
 ### First come: requests of two people
 
-The earlier request A keeps working, untouched (ADR 0032).
+The earlier request A keeps working without change (ADR 0032).
 The later request B waits. It does not plan again, build, or spend while it waits.
 
 1. `askFirstRequester` inserts one `request_choices` row for the pair (`rw_<A>_<B>`, `INSERT OR IGNORE`), with `asked_user_id` = A's requester and the waiting workflow instance ID. B moves from `compiling` to `awaiting_choice`. The event is `change.choice.requested`.
 2. The workflow stores B's planned title and criteria, so the wait shows what B asks for.
-3. A's requester gets `request_choice_needed`. Nobody else gets it: not the owner, not an admin, and not B's requester.
-4. A's requester sends `POST /v1/changes/<B>/choose` with `{ "choice": "keep_mine" }` or `{ "choice": "apply_theirs" }`. The API checks `canChooseFirstCome`: the caller is the asked user and has `change.manageOwn`. Anyone else gets `403`. The update is guarded on `choice IS NULL`: a repeat of the same choice returns `repeated: true`, another choice returns `409`.
+3. A's requester gets `request_choice_needed`. The owner, the admins, and B's requester do not get it.
+4. A's requester sends `POST /v1/changes/<B>/choose` with `{ "choice": "keep_mine" }` or `{ "choice": "apply_theirs" }`. The API checks `canChooseFirstCome`. The caller must be the asked user and have `change.manageOwn`. Any other member of the Project gets `403`. The update has a guard on `choice IS NULL`. A repeat of the same choice returns `repeated: true`. Another choice returns `409`.
 5. `advanceFirstCome` applies the next step (`firstComeStep`):
 
 | Step | When | Effect on B |
@@ -415,7 +415,7 @@ The later request B waits. It does not plan again, build, or spend while it wait
 | `expire` | No choice within 7 days | The choice is `expired`. B ends as for `keep_mine`, with the reason `<name> did not choose within 7 days, so their version of "<A>" stays.` |
 | `moot` | A ends without a build (`cancelled`, `failed` without promotion, `not_selected`, `declined`) before a choice | The choice is `moot`. B returns to `compiling` and plans at once. |
 | `queue` | `apply_theirs`, A is in flight | `queued`, outcome `follows`, reason `<name> chose to apply this request after "<A>".` |
-| `resume` | `apply_theirs` or `moot`, and A has a promoted Candidate or a terminal status | `compiling` at the current Canonical Generation. The event is `change.resumed`. |
+| `resume` | `moot`, or `apply_theirs` after A has a promoted Candidate or a terminal status | `compiling` at the current Canonical Generation. The event is `change.resumed`. |
 
 The choice events are `change.choice.made` (`keep_mine`, `apply_theirs`, `expired`, or `moot`).
 B's requester gets `request_not_selected` after `keep_mine` or `expired`, and `request_choice_made` after `apply_theirs`.
@@ -434,9 +434,9 @@ stateDiagram-v2
 
 The wait:
 
-- The ChangeWorkflow of B waits with `step.waitForEvent` (type `first_come`): 6 hours while the choice is open, 1 hour while B is `queued`. After each wake or timeout it runs `advanceFirstCome`, so the D1 rows decide. A lost event only delays.
-- The choose command sends the event. When A ends, `releaseRequestScope` calls `wakeAfterFirst`: each B that waits on A moves on, and its workflow wakes.
-- The workflow re-checks 150 times. If it ends while B still waits, the end of A starts a new instance `<B>_f<n>`.
+- The ChangeWorkflow of B waits with `step.waitForEvent` (type `first_come`). The timeout is 6 hours while the choice is open and 1 hour while B is `queued`. After each wake or timeout, the workflow runs `advanceFirstCome`, so the D1 rows decide. A lost event only adds delay.
+- The choose command sends the event. When A ends, `releaseRequestScope` calls `wakeAfterFirst`. Each B that waits on A moves to its next step, and its workflow wakes.
+- The workflow re-checks at most 150 times (`FIRST_COME_CHECKS`). If it ends while B waits, the end of A starts a new instance `<B>_f<n>`.
 
 The plan after the wait:
 
@@ -461,7 +461,7 @@ The insert in `recomposeStaleCandidate` (`workers/integration/src/recompose.ts`)
 ## Web UI
 
 - The Project page lists Changes in a table with a `Requested by` column.
-- Each Change row has an outcome line: `Waiting for an admin to include it` for a `proposed` request, `Declined by <name>: <reason>`, `Not selected: <reason>` with the link "View the selected change", `Selected`, `Follows: <reason>`, `Replaces earlier request`, or `Duplicate: <reason>`. An `awaiting_choice` Change reads "Waiting for the person who asked first to choose". A `queued` Change reads "Queued: plans when the earlier request finishes".
+- Each Change row has an outcome line: `Waiting for an admin to include it` for a `proposed` request, `Declined by <name>: <reason>`, `Not selected: <reason>` with the link "View the selected change", `Selected`, `Follows: <reason>`, `Replaces earlier request`, or `Duplicate: <reason>`. A `needs_input` Change reads "Waiting for an answer from the requester". An `awaiting_choice` Change reads "Waiting for the person who asked first to choose". A `queued` Change reads "Queued: plans when the earlier request finishes".
 - The New change form is hidden from a viewer. When a member's requests need review, the form shows "An admin reviews requests before anything is built." under Submit.
 - A `proposed` Change reads "Waiting for an admin to include it". The requester can withdraw it ("Withdraw request"). An owner or admin sees Include and Decline under Needs attention. Decline asks for an optional reason in place. A `declined` Change reads "Not built: declined by <name>: <reason>".
 - A `needs_input` Change shows the summary, the questions, and a link to the related request. The requester, an admin, and the owner get the actions "Send answers", "Build it as it is", and "Withdraw request".
@@ -469,7 +469,14 @@ The insert in `recomposeStaleCandidate` (`workers/integration/src/recompose.ts`)
   - On the earlier request, an open question reads "<name>'s request conflicts with yours", with the conflicting criteria. The earlier requester gets "Keep mine" and "Apply theirs after mine". Everyone else reads who chooses.
   - On the later request, it reads "Waiting for <name> to choose" with the conflicting criteria and the date when the earlier version stays. After "apply theirs", it reads "Waiting for "<title>" to finish".
 - The `Conflicting requests` card shows both goals, the cited criteria or covered quotes, and the winner. It reads `GET /v1/changes/:changeId/request-conflicts` (up to 10 `conflicting` or `duplicate` rows).
-- The Board (`/projects/:projectId/board`, sidebar item after Changes) reads `GET /v1/projects/:projectId/board`. The columns are Proposed, Needs answer, Building, Checking, Shipped, and Not built. "By person" shows one lane per person (initial, name, role, counts). "By stage" shows one lane. A Person filter shows only one lane. A card shows the title (else the goal), the requester, the status, the wait ("Waiting for <name> to choose" or "Waiting for "<title>" to finish"), Tasks done of total, the agents at work (Task title, tier H, S or O, a pulse while the Task runs), and the age. A click on a card opens the Change. An owner or admin includes a Proposed card with Include or by a drag to Building, and declines it with Decline. The card moves at once and moves back when the API refuses. Live signals refresh the Board. Without the socket, the Board polls every 10 seconds. On a phone, the columns scroll sideways inside the Board.
+- The Board (`/projects/:projectId/board`, sidebar item after Changes) reads `GET /v1/projects/:projectId/board`. The columns are Proposed, Needs answer, Building, Checking, Shipped, and Not built. "By person" shows one lane per person (initial, name, role, counts). "By stage" shows one lane. A Person filter shows only one lane. A card shows these items:
+  - the title (else the goal), the requester, and the status;
+  - the wait: "Waiting for <name> to choose" or "Waiting for "<title>" to finish";
+  - Tasks done of total;
+  - the agents at work: Task title, tier H, S, or O, and a pulse while the Task runs;
+  - the age.
+
+  A click on a card opens the Change. An owner or admin includes a Proposed card with Include or by a drag to Building, and declines it with Decline. The card moves at once and moves back when the API refuses. Live signals refresh the Board. Without the socket, the Board polls every 10 seconds. On a phone, the columns scroll sideways inside the Board.
 - The Project header has a Share dialog for an owner or admin and a Members dialog for everyone else. The API shows invitations only to the owner and admins. It shows the email of a member only to the owner, admins, and that member.
 - The People section and the Share dialog show each person's role. An owner or admin changes a role with a select per person and invites with a role. Only the owner gives or removes the admin role. The owner role is never assignable.
 - The Settings page (`/projects/:projectId/settings`) has these sections:
@@ -484,9 +491,9 @@ The insert in `recomposeStaleCandidate` (`workers/integration/src/recompose.ts`)
 - The New change form has a Budget selector: "This request" with an amount, "Project budget" (only when the Project has a monthly budget), and "My budget" (only when the person set one). Each pool shows the money left this month. See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
 - The home page has a `Shared with you` section and the pending invitations.
 - The inbox shows `request_proposed` to the owner and admins ("<requester> proposed <title>", with Include and Decline links to the Change), and `request_included` and `request_declined` to the requester.
-- The inbox shows `request_choice_needed` to the earlier requester only ("<name>'s request conflicts with yours", with Keep mine and Apply theirs links to their Change, where the choice is made), and `request_choice_made` to the later requester ("<name> will apply your request after theirs").
-- A verified Candidate that waits for a person gives `approval_required` (no decision yet) or `promotion_ready` (approved, or no approval needed). The owner and admins get it as an action item. The requester gets it as an attention item ("Your request waits for an owner or admin"). The body states why the Candidate waits (the Candidate status reason). The link opens the Change.
-- The UI hides each control that a role cannot use (`apps/web/src/lib/permissions.ts` mirrors the API's role matrix): approve, promote, compose, roll back, publish or remove the app, raise a budget, resolve dead letters, and edit code are for the owner and admins. The API enforces the same rules.
+- The inbox shows `request_choice_needed` to the earlier requester only. It reads "<name>'s request conflicts with yours" and links to their own Change, where they make the choice. The later requester gets `request_choice_made` ("<name> will apply your request after theirs").
+- A verified Candidate that waits for a person gives `approval_required` (no decision yet) or `promotion_ready` (approved, or no approval needed). The owner and admins get it as an action item. The requester gets it as an attention item ("Your request waits for an owner or admin"). The body states why the Candidate waits (the Candidate status reason). The link opens the Change, where an owner or admin approves the Candidate or ships it with Ship.
+- The UI hides each control that a role cannot use. `apps/web/src/lib/permissions.ts` mirrors the role matrix of the API. Only the owner and admins see approve, promote and Ship, compose, roll back, publish or remove the app, raise a budget, resolve dead letters, and edit code. The API enforces the same rules.
 
 ## Limitation
 

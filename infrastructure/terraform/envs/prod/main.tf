@@ -451,7 +451,6 @@ module "integration_worker" {
     { type = "plain_text", name = "AI_GATEWAY_ID", text = module.ai.gateway_id },
     { type = "secret_text", name = "ANTHROPIC_API_KEY", text = var.anthropic_api_key },
     { type = "plain_text", name = "ANTHROPIC_WORKSPACE_ID", text = var.anthropic_workspace_id },
-    { type = "plain_text", name = "MODEL_PROVIDER", text = var.model_provider },
     { type = "plain_text", name = "ALLOW_OPUS", text = tostring(var.allow_opus) },
     local.cap_bindings.anthropic,
     # Browser Run for the Candidate browser check. Capped in code: one
@@ -536,7 +535,6 @@ module "agents_worker" {
     { type = "plain_text", name = "AI_GATEWAY_ID", text = module.ai.gateway_id },
     { type = "secret_text", name = "ANTHROPIC_API_KEY", text = var.anthropic_api_key },
     { type = "plain_text", name = "ANTHROPIC_WORKSPACE_ID", text = var.anthropic_workspace_id },
-    { type = "plain_text", name = "MODEL_PROVIDER", text = var.model_provider },
     { type = "plain_text", name = "ALLOW_OPUS", text = tostring(var.allow_opus) },
     { type = "ai", name = "AI" },
     local.cap_bindings.sandbox,

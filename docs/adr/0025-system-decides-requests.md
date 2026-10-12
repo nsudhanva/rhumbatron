@@ -39,34 +39,40 @@ Research on model cascades and model judges sets the method:
   1. Retrieval (deterministic): the open Changes plus the 20 latest completed Changes. Each is
      embedded as goal plus acceptance criteria (`@cf/baai/bge-small-en-v1.5`). Up to 10 with
      cosine >= 0.55 stay. When embeddings fail, shared product words select them.
-     `@cf/baai/bge-reranker-base` orders them, and 5 go on. The current app (canonical file list,
-     `package.json` dependency names, stack hints) is always one more item. Cosine never decides.
-  2. Clef-flash, one call inside the shared counter of 200 calls per UTC day: per pair, a choice
-     over `duplicate`, `already_covered`, `extends`, `overlaps`, and `unrelated`, plus "buildable
-     as stated". Clef-flash is a different model family from Claude, so its agreement counts. It
-     can only clear a pair. The pair drops when P(`unrelated`) >= 0.9.
+     `@cf/baai/bge-reranker-base` orders them, and 5 go on. When its source is readable and not
+     empty, the current app (canonical file list, `package.json` dependency names, stack hints) is
+     one more item. Cosine never decides.
+  2. Clef-flash makes one call inside the shared counter of 200 calls per UTC day. It reads the
+     request, the items, and a short copy of the app context. For each pair it picks one of
+     `duplicate`, `already_covered`, `extends`, `overlaps`, and `unrelated`. It also answers
+     "buildable as stated". Clef-flash is a different model family from Claude, so its agreement
+     counts. It can only clear a pair. The pair drops when P(`unrelated`) >= 0.9.
   3. Duplicates: Sonnet answers "which criteria of the existing request, or which features of the
      app, already deliver the new request?" with quotes. It runs twice with the order swapped. Code
      drops an answer with a quote that is not in the packet. When Clef and both Sonnet orders say
      covered, the kind is `duplicate`. When one or both Sonnet orders say covered without that full
      agreement, the kind is `unclear`, with the quoted criteria. Clef alone never marks a
      duplicate. Haiku is not a confirming vote.
-  4. Clarity, read against the app. The app context is deterministic and small: up to 60
+  4. Clarity, read against the app. The app context is deterministic and small. It holds up to 60
      canonical file paths, the `package.json` name and description, the first 600 characters of
-     `README.md`, and up to 10 titles of in-flight and shipped requests of the Project. A rule
-     runs first. A goal with fewer than two words that name a product object gets a question.
-     Then Clef-flash runs with the app context. P(buildable) >= 0.9 plans with no Claude call.
-     Otherwise one Sonnet call (`review_clarity`) reads the request and the app context. It
-     returns questions only for a part that two readings build as materially different products,
-     each with a quote of the goal and 2 to 4 readings as options. It returns small open details
-     (colors, sizes, labels, defaults) as assumptions. Code keeps a question only when its quote
-     is in the goal, it asks one thing, and it has two distinct options. One or more questions
-     ask. No question plans, and the assumptions go to the Root Planner.
+     `README.md`, and up to 10 titles of in-flight and shipped requests of the Project.
+     - A rule runs first. A goal with fewer than two words that name a product object gets a
+       question.
+     - Then the `buildable` answer of the Clef-flash call decides. P(buildable) >= 0.9 plans with
+       no Claude call.
+     - Otherwise one Sonnet call (`review_clarity`) reads the request and the app context. It
+       returns questions only for a part that two readings build as materially different
+       products. Each question has a quote of the goal and 2 to 4 readings as options. The call
+       returns small open details (colors, sizes, labels, defaults) as up to 6 assumptions.
+     - Code keeps a question only when its quote is in the goal, it asks one thing, and it has two
+       distinct options. It keeps at most 3 questions.
+     - One or more questions make the Change ask. With no question, the Change plans, and the
+       assumptions go to the Root Planner as open details.
 
   A model never rejects a request. The worst outcome is a question. Clef-flash can only clear a
   request or a pair. It never asks alone.
-- Small details are assumptions, not questions. The Root Planner decides each open detail and
-  records it in `assumptions` of the Work Graph. The ChangeWorkflow stores them in
+- Small details are assumptions. They never become questions. The Root Planner decides each open
+  detail and records up to 8 in `assumptions` of the Work Graph. The ChangeWorkflow stores them in
   `changes.assumptions_json`. The Change page shows them as "Assumptions". A follow-up request
   changes one.
 - A question makes the Change `needs_input`, with a `ChangeClarification` in
@@ -94,9 +100,8 @@ Research on model cascades and model judges sets the method:
 - Two conflicting requests from the same requester are not a conflict between people. The later
   request replaces the earlier one (`system:same_requester`).
 - Each intake decision is a Decision Receipt in D1 `change_decisions` (`INTAKE`), without
-  private reasoning. Intake also records
-  `change.intake.reviewed`. An answer records `change.clarification.answered`. Model cost counts
-  against the Change budget.
+  private reasoning. Intake also records `change.intake.reviewed`. An answer records
+  `change.clarification.answered`. Model cost counts against the Change budget.
 
 ## Alternatives considered
 
@@ -111,18 +116,18 @@ Research on model cascades and model judges sets the method:
 | Clarity check on the request text only | Without the app, a model reads most requests as open and asks about each product decision. "Change to 16 color palette" is clear in a canvas app with a palette. |
 | A question for each open product decision | Most decisions are small details that the planner can decide. Questions about them delay the build, and people answer "any". Assumptions keep them visible and changeable. |
 | Several decisions in one question | One text box for "a; b; c" gets one vague answer. Each question has its own answer and options. |
-| A new intake round after each answer | The answer starts a second round of questions about the same request. One round is enough: the planner decides what stays open. |
+| Run the intake gate again after each answer | Each answer can open more questions about the same request. One round is enough. The planner decides the details that stay open. |
 | A separate review service or vector store | Workers AI, D1, and the existing Workflow cover it. |
 
 ## Consequences
 
-- An unclear or repeated request waits for its requester before any planning spend. The C1 and C2
-  case stops at intake as a duplicate.
+- An unclear or repeated request waits for its requester before any planning spend. In the C1 and
+  C2 case, intake stops C2 as a duplicate.
 - A request with no related items and a clear goal costs one embedding call, one Clef-flash call,
   and no Claude call. A pair that Clef-flash cannot clear adds two Sonnet calls (about $0.02). A
   request that Clef-flash does not clear adds one Sonnet clarity call. The app context adds at
   most one R2 read (`README.md`) and about 1,000 input tokens. A supported conflict adds no
-  model call: the earlier requester chooses (ADR 0032).
+  model call, because the earlier requester chooses (ADR 0032).
 - Workers AI adds one `AI` binding to the integration Worker (Terraform and `wrangler.jsonc`).
   Embeddings and the reranker cost much less than 1 Neuron per request. Clef-flash stays inside
   the shared counter of 200 calls per day. The free 10,000 Neurons per day cover it.

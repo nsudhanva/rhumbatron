@@ -86,17 +86,6 @@ variable "anthropic_monthly_budget_usd" {
   }
 }
 
-variable "model_provider" {
-  description = "Model provider for agents and the Root Planner. The only provider is \"anthropic\" (ADR 0021)."
-  type        = string
-  default     = "anthropic"
-
-  validation {
-    condition     = var.model_provider == "anthropic"
-    error_message = "model_provider must be \"anthropic\"."
-  }
-}
-
 variable "allow_opus" {
   description = "true lets the opus tier run Claude Opus 5.5; false (default) runs it on Sonnet 5.5 and records the downgrade (ADR 0021)."
   type        = bool

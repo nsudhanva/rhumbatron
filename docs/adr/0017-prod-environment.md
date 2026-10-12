@@ -43,7 +43,7 @@ each account-wide limit with those projects.
 
 ### Prod settings
 
-- Models: `MODEL_PROVIDER` is `anthropic`. `ALLOW_OPUS` comes from `var.allow_opus` (default
+- Models: Anthropic only. `ALLOW_OPUS` comes from `var.allow_opus` (default
   `false`). The monthly Anthropic budget is `var.anthropic_monthly_budget_usd` (default $100,
   maximum $100). The AI Gateway `rhumbatron-models-prod` uses the same budget as its spend limit.
   See ADR 0021.

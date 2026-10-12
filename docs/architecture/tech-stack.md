@@ -191,7 +191,7 @@ Each row names one area and the choice that the code makes in it.
 
 | Area | Choice in the code |
 |---|---|
-| Planning and arbitration | Sonnet 5.5 while `ALLOW_OPUS` is `false` (ADR 0021) |
+| The `opus` tier (route kinds `plan`, `architecture`, and `arbitration`) | Sonnet 5.5 while `ALLOW_OPUS` is `false` (ADR 0021) |
 | Model provider | Anthropic only (ADR 0021) |
 | Bounded decision models | Only Clef-flash runs. No code path calls Clef |
 | Deployables | Nine Workers, including `rhumbatron-sandbox` (ADR 0012) and `rhumbatron-apps` (ADR 0020). The docs site is a tenth, assets-only Worker |

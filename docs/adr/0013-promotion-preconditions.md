@@ -24,7 +24,7 @@ state. D1 reads also make the most important correctness boundary depend on a se
 Rhumbatron checks the preconditions for `POST /v1/candidates/:candidateId/promote` in two steps,
 in this order.
 
-1. **Integration Worker (`promoteCandidate` RPC).** The API authenticates the user, checks that
+1. Integration Worker (`promoteCandidate` RPC). The API authenticates the user, checks that
    the user is a Project owner or admin (ADR 0028), and calls the integration Worker over the
    `INTEGRATION` service binding. The integration Worker has no public route. It reads the
    authoritative rows and checks them with the pure function `checkPromotion`
@@ -42,7 +42,7 @@ in this order.
 
    `checkPromotion` returns every block at once. Then the Worker builds and Zod-validates a
    `PromotionRequest` and records `canonical.promotion.requested`.
-2. **ProjectRootDO (`promote`).** It decides on its own state in one SQLite transaction. It
+2. ProjectRootDO (`promote`). It decides on its own state in one SQLite transaction. It
    checks rule 5 (authoritative policy version), rule 6 (expected generation = current), and rule 7
    (expected tree = current, when the Candidate recorded its `base_tree`). It writes the next
    generation and the `canonical.advanced` outbox row together. The Event records
@@ -56,9 +56,9 @@ records `candidate.stale`. Rhumbatron does not retry a stale promotion blind.
 ### Approvals
 
 `POST /v1/changes/:changeId/approve` records one decision per Candidate in `approvals`
-(migration 0008). The approver is the authenticated Project owner or admin from the session, never from the
-request body. Only a verified Candidate that needs approval can get a decision. The first decision
-is final, and an identical repeat returns the stored row. A rejection also sets the Candidate to
+(migration 0008). The approver is the authenticated Project owner or admin from the session. The
+request body never names the approver. Only a verified Candidate that needs approval can get a
+decision. The first decision is final, and an identical repeat returns the stored row. A rejection also sets the Candidate to
 `rejected`. The policy is deterministic (`approvalRequired`, `checkApprovalDecision`). No model
 takes part. The integration Worker records `approval.requested` for a verified Candidate that
 needs approval. That Candidate has no siblings, or it is the winner of a selection (ADR 0026).
@@ -116,11 +116,12 @@ on a commit that `main` does not have. The sync uses no Sandbox time.
   automatic and gates `high` and `critical`. A plan gate (`humanApprovalRequired`, for example an
   authorization change) or a gated policy tier is never automatic. An unknown risk tier is never
   automatic. An acceptance shortfall is never automatic (ADR 0026).
-- A Candidate that does not promote automatically is held for a person (`holdForPerson` adds the
-  plan gate when the plan has none). The Change is `awaiting_approval`, `approval.requested`
-  states the reason, and the inbox tells the owner, the admins, and the requester. The Change page
-  has the Ship action. It calls the same `POST /v1/candidates/:candidateId/promote`, so every
-  precondition above applies.
+- A Candidate that does not promote automatically waits for a person. `holdForPerson` adds the
+  plan gate when the plan has none. The Change is `awaiting_approval`, and `approval.requested`
+  states the reason. The inbox tells the owner, the admins, and the requester
+  (`approval_required` or `promotion_ready`). The Change page has the Ship action in the header
+  and under Needs attention. Ship calls the same `POST /v1/candidates/:candidateId/promote`, so
+  every precondition above applies.
 - Promotion sets the Change status to `promoting`, then to `releasing` or `completed`.
 
 ## Diagram

@@ -35,8 +35,8 @@ the system chooses between requests. See
 - Scope registration is serialized. After planning, the ChangeWorkflow calls `registerScope` on
   ProjectRootDO (`workers/coordinator/src/request-scopes.ts`) with the criteria (each has an ID) and
   the semantic resources. ProjectRootDO returns the earlier active Changes with a scope, in
-  registration order. The later Change compares itself with each of them, so each pair is compared
-  once per clarification round.
+  registration order. The later Change compares itself with each of them. Each pair gets one
+  comparison per clarification round and one per plan after a first-come wait.
 - When an earlier Change has no scope yet, the later Change waits for it: 10 checks, 15 s apart.
   After that, the earlier Change without a scope counts as overlapping.
 - Comparison (`workers/integration/src/request-policy.ts`, `request-check.ts`):
@@ -49,13 +49,16 @@ the system chooses between requests. See
   5. At most 4 overlapping pairs get a review per Change.
 - A supported conflict between two people follows the first-come rule of
   [ADR 0032](./0032-first-come-conflicts.md): the earlier request keeps working, and the later
-  request waits for the earlier requester's choice. When one person asks twice, the earlier Change
-  becomes `not_selected`, and Rhumbatron cancels its running work.
+  request waits for the earlier requester's choice. When one person asks twice, the later request
+  replaces the earlier one. The earlier Change becomes `not_selected`, and Rhumbatron cancels its
+  running work. An earlier Change with a promoted Candidate stays, and the later Change gets the
+  outcome `replaces`.
 - The recompose guard: `recomposeDecision` refuses a `not_selected`, `cancelled`, or `needs_input`
   Change, and a Change with the outcome `not_selected` or `duplicate`. Without the guard, the
   stale-Candidate recomposition merges without a conflict and ships the losing request over the
   winner.
-- `ChangeStatus` has `not_selected` (terminal) and `needs_input` (ADR 0025).
+- `ChangeStatus` has `not_selected` (terminal), `needs_input` (ADR 0025), and `awaiting_choice`
+  and `queued` (ADR 0032).
 
 ## Alternatives considered
 
@@ -76,6 +79,6 @@ the system chooses between requests. See
 - The design adds D1 migration `0022_shared_projects.sql` and no Cloudflare resource.
 - Known limitation: a conflict that both requests hide behind unrelated words and unrelated
   resources can pass the review. Then both Changes ship in sequence, and the later one wins. The
-  tests of the earlier Change usually fail on the later tree and stop it. But an agent can edit
-  those tests. Report such a miss as an incident. Never mark both requests as satisfied without
+  tests of the earlier Change usually fail on the later tree and stop it. An agent can edit those
+  tests. Report such a miss as an incident. Never mark both requests as satisfied without
   Evidence.

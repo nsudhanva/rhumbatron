@@ -351,7 +351,7 @@ Selection:
 - Only the winner goes on the promotion path: a canonical check, the acceptance hold, policy `autoPromoteRiskTiers`, the approval gate (`approval.requested` for a gated winner), and the compare-and-swap. A Candidate without siblings goes on the same path.
 - A verified winner that cannot auto-promote moves the Change to `awaiting_approval`. The Candidate status reason states why, and `approval.requested` carries the same `reason`:
   - Plan gate (`trigger: "policy"`, from the gate step or the selection): "Policy policy-1 requires a person to approve high-risk changes. Approve to ship it or cancel the change." An authorization change reads "changes to authorization".
-  - Policy hold (`trigger: "policy"`, `holdForPerson` in `candidate-selection.ts`): the plan has no gate, but the stored policy does not list the tier as automatic, gates the tier, or the Change has no risk tier. The hold adds the human gate to the plan (`policyHoldReason` in `packages/evidence/src/promotion.ts`).
+  - Policy hold (`trigger: "policy"`, `holdForPerson` in `candidate-selection.ts`): the plan has no gate. The stored policy gates the tier or does not list it as automatic, or the Change has no risk tier. The hold adds the human gate to the plan (`policyHoldReason` in `packages/evidence/src/promotion.ts`).
   - Acceptance hold (`trigger: "acceptance"`), above.
 - A manual promotion is blocked (`selection_pending`) while a sibling composes or verifies.
 

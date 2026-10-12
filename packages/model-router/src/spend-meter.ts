@@ -99,15 +99,6 @@ export async function settleSpend(
     .run();
 }
 
-/** Recorded spend this month in USD, open reservations included. */
-export async function monthSpentUsd(db: MeterDb, month: string): Promise<number> {
-  const row = await db
-    .prepare("SELECT count FROM usage_counters WHERE day = ? AND counter = ?")
-    .bind(month, USAGE_COUNTER.anthropicSpend)
-    .first<{ count: number }>();
-  return (row?.count ?? 0) / 1_000_000;
-}
-
 /** Rough prompt size for a reservation: 4 characters per token, never below 1,000 tokens. */
 function promptTokensOf(req: CompletionRequest): number {
   const chars = JSON.stringify(req.messages).length + JSON.stringify(req.tools ?? []).length;

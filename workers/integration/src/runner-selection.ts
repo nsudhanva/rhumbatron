@@ -25,14 +25,6 @@ export function isAppCheckerEligible(
   return check.kind === "build" || check.kind === "unit" || check.kind === "contract";
 }
 
-/** Pure function to determine initial runner for a check. */
-export function initialRunnerForCheck(
-  check: Pick<VerificationCheck, "kind" | "checkId">,
-  hasAppsBinding: boolean,
-): CheckRunner {
-  return isAppCheckerEligible(check, hasAppsBinding) ? "dynamic-worker" : "sandbox";
-}
-
 export type AppCheckDisposition =
   | { handled: true; runner: "dynamic-worker"; outcome: CheckOutcome }
   | { handled: false; runner: "sandbox"; fallbackReason: string };
@@ -131,29 +123,4 @@ export function evaluateContractAppCheck(
     runner: "dynamic-worker",
     outcome,
   };
-}
-
-/**
- * Determines whether any check in the verification plan requires Sandbox container execution.
- * Returns true if:
- * - Any check is not eligible for AppChecker (performance, security, browser, cart invariant, no APPS binding)
- * - Any eligible check returned supported: false (fallback needed)
- */
-export function planNeedsSandbox(
-  checks: readonly Pick<VerificationCheck, "kind" | "checkId">[],
-  hasAppsBinding: boolean,
-  appCheckResults?: ReadonlyMap<string, AppCheckResult>,
-): boolean {
-  for (const check of checks) {
-    // The acceptance check is a model call in the integration Worker: no Sandbox.
-    if (check.kind === "acceptance") continue;
-    if (!isAppCheckerEligible(check, hasAppsBinding)) {
-      return true;
-    }
-    const result = appCheckResults?.get(check.checkId);
-    if (result && !result.supported) {
-      return true;
-    }
-  }
-  return false;
 }
