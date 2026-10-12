@@ -8,12 +8,22 @@ Made by [Sudhanva Narayana](https://sudhanva.me) and [Maanasa Narayan](https://m
 
 ## How it works
 
-1. A person sends a request. If the request is not clear or repeats another request, Rhumbatron asks a question first.
-2. A planner model divides the request into Tasks with dependencies and acceptance criteria.
-3. Rhumbatron starts an agent only when its Task is ready. Each agent works in its own fork in Cloudflare Artifacts.
-4. Before an agent edits code, it declares what it plans to change. Rhumbatron compares these plans and finds conflicts.
-5. Two designs that cannot go together become two Candidates. Rhumbatron builds and tests each Candidate.
-6. The Candidate with the best evidence promotes through one atomic compare-and-swap, and the app deploys to `<project>.rhumbatron.com`.
+```mermaid
+flowchart LR
+  goal[Request in plain language] --> intake[Intake check<br/>clear? duplicate?]
+  intake --> plan[Work Graph<br/>Tasks + dependencies]
+  plan --> wake[Causal wake-up<br/>only ready Tasks]
+  wake --> agents[Agents in parallel<br/>one Artifacts fork each]
+  agents --> intents[Typed Intents and Claims<br/>on semantic resources]
+  intents --> conflict{Semantic<br/>conflict?}
+  conflict -->|no| compose[Compose one Candidate]
+  conflict -->|yes| fork[Fork Candidates<br/>A and B]
+  compose --> verify[Verify with evidence<br/>build, tests, contract, browser, p95]
+  fork --> verify
+  verify --> select[Select by evidence]
+  select --> promote[Compare-and-swap promotion<br/>S41 → S42]
+  promote --> live[Live app on<br/>Dynamic Workers]
+```
 
 ## Key Features
 
