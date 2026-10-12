@@ -2,15 +2,15 @@
 
 ## Context
 
-The Code page lets the owner or an admin save one file of the live tree as a human Change (P16-19,
-`code-edit.ts`). A real fix often changes more than one file, adds or deletes a file, or needs a
-command such as `bun test` before the person sends it. Rules that apply:
+The Code page lets the owner or an admin save one file of the live tree as a human Change
+(`code-edit.ts`). A real fix often changes more than one file, adds or deletes a file, or needs a
+command such as `bun test` before the person sends it. These rules apply:
 
-- A person never advances canonical directly. Only verified evidence does (AGENTS.md section 36).
+- A person never advances canonical directly. Only verified Evidence advances the Canonical State.
 - The Sandbox costs Container time. The Project has one Sandbox (`proj-<uuid>`, `max_instances = 1`)
   that agents and Candidate checks share (ADR 0011). The monthly meter `SANDBOX_MONTHLY_SECONDS`
   limits it to 72,000 s (20 hours) in prod.
-- The Sandbox never gets a Terraform, Cloudflare API, or model credential (section 30.3).
+- The Sandbox never gets a Terraform, Cloudflare API, or model credential.
 
 ## Decision
 
@@ -23,7 +23,7 @@ command such as `bun test` before the person sends it. Rules that apply:
   The integration Worker (`workers/integration/src/code-sessions.ts`) owns the session state, the
   fork, and the Sandbox. It checks the owner and the session state again from D1.
 - Open: the session forks canonical into the Artifacts repository `edit-<hex>` for session
-  `edit_<hex>`. Cleanup derives the name from the D1 row ID only. The open does not start the
+  `edit_<hex>`. Cleanup derives the name only from the D1 row ID. The open does not start the
   Sandbox.
 - Edits: D1 `code_session_files` holds each changed file (its full text) or a deleted path. Reads
   come from the edits, then from the R2 code store of the base tree, then from Artifacts. A file
@@ -60,9 +60,9 @@ command such as `bun test` before the person sends it. Rules that apply:
   the edits. Edits that are not submitted are discarded. The web warns 1 minute before the idle
   limit.
 - Sandbox stop: while the Sandbox is awake, the end kills every process of the session and
-  removes its directory. Then the Sandbox sleeps after 2 idle minutes (`sleepAfter`). The end
-  does not wake a sleeping Sandbox: a sleeping Sandbox has no disk. The end does not destroy the
-  Sandbox, because agents and Candidate checks of the Project can use it at the same time.
+  removes its directory. Then the Sandbox sleeps after 2 idle minutes (`sleepAfter`). A sleeping
+  Sandbox has no disk, so the end does not wake it. The end does not destroy the Sandbox, because
+  agents and Candidate checks of the Project can use it at the same time.
 - Events: `code.session.opened`, `code.session.closed` (with `reason`: `discarded`, `idle`,
   `max_age`, or `archived`), and `code.session.submitted` (with `changeId`). They are
   informational for the causal router.

@@ -3,7 +3,7 @@
 ## Context
 
 Agent tools need a repository to write to. A Project without an Artifacts repository gives agents
-no place for files, test Tasks fail, and no live app can start. The product has no templates and no
+no place for files. Its test Tasks fail, and no live app can start. The product has no templates and no
 prefilled files.
 
 ## Decision
@@ -18,12 +18,17 @@ prefilled files.
 - Backfill: `POST /v1/projects/:id/provision` (no body) and `POST /v1/projects/:id/app` ("Deploy
   app", prod) both create the empty repository when the source is unassigned.
   `bun scripts/seed-repo.ts <projectId> prod [--user <Clerk user ID or email>]` calls them.
-- The app conventions are instructions, not files (`APP_CONVENTIONS` in
-  `packages/protocol/src/app.ts`): a Worker with `src/worker.ts` and a Hono app from
-  `src/app.ts`, static files in `public/`, the `package.json` scripts `typecheck`, `test`,
-  `contract`, and `dev`, a `scripts/contract.ts` that prints `{"routes":[...]}`, at least one test,
-  `env.DATA` for storage, and a fake identity only. The Root Planner and the Context Compiler both
-  give them to the model.
+- The app conventions are model instructions (`APP_CONVENTIONS` in
+  `packages/protocol/src/app.ts`), and they add no files. They ask for these items:
+  - a Worker with `src/worker.ts` and a Hono app from `src/app.ts`;
+  - static files in `public/`;
+  - the `package.json` scripts `typecheck`, `test`, `contract`, and `dev`;
+  - a `scripts/contract.ts` that prints `{"routes":[...]}`;
+  - at least one test;
+  - `env.DATA` for storage;
+  - a fake identity only.
+
+  The Root Planner and the Context Compiler both give the conventions to the model.
 - The Root Planner sees the canonical file list. For an empty repository (no root
   `package.json`), t1 must be an implement bootstrap Task, and every other Task must depend on it.
   Application code checks this and asks for one repair turn when the plan breaks the rule.
@@ -36,7 +41,7 @@ prefilled files.
   the pointer to a bundle.
 - The Acme Shop fixture serves internal demo and smoke scripts only:
   `POST /v1/fixtures/projects` (404 where fixtures are off).
-- Goal suggestions (`GET /v1/projects/:id/suggestions`, `workers/agents/src/suggestions.ts`):
+- Goal suggestions (`GET /v1/projects/:id/suggestions`, `workers/agents/src/suggestions.ts`).
   Clef is a choice model and cannot write text. So `clef-flash` ranks a fixed list of short goals
   ("start" goals for a repository with no code, "extend" goals for other repositories). The inputs
   are the Project name, up to 200 file paths, and the last 5 goals. The top 4 goals show as pills
@@ -48,7 +53,8 @@ prefilled files.
 
 - Agents always have a repository to write to. A blank Project's first Change must build the app
   in the conventions' shape, or the build, unit, and contract checks fail.
-- Each Project costs a few Artifacts operations at creation, also scratch and smoke Projects.
+- Each Project costs a few Artifacts operations at creation. This includes scratch and smoke
+  Projects.
   Archive cleanup deletes the repository.
 - A rollback to Generation 0 of a blank Project builds an empty tree, and the build fails. The
   release is `failed`, and the pointer does not move.

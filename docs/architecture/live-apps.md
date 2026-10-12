@@ -68,7 +68,7 @@ Each request follows these steps:
 5. The app env holds only `ASSETS` and `DATA`. The router strips cookies of other hosts on the way in and `Domain` cookies on the way out.
 
 The router has a page for each other state: `building` (503), `failed` (503), an app with no code (200), and `removed` (410).
-A pointer row keeps the last good bundle while a newer build runs or fails. A failed build never takes a live app down.
+A pointer row keeps the last good bundle while a newer build runs or fails. A failed build never stops a live app.
 
 `DATA` is a string key-value store. A key has at most 512 characters and a value at most 128 KiB. A store holds at most 10,000 keys.
 
@@ -95,7 +95,7 @@ For such an app, Candidate composition runs the app's build in the Sandbox (`wor
 5. The required `client-assets` check compares the composed commit with the base. See [Source and verification](source-and-verification.md#which-checks-run).
 
 The Sandbox time of the build counts on the reservation of the verification workflow.
-Agents edit the client sources, not the generated files (`APP_CONVENTIONS`). A `bun run build` in an agent workspace does not keep its output, so sibling ChangeSets never conflict on generated files.
+Agents edit the client sources. They do not edit the generated files (`APP_CONVENTIONS`). A `bun run build` in an agent workspace does not keep its output, so sibling ChangeSets never conflict on generated files.
 
 ## Preview of a Candidate
 

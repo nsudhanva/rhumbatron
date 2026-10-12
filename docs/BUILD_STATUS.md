@@ -4,19 +4,19 @@
 Phase 17a - Shared Projects
 
 ## Completed
-- Phases 0 to 13: monorepo, Terraform roots (`bootstrap`, `envs/global`, `envs/prod`), R2 remote state, and the Workers web, api, coordinator, event-router, integration, agents, indexer, sandbox, apps, and docs.
-- Durable Objects (`ProjectRootDO`, `ResourceShardDO`, `ProjectViewDO`, `AgentDO`), D1, transactional outbox, K2 (8 streams, 4 subscriptions), 6 Queues, and 3 Workflows.
-- Agent runtime: Pi harness behind `AgentRuntime`, model routing, Decision Receipts, escalation, and per-Task budgets.
+- Phases 0 to 13: the monorepo, the Terraform roots (`bootstrap`, `envs/global`, `envs/prod`), the R2 remote state, and the Workers web, api, coordinator, event-router, integration, agents, indexer, sandbox, apps, and docs.
+- Durable Objects (`ProjectRootDO`, `ResourceShardDO`, `ProjectViewDO`, `AgentDO`), D1, the transactional outbox, K2 (8 streams, 4 subscriptions), 6 Queues, and 3 Workflows.
+- Agent runtime: the Pi harness behind `AgentRuntime`, model routing, Decision Receipts, escalation, and per-Task budgets.
 - Context Packets with exact retrieval, the indexer, the Product Graph, Vectorize retrieval, and Haiku compaction of retry logs.
 - Artifacts source, Workspace forks, and the capped Sandbox Worker.
 - Intents, Challenges, advisory Claims, deterministic conflict detection, Sonnet conflict review, and Candidate forks. Complementary Tasks integrate into one Candidate.
 - Candidate composition and verification (build, unit, contract, protected invariants, performance, security, browser, acceptance, preview smoke), coverage states, and D1 and R2 Evidence.
-- Candidate selection (ADR 0026): sibling Candidates wait for each other, ranking by Evidence, the cited Integration Judge on ties, and the acceptance check as the auto-promotion gate.
+- Candidate selection (ADR 0026). Sibling Candidates wait for each other, and Evidence ranks them. The Integration Judge breaks ties with cited Evidence. The acceptance check gates auto-promotion.
 - Approval policy, promotion preconditions, `ProjectRootDO` compare-and-swap, `canonical.advanced`, and stale Candidate recomposition.
 - Phase 14: `.github/workflows/ci.yml` runs checks only and holds no deploy credentials.
 - Phase 16, live apps (ADR 0020): previews, the production pointer, the release smoke check, version hosts, rollback, and app removal.
-- Phase 17a, shared Projects (ADR 0023, ADR 0025): invitations, owner and collaborator roles, the intake gate, `needs_input` with clarify answers, and the system arbiter. Project deletion for the owner and Leave project for a collaborator. The Settings page.
-- Dead-letter consumer with Retry and Dismiss, section 44 limits, and runaway-billing guards (ADR 0019).
+- Phase 17a, shared Projects (ADR 0023, ADR 0025, ADR 0028): invitations, the owner, admin, member, and viewer roles, member request review, the intake gate, `needs_input` with clarify answers, and the system arbiter. Project deletion for the owner, Leave project for the other roles, and the Settings page.
+- The dead-letter consumer with Retry and Dismiss, the per-Change limits on Agents, Sandboxes, and attempts, and the runaway-billing guards (ADR 0019).
 - Authentication with the Clerk production instance (ADR 0002).
 
 ## Active
@@ -38,10 +38,10 @@ Phase 17a - Shared Projects
 
 ## Decisions
 - Prod is the only remote environment (ADR 0024). Local work uses `wrangler dev`.
-- Terraform owns remote control-plane changes. Never `wrangler deploy`.
-- Artifacts is canonical source for managed Projects (ADR 0010).
+- Terraform owns remote control-plane changes. Nobody runs `wrangler deploy`.
+- Artifacts holds the canonical source of managed Projects (ADR 0010).
 - Models: Anthropic Claude Haiku 5.5 and Sonnet 5.5. The opus tier runs on Sonnet 5.5 unless `ALLOW_OPUS` is `true` (ADR 0021). Workers AI Clef-flash makes cheap bounded decisions.
-- The owner role covers administration only. The system decides between requests and asks the requester when it cannot decide (ADR 0025).
+- The owner and admin roles cover administration only. The system decides between requests and asks the requester when it cannot decide (ADR 0025).
 - CI runs checks only. Deployment runs locally through Terraform.
 
 ## Next

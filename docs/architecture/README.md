@@ -1,7 +1,6 @@
 # Rhumbatron architecture guide
 
 This guide describes the code on `main` with text, tables, and diagrams.
-Each page records the differences from `AGENTS.md`.
 
 ## Product summary
 
@@ -22,7 +21,7 @@ Each page records the differences from `AGENTS.md`.
 
 ## The six planes
 
-The code follows the six planes of `AGENTS.md` section 8.
+The code has six planes.
 Arrows show the main direction of calls and data.
 
 ```mermaid
@@ -79,14 +78,14 @@ flowchart LR
 | State | Artifacts, R2, D1, DO SQLite, KV (`CONFIG`), Vectorize | `workers/integration`, `workers/indexer` |
 | Observability | Analytics Engine (`METRICS`, `EVENT_METRICS`), Workers Logs, AI Gateway logs | `workers/agents`, `workers/indexer`, `workers/event-router` |
 
-The browser check drives Browser Run from the integration Worker.
+The integration Worker drives Browser Run for the browser check.
 Browser Run reaches the composed app in the Sandbox only through request interception (`containerFetch`).
 
-Differences from `AGENTS.md`:
+Policy and tracing:
 
 - D1 `project_policies` is the source of truth for the Project policy. No API writes it.
   The KV namespace `rhumbatron-config-prod` (binding `CONFIG` on the integration Worker) holds a 5-minute snapshot (`workers/integration/src/policy.ts`).
-  Readers use the policy as follows:
+  Each reader gets the policy from one source:
 
   | Reader | Policy source |
   |---|---|
@@ -94,7 +93,7 @@ Differences from `AGENTS.md`:
   | Verification plan, approval gate, auto-promotion decision, composition compatibility check | Stored row through the KV snapshot, read once per verification run. Without a row: `DEFAULT_POLICY`, which protects no resource. |
   | Conflict detection, conflict review, Product Graph | `protectedResources` of the stored row only. Without a row: nothing is protected. |
 
-- No OpenTelemetry tracing is configured. The Durable Object Workers set `traces.enabled = false`.
+- Rhumbatron configures no OpenTelemetry tracing. The Durable Object Workers set `traces.enabled = false`.
 
 ## Deployables map
 
@@ -183,8 +182,8 @@ flowchart TB
 
 Notes:
 
-- `AGENTS.md` section 12 lists seven deployables. The code adds `rhumbatron-sandbox` (ADR 0012) and `rhumbatron-apps` (ADR 0020).
-  The provider cannot attach a container to a DO class in another Worker, so the Sandbox class has its own Worker.
+- The Sandbox class has its own Worker, `rhumbatron-sandbox` (ADR 0012). The provider cannot attach a container to a DO class in another Worker.
+- `rhumbatron-apps` hosts the live apps of Projects (ADR 0020).
 - Terraform sources: `infrastructure/terraform/envs/prod/main.tf` and `docs.tf`.
 
 ## Reading order
@@ -212,7 +211,6 @@ flowchart LR
 
 Related documents:
 
-- [Tech stack](tech-stack.md): each technology in use, its function, and its differences from `AGENTS.md`.
-- `AGENTS.md`: the authoritative build plan.
+- [Tech stack](tech-stack.md): each technology in use and its function.
 - `docs/adr/`: one record per architecture decision. This guide cites ADRs by number.
 - `docs/BUILD_STATUS.md`: current phase, blockers, and caps.

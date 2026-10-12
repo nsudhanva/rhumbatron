@@ -1,6 +1,7 @@
 # Infrastructure and cost
 
-This page explains how Terraform owns the Cloudflare control plane, and how the code keeps the bill inside free and included limits.
+This page explains how Terraform owns the Cloudflare control plane.
+It also explains how the code keeps the bill inside free and included limits.
 
 Main source files:
 
@@ -15,7 +16,7 @@ There are three roots:
 
 - `bootstrap` creates only the state bucket.
 - `envs/global` owns account-wide and zone-wide singletons.
-- `envs/prod` owns the one remote environment. There is no other environment.
+- `envs/prod` owns the one remote environment. Rhumbatron has no other remote environment.
 
 All three keep state in one R2 bucket, with one key per root.
 
@@ -37,7 +38,7 @@ flowchart TB
 Rules:
 
 - The backend is the S3 backend on R2 with `use_lockfile = true`.
-- `scripts/tf.ts` loads the shared credentials and the secrets of the selected root from the macOS Keychain. A value already in the environment takes precedence.
+- `scripts/tf.ts` loads the shared credentials and the secrets of the selected root from the macOS Keychain. A value that is already in the environment wins.
 - `scripts/tf.ts` refuses `-auto-approve`.
 - Provider: `cloudflare/cloudflare ~> 5.27`. Terraform `>= 1.16.0`. Prod also uses `hashicorp/external ~> 2.4` to read K2 stream IDs.
 - The zone `rhumbatron.com` is a data source. No plan can delete the domain.
@@ -83,7 +84,7 @@ Prod also has these checks:
 ### Adapters
 
 Provider 5.27 has no resource for K2 streams, Vectorize indexes, a container on a DO class, the apps Worker, D1 schema migrations, or billing budget alerts.
-A `terraform_data` adapter covers each one (AGENTS.md section 11.4).
+A `terraform_data` adapter covers each one.
 Each adapter runs a Bun script, and only `terraform apply` can run it.
 The shared API helper `scripts/lib/cloudflare-api.ts` and `scripts/d1-migrate.ts` refuse to run unless `RHUMBATRON_INVOKED_BY=terraform`.
 
@@ -114,7 +115,7 @@ Rules:
 ### Deployment loop
 
 Deployment runs on a developer machine. `.github/workflows/ci.yml` runs checks only.
-The project never uses `wrangler deploy`.
+Rhumbatron never uses `wrangler deploy`.
 
 ```mermaid
 flowchart LR
@@ -127,7 +128,7 @@ flowchart LR
 ```
 
 A new bundle hash creates a new Worker version (`modules/worker`) or a new full script upload (`modules/durable-worker`).
-Bindings carry the environment configuration. The bundles are the same for every environment.
+Bindings carry the environment configuration, so one bundle serves every environment.
 
 ## Cost guard layers
 
@@ -139,7 +140,7 @@ flowchart TB
   L1["1. Durable Object alarms<br/>AlarmGuard: no work, no alarm,<br/>reschedule at least 1 s, backoff to 5 min,<br/>2,000 fires per object per day"]
   L2["2. Outbox retries<br/>max 10 attempts, backoff to 5 min,<br/>unbound stream fails at once"]
   L3["3. Causal caps<br/>1,000 commands per Change per day,<br/>Clef-flash 200 calls per day"]
-  L4["4. Section 44 limits<br/>8 agents, 4 Sandboxes, 3 Candidates,<br/>2 attempts per tier, 2 browser runs"]
+  L4["4. Change limits<br/>8 agents, 4 Sandboxes, 3 Candidates,<br/>2 attempts per tier, 2 browser runs"]
   L5["5. Queue and K2 bounds<br/>3 retries, then dead-letter,<br/>K2 batch skipped after 5 failures"]
   L6["6. Metered caps in D1<br/>Sandbox 20 h per month,<br/>Browser Run 960 s per day,<br/>400 agent model calls per day,<br/>Anthropic $100 per month"]
   L7["7. AI Gateway<br/>20 requests per minute,<br/>Anthropic spend limit (best effort)"]
@@ -176,7 +177,7 @@ Terraform refuses an Anthropic budget above 100 USD (variable validation in `env
 
 A guard that trips stops new expensive work and keeps all state.
 A concurrency limit applies backpressure. The work waits for a free slot.
-A budget limit stops the work. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit named.
+A budget limit stops the work. The Task becomes `blocked`, and the Change becomes `budget_blocked` and names the exact limit.
 
 ## Pause switch
 

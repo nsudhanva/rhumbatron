@@ -3,13 +3,13 @@
 ## Context
 
 Cloudflare Terraform provider 5.27 has no Vectorize index resource. `terraform providers schema`
-lists only the `vectorize` Worker binding type. AGENTS.md section 11.4 forbids creation through
-the dashboard, Wrangler, or a direct API call. Semantic retrieval needs the index.
+lists only the `vectorize` Worker binding type. Rhumbatron does not create Cloudflare resources
+through the dashboard, Wrangler, or a direct API call. Semantic retrieval needs the index.
 
 ## Decision
 
-An adapter creates the index. `scripts/vectorize-sync.ts` follows section 11.4: it is idempotent,
-reads before it writes, supports delete, and runs only from `terraform apply`.
+A Terraform adapter creates the index. The adapter script `scripts/vectorize-sync.ts` is
+idempotent and reads before it writes. It supports delete. Only `terraform apply` runs it.
 
 - `terraform_data.vectorize_index` creates the index when it does not exist. It fails the apply on
   a dimension or metric mismatch. It never replaces the index.

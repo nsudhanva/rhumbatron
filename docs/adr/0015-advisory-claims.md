@@ -2,13 +2,13 @@
 
 ## Context
 
-ResourceShardDO implements Claims as renewable leases (AGENTS.md section 13.2): one active Claim
-per Project and semantic resource, `claim.*` events in the same transaction as the lease change
-(section 18), and expiry through the shard alarm (section 42.3). Conflict detection needs a signal
+ResourceShardDO implements Claims as renewable leases. Each Project and semantic resource has at
+most one active Claim. The shard writes `claim.*` events in the same transaction as the lease
+change. The shard alarm expires a Claim. Conflict detection needs a signal
 that two agents work on one resource at the same time.
 
 A blocking lock does not fit the product. Rhumbatron runs parallel agents on one resource, and it
-can fork two Candidates that implement one resource in two ways (sections 4 and 32.4). A lock that
+can fork two Candidates that implement one resource in two ways. A lock that
 makes agents wait serializes the work that must diverge and then converge with Evidence.
 
 ## Decision
@@ -56,18 +56,18 @@ Claims are advisory leases for agent runs.
   renewal, and R release requests to ResourceShardDO, plus the shard alarms that publish the
   outbox. That is about 2R(T + 2) Durable Object requests and the same number of feed rows in D1
   (`project_events`) through the projector. For R = 2 and T = 5, this is about 28 requests and 28
-  rows, far below the free daily limits (section 7.3).
+  rows, far below the free daily limits.
 
 ## Why not blocking Claims
 
-- A blocking Claim serializes parallel agents and prevents the two-Candidate fork. Section 32.3
-  says to fork and let Evidence decide, not to force consensus.
+- A blocking Claim serializes parallel agents and prevents the two-Candidate fork. Rhumbatron
+  forks Candidates and lets Evidence decide.
 - A blocking lock held by a stopped agent stalls a Change for up to one lease. An advisory lease
   only loses a signal for that time.
-- Section 59 asks for strong consistency of Claim ownership, not for exclusive write access to
-  source. Ownership stays strongly consistent: one active Claim per resource in one shard
-  transaction. Per-run Artifact forks already isolate source. Promotion safety comes from
-  compare-and-swap with executable evidence (section 36), not from Claims.
+- Claim ownership needs strong consistency. Source needs no exclusive write access. Ownership is
+  strongly consistent, because one shard transaction keeps one active Claim per resource. Per-run
+  Artifact forks isolate source. Promotion safety comes from compare-and-swap with executable
+  Evidence (ADR 0013).
 
 ## Diagram
 

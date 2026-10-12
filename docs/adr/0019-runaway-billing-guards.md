@@ -14,7 +14,7 @@ guards below put a limit on them.
 
 ## Decision
 
-Three layers.
+Rhumbatron uses three layers of guards.
 
 1. Code guards (first line).
    - `workers/coordinator/src/alarm-guard.ts`:
@@ -32,7 +32,7 @@ Three layers.
 2. Monitoring. During work sessions, run `bun run cost:report --alerts-only` every 15 minutes.
 3. Account budget alerts (backstop). The account sends an email to the owner when usage-based
    spend reaches $10, $25, and $100 (`envs/global`, `var.budget_alert_usd`).
-   - This is an adapter (AGENTS.md section 11.4): `terraform_data.budget_alerts` runs
+   - A Terraform adapter manages the alerts. `terraform_data.budget_alerts` runs
      `scripts/budget-alerts.ts`.
    - Provider 5.27.0 (the locked version) rejects the alert type `billing_budget_alert`.
    - The Terraform API token has no Notifications permission, so the adapter writes through the
@@ -46,8 +46,8 @@ Three layers.
 - An alarm loop costs at most 2,000 fires per object per day.
 - A capped ResourceShardDO stops lease expiry for the rest of the UTC day. Claims are advisory
   (ADR 0015), so this is safe.
-- Budget alerts follow billing data with a delay. They find slow leaks and missed loops, not a
-  spike within minutes. The code guards stop spikes.
+- Budget alerts follow billing data with a delay. They find slow leaks and missed loops. They are
+  too slow for a spike within minutes. The code guards stop spikes.
 - `local.paused` stops cron sweeps and Sandbox starts. It does not stop Durable Object alarms.
   The guards limit those.
 

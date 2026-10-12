@@ -2,11 +2,13 @@
 
 ## Context
 
-The frozen stack fixes Bun, Turborepo, TypeScript, Biome, Zod, Vitest, Terraform, and Wrangler.
-The repository also needs secret scanning, Git hooks, dependency hygiene, and a check of the
-Terraform-only rule. These are developer tools. They do not change the runtime stack.
+Rhumbatron's frozen stack contains Bun, Turborepo, TypeScript, Biome, Zod, Vitest, Terraform, and
+Wrangler. The repository also needs secret scanning, Git hooks, dependency hygiene, and a check of
+the Terraform-only rule. These are developer tools. They do not change the runtime stack.
 
 ## Decision
+
+Rhumbatron uses these developer tools.
 
 | Concern | Tool | Reason |
 |---|---|---|

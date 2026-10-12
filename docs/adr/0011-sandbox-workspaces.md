@@ -2,9 +2,9 @@
 
 ## Context
 
-Implementation Tasks must change and test real code (AGENTS.md sections 29.2 and 30). Cloudflare
-Sandboxes run on Containers. Rule 5 forbids a container deploy through Wrangler
-(`wrangler deploy`, `wrangler containers push`), and that deploy needs Docker. Provider 5.27 has
+Implementation Tasks must change and test real code. Cloudflare Sandboxes run on Containers.
+Rhumbatron does not deploy containers through Wrangler (`wrangler deploy`,
+`wrangler containers push`), and that deploy needs Docker. Provider 5.27 has
 no container application resource. ADR 0012 describes the Terraform adapter that deploys the
 Sandbox.
 
@@ -23,8 +23,8 @@ Sandbox.
 - `run_command` accepts only these commands: `bun install` (also with `--frozen-lockfile`),
   `bun test`, `bun run typecheck|test|bench|contract|build`, `bun run <name>` for a script in the
   workspace `package.json`, `bunx tsc --noEmit`, `git status|diff|log`, and `ls`. It rejects shell
-  metacharacters. A workspace build does not keep its output; Candidate composition builds it.
-- A Change can have at most 4 open coding Sandboxes (`maxActiveSandboxesPerChange`, section 44).
+  metacharacters. A workspace build does not keep its output. Candidate composition builds it.
+- A Change can have at most 4 open coding Sandboxes (`maxActiveSandboxesPerChange`).
   The workspace refuses an open above that limit before any fork. It also refuses an open when the
   monthly meter has no room. The agent then declares its Intent without code changes.
 

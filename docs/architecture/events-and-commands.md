@@ -2,8 +2,8 @@
 
 Rhumbatron keeps facts and work apart.
 
-- An **Event** is an immutable fact, for example `task.completed`. Events travel on K2.
-- A **Command** is a request for work, for example `agent.wake`. Commands travel on Queues.
+- An Event is an immutable fact, for example `task.completed`. Events travel on K2.
+- A Command is a request for work, for example `agent.wake`. Commands travel on Queues.
 
 No authoritative state change writes to K2 directly.
 A Durable Object writes the state change and the Event in one SQLite transaction (the outbox).
@@ -24,7 +24,7 @@ Most Change Events get a deterministic ID from `stableEventId` in `workers/integ
 The ID is `evt_` plus the first 16 bytes of SHA-256 over the Change ID, the Event type, the Task ID, and an optional key.
 A retried Workflow step writes the same Event ID again, and the outbox ignores the repeat.
 ProjectRootDO and ResourceShardDO use `crypto.randomUUID()` for Events that they create in their own transaction (for example `canonical.advanced` and `claim.acquired`).
-The transaction runs once, so the ID does not change on a retry.
+The transaction runs once, so a retry keeps the same ID.
 
 ## Transactional outbox to K2
 
@@ -53,7 +53,7 @@ Rules in the code (`workers/coordinator/src/outbox.ts`, `infrastructure/terrafor
 - There are 8 streams, `rhumbatron_events_00_prod` to `rhumbatron_events_07_prod`. K2 names allow only letters, digits, and underscores (ADR 0006).
 - Retention is 7 days (`retention_seconds = 604800`).
 - One Project always maps to one stream. Its Events stay in order on that stream.
-- The nudge is best effort. The cron sweep is the backstop. The cron visits one stream per minute, so each stream gets a sweep every 8 minutes. The pause switch removes the cron.
+- The nudge is best effort. The cron sweep catches what the nudge misses. The cron visits one stream per minute, so each stream gets a sweep every 8 minutes. The pause switch removes the cron.
 - A Terraform precondition fails the plan if the account would have more than 20 K2 streams (ADR 0017).
 - `AlarmGuard` (`alarm-guard.ts`) limits each Durable Object to 2,000 alarm fires per UTC day. An alarm with no due work is deleted.
 
@@ -72,7 +72,7 @@ stateDiagram-v2
 ```
 
 A failed row stays in the table with `last_error`, so an operator can see it.
-If K2 is down, the state change is still correct. Only the dashboard lags (section 42.6).
+If K2 is down, the state change is still correct. Only the dashboard lags.
 
 ## Event router: K2 pull consumer
 
@@ -108,7 +108,7 @@ Notes (`workers/event-router/src/index.ts`):
 - A dead-lettered K2 batch gets a `dead_letters` row with queue `k2-<consumer>`. An operator can only dismiss it (`poison-batch.ts`).
 - The archive key is `events/<yyyy>/<mm>/<dd>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz`. The R2 lifecycle deletes `events/` objects after 365 days.
 - Terraform creates four subscriptions: `causal-router`, `project-view-projector`, `audit-archiver`, and `analytics-projector`.
-- `analytics-projector` (`analytics.ts`) maps lifecycle Events to section 41.1 metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others). It writes one data point per fresh Event, at most 100 per tick, to the `rhumbatron_event_metrics_prod` dataset (binding `EVENT_METRICS`). The source points of other Workers stay in `METRICS`.
+- `analytics-projector` (`analytics.ts`) maps lifecycle Events to metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others). It writes one data point per fresh Event, at most 100 per tick, to the `rhumbatron_event_metrics_prod` dataset (binding `EVENT_METRICS`). Other Workers write their own data points to `METRICS`.
 
 ### Cron housekeeping
 
@@ -122,7 +122,7 @@ The same every-minute cron runs two bounded sweeps (`workers/event-router/src/ma
 ## Causal routing
 
 The causal router decides which Agents wake after each fresh Event (`workers/event-router/src/causal.ts`, `packages/causal-router`).
-Deterministic rules come first. Clef-flash on Workers AI decides only a prefix resource overlap.
+Deterministic rules run first. Clef-flash on Workers AI decides only a prefix resource overlap.
 
 ```mermaid
 flowchart TB
@@ -152,7 +152,7 @@ Notes:
 - The 1,000-command cap counts `change.dispatch`, `candidate.create`, and `agent.wake`. The router logs the dropped commands as errors.
 - `artifact.promoted` and `canonical.advanced` both queue `index.build` for the indexer. The cap does not count `index.build` or `candidates.recompose`.
 - After `canonical.advanced`, the router marks the promoted Candidate `promoted` and every other open Candidate on an older base `stale`. A Change in `awaiting_approval` with no verified Candidate returns to `verifying`. The `candidates.recompose` command then settles each stale Candidate. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release).
-- `task.completed` and `task.failed` free an Agent slot. If a ready Task waits at the 8-agent limit, the router dispatches the Change again.
+- `task.completed` and `task.failed` free an Agent slot. When a ready Task waits at the 8-agent limit, the router dispatches the Change again.
 - The wake consumer checks relevance again. A stale wake ends at once and counts as a false wakeup in Analytics Engine (`workers/agents/src/wake-consumer.ts`).
 
 ## Queues
@@ -203,7 +203,7 @@ The integration Worker consumes the `integration`, `verification`, and `release`
 
 Two commands start Workflows: `verification.start` (one per Candidate) and `release.start` (one per promoted generation with a live app).
 Each command carries a stable `commandId` and the idempotency key (Candidate ID or release ID).
-The consumer starts the Workflow with that key as the instance ID, so a redelivery finds the existing instance.
+The consumer uses that key as the Workflow instance ID, so a redelivery finds the existing instance.
 The producer starts the Workflow directly only if the send fails (`workers/integration/src/workflow-commands.ts`).
 
 The integration consumer also limits its own work (`MAX_DELIVERIES = 4` in `workers/integration/src/index.ts`):

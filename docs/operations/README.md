@@ -1,11 +1,11 @@
 # Operations
 
-These runbooks tell an operator how to deploy, release, pause, clean up, and watch the cost of Rhumbatron on prod. Prod is the only remote environment ([ADR 0024](../adr/0024-single-prod-environment.md)).
+These runbooks tell an operator how to deploy, release, pause, and clean up Rhumbatron on prod. They also tell the operator how to watch its cost. Prod is the only remote environment ([ADR 0024](../adr/0024-single-prod-environment.md)).
 
 ## Rules
 
-1. Terraform changes the remote control plane. Do not edit in the Cloudflare dashboard. Do not run `wrangler deploy` (`AGENTS.md` section 2, [ADR 0004](../adr/0004-resource-organization-and-bootstrap-credentials.md)).
-2. Stay within the Cloudflare free and included limits and the model spend cap (`AGENTS.md` section 7 and rule 50).
+1. Terraform changes the remote control plane. Do not edit in the Cloudflare dashboard. Do not run `wrangler deploy` ([ADR 0004](../adr/0004-resource-organization-and-bootstrap-credentials.md)).
+2. Stay within the Cloudflare free and included limits and the model spend cap. Check each new resource against these limits before you apply it.
 3. Only executable Evidence passes a release or promotion gate. Model confidence never passes a gate.
 
 ## Runbooks

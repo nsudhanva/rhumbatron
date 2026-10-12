@@ -2,7 +2,7 @@
 
 ## Context
 
-Agents need a real codebase (AGENTS.md section 29). Artifacts is Workers Paid only and in open
+Agents need a real codebase. Artifacts is Workers Paid only and in open
 beta. Each month includes 10,000 operations and 1 GB-month. Rhumbatron stays within that
 allowance.
 
@@ -10,8 +10,8 @@ allowance.
 
 - Terraform binds `ARTIFACTS` (namespace `rhumbatron-projects-prod`) on the integration, agents, and
   indexer Workers. Provider 5.27 has no namespace resource. Artifacts creates a namespace on first
-  use, so no adapter exists. Repositories are runtime data (section 2.1): one per Project, named
-  by the Project ID.
+  use, so no adapter exists. Repositories are runtime data. Each Project has one repository,
+  named by the Project ID.
 - Project creation queues `project.provision` on `rhumbatron-integration`. The integration Worker
   creates the repository and pushes the first commit with isomorphic-git over an in-memory file
   system. The binding has no write API, but Artifacts accepts the git push protocol v1. ADR 0022

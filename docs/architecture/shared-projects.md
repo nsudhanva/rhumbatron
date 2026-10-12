@@ -1,7 +1,7 @@
 # Shared Projects and simultaneous requests
 
 This page covers Project membership and roles, request review, the intake gate, the comparison of simultaneous requests, and the system arbiter.
-A role decides who can act. It never decides between two requests: the system does (ADR 0025, ADR 0028).
+A role decides who can act. It never decides between two requests. The system decides between them (ADR 0025, ADR 0028).
 
 Main source files:
 
@@ -28,7 +28,7 @@ Main source files:
 
 Membership is per Project.
 The D1 table `project_members` has one row for each user and Project.
-A person sees only the Projects that they own or that were shared with them.
+A person sees only the Projects that they own or that another person shares with them.
 Rhumbatron does not use Clerk Organizations.
 
 | Role | How the user gets it | Rank |
@@ -55,7 +55,7 @@ No build decision reads a role, `rank`, or `requester_rank`.
 3. After 7 days the invitation expires. The owner or an admin can then send a new one.
 4. `GET /v1/invitations` lists the pending invitations for the Clerk email addresses of the caller that have the status `verified`.
 5. `POST /v1/invitations/:invitationId/accept` checks that the invitation email is one of these addresses. If not, the API answers `404`, as for a missing invitation.
-6. The member row stores the user ID and the role of the invitation, not the email. A second accept returns the same result.
+6. The member row stores the user ID and the role of the invitation. It does not store the email. A second accept returns the same result.
 
 ### Roles and permissions
 
@@ -82,7 +82,7 @@ A refused action gets `403` with the text of `deniedMessage`: "Only the project 
 
 - `PATCH /v1/projects/:projectId/members/:userId` changes a role. It never changes the owner row.
 - `DELETE /v1/projects/:projectId/members/:userId` removes a person, or the caller leaves with their own user ID.
-- A person who leaves gets their open requests cancelled first. A removed person gets their `proposed` requests cancelled. Past Changes stay with the Project.
+- When a person leaves, the API first cancels their open requests. When the API removes a person, it cancels their `proposed` requests. Past Changes stay with the Project.
 
 ## Request review
 
@@ -188,10 +188,10 @@ Clef-flash alone never marks a duplicate.
 
 ### Duplicate check
 
-Sonnet answers one question for each remaining pair: which criteria of the other request, or which features of the current app, already deliver the new request?
+For each remaining pair, Sonnet finds the criteria of the other request, or the features of the current app, that already deliver the new request.
 The tool is `coverage_review`.
 A `duplicate` or `already_covered` verdict must quote source text with its packet ID.
-`validateCoverage` checks each quote: the text must be in that source of that target.
+`validateCoverage` checks that each quote is text of the cited source of that target.
 A covered verdict without a valid quote counts as `unsupported`.
 Sonnet runs twice: once with the new request first, once with the other items first.
 
@@ -234,7 +234,7 @@ Only the requester, the Project owner, or an admin can call it.
 
 When a `duplicate` Change ends by withdrawal or by the 7-day limit, it also gets `outcome = duplicate` and the related Change ID.
 A request gets at most 3 rounds of questions. After the third answer, it plans without the intake gate and without another question.
-The update is guarded on the open round. Of two answers to one round, one applies.
+The update has a guard on the open round. When two answers arrive for one round, only one applies.
 If the first workflow instance of the Change has ended, the answer starts a new instance with the ID `<changeId>_r<round>`.
 
 Each intake run writes a Decision Receipt to `change_decisions` (`decision_type = 'INTAKE'`) and records the event `change.intake.reviewed`.
@@ -250,11 +250,11 @@ After planning, the ChangeWorkflow step `check other requests` compares the Chan
 ### Admission and registration
 
 1. After the intake gate lets the Change plan, the workflow calls `admit` on ProjectRootDO. `admit` inserts a row in the SQLite table `request_scopes` and returns the admission order. The row starts with an empty scope (`scoped: false`).
-2. After planning, the workflow calls `registerScope` with the criteria (each has an ID) and the semantic resources of the Work Graph.
-3. `registerScope` runs in one ProjectRootDO transaction. It returns the scopes of all Changes with a lower admission order that are not released, and it stores this answer as a receipt.
+2. After planning, the workflow calls `registerScope` with the criteria and the semantic resources of the Work Graph. Each criterion has an ID.
+3. `registerScope` runs in one ProjectRootDO transaction. It returns each scope that has a lower admission order and is not released. It stores this answer as a receipt.
 4. A retry gets the same receipt. After an answer, the next pass keeps the receipt and updates the scope with the new criteria.
 
-A Change that waits for an answer before planning has no admission, so it does not hold back other requests.
+A Change that waits for an answer before planning has no admission, so it does not delay other requests.
 A `proposed` Change has no ChangeWorkflow, so it has no admission either. Its admission order starts when an owner or admin includes it.
 The later-admitted Change of a pair does the comparison, once for each clarification round.
 The workflow releases the scope of a Change that ends as `completed`, `failed`, `cancelled`, or `not_selected`.
@@ -315,7 +315,7 @@ The verdict is `independent`, `compatible`, `conflicting`, or `duplicate`.
 - `dependentOnConflict` lists the criteria that only make sense if a conflicting criterion of the same side holds.
 - For `duplicate`, `covered` maps each criterion of the later Change to the earlier criterion that delivers it, with a quote.
 
-`validateRequestReview` rejects the answer in these cases (AGENTS.md section 34.4.2):
+`validateRequestReview` rejects the answer in these cases:
 
 - The JSON does not match the schema, or the model returns no tool call or more than one.
 - A conflict cites an ID that is not a criterion of that Change.
@@ -412,13 +412,20 @@ The insert in `recomposeStaleCandidate` (`workers/integration/src/recompose.ts`)
 - The Project page lists Changes in a table with a `Requested by` column.
 - Each Change row has an outcome line: `Waiting for an admin to include it` for a `proposed` request, `Declined by <name>: <reason>`, `Not selected: <reason>` with the link "View the selected change", `Selected`, `Partially selected`, `Replaces earlier request`, or `Duplicate: <reason>`.
 - The New change form is hidden from a viewer. When a member's requests need review, the form shows "An admin reviews requests before anything is built." under Submit.
-- A `proposed` Change reads "Waiting for an admin to include it". The requester can withdraw it ("Withdraw request"). An owner or admin sees Include and Decline under Needs attention; Decline asks for an optional reason in place. A `declined` Change reads "Not built: declined by <name>: <reason>".
+- A `proposed` Change reads "Waiting for an admin to include it". The requester can withdraw it ("Withdraw request"). An owner or admin sees Include and Decline under Needs attention. Decline asks for an optional reason in place. A `declined` Change reads "Not built: declined by <name>: <reason>".
 - A `needs_input` Change shows the summary, the questions, and a link to the related request. The requester, an admin, and the owner get the actions "Send answers", "Build it as it is", and "Withdraw request".
 - The `Conflicting requests` card shows both goals, the cited criteria or covered quotes, and the winner. It reads `GET /v1/changes/:changeId/request-conflicts` (up to 10 `conflicting` or `duplicate` rows).
-- The Board (`/projects/:projectId/board`, sidebar item after Changes) reads `GET /v1/projects/:projectId/board`. Columns: Proposed, Needs answer, Building, Checking, Shipped, Not built. "By person" shows one lane per person (initial, name, role, counts); "By stage" shows one lane; a Person filter narrows to one lane. A card shows the title (else the goal), the requester, the status, Tasks done of total, the agents at work (Task title, tier H, S or O, a pulse while running), and the age; it opens the Change. An owner or admin includes a Proposed card with Include or by dragging it to Building, and declines it with Decline. The card moves at once and moves back when the API refuses. Live signals refresh the Board; without the socket it polls every 10 seconds. On a phone the columns scroll sideways inside the Board.
+- The Board (`/projects/:projectId/board`, sidebar item after Changes) reads `GET /v1/projects/:projectId/board`. The columns are Proposed, Needs answer, Building, Checking, Shipped, and Not built. "By person" shows one lane per person (initial, name, role, counts). "By stage" shows one lane. A Person filter shows only one lane. A card shows the title (else the goal), the requester, the status, Tasks done of total, the agents at work (Task title, tier H, S or O, a pulse while the Task runs), and the age. A click on a card opens the Change. An owner or admin includes a Proposed card with Include or by a drag to Building, and declines it with Decline. The card moves at once and moves back when the API refuses. Live signals refresh the Board. Without the socket, the Board polls every 10 seconds. On a phone, the columns scroll sideways inside the Board.
 - The Project header has a Share dialog for an owner or admin and a Members dialog for everyone else. The API shows invitations only to the owner and admins. It shows the email of a member only to the owner, admins, and that member.
-- The People section and the Share dialog show each person's role. An owner or admin changes a role with a select per person and invites with a role; only the owner gives or removes the admin role. The owner role is never assignable.
-- The Settings page (`/projects/:projectId/settings`) has these sections: General (name, slug, live app host, created date), People (members, roles, and invitations), Defaults (the default Change budget, 0.5 to 25 USD, the Project monthly budget, 1 to 100 USD with this month's spend, and "Member requests need review: On / Off"), Display (the Events page default view, Product or Systems, stored in the browser), and Danger zone (Delete project for the owner, Leave project for everyone else). A member or viewer sees the values as read-only, with the line "Only the project owner or an admin can change these."
+- The People section and the Share dialog show each person's role. An owner or admin changes a role with a select per person and invites with a role. Only the owner gives or removes the admin role. The owner role is never assignable.
+- The Settings page (`/projects/:projectId/settings`) has these sections:
+  - General: name, slug, live app host, created date.
+  - People: members, roles, and invitations.
+  - Defaults: the default Change budget (0.5 to 25 USD), the Project monthly budget (1 to 100 USD, with this month's spend), and "Member requests need review: On / Off".
+  - Display: the Events page default view (Product or Systems), stored in the browser.
+  - Danger zone: Delete project for the owner, Leave project for everyone else.
+
+  A member or viewer sees the values as read-only, with the line "Only the project owner or an admin can change these."
 - The Account page (`/account`, in the sidebar footer under the person's name) sets "My monthly budget" (1 to 100 USD) and shows this month's spend across Projects.
 - The New change form has a Budget selector: "This request" with an amount, "Project budget" (only when the Project has a monthly budget), and "My budget" (only when the person set one). Each pool shows the money left this month. See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
 - The home page has a `Shared with you` section and the pending invitations.

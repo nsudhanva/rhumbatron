@@ -2,9 +2,9 @@
 
 ## Context
 
-K2 streams and subscriptions carry the event log (AGENTS.md section 19). Provider 5.27 has no K2
-resource. AGENTS.md section 11.4 steps 6 to 10 apply. K2 billing is not enabled in the beta.
-Rhumbatron stays within free limits (rule 50).
+K2 streams and subscriptions carry the event log. Provider 5.27 has no K2 resource. When the
+provider has no resource for a required product, Rhumbatron uses an idempotent adapter that only
+`terraform apply` runs. K2 billing is not enabled in the beta. Rhumbatron stays within free limits.
 
 ## Decision
 
@@ -18,8 +18,8 @@ Rhumbatron stays within free limits (rule 50).
 - Prod has 8 streams `rhumbatron_events_NN_prod` with 7-day retention. Each stream has the
   subscriptions `causal-router`, `project-view-projector`, `audit-archiver`, and
   `analytics-projector`.
-- K2 names allow only letters, digits, and underscores. So K2 streams do not use the hyphenated
-  naming pattern (ADR 0004).
+- K2 names allow only letters, digits, and underscores. For this reason, the K2 stream names do
+  not use the hyphenated naming pattern (ADR 0004).
 - The account allows 20 streams, and other projects share them. A plan-time precondition
   (`data.external.k2_inventory`, `scripts/k2-read.ts` in inventory mode) fails the plan when the
   other streams plus 8 are more than 20. `k2-sync.ts` applies the same check at apply time.
@@ -31,7 +31,7 @@ K2 has no push delivery to Workers. Consumers pull over HTTP with leases and ack
 - `rhumbatron-event-router` consumes all four subscriptions:
   - `project-view-projector` updates ProjectViewDO and the event feed rows in D1.
   - `causal-router` runs the Causal Router and sends commands to Queues.
-  - `audit-archiver` writes NDJSON batches to R2 `events/` (AGENTS.md section 19.1).
+  - `audit-archiver` writes NDJSON batches to R2 `events/`.
   - `analytics-projector` writes Analytics Engine data points.
 - Fast path: after a successful publish, the coordinator calls the router RPC `nudge(streamIndex)`
   through the `EVENT_ROUTER` service binding. The UI then shows events within seconds. The nudge

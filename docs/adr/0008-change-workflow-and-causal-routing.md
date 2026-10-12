@@ -2,14 +2,14 @@
 
 ## Context
 
-One Change becomes a Work Graph, and only causally affected Agents wake (AGENTS.md sections 21.1
-and 31). Task state needs idempotent transitions and durable events. ProjectRootDO stays cold
-(section 13.1).
+Rhumbatron compiles one Change into a Work Graph. Only causally affected Agents wake. Task state
+needs idempotent transitions and durable events. ProjectRootDO holds only cold project-wide state.
 
 ## Decision
 
 - `POST /v1/projects/:id/changes` starts `ChangeWorkflow` (Cloudflare Workflows, integration
-  Worker) with instance ID = Change ID. `startPlanning: false` does not start it (smoke checks).
+  Worker) with instance ID = Change ID. A request with `startPlanning: false` does not start it.
+  Smoke checks use this option.
 - Steps (`workers/integration/src/change-workflow.ts`):
   1. Load the Change. Mark it `compiling`.
   2. Run the intake gate (ADR 0025). A question makes the Change `needs_input`, and the workflow
@@ -26,8 +26,8 @@ and 31). Task state needs idempotent transitions and durable events. ProjectRoot
     (ADR 0022). A plan that breaks this rule gets the repair turn.
   - A UI Task and an API Task of the same area with no dependency path between them get the edge
     UI -> API. No model call adds it. The UI agent then reads the real API routes.
-- Each step is idempotent: deterministic Task IDs, `INSERT OR IGNORE`, conditional status updates,
-  and stable event and command IDs.
+- Each step is idempotent. The steps use deterministic Task IDs, `INSERT OR IGNORE`, conditional
+  status updates, and stable event and command IDs.
 - Tasks and dependency edges are in D1. R2 stores the Work Graph JSON under
   `work-graphs/<project>/<change>.json`, with the planner model, tokens, and cost.
 - Change and Task events go to the outbox of the ResourceShardDO that owns `change:<id>`

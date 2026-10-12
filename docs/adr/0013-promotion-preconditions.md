@@ -2,26 +2,37 @@
 
 ## Context
 
-AGENTS.md section 36 lists eight preconditions before one atomic `S<n> -> S<n+1>` transition.
-Most of them read data that ProjectRootDO does not own. Candidate status, the Verification Plan,
-Evidence, and approvals are D1 rows. The Candidate commit is in an Artifacts fork. ProjectRootDO
-owns only the Canonical Generation, tree, ref, and active policy version. A Durable Object that
-reads D1 inside its transaction cannot make those reads atomic with its own state. D1 reads also
-make the most important correctness boundary depend on a second database.
+Promotion is one atomic `S<n> -> S<n+1>` transition. Eight preconditions must be true before it:
+
+1. The Candidate status is `verified`.
+2. The required Evidence exists.
+3. The required Evidence has the pass state.
+4. The required human approval exists.
+5. The policy version is valid.
+6. The current Canonical Generation equals the expected generation.
+7. The current canonical tree equals the expected tree, when the tree check is on.
+8. The Candidate Artifact still exists.
+
+Most of these preconditions read data that ProjectRootDO does not own. Candidate status, the
+Verification Plan, Evidence, and approvals are D1 rows. The Candidate commit is in an Artifacts
+fork. ProjectRootDO owns only the Canonical Generation, tree, ref, and active policy version. A
+Durable Object that reads D1 inside its transaction cannot make those reads atomic with its own
+state. D1 reads also make the most important correctness boundary depend on a second database.
 
 ## Decision
 
-Two steps, in this order, for `POST /v1/candidates/:candidateId/promote`:
+Rhumbatron checks the preconditions for `POST /v1/candidates/:candidateId/promote` in two steps,
+in this order.
 
 1. **Integration Worker (`promoteCandidate` RPC).** The API authenticates the user, checks that
-   the user is the Project owner (ADR 0023), and calls the integration Worker over the
+   the user is a Project owner or admin (ADR 0028), and calls the integration Worker over the
    `INTEGRATION` service binding. The integration Worker has no public route. It reads the
    authoritative rows and checks them with the pure function `checkPromotion`
    (`packages/evidence/src/promotion.ts`):
    - rule 1: the Candidate status is `verified`, and its base is the current generation;
    - rules 2 and 3: `gateRequiredChecks` gates the required checks again from the `evidence_index`
      rows. It never trusts the cached `score_json` gate. Only `checked_supported` plus `pass`
-     satisfies a check (section 34.4.1);
+     satisfies a check;
    - rule 4: when the plan or the policy risk tiers require it, a `granted` approval exists for
      the exact composed tree. A `rejected` approval always blocks;
    - rule 5 (early): the policy version of the plan equals the active version;
@@ -30,27 +41,27 @@ Two steps, in this order, for `POST /v1/candidates/:candidateId/promote`:
      ADR 0026).
 
    `checkPromotion` returns every block at once. Then the Worker builds and Zod-validates a
-   section 36 `PromotionRequest` and records `canonical.promotion.requested`.
-2. **ProjectRootDO (`promote`).** It decides on its own state, in one SQLite transaction:
-   rule 5 (authoritative policy version), rule 6 (expected generation = current), and rule 7
+   `PromotionRequest` and records `canonical.promotion.requested`.
+2. **ProjectRootDO (`promote`).** It decides on its own state in one SQLite transaction. It
+   checks rule 5 (authoritative policy version), rule 6 (expected generation = current), and rule 7
    (expected tree = current, when the Candidate recorded its `base_tree`). It writes the next
    generation and the `canonical.advanced` outbox row together. The Event records
    `requiredEvidenceIds` and `approvalId` for audit.
 
 The expected generation is always the `base_generation` of the Candidate. The browser cannot
-choose it. The idempotency key is the Candidate ID plus the expected generation (section 60): a
+choose it. The idempotency key is the Candidate ID plus the expected generation. A
 retry returns `alreadyPromoted`. A generation or tree mismatch marks the Candidate `stale` and
-records `candidate.stale`. No blind retry occurs (section 42.9).
+records `candidate.stale`. Rhumbatron does not retry a stale promotion blind.
 
 ### Approvals
 
 `POST /v1/changes/:changeId/approve` records one decision per Candidate in `approvals`
-(migration 0008). The approver is the authenticated Project owner from the session, never from the
+(migration 0008). The approver is the authenticated Project owner or admin from the session, never from the
 request body. Only a verified Candidate that needs approval can get a decision. The first decision
 is final, and an identical repeat returns the stored row. A rejection also sets the Candidate to
 `rejected`. The policy is deterministic (`approvalRequired`, `checkApprovalDecision`). No model
-takes part. `approval.requested` is recorded for a verified Candidate that needs approval: a
-Candidate without siblings, or the winner of a selection (ADR 0026). `approval.granted` or
+takes part. The integration Worker records `approval.requested` for a verified Candidate that
+needs approval. That Candidate has no siblings, or it is the winner of a selection (ADR 0026). `approval.granted` or
 `approval.rejected` is recorded with the decision.
 
 ### Canonical source after promotion
@@ -64,7 +75,7 @@ the canonical commit, so the integration Worker writes it only after `main` move
 ref is `artifacts://<project>@<commit>`.
 
 If the sync fails, the generation stays advanced, and the response has `sourceSynced: false`.
-Promote again to repair it: the retry is `alreadyPromoted` and runs the sync again. Until the sync
+To repair it, promote again. The retry is `alreadyPromoted` and runs the sync again. Until the sync
 succeeds, the first step of a Candidate verification waits (bounded retries). It does not compose
 on a commit that `main` does not have. The sync uses no Sandbox time.
 
@@ -89,7 +100,8 @@ on a commit that `main` does not have. The sync uses no Sandbox time.
   Evidence row). Evidence IDs are stable per check. Only the verification workflow of a Candidate
   writes its Evidence, and that workflow is finished when the Candidate is `verified`.
 - The API Worker has the `INTEGRATION` service binding (Terraform `api_worker`).
-- The approver can also be the author of the Change. Only the Project owner can approve (ADR 0023).
+- The approver can also be the author of the Change. Only the Project owner and admins can
+  approve (ADR 0028).
 - The rules in ProjectRootDO are the pure function `decidePromotion`
   (`workers/coordinator/src/promotion-cas.ts`). The order is: already promoted, generation, tree,
   then policy version.
@@ -109,7 +121,7 @@ Preconditions in the integration Worker (`checkPromotion`).
 
 ```mermaid
 flowchart TD
-  S["POST /v1/candidates/:id/promote"] --> M["API: session and<br/>Project owner"]
+  S["POST /v1/candidates/:id/promote"] --> M["API: session and<br/>Project owner or admin"]
   M --> R["integration.promoteCandidate"]
   R --> C1{"1. status verified,<br/>base = canonical generation?"}
   C1 -- no --> X["stale or blocked"]

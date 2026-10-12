@@ -1,7 +1,7 @@
 # Tech stack
 
 This page lists each technology that Rhumbatron uses and what it does.
-The source is the code, the `wrangler.jsonc` files, the `package.json` files, `bun.lock`, and the Terraform roots.
+The sources are the code, the `wrangler.jsonc` files, the `package.json` files, `bun.lock`, and the Terraform roots.
 Versions are the pinned versions.
 
 ## How the parts connect
@@ -52,8 +52,8 @@ flowchart LR
 
 ### Replay and filters
 
-- One replay controller serves the execution timeline on the Project overview and the Agents graph (`src/components/replay`). The `useReplay` hook has two modes. Live is the default: the view shows the newest state and follows new facts. Replay shows the state at a playhead. Play moves the playhead through the recorded facts at 1x, 2x, 4x, or 8x on `requestAnimationFrame`. At 1x one minute of recorded time plays in one second, and each pause between two facts takes 0.2 to 1.5 s. Under reduced motion the playhead holds at each fact and then steps to the next one. The control bar has play and pause, the speeds, the replay clock, a range with a tick per notable fact, and Live. Keys: Space plays or pauses, Left and Right step between facts, Home goes to the first fact, L goes live.
-- Timeline replay (`components/timeline/timeline-replay.ts`): an accent playhead sweeps the time axis. Attempt bars and Change spans show up to the playhead through a CSS clip that follows it every frame, so the layout does not move. Markers appear when the playhead passes them. The "Needs attention" rail shows the open questions, approval requests, Challenges, and failed commands at the playhead.
+- One replay controller serves the execution timeline on the Project overview and the Agents graph (`src/components/replay`). The `useReplay` hook has two modes. Live is the default. In Live, the view shows the newest state and follows new facts. Replay shows the state at a playhead. Play moves the playhead through the recorded facts at 1x, 2x, 4x, or 8x on `requestAnimationFrame`. At 1x one minute of recorded time plays in one second, and each pause between two facts takes 0.2 to 1.5 s. Under reduced motion the playhead holds at each fact and then steps to the next one. The control bar has play and pause, the speeds, the replay clock, a range with a tick per notable fact, and Live. Space plays or pauses. Left and Right step between facts. Home goes to the first fact. L goes live.
+- Timeline replay (`components/timeline/timeline-replay.ts`): an accent playhead sweeps the time axis. Attempt bars and Change spans show up to the playhead. A CSS clip follows the playhead every frame, so the layout stays still. Markers appear when the playhead passes them. The "Needs attention" rail shows the open questions, approval requests, Challenges, and failed commands at the playhead.
 - Agents replay (`components/agents-page/agents-replay.ts`): Change and Task nodes appear when they were created (`task.created` or `change.compiled` from one page of the Change's oldest events, read once per Change). An agent appears when its first attempt starts. While an attempt runs, the agent shows its tier (H, S, O), a pulse, and a progress line for the recorded duration. Retries and escalations show in its meta line. Conflict edges appear as suspected when detected and take their recorded state at their last update. A strip under the graph shows one lane per agent with the playhead, and the latest steps as text. A polite live region reads the current step.
 - Events filters (`components/dag/filter-search.ts`, `components/events-page/events-filter-bar.tsx`): text search over the event type, summary, and IDs; person; Change by its short title; Task or agent; event type group; and time range. The filter lives in the URL (`?q=&person=&change=&task=&group=&range=`), and the List and Graph views share it. `change` also scopes the stream on the server, so "Load older" reads further back in that Change. The other fields filter the loaded events. The bar shows the number of set fields and a Clear button.
 
@@ -179,22 +179,24 @@ flowchart LR
 
 Thinking effort is low for haiku, medium for sonnet, and high for opus.
 Routed Agent steps cap output at 4,000 tokens for haiku and 8,000 tokens for sonnet and opus.
-Two failures at one tier move the Task up one tier. Two failures at the top tier send it back to re-planning.
+Two failures at one tier move the Task up one tier. Two failures at the top tier stop the Task with limit `max_attempts_per_tier`, and the Change becomes `budget_blocked`.
 A transport failure retries once at the same tier and never escalates (`packages/model-router/src/escalation.ts`).
 The caps are 400 agent model calls per day and an Anthropic budget of 100 USD per calendar month (`packages/model-router/src/budget.ts`, Terraform `anthropic_monthly_budget_usd`).
 
-## Differences from AGENTS.md section 5
+## Stack decisions
 
-| AGENTS.md says | The code does |
+Each row names one area and the choice that the code makes in it.
+
+| Area | Choice in the code |
 |---|---|
-| Claude Opus 5.5 plans and arbitrates | Sonnet 5.5 does this while `ALLOW_OPUS` is `false` (ADR 0021) |
-| Model providers: Anthropic or OpenAI | Anthropic only (ADR 0021) |
-| Clef for richer bounded decisions | Only Clef-flash runs. No code path calls Clef |
-| Seven deployables | Nine Workers: the seven, plus `rhumbatron-sandbox` (ADR 0012) and `rhumbatron-apps` (ADR 0020). The docs site is a tenth, assets-only Worker |
-| First-party Terraform resources for new products | `terraform_data` adapters for K2, Vectorize, the Sandbox Worker, and the apps Worker |
-| Demo shop fixture in Artifacts (section 54) | Each Project starts from an empty repository (ADR 0022) |
-| Components and charts: kumo and Recharts | kumo. No chart library |
-| Traces: OpenTelemetry and Cloudflare tracing | No tracing. Durable Object Workers set `traces.enabled = false` |
-| WAF, rate limiting, Turnstile, Access | None configured. The AI Gateway has a request rate limit |
-| Several GitHub Actions workflows | One `ci.yml`. Deployment runs locally through Terraform |
-| `PiAgentRuntime` implements `AgentRuntime` | `AgentDO` implements `AgentRuntime` and runs Pi through `PiHarness` of the Agents SDK (ADR 0009) |
+| Planning and arbitration | Sonnet 5.5 while `ALLOW_OPUS` is `false` (ADR 0021) |
+| Model provider | Anthropic only (ADR 0021) |
+| Bounded decision models | Only Clef-flash runs. No code path calls Clef |
+| Deployables | Nine Workers, including `rhumbatron-sandbox` (ADR 0012) and `rhumbatron-apps` (ADR 0020). The docs site is a tenth, assets-only Worker |
+| Products without a first-party Terraform resource | `terraform_data` adapters for K2, Vectorize, the Sandbox Worker, and the apps Worker |
+| Project source at creation | Each Project starts from an empty repository (ADR 0022) |
+| Components and charts | kumo. No chart library |
+| Tracing | No OpenTelemetry or Cloudflare tracing. Durable Object Workers set `traces.enabled = false` |
+| Edge protection | No WAF, rate limiting, Turnstile, or Access. The AI Gateway has a request rate limit |
+| CI/CD | One `ci.yml`. Deployment runs locally through Terraform |
+| Agent runtime | `AgentDO` implements `AgentRuntime` and runs Pi through `PiHarness` of the Agents SDK (ADR 0009) |

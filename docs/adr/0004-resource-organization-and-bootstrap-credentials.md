@@ -7,15 +7,16 @@
    Durable Object namespaces. Provider 5.27 manages tags only on `cloudflare_worker`.
 2. Terraform needs an API token before it can run, and the state backend needs an R2 key. The
    `cf` CLI OAuth session can create account tokens, but it cannot grant "Account API Tokens
-   Write". So a Terraform token that the CLI creates cannot create the backend key in Terraform.
+   Write". For this reason, a Terraform token that the CLI creates cannot create the backend key in
+   Terraform.
 
 ## Decision
 
 ### Organization
 
-- Name each resource `rhumbatron-<component>-<env>`, with `env` in `prod` and `global`.
-  `scripts/check-guardrails.ts` enforces this for Terraform names.
-- Tag each `cloudflare_worker` resource with `project:rhumbatron`, `env:<env>`,
+- Each resource name is `rhumbatron-<component>-<env>`, with `env` in `prod` and `global`.
+  `scripts/check-guardrails.ts` enforces this rule for Terraform names.
+- Terraform tags each `cloudflare_worker` resource with `project:rhumbatron`, `env:<env>`,
   `component:<component>`, and `managed-by:terraform` (`modules/worker` and `envs/prod/docs.tf`).
   The Durable Object Workers (`cloudflare_workers_script`) and the adapter-deployed Sandbox and
   apps Workers have no tags attribute. Their names group them.

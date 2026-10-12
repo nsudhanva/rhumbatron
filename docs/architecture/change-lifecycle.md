@@ -3,7 +3,7 @@
 This page follows one user goal from the browser to a release in three sequence diagrams.
 Then it shows the status state machines.
 
-The path uses these stable IDs (`AGENTS.md` section 60):
+The path uses these stable IDs:
 
 | Object | ID rule | Source |
 |---|---|---|
@@ -19,9 +19,9 @@ The path uses these stable IDs (`AGENTS.md` section 60):
 ## Part 1: from goal to ready Tasks
 
 The API stores the Change and starts one ChangeWorkflow (request field `startPlanning`, default `true`).
-The API returns before any model call (section 58).
-A member's request waits for review first (ADR 0028): while the Project setting `memberRequestReview` is on, the API stores it as `proposed` and starts no ChangeWorkflow.
-When an owner or admin includes it, the Change becomes `created` at the current Canonical Generation, and the integration Worker starts the ChangeWorkflow with the same instance ID.
+The API returns before any model call.
+A member's request waits for review first (ADR 0028). While the Project setting `memberRequestReview` is on, the API stores the request as `proposed` and starts no ChangeWorkflow.
+When an owner or admin includes the request, the Change becomes `created` at the current Canonical Generation. The integration Worker then starts the ChangeWorkflow with the same instance ID.
 [Shared Projects](shared-projects.md#request-review) describes the review.
 The ChangeWorkflow runs the intake gate, calls the Root Planner, and compares the plan with the other open requests.
 Then it stores the Work Graph and dispatches the ready Tasks.
@@ -74,11 +74,11 @@ sequenceDiagram
 Notes:
 
 - The Root Planner routes to the `opus` tier (`taskKind = plan`, `complexity = large`). With `ALLOW_OPUS` set to `false` (the Terraform default), the `opus` tier runs on Sonnet 5.5 (ADR 0021).
-- The plan has a `title`: a short title for the request, at most 6 words. The planner sees the goal with the clarification answers, so the title names the final request. `parsePlan` cuts the title to 48 characters at a word boundary. A missing title never causes a repair turn. The ChangeWorkflow writes it to D1 `changes.title` with the Tasks. Without a title, the API shows `fallbackTitle(goal)` (`packages/protocol/src/change-title.ts`).
+- The plan has a short `title` for the request, at most 6 words. The planner sees the goal with the clarification answers, so the title names the final request. `parsePlan` cuts the title to 48 characters at a word boundary. A missing title never causes a repair turn. The ChangeWorkflow writes it to D1 `changes.title` with the Tasks. Without a title, the API shows `fallbackTitle(goal)` (`packages/protocol/src/change-title.ts`).
 - The prompt asks for 2 to 8 Tasks. The schema accepts 1 to 12 (`MAX_TASKS_PER_CHANGE`). The planner makes at most two model calls: the plan and one repair turn.
-- A UI Task that calls routes of another Task must depend on that Task. The prompt states the rule. `parsePlan` (`workers/integration/src/root-planner.ts`) also repairs the plan without a model call. A UI Task and an API Task on the same area (first resource segment, `todos` in `todos:ui` and `todos:api`) with no dependency path between them get the edge UI → API.
+- A UI Task that calls routes of another Task must depend on that Task. The prompt states the rule. `parsePlan` (`workers/integration/src/root-planner.ts`) also repairs the plan without a model call. It adds the edge UI → API between a UI Task and an API Task on the same area when no dependency path joins them. The area is the first resource segment, for example `todos` in `todos:ui` and `todos:api`.
 - The Work Graph JSON goes to R2 at `work-graphs/<project>/<change>.json`.
-- Change Events go to the ResourceShardDO that owns `change:<id>`. This keeps ProjectRootDO cold (section 13.1).
+- Change Events go to the ResourceShardDO that owns `change:<id>`. This keeps ProjectRootDO cold.
 - The API writes the Change to ProjectViewDO directly.
 - The intake gate records `change.intake.reviewed` and an `INTAKE` Decision Receipt in D1 `change_decisions`. An answer records `change.clarification.answered`.
 - A `needs_input` Change waits for the event `clarification` and reads D1 once a day. After 7 days without an answer, the Change is `cancelled`. After 3 answered rounds, the Change plans without another question.
@@ -127,7 +127,7 @@ Notes:
 
 - Only Task kinds `implement`, `migrate`, and `test` get a workspace. Other kinds get read-only file tools.
 - A Task with dependencies starts on a stacked workspace: canonical plus the dependency ChangeSets. See [Agents and models](agents-and-models.md#stacked-workspaces).
-- Conflict detection is deterministic and runs before `task.completed`. A model review (Sonnet tier, then Opus tier) runs later from a durable schedule, never on the run path.
+- Conflict detection is deterministic and runs before `task.completed`. A model review (Sonnet tier, then Opus tier) runs later from a durable schedule and stays off the run path.
 - Conflict detection and conflict review read protected resources from the Project policy row (D1 `project_policies`, `protectedResources`). A Project without a row, or with a row that does not parse, has no protected resources there.
 - When the last Task completes, AgentDO moves the Change to `verifying` and records `verification.started` with reason `work_graph_completed`.
 
@@ -176,19 +176,19 @@ sequenceDiagram
 
 Notes:
 
-- Integrate before fork: a `confirmed` or `fork_required` conflict between two Tasks on different semantic resources (an API and its UI) creates no Candidate. The dependent Task gets a dependency edge and re-runs once on a stacked workspace with the other Task's ChangeSet. The Change returns to `running`. One Candidate then holds both ChangeSets.
+- The integrate rule runs before the fork rule. A `confirmed` or `fork_required` conflict between two Tasks on different semantic resources (an API and its UI) creates no Candidate. The dependent Task gets a dependency edge and re-runs once on a stacked workspace with the other Task's ChangeSet. The Change returns to `running`. One Candidate then holds both ChangeSets.
 - `candidate.create` waits while a conflict review reserved in the last 10 minutes is still open. The last Queue delivery composes anyway.
-- A verified Candidate does not promote while a sibling on the same base still composes or verifies. A winner that does not meet every acceptance criterion never auto-promotes: the Change is `awaiting_approval`. See [Source and verification](source-and-verification.md#sibling-candidates-and-selection).
-- Auto-promotion applies when the winner needs no human approval and the Project's policy `autoPromoteRiskTiers` lists the Change risk tier. The policy is the D1 `project_policies` row; without a row it is `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`), which lists `low`. The CandidateVerificationWorkflow then calls `promoteCandidate` with actor `system:auto-promotion`, and `canonical.promotion.requested` records `trigger: "auto"`. All section 36 preconditions apply (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
+- A verified Candidate does not promote while a sibling on the same base still composes or verifies. A winner that does not meet every acceptance criterion never auto-promotes. Its Change goes to `awaiting_approval`. See [Source and verification](source-and-verification.md#sibling-candidates-and-selection).
+- Auto-promotion applies when the winner needs no human approval and the Project's policy `autoPromoteRiskTiers` lists the Change risk tier. The policy is the D1 `project_policies` row. Without a row, the policy is `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`), which lists `low`. The CandidateVerificationWorkflow then calls `promoteCandidate` with actor `system:auto-promotion`, and `canonical.promotion.requested` records `trigger: "auto"`. Every promotion precondition applies (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
 - The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a live app, else `completed`. The release ends the Change as `completed` (deployed or superseded) or `failed`. See [Live apps](live-apps.md#promotion-and-release).
-- Every end after promotion records `change.completed` or `change.failed`. The projector maps `build.started` to `releasing`. These Events move ProjectViewDO out of `promoting` (section 13.3).
-- A Change still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes, the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change (at most 10 per sweep). The integration Worker then re-checks the Change:
+- Every end after promotion records `change.completed` or `change.failed`. The projector maps `build.started` to `releasing`. These Events move ProjectViewDO out of `promoting`.
+- A Change that is still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes, the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change (at most 10 per sweep). The integration Worker then re-checks the Change:
   1. A release that already finished settles the Change.
   2. A `queued` or `building` release becomes `failed`, and the Change becomes `failed`.
   3. A Project without a live app completes the Change.
   4. A Project with a live app but no release row gets a `failed` release row, and the Change becomes `failed`.
   The generation stays promoted. The next promotion releases as usual.
-- After `canonical.advanced`, the causal router marks every other `composing`, `verifying`, or `verified` Candidate on an older base `stale`. The router does not compose. It queues one `candidates.recompose` command. Promotion runs the same sweep (`settleStaleBehind` in `workers/integration/src/recompose.ts`). The sweep takes each `verified` Candidate on an older base, and each `stale` Candidate whose Change has no other active Candidate and none on a newer base. The order against the router sweep has no effect.
+- After `canonical.advanced`, the causal router marks every other `composing`, `verifying`, or `verified` Candidate on an older base `stale`. The router does not compose. It queues one `candidates.recompose` command. Promotion runs the same sweep (`settleStaleBehind` in `workers/integration/src/recompose.ts`). The sweep takes each `verified` Candidate on an older base. It also takes each `stale` Candidate whose Change has no other active Candidate and none on a newer base. The order of the two sweeps has no effect.
 - Every stale Candidate ends in one of three states: a new Candidate on the new canonical state, a `blocked` Change with a plain reason, or a closed Change. A lineage recomposes at most 2 times (`MAX_RECOMPOSES`). A Change never waits in `verifying` with nothing running.
 
 ## Status state machines
@@ -237,7 +237,7 @@ The pure rules are in `workers/integration/src/change-status.ts`.
 | Rule | Source |
 |---|---|
 | A person can cancel a Change in `proposed`, `created`, `compiling`, `needs_input`, `running`, `verifying`, `awaiting_approval`, `budget_blocked`, or `blocked`. A Change with a promoted Candidate cannot be cancelled. | `CANCELLABLE_FROM`, `cancelChange` in `change-commands.ts` |
-| Only an owner or admin moves a `proposed` Change: include to `created`, decline to `declined`. Each update is guarded on `proposed`; a repeat returns the stored result. | `includeChange`, `declineChange` in `change-commands.ts` |
+| Only an owner or admin moves a `proposed` Change: include to `created`, decline to `declined`. Each update has a guard on `proposed`. A repeat returns the stored result. | `includeChange`, `declineChange` in `change-commands.ts` |
 | A later request that wins the system arbiter makes an earlier Change `not_selected` from any of these statuses, and also from `failed` or `completed`, when the earlier Change has no promoted Candidate. See [Shared Projects](shared-projects.md#the-system-arbiter). | `request-check.ts` |
 | A merge conflict makes the Change re-run the conflicting Tasks on the new base. After 2 re-runs the Change is `blocked` with the reason "The request could not be merged with newer changes twice. Submit it again." | `MAX_REBASE_RERUNS` in `rebase.ts` |
 | The Change ends as `failed` when every Candidate on the newest base is `rejected` for a reason other than a merge conflict or a cancel, and no Candidate of the Change is `composing`, `verifying`, `verified`, or `promoted`. `blocked_reason` starts with "No Candidate passed its required checks:" and quotes the Candidate reasons. `change.failed` records it with `phase: "verification"`. | `verificationDeadEnd` |
@@ -257,7 +257,7 @@ The pure rules are in `workers/integration/src/change-status.ts`.
 
 1. A `budget_blocked` Change returns to `running`. A Change that a budget stopped while planning (it has no Tasks) returns to `compiling`, and a new ChangeWorkflow instance plans it again. `compiling` and `running` are the only statuses that a budget stop interrupts.
 2. Its budget-stopped Tasks become `ready` again with a new attempt window, and their blocked dependents become `pending`.
-3. The normal dispatch runs (section 44 rule 5).
+3. The normal dispatch runs.
 4. On a `verifying`, `blocked`, or `awaiting_approval` Change, the same call retries a merge-conflict re-run within its bound and recomposes a stale Candidate.
 
 A raise of the Project monthly budget (`PATCH /v1/projects/:projectId`) or of a user monthly budget (`PATCH /v1/me/budget`) runs the same restore for each Change that budget stopped (`resumeBudgetBlocked` in `change-commands.ts`, ADR 0030).
@@ -305,7 +305,7 @@ stateDiagram-v2
 ```
 
 `composed` is in the enum and in RPC results. D1 rows go from `composing` directly to `verifying`.
-Rhumbatron never retries a stale Candidate blind (section 42.9). A new Candidate on the new base replaces it.
+Rhumbatron never retries a stale Candidate blind. A new Candidate on the new base replaces it.
 
 ### Release status
 
@@ -327,4 +327,4 @@ stateDiagram-v2
 
 The allowed transitions are in `NEXT` (`workers/integration/src/release-model.ts`).
 A failed release never deletes canonical history.
-Recovery is a new canonical transition (section 42.10).
+Recovery is a new canonical transition.

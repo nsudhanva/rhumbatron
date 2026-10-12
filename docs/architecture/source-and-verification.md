@@ -47,11 +47,11 @@ Repository names come from D1 row IDs only (`repo-names.ts`):
 
 Rules:
 
-- Cleanup does not list the namespace. It deletes only the names that it derives from the rows of one Project. Thus it cannot delete a repository of a different Project.
+- Cleanup does not list the namespace. It deletes only the names that it derives from the rows of one Project. So it cannot delete a repository of a different Project.
 - Each Git access uses a repository token that expires after 600 s. The code revokes the token after use.
 - The daily `forks.sweep` command deletes a fork 30 days after its run or Candidate ends (`FORK_RETENTION_DAYS`). It deletes workspace forks of failed runs, of runs without a ChangeSet, and of finished Changes. It deletes the forks of `rejected`, `stale`, and `promoted` Candidates. It deletes a promoted fork only when canonical `main` holds the composed commit.
 - A code edit session deletes its fork when it ends. The daily `forks.sweep` command ends overdue sessions and deletes a session fork that a failed delete left.
-- A new Project starts at Canonical Generation 0 (`S0`) with one commit that holds only `.gitignore` (ADR 0022). `AGENTS.md` uses `S1841` for the demo.
+- A new Project starts at Canonical Generation 0 (`S0`) with one commit that holds only `.gitignore` (ADR 0022).
 
 Source objects in R2:
 
@@ -149,7 +149,7 @@ After `bun run build` (or `bun run build:<x>`), the workspace discards the files
 A code edit session (ADR 0029) starts the Sandbox only at its first command. After each command, and when the session ends while the Sandbox is awake, a kill as the session user stops every process of the session. The end also removes the session directory. The Sandbox then sleeps after 2 idle minutes.
 
 A Sandbox loss does not lose committed work.
-The workspace restores from the same fork, base, and stacked merges. Then it compares the result with the recorded start commit (section 42.5).
+The workspace restores from the same fork, base, and stacked merges. Then it compares the result with the recorded start commit.
 Uncommitted edits are lost.
 A publish after a loss fails the run. It does not publish partial work.
 The Sandbox gets short-lived Git tokens only. It never gets Terraform, Cloudflare API, or model credentials.
@@ -191,7 +191,7 @@ flowchart TB
 - A rejection by `checkCompatibility` or by the merge records `composition` Evidence with the reason.
 - A composition build that fails records the `build` Evidence (`fail`, `checked_supported`, the output tail). The `build` check then does not run again. A passing composition build leaves the `build` check to its normal runner.
 - The Candidate patch leaves out the files that the composition build generated.
-- A check step that throws records status `error` with coverage `not_checked`. A record that took longer than the check timeout is the gap `timed_out`. A gap is never a pass (section 34.4.1).
+- A check step that throws records status `error` with coverage `not_checked`. A record with a duration over the check timeout is the gap `timed_out`. A gap is never a pass.
 - The Sandbox meter settles after the last check, before preview publication and the gate.
 - The preview publishes only when the `build` check (check ID `build`) passed.
 - After selection, a Change with no Candidate that can ship ends as `failed`. See [Change lifecycle](change-lifecycle.md#change-status).
@@ -201,7 +201,7 @@ flowchart TB
 `build`, `unit`, and `contract` run in a Dynamic Worker through the `APPS.check` RPC when the integration Worker has the `APPS` binding (`isAppCheckerEligible` in `runner-selection.ts`).
 The AppChecker reads the composed tree from the R2 code store. Each check has at most 30 s, no network, and no binding.
 When AppChecker answers `supported: false` (for example no code store, a bundler error, or a deadline), the check runs in the Sandbox.
-A `unit` check whose tests read project files (`import.meta.dir`, `__dirname`, `node:fs`), use Bun globals, call `process.cwd()`, or start processes is `supported: false` before any test runs (`sandboxOnlyFeatures` in `workers/apps/src/checker-program.ts`). A Dynamic Worker has no project files on disk. Such a test fails there because of the runner, not because of the code.
+A `unit` check whose tests read project files (`import.meta.dir`, `__dirname`, `node:fs`), use Bun globals, call `process.cwd()`, or start processes is `supported: false` before any test runs (`sandboxOnlyFeatures` in `workers/apps/src/checker-program.ts`). A Dynamic Worker has no project files on disk, so such a test would fail there because of the runner.
 A completed Dynamic Worker failure is final. It does not go to the Sandbox for a second try.
 `protected-invariant-cart`, `performance`, `security`, and `browser` always run in the Sandbox.
 `acceptance` and `preview-smoke` use no Sandbox.
@@ -225,15 +225,15 @@ flowchart LR
   T6["package.json has a build script"] --> CA["client-assets"]
 ```
 
-- Verification uses the Project's policy: the D1 `project_policies` row (migration 0017), read once per run through `policyForRun` (`workers/integration/src/policy.ts`). This applies to the plan, to the approval gate, to the auto-promotion tiers, and to the protected resources of `checkCompatibility`. Without a row, verification uses `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`), which protects no resource.
-- A Candidate is `rejected` as `invariant_violation` when one of its ChangeSets declares a contract or data change whose subject is a protected resource of the Project's policy.
+- Verification uses the policy of the Project. The policy is the D1 `project_policies` row (migration 0017). `policyForRun` (`workers/integration/src/policy.ts`) reads it once per run. The plan, the approval gate, the auto-promotion tiers, and the protected resources of `checkCompatibility` use this policy. Without a row, verification uses `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`). `DEFAULT_POLICY` protects no resource.
+- Rhumbatron rejects a Candidate as `invariant_violation` when one of its ChangeSets declares a contract or data change on a protected resource of the Project policy.
 - The policy check `targeted` runs the `unit` check. Every plan has `build` and `unit`.
 - The policy does not list the `critical` tier. A `critical` Change uses the strictest listed tier. A gap in the policy never lowers verification.
 - The p95 limit is the number in the goal, the acceptance criteria, or the invariants. The default is 200 ms.
 - UI files are files under `public/` or with the extension `.tsx`, `.jsx`, `.html`, or `.css`.
 - An invariant that keeps existing endpoint behavior adds `contract` and `unit`. Another app-behavior invariant adds `unit`. An invariant that no test can prove (for example email delivery or uptime) becomes a required procedure check. It stays a visible gap.
 - A Change with acceptance criteria gets the optional `acceptance` check (see below).
-- A composed `package.json` with a `build` script adds the required `client-assets` check. Client sources are the files under `src/client/` and the `src/` paths that the build script files name (a named file also adds its directory, except `src/` itself). When a client source changed but no script or style that `public/index.html` references differs from the base, the check fails: the live app would serve the old bundle. No changed client source passes. A page without `public/index.html`, or without a local script or style, passes with that reason.
+- A composed `package.json` with a `build` script adds the required `client-assets` check. Client sources are the files under `src/client/` and the `src/` paths that the build script files name (a named file also adds its directory, except `src/` itself). The check fails when a client source changed but no script or style that `public/index.html` references differs from the base. In that case the live app would serve the old bundle. The check passes when no client source changed. A page without `public/index.html`, or without a local script or style, passes with that reason.
 
 | Check ID | Kind | Command or procedure | Timeout |
 |---|---|---|---|
@@ -253,7 +253,7 @@ The preview host has no public URL. The check blocks every other request.
 The flow depends on the app:
 
 - An app without the Acme Shop catalog: the home page shows text, and `GET /api/health` answers 200.
-- The Acme Shop fixture: the section 35 Wishlist flow, or a cart flow when the shop has no Wishlist.
+- The Acme Shop fixture: the Wishlist flow, or a cart flow when the shop has no Wishlist.
 
 One session lasts at most 55 s. A Candidate gets at most 2 browser runs.
 The `BROWSER_DAILY_SECONDS` meter (960 s per UTC day) applies before a session opens.
@@ -264,14 +264,14 @@ The acceptance check tests what the person asked for. Each Candidate of a Change
 It is not a gate check. It does not make a Candidate unpromotable, and it does not reject a Candidate. It ranks sibling Candidates, and it gates auto-promotion.
 A failing required check (`build`, `unit`, `contract`, `preview-smoke`, and the others in the table) still makes a Candidate unpromotable.
 
-- Criteria: the Change acceptance criteria, without the criteria that other checks cover (`acceptanceCriteriaToJudge` in `candidate-composer.ts`). These are a criterion that only states the quality gate ("typecheck and tests pass"), a latency limit (the `performance` check), and kept behavior ("unchanged", the invariant checks). When no criterion is left, the plan has no `acceptance` check.
+- Criteria: the Change acceptance criteria, without the criteria that other checks cover (`acceptanceCriteriaToJudge` in `candidate-composer.ts`). Other checks cover three kinds of criterion: a criterion that only states the quality gate ("typecheck and tests pass"), a latency limit (the `performance` check), and kept behavior ("unchanged", the invariant checks). When no criterion is left, the plan has no `acceptance` check.
 - Input (`acceptanceSource` in `verification-workflow.ts` and `acceptance-check.ts`), in this order, at most 60,000 characters in total (`ACCEPTANCE_SOURCE_CAP`):
   1. The Candidate patch at `source/<project>/patches/candidates/<cand>.patch`, when it belongs to the composed commit. Hunks of changed text files only.
   2. The full text of composed files from the Candidate fork, at most 24 files (`composedFileOrder`): the changed app files, then `public/index.html`, the local `.js` and `.css` files that it references, `src/app.ts`, and `src/worker.ts`, then the other changed files (tests and docs).
 
   A file that crosses the limit is cut at a line boundary and marked `truncated`. A binary file, or a file larger than 60,000 bytes, is not sent. When the fork cannot be read, the patch alone is the input.
 - Model: one Haiku call with the tool `record_acceptance`. Each criterion is `met`, `not_met`, or `unclear`. A `met` cites `{path, quote}`. When the output does not give one result per criterion, one Sonnet call follows. No browser session runs.
-- Citations (`citationValid`): code keeps a citation only when the path is a file that the model received and the quote occurs in that text. In a composed file, the quote can come from any line. In a patch, the quote must come from added or context lines; a removed line proves nothing. The quote has at least 8 characters, after whitespace is collapsed. A criterion that code in the base already satisfies is `met` with a quote of the composed file. A `met` without a valid citation counts as `unclear` (section 34.4.2).
+- Citations (`citationValid`): code keeps a citation only when the path is a file that the model received and the quote occurs in that text. In a composed file, the quote can come from any line. In a patch, the quote must come from added or context lines. A removed line proves nothing. The quote has at least 8 characters, after whitespace is collapsed. A criterion that code in the base already satisfies is `met` with a quote of the composed file. A `met` without a valid citation counts as `unclear`.
 - Evidence: `pass` with `checked_supported` only when each criterion is `met`. Otherwise `fail` with `checked_supported` and a summary, for example "2 of 3 criteria met; not met: calendar view". These results are `error` with `not_checked` (a gap): a model error, a refused call (Change budget, daily call cap, monthly budget), and no readable source.
 - When an earlier check has no passing result, the Candidate cannot ship. The check then records `skipped` (`not_checked`) and makes no model call.
 - Auto-promotion: a selected Candidate auto-promotes (when policy allows) only when its acceptance Evidence is `pass` with `checked_supported`. When a criterion is not met or unclear, or when the check has a gap, `holdForAcceptance` (`candidate-selection.ts`) does these steps:
@@ -308,7 +308,7 @@ flowchart TB
 
 Integrate rule (applied before the fork rule, `workers/integration/src/integrate.ts`):
 
-- Two Tasks of one Change are complementary when their planned semantic resources do not overlap (`todos:api` and `todos:ui`, `missions:calendar-ui` and `missions:kanban-ui`). They are parts of one plan, not alternatives. A `confirmed` or `fork_required` conflict between them gets the fork decision `integrate` (`integrationFor` in `packages/conflict/src/integrate.ts`). This applies at detection and after each model review.
+- Two Tasks of one Change are complementary when their planned semantic resources do not overlap (`todos:api` and `todos:ui`, `missions:calendar-ui` and `missions:kanban-ui`). They are parts of one plan. A `confirmed` or `fork_required` conflict between them gets the fork decision `integrate` (`integrationFor` in `packages/conflict/src/integrate.ts`). This applies at detection and after each model review.
 - Order:
   1. An existing dependency path decides.
   2. Else the UI Task depends on the API Task. A UI Task has a resource whose last segment is `ui`, `frontend`, or `page` (alone or after `-`), or a title that says UI, page, or frontend. An API Task has a last segment `api` (alone or after `-`), or a title that says API.
@@ -335,7 +335,7 @@ Fork rule:
 - A fork conflict counts only when both sides have at least one proposed ChangeSet.
 - No fork conflict counts: one Candidate with every proposed ChangeSet.
 - The first counting conflict is `confirmed`: one Candidate per side. Each Candidate also holds the shared ChangeSets.
-- The first counting conflict is `fork_required` (the conflict review said `needs_more_evidence`): the two side Candidates, plus a combined Candidate. The combined Candidate holds the shared ChangeSets, both sides, and the ChangeSets that need both sides. It gives the evidence that the review asked for: do the sides work together?
+- The first counting conflict is `fork_required` (the conflict review said `needs_more_evidence`): the two side Candidates, plus a combined Candidate. The combined Candidate holds the shared ChangeSets, both sides, and the ChangeSets that need both sides. It shows whether the sides work together. The review asked for this evidence.
 - A Change has at most `MAX_CANDIDATES` (3) Candidates per round. The ChangeSets of a further counting conflict wait for a later round.
 
 Selection:
@@ -346,7 +346,7 @@ Selection:
   2. Most acceptance criteria met.
   3. Fewer gaps and optional failures.
   4. More passing checks.
-- A tie goes to the Integration Judge (section 22.5). It reads only the Evidence snapshot of the tied Candidates (Evidence summaries and acceptance results). It fetches nothing. Its verdict is closed: `prefer_candidate` (with a Candidate ID), `reject_candidate`, `needs_more_evidence`, or `escalate_to_human`. Code validates the cited Evidence IDs. Only a valid `prefer_candidate` selects a winner. Any other result moves the Change to `awaiting_approval`, and a person promotes one Candidate.
+- A tie goes to the Integration Judge. It reads only the Evidence snapshot of the tied Candidates (Evidence summaries and acceptance results). It fetches nothing. Its verdict is closed: `prefer_candidate` (with a Candidate ID), `reject_candidate`, `needs_more_evidence`, or `escalate_to_human`. Code validates the cited Evidence IDs. Only a valid `prefer_candidate` selects a winner. Any other result moves the Change to `awaiting_approval`, and a person promotes one Candidate.
 - Each verified loser becomes `rejected` with a reason, for example "Lost to cand_x: met 3 of 3 criteria, this met 2 of 3." Each Candidate of the group stores the outcome in `selection_json`. The decision is a Decision Receipt (`CANDIDATE_SELECTION`) and the Event `candidate.selected`.
 - Only the winner goes on the promotion path: a canonical check, the acceptance hold, policy `autoPromoteRiskTiers`, the approval gate (`approval.requested` for a gated winner), and the compare-and-swap. A Candidate without siblings goes on the same path.
 - A verified winner that cannot auto-promote moves the Change to `awaiting_approval`.
@@ -388,8 +388,8 @@ A finding with a bad citation is `unsupported`. It cannot change state.
 ## Promotion preconditions
 
 Promotion has two deterministic layers (ADR 0013).
-The integration Worker checks section 36 preconditions 1 to 5 and 8 from authoritative D1 rows and Artifacts. It also compares the plan policy version with the active policy version.
-ProjectRootDO then checks preconditions 6 and 7 and the policy version in its own transaction.
+The integration Worker reads authoritative D1 rows and Artifacts. It checks that the Candidate is verified, that the required Evidence exists and passes, that each required human approval exists, and that the composed commit is still in the Candidate fork. It also compares the plan policy version with the active policy version.
+ProjectRootDO then checks the expected Canonical Generation, the expected canonical tree, and the policy version in its own transaction.
 The integration Worker reports every failed precondition at once.
 
 ```mermaid
@@ -418,7 +418,7 @@ Approval rules (`packages/evidence/src/promotion.ts`):
 - A human gate applies when the plan requires one (an authorization change, or the acceptance hold) or when the policy gates the risk tier (`high`, `critical`).
 - A grant counts only for the exact composed tree that the approver saw.
 - The first decision is final. A rejection also rejects the Candidate.
-- No model decides approval or promotion (section 22.7).
+- No model decides approval or promotion.
 
 The idempotency key is the Candidate ID plus the expected generation.
 A retry after success returns `alreadyPromoted`. It repairs the D1 mirror and the source sync.

@@ -43,7 +43,7 @@ K2 stream names and Analytics Engine dataset names allow only letters, digits, a
 | `component` | the component part of the name |
 | `managed-by` | `terraform` |
 
-- `modules/worker` and the docs Worker set these tags as `key:value` strings in `cloudflare_worker.tags`. These are the web, api, event-router, integration, indexer, and docs Workers.
+- `modules/worker` and the docs Worker set these tags as `key:value` strings in `cloudflare_worker.tags`. This applies to the web, api, event-router, integration, indexer, and docs Workers.
 - The coordinator and agents Workers deploy through `cloudflare_workers_script` (`modules/durable-worker`), and the sandbox and apps Workers deploy through adapters. They have no tags. Their names group them.
 - D1, KV, R2, Queues, AI Gateway, Vectorize, and Durable Object namespaces have no tags. Provider 5.27 has no tagging resource for them (ADR 0004).
 

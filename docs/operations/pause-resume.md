@@ -1,8 +1,8 @@
 # Pause and Resume Runbook
 
-This runbook pauses and resumes the work that starts on its own: the cron sweep and Sandbox containers.
+This runbook pauses and resumes the work that starts automatically. This work is the cron sweep and the Sandbox containers.
 
-The `paused` switch stops the event router cron and every new Sandbox start. It does not destroy infrastructure or delete data (`AGENTS.md` rule 50, [ADR 0017](../adr/0017-prod-environment.md)).
+The `paused` switch stops the event router cron and every new Sandbox start. It does not destroy infrastructure or delete data ([ADR 0017](../adr/0017-prod-environment.md)).
 
 The switch is `locals { paused = false }` in `infrastructure/terraform/envs/prod/main.tf`.
 
@@ -23,23 +23,23 @@ stateDiagram-v2
 
 ## 1. What `paused = true` stops
 
-1. The event router cron:
+1. The event router cron.
    ```hcl
    cron_schedules = local.paused ? [] : ["* * * * *"]
    ```
-   The cron is the 1-minute safety-net sweep of the K2 streams. The same cron runs the daily maintenance at 04:17 UTC ([cleanup.md](./cleanup.md)) and the stuck-release sweep every 5 minutes ([release.md](./release.md)). None of them runs while paused.
-2. Sandbox containers:
+   The cron runs the 1-minute safety-net sweep of the K2 streams. The same cron runs the daily maintenance at 04:17 UTC ([cleanup.md](./cleanup.md)) and the stuck-release sweep every 5 minutes ([release.md](./release.md)). None of them runs while paused.
+2. Sandbox containers.
    ```hcl
    max_instances = local.paused ? 0 : 1
    ```
-   No container can start ([ADR 0012](../adr/0012-sandbox-worker.md)), so Sandbox time does not grow. Agent Workspaces and Candidate checks that need a container fail.
+   No container can start ([ADR 0012](../adr/0012-sandbox-worker.md)), so Sandbox time does not increase. Agent Workspaces and Candidate checks that need a container fail.
 
 ## 2. What keeps running
 
 - Data: D1, Durable Object storage, R2, KV, K2, and Artifacts repositories stay intact.
 - The web Worker (`rhumbatron.com`), the API Worker (`api.rhumbatron.com`), and the live apps serve traffic.
-- Queue consumers stay bound and process messages. Workflows continue. Agents can still call models, inside the caps of [costs.md](./costs.md).
-- The coordinator still nudges the event router after each publish, so Events still reach the event router.
+- Queue consumers stay bound and process messages. Workflows continue. Agents can call models within the caps of [costs.md](./costs.md).
+- The coordinator signals the event router after each publish, so Events reach the event router.
 - Durable Object alarms continue. The alarm guard of [ADR 0019](../adr/0019-runaway-billing-guards.md) limits each object to 2,000 alarm fires per UTC day.
 
 ## 3. Pause

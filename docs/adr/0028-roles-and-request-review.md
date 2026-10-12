@@ -2,12 +2,11 @@
 
 ## Context
 
-A shared Project has two roles in ADR 0023: `owner` and `collaborator`. Each collaborator request
-starts a ChangeWorkflow at once. The intake gate, the planner, and the agents then spend model
-budget on it. Three needs follow from real use:
+A request that needs no review starts a ChangeWorkflow at once. Then the intake gate, the
+planner, and the agents spend model budget on it. Shared Projects (ADR 0023) have three needs:
 
-- A team needs more than one person who administers the Project. With one owner, every approval,
-  promotion, and invitation waits for that one person.
+- A team needs more than one person who administers the Project. With only one owner, every
+  approval, promotion, and invitation waits for that one person.
 - A Project owner needs people who can read the Project but not send work, for example a reviewer
   or a customer.
 - The owner needs a gate before a request of a non-admin spends model budget. The system still
@@ -15,13 +14,13 @@ budget on it. Three needs follow from real use:
 
 ## Decision
 
-- Four roles per Project in `project_members`: `owner`, `admin`, `member`, and `viewer`. One owner
-  per Project, as before. Nobody can assign, change, or remove the owner role. The rank
+- Four roles per Project in `project_members`: `owner`, `admin`, `member`, and `viewer`. Each
+  Project has one owner. Nobody can assign, change, or remove the owner role. The rank
   (`ROLE_RANK`: owner 0, admin 5, member 10, viewer 30) only orders lists. Migration
   `0029_roles_and_request_review.sql` maps every `collaborator` row and pending invitation to
   `member` and keeps all rows.
 - One permission matrix, `PERMISSIONS` in `packages/protocol/src/roles.ts`. The API checks every
-  action with `can(role, action)`; the web uses the same function to hide controls. A critical test
+  action with `can(role, action)`. The web uses the same function to hide controls. A critical test
   spells out the full matrix.
   - Every role reads the Project.
   - The owner, the admins, and the members send requests and answer, withdraw, or cancel their own.
@@ -43,8 +42,8 @@ budget on it. Three needs follow from real use:
   requester withdraws a `proposed` request with the normal cancel.
 - Events `change.proposed`, `change.included`, and `change.declined`. Notifications
   `request_proposed` (owner and admins), `request_included` and `request_declined` (requester).
-- The intake gate counts a `proposed` request as open, so a later duplicate request gets the
-  question with the name of the person who proposed it.
+- The intake gate counts a `proposed` request as open. So a later duplicate request gets a
+  question with the name of the person who proposed the first request.
 - The Board (`GET /v1/projects/:projectId/board`) shows the newest 100 Changes as cards in six
   columns, with the people and their counts, in one D1 batch.
 
@@ -59,10 +58,11 @@ budget on it. Three needs follow from real use:
 
 ## Consequences
 
-- An existing collaborator becomes a member, and the review setting starts on. Their next request
-  waits for the owner. The owner turns the setting off in Settings to keep the earlier behavior.
+- The migration makes each `collaborator` a `member`, with the review setting on. A request of a
+  member then waits for the owner or an admin. The owner or an admin turns the setting off in
+  Settings so that member requests start at once.
 - An admin can do every operational action. Only Project deletion and the admin role stay with
   the owner.
 - A `proposed` request costs one D1 row and one event. Nothing else runs until a person includes
   it.
-- The members response returns `joinedAt` and each role; invitations carry their role.
+- The members response returns `joinedAt` and each role. Invitations carry their role.

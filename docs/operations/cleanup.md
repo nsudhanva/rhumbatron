@@ -1,6 +1,6 @@
 # Resource Cleanup and Retention Runbook
 
-This runbook covers smoke Project cleanup, Project deletion, the daily fork sweep, and R2 retention. Cleanup keeps Artifacts, R2, and D1 usage within the free and included limits (`AGENTS.md` sections 7 and 43, [ADR 0010](../adr/0010-artifacts-project-source.md)).
+This runbook covers smoke Project cleanup, Project deletion, the daily fork sweep, and R2 retention. Cleanup keeps Artifacts, R2, and D1 usage within the free and included limits ([ADR 0010](../adr/0010-artifacts-project-source.md)).
 
 ## 1. Smoke Project cleanup
 
@@ -13,18 +13,18 @@ This runbook covers smoke Project cleanup, Project deletion, the daily fork swee
 
 Set `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` for the prod Clerk instance (see the root `README.md`). Then:
 
-1. List the matches. This changes nothing:
+1. List the matches. This command changes nothing.
    ```sh
    bun run cleanup:projects --dry-run
    ```
-2. Delete the matches:
+2. Delete the matches.
    ```sh
    bun run cleanup:projects
    ```
 
 ## 2. Project deletion
 
-Only the owner can delete a Project. `DELETE /v1/projects/:id` sets the Project to `archived` in D1, purges its `ProjectRootDO` and `ProjectViewDO`, and queues `project.cleanup` on the integration Queue. `cleanupProject` in `workers/integration/src/project-cleanup.ts` then deletes everything that the Project created.
+Only the owner can delete a Project. `DELETE /v1/projects/:id` sets the Project to `archived` in D1, purges its `ProjectRootDO` and `ProjectViewDO`, and queues `project.cleanup` on the integration Queue. Then `cleanupProject` in `workers/integration/src/project-cleanup.ts` deletes everything that the Project created.
 
 ```mermaid
 flowchart TB
@@ -44,13 +44,13 @@ flowchart TB
   cron -.->|index.purge| idx[Indexer: vectors, index objects, index rows]
 ```
 
-Cleanup skips a Project that is not `archived`. Each queue message does a bounded part of the work. The next delivery continues where the last one stopped. Every step is safe to repeat. The order is:
+Cleanup skips a Project that is not `archived`. Each queue message does a bounded part of the work. The next delivery continues where the last one stopped. Every step is safe to repeat. Cleanup does the steps in this order:
 
 1. Purge `ProjectRootDO` and `ProjectViewDO` again. Mark every `app_deployments` row `removed`.
 2. Delete every Workspace fork (`ws-*`), Candidate fork (`cand-*`), and code edit session fork (`edit-*`) that `task_runs`, `candidates`, and `code_sessions` record, 20 per message.
 3. Delete the canonical repository (`ARTIFACTS.delete(projectId)`).
 4. Delete every object in the evidence bucket under these prefixes, each followed by the Project ID: `source/`, `context/`, `apps/`, `app-previews/`, `evidence/`, `work-graphs/`, and `workspace/`.
-5. Wait until `removeApp` on the apps Worker has wiped the app data stores.
+5. Wait until `removeApp` on the apps Worker clears the app data stores.
 6. For each batch of 25 Tasks, purge the `AgentDO` of each Task, then delete the `task_dependencies`, `decision_receipts`, `task_runs`, and `tasks` rows.
 7. Delete the rows of `evidence_index`, `approvals`, `conflicts`, `changesets`, `candidates`, `change_decisions`, `changes`, `request_conflicts`, `goal_suggestions`, `project_policies`, `project_members`, `project_invitations`, `agents`, `dead_letters`, `releases`, `project_events`, `code_session_files`, `code_session_commands`, and `code_sessions`. Each statement deletes at most 500 rows. Each message runs at most 40 statements.
 8. Purge the 32 `ResourceShardDO` shards (Claims, Intents, Challenges, outbox). This step is last, so a late Claim cannot fill a shard again.
@@ -58,7 +58,7 @@ Cleanup skips a Project that is not `archived`. Each queue message does a bounde
 
 The indexer Worker deletes the Vectorize vectors, the `index/` objects, and the `project_indexes` and `project_vectors` rows (`index.purge`). The daily maintenance sends `index.purge` for an archived Project until no index row remains.
 
-Cleanup keeps these records:
+Cleanup keeps these records.
 
 | Kept | Reason |
 |---|---|
@@ -67,7 +67,7 @@ Cleanup keeps these records:
 | `usage_counters` | The Anthropic, Sandbox, Browser Run, and build meters are global rows. A deletion cannot free budget. The budget meters of the Project and its Changes (`project-usd-micro:<id>`, `change-usd-micro:<id>`) hold only an ID and an amount, and they stay. |
 | The R2 `events/` archive and K2 events | All Projects share them. The R2 lifecycle rule deletes `events/` after 365 days. K2 keeps events for 7 days. |
 | Organization, user, and membership rows; `notification_reads`; `processed_events` | They are not Project data. |
-| The Project Sandbox container | It keeps no data after its 2-minute sleep. To wake it only to destroy it uses Sandbox hours. |
+| The Project Sandbox container | It keeps no data after its 2-minute sleep. A wake only to destroy it uses Sandbox hours. |
 
 ## 3. Daily fork sweep
 

@@ -1,8 +1,8 @@
 # Shared requests demo
 
-This runbook shows two people who change one live Project at the same time. Alice owns the Project. Bob is a member. Before the demo, Alice turns off "Member requests need review" in Settings, so Bob's requests go to the system at once (ADR 0028). Five requests run in parallel: one pair conflicts, and one request repeats another. The system decides. A role never decides (ADR 0025). The design is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
+This runbook shows two people who change one live Project at the same time. Alice owns the Project. Bob is a member. Before the demo, Alice turns off "Member requests need review" in Settings, so Bob's requests go to the system at once (ADR 0028). Five requests run in parallel. One pair conflicts, and one request repeats another. The system decides between the requests, and a role never decides (ADR 0025). The design is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
 
-Use prod (`https://rhumbatron.com`). You need two accounts with different email addresses and two browser profiles. Alice must own a Project whose live app is a daily planner: one section per day with checklist items.
+Use prod (`https://rhumbatron.com`). You need two accounts with different email addresses and two browser profiles. Alice must own a Project whose live app is a daily planner, with one section per day and checklist items in each section.
 
 ```mermaid
 sequenceDiagram
@@ -80,12 +80,12 @@ If Bob calls a route for the owner and the admins, the API returns 403.
 3. Sign in as Alice. Make sure that Alice can answer a question on a Change of Bob.
 4. Make sure that Bob cannot raise a budget or cancel a Change of Alice. The API returns 403.
 
-A Change gets at most 3 rounds of questions. A Change that gets no answer for 7 days is cancelled.
+A Change gets at most 3 rounds of questions. Rhumbatron cancels a Change that gets no answer for 7 days.
 
 ## Cost
 
-- Each request gets the Project default budget: 3 USD when the Project sets none ([protocols](../protocols/README.md#project-settings)).
-- The intake gate makes one Clef-flash call per request. When it finds a related request, it adds two Sonnet coverage runs, one in each order.
+- Each request gets the Project default budget. That budget is 3 USD when the Project sets none ([protocols](../protocols/README.md#project-settings)).
+- The intake gate makes one Clef-flash call per request. For a related request, it adds two Sonnet coverage runs, one in each order.
 - A Sonnet review runs for each pair of overlapping requests, at most 4 for each Change. A conflict adds two arbiter runs.
 - Model spend counts against the prod cap of 100 USD per calendar month (ADR 0021). Run `bun run cost:report` before and after the demo ([costs.md](../operations/costs.md)).
 

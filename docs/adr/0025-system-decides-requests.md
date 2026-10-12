@@ -6,13 +6,13 @@ Several people send requests to one Project. A request can be unclear, can repea
 open or already built, or can contradict another request. Two cases set the requirements:
 
 - Change C1 ("gta6 mission planner, calendar ..., each day has a kanban list") runs. A
-  collaborator sends C2 "Add kanban feature". A request review that says `compatible` builds both.
+  member sends C2 "Add kanban feature". A request review that says `compatible` builds both.
   C2 repeats the bootstrap, the merge conflicts, and each Task runs again.
-- C3 (AngularJS) and C4 (React) conflict. A rule that uses the role of the requester picks the
-  request to build.
+- C3 (AngularJS) and C4 (React) conflict. A rule that uses the role of the requester then picks
+  the request to build.
 
 The role of a person says nothing about which request fits the app. People do not own features.
-Build decisions belong to the system. An unclear or repeated request needs a question, not a
+Build decisions belong to the system. An unclear or repeated request needs a question before any
 build.
 
 Research on model cascades and model judges sets the method:
@@ -32,8 +32,9 @@ Research on model cascades and model judges sets the method:
 
 ## Decision
 
-- The Project owner role is for administration only: share, members, settings, delete Project,
-  budget raise, and the other owner-only routes. No build decision reads a role or `requester_rank`.
+- The owner and admin roles are for administration only (ADR 0028). This covers share, members,
+  settings, budget raise, Project deletion, and the other management routes. No build decision
+  reads a role or `requester_rank`.
 - Intake gate, a ChangeWorkflow step before the Root Planner (`workers/integration/src/intake.ts`):
   1. Retrieval (deterministic): the open Changes plus the 20 latest completed Changes. Each is
      embedded as goal plus acceptance criteria (`@cf/baai/bge-small-en-v1.5`). Up to 10 with
@@ -43,29 +44,29 @@ Research on model cascades and model judges sets the method:
   2. Clef-flash, one call inside the shared counter of 200 calls per UTC day: per pair, a choice
      over `duplicate`, `already_covered`, `extends`, `overlaps`, and `unrelated`, plus "buildable
      as stated". Clef-flash is a different model family from Claude, so its agreement counts. It
-     can only clear a pair: the pair drops when P(`unrelated`) >= 0.9.
+     can only clear a pair. The pair drops when P(`unrelated`) >= 0.9.
   3. Duplicates: Sonnet answers "which criteria of the existing request, or which features of the
      app, already deliver the new request?" with quotes. It runs twice with the order swapped. Code
      drops an answer with a quote that is not in the packet. When Clef and both Sonnet orders say
      covered, the kind is `duplicate`. When one or both Sonnet orders say covered without that full
      agreement, the kind is `unclear`, with the quoted criteria. Clef alone never marks a
      duplicate. Haiku is not a confirming vote.
-  4. Clarity: a rule first (fewer than two words that name a product object: ask). Then
-     Clef-flash: P(buildable) >= 0.9 plans, and P(buildable) <= 0.4 asks. Between the two, one
-     Sonnet call lists the distinct readings, each with a quote of the goal. Two or more valid
-     readings ask, with the readings as options.
+  4. Clarity: a rule runs first. A goal with fewer than two words that name a product object gets
+     a question. Then Clef-flash runs. P(buildable) >= 0.9 plans, and P(buildable) <= 0.4 asks.
+     Between the two, one Sonnet call lists the distinct readings, each with a quote of the goal.
+     Two or more valid readings ask, with the readings as options.
 
   A model never rejects a request. The worst outcome is a question.
 - A question makes the Change `needs_input`, with a `ChangeClarification` in
   `changes.clarification_json`. The ChangeWorkflow waits for the event `clarification`. It reads D1
   after each event and once a day. It cancels the Change after 7 days without an answer. The
-  requester or the owner answers with `POST /v1/changes/:changeId/clarify`:
+  requester, the owner, or an admin answers with `POST /v1/changes/:changeId/clarify`:
   - answers, which go to `clarification_answers_json` and to the goal that the next intake and
     planner read;
   - `proceed_anyway`;
   - `withdraw`.
 
-  At most 3 rounds occur. After the third answer, the Change plans.
+  A Change gets at most 3 rounds. After the third answer, the Change plans.
 - Request comparison after planning (`request-check.ts`) keeps the deterministic overlap pass, the
   Sonnet review with criterion citations, and the review limit (ADR 0023). The review can return
   `duplicate`, which must quote the earlier criterion that delivers each later criterion. A
@@ -95,7 +96,7 @@ Research on model cascades and model judges sets the method:
 | Gate on the model's stated confidence | Verbal confidence is poorly calibrated. Clef probabilities and cross-run agreement are measurable. |
 | Cosine similarity decides duplicates | Short goals such as "Add kanban feature" embed badly. Cosine only shortlists. |
 | Reject a duplicate automatically | A wrong rejection loses a request. A question costs one answer. |
-| A separate review service or vector store | Workers AI, D1 and the existing Workflow cover it (AGENTS.md rules 13, 15, 22). |
+| A separate review service or vector store | Workers AI, D1, and the existing Workflow cover it. |
 
 ## Consequences
 

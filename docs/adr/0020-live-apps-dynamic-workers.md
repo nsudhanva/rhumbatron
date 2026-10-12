@@ -10,10 +10,11 @@ Each Project is a live application:
   identity (a demo user picker).
 - User apps never need Terraform. Terraform creates only the one-time foundation.
 
-A Cloudflare build connection per Project does not work: an Artifacts connection needs a dashboard
-step, and one build runs at a time. Workers for Platforms adds a $25 base fee. Dynamic Workers are
-in the frozen stack (AGENTS.md section 5.3) and Workers Paid includes them: 1,000 unique Dynamic
-Workers created per month, and 10 M requests and 30 M CPU-ms shared with Workers.
+A Cloudflare build connection per Project does not work. An Artifacts connection needs a
+dashboard step, and only one build runs at a time. Workers for Platforms adds a $25 base fee.
+Dynamic Workers are part of the Rhumbatron stack, and Workers Paid includes them. The included
+amounts are 1,000 unique Dynamic Workers created per month, and 10 M requests and 30 M CPU-ms
+shared with Workers.
 
 [Live apps](../architecture/live-apps.md) describes the request path, builds, previews, releases,
 and rollback in full. This ADR states the decisions and their limits.
@@ -47,14 +48,14 @@ and rollback in full. This ADR states the decisions and their limits.
 
 - Format: `apps/<project>/<commit>/bundle.json` (modules, compatibility settings, asset manifest)
   plus one R2 object per static asset under `.../assets/<path>`. Previews use `app-previews/`.
-  The builder writes `bundle.json` last. The commit is the content address: a stored bundle is
-  used again, never built again.
+  The builder writes `bundle.json` last. The commit is the content address, so the builder uses a
+  stored bundle again and never builds it again.
 - Builder: the `AppBuilder` entrypoint of the apps Worker, with `@cloudflare/worker-bundler` 0.2.6
-  (esbuild-wasm). It runs in the Worker, not in the Sandbox, so builds use no container time.
+  (esbuild-wasm). It runs in the Worker, so builds use no Sandbox container time.
   npm dependencies come from the public registry at build time.
 - The integration Worker reads the build inputs of one commit through its Artifacts binding: one
   read per directory and per file. It skips tests, benchmarks, lockfiles, and Markdown files. Then
-  it calls `APPS.build(...)` over the `APPS` service binding (`entrypoint = "AppBuilder"`).
+  it calls `APPS.build(...)` through the `APPS` service binding (`entrypoint = "AppBuilder"`).
 - Limits: 400 files, 8 MB of source, 10 MB of modules, and 500 assets of at most 5 MB each. The
   compatibility flags must be in an allowlist: `nodejs_compat`, `nodejs_compat_v2`, `nodejs_als`,
   and `global_fetch_strictly_public`.
@@ -85,7 +86,7 @@ plain fetch Workers, and only storage calls reach a Durable Object.
 
 ### Security
 
-- `globalOutbound: null`: an app cannot reach the network.
+- `globalOutbound` is `null`, so an app cannot reach the network.
 - Limits per request: 50 ms CPU and 20 subrequests (binding calls included). A limit hit returns
   503.
 - The app env holds only `ASSETS` and `DATA`. It has no Rhumbatron binding, secret, or token.
@@ -102,15 +103,15 @@ plain fetch Workers, and only storage calls reach a Durable Object.
   sets them (the sign-in pages set no cookies on the server):
   - `__session` and `__session_<suffix>` have no `Domain`. They are host-only on `rhumbatron.com`,
     and app hosts never get them.
-  - `__client_uat` has `Domain=rhumbatron.com`, so browsers send it to app hosts. It is a
-    timestamp, not a credential, and the router removes it.
+  - `__client_uat` has `Domain=rhumbatron.com`, so browsers send it to app hosts. It holds only a
+    timestamp, and the router removes it.
   - `__client` is on `clerk.rhumbatron.com` (HttpOnly, set by the Frontend API).
 
 ### Fake identity
 
 Apps have no real login (`APP_CONVENTIONS`, ADR 0022). The Acme Shop fixture shows the pattern in
-`src/identity.ts`: it reads the user from the `x-user-id` header, then from the `acme_user` cookie,
-else it uses the demo user `alice`. It rejects an unknown name (401).
+`src/identity.ts`. It reads the user from the `x-user-id` header, then from the `acme_user` cookie.
+Without either, it uses the demo user `alice`. It rejects an unknown name (401).
 
 ### Provisioning
 
@@ -120,8 +121,8 @@ else it uses the demo user `alice`. It rejects an unknown name (401).
   Project without an app.
 - `GET /v1/projects/:projectId/app` returns `{ enabled, app }`. `enabled` is false without
   `APPS_DOMAIN`.
-- Archiving a Project marks its app `removed` (410 at once). The cleanup deletes the `AppDataDO`
-  stores, the `apps/<project>/` and `app-previews/<project>/` prefixes, and the preview and
+- When a Project is archived, its app becomes `removed` (410 at once). The cleanup deletes the
+  `AppDataDO` stores, the `apps/<project>/` and `app-previews/<project>/` prefixes, and the preview and
   version rows. The production row stays as a tombstone (status `removed`, no commit, no bundle),
   so the hosts answer 410, not 404.
 
@@ -133,7 +134,7 @@ These are runtime data. No Terraform runs at release time.
   builds the composed commit and writes the row `preview:<first 8 characters of the Candidate
   ID>`. A Change keeps at most 3 previews. When it is full, the oldest preview of a stale,
   rejected, or promoted Candidate makes room. The workflow never removes the preview of a Candidate
-  that can still ship. A failed preview build marks only the row.
+  that can still ship. A failed preview build changes only the row.
   `GET /v1/candidates/:candidateId/preview` feeds "Open preview" on the Candidate page.
 - **Release.** For a Project with an app, promotion starts `ReleaseWorkflow` (below). The bundle of
   the promoted commit comes from, in order: a stored bundle, the bundle of another commit with the
@@ -143,13 +144,13 @@ These are runtime data. No Terraform runs at release time.
   route).
   - `/` must answer 2xx or 3xx and must not be a router status page ("Nothing built yet",
     "Building").
-  - Up to 3 static GET routes (no path parameters) from the route table in the contract Evidence of
-    the released Candidate are also probed, the routes that the Change added first. Without a route
-    table, only `/` is probed.
+  - The probes also call up to 3 static GET routes (no path parameters) from the route table in
+    the contract Evidence of the released Candidate. Routes that the Change added go first. Without
+    a route table, the probes call only `/`.
   - A release that starts late never moves the pointer back to an older generation.
 - **Smoke failure.** The pointer moves back to the version that it replaced, as a recorded
   transition (`deployment.completed` with status `restored`). The release is `smoke_failed`. The
-  Canonical Generation stays promoted (AGENTS.md section 42.10).
+  Canonical Generation stays promoted.
 - **Versions.** Each deployed generation also gets a version row `preview:v<generation, 7 digits>`
   that points at its production bundle, for example `v0000003--acme.rhumbatron.com`. `v` is not a
   hex digit, so a version ID never equals a Candidate preview ID. A version host has its own data
@@ -161,23 +162,23 @@ These are runtime data. No Terraform runs at release time.
   rollback undoes. Then the normal compare-and-swap promotes it (Sn -> Sn+1), and the release uses
   the stored bundle of Sk. Nothing in the history is deleted. The file index of the tree points at
   the rollback commit, so later Candidates compose on it.
-- **Stale recomposition.** A Candidate that is stale because canonical advanced is composed again
-  on the current canonical state (same ChangeSets, a real merge, all checks), at most 2 times per
-  lineage (`MAX_RECOMPOSES`). After that, it is blocked. Recompositions do not count against the
-  Candidate limit. Triggers: verification finds the base behind, canonical moves during the checks,
+- **Stale recomposition.** When canonical advances, a stale Candidate is composed again on the
+  current Canonical State (same ChangeSets, a real merge, all checks). This occurs at most 2 times
+  per lineage (`MAX_RECOMPOSES`). After that, the Candidate is blocked. Recompositions do not
+  count against the Candidate limit. Triggers: verification finds the base behind, canonical moves during the checks,
   ProjectRootDO refuses the compare-and-swap, or a promotion settles the Candidates behind it
   (ADR 0013). A rollback Candidate, a Change that already promoted a sibling, and a closed,
   `needs_input`, `not_selected`, or duplicate Change never recompose (ADR 0023).
 
 ### ReleaseWorkflow (integration Worker)
 
-AGENTS.md sections 21.3 and 37 define the release path: promotion moves canonical `main`, a build
-and a deploy follow, a smoke check runs, and release Evidence is recorded. Only a Project with a
-live app releases. A Project without one ends its Change at promotion.
+The release path has four parts. Promotion moves canonical `main`. A build and a deploy follow.
+A smoke check runs, and Rhumbatron records release Evidence. Only a Project with a live app
+releases. A Project without a live app ends its Change at promotion.
 
 - **Trigger.** Promotion fast-forwards canonical `main` (ADR 0013). After the push, promotion
-  starts `ReleaseWorkflow` with instance ID `rel_<project>_<generation>` (one release per
-  generation, section 60). A promotion retry starts no second release. A release start marks each
+  starts `ReleaseWorkflow` with instance ID `rel_<project>_<generation>`, so each generation has
+  one release. A promotion retry starts no second release. When a release starts, it marks each
   older `queued` or `building` release of the Project `superseded`.
 - **Steps.**
   1. Confirm that the generation is still canonical (ProjectRootDO). If not, the release is
@@ -192,18 +193,18 @@ live app releases. A Project without one ends its Change at promotion.
      gate.
   6. If the smoke check passes, the release is `deployed`. Else the pointer moves back (see Smoke
      failure), and the release is `smoke_failed`, with `release.smoke_failed`. A probe without a
-     response is a gap, never a pass (section 34.4.1).
+     response is a gap, never a pass.
 - **Statuses.** `queued -> building -> deployed | failed | smoke_failed`, and
   `queued | building -> superseded`. A final state does not change, except that failure injection
   can move `deployed` to `smoke_failed`. A release takes 6 to 9 Workflow steps.
-- **Failure semantics (section 42.10).** A failed release never moves the Canonical Generation
+- **Failure semantics.** A failed release never moves the Canonical Generation
   back and never deletes history. Recovery is a new canonical transition: a Change and a promotion
   (a fix, or a rollback). No path releases the same generation again. The event router sweep ends
   a Change that is still `releasing` 45 minutes after promotion (`RELEASE_STUCK_AFTER_MS`).
 - **Failure injection.** `POST /v1/projects/:projectId/releases/inject-failure` (only where
   `FIXTURES_ENABLED`) probes the live app through the router with the normal probes plus a route
-  that does not exist. Its real 404 fails the smoke check through the same path. The release is
-  marked `injected: true`.
+  that does not exist. Its real 404 fails the smoke check through the same path. The release
+  record has `injected: true`.
 
 ```mermaid
 sequenceDiagram
@@ -253,8 +254,7 @@ sequenceDiagram
   migration (`v1` on the first upload, then the live tag). It turns off the workers.dev subdomain
   if it is on. It reads before it writes, and it runs again only when the bundle or config hash
   changes. `apps_worker_teardown` deletes the Worker on a real destroy only. Replace both with a
-  `cloudflare_worker_version` resource when the provider supports the binding (AGENTS.md section
-  11.4).
+  `cloudflare_worker_version` resource when the provider supports the binding.
 - The integration Worker binds `APPS` (service, entrypoint `AppBuilder`).
 - The R2 lifecycle rule expires `app-previews/` after 7 days.
 - D1 migration `0018_app_deployments.sql` creates the pointer table.
@@ -263,14 +263,14 @@ sequenceDiagram
 
 ### Routing
 
-The Cloudflare Workers routes documentation says that a route can run on a Custom Domain hostname
-and takes precedence on the same hostname. So `*.rhumbatron.com/*` alone captures `api`, `www`, and
-`docs`. The apex does not match `*.`. The Clerk records are DNS-only, so no Worker route runs on
+The Cloudflare Workers routes documentation says that a route can run on a Custom Domain hostname.
+On the same hostname, the route takes precedence. So `*.rhumbatron.com/*` alone captures `api`,
+`www`, and `docs`. The apex does not match `*.`. The Clerk records are DNS-only, so no Worker route runs on
 them. Explicit DNS records have priority over the wildcard record.
 
 A route without a Worker cancels less specific patterns, and the most specific pattern wins. So
-routing adds one route without a Worker for each custom-domain host (`local.apps.bypass_hosts`:
-`api`, `www`, and `docs`), before the wildcard route. A request to those hosts skips route Workers
+routing adds one route without a Worker for each custom-domain host, before the wildcard route.
+These hosts are in `local.apps.bypass_hosts`: `api`, `www`, and `docs`. A request to those hosts skips route Workers
 and reaches its custom-domain Worker. A Worker custom domain that is added to the zone needs a
 bypass host in `local.apps.bypass_hosts`. To remove the wildcard, set `routing = false` and apply.
 
@@ -292,8 +292,8 @@ bypass host in `local.apps.bypass_hosts`. To remove the wildcard, set `routing =
 
 - Script that runs in the pages of an app shares the registrable domain with `rhumbatron.com`. It
   cannot read the host-only `__session`. But it can write a cookie for `Domain=rhumbatron.com` with
-  `document.cookie` (cookie tossing), and the router cannot see that. Impact: a forced sign-out, or
-  a sign-in as the account of the attacker on `rhumbatron.com`. A separate zone for apps removes
+  `document.cookie` (cookie tossing), and the router cannot see that. The impact is a forced
+  sign-out, or a sign-in as the account of the attacker on `rhumbatron.com`. A separate zone for apps removes
   this risk. A `Content-Security-Policy: sandbox` header also blocks it, but it breaks same-origin
   storage.
 - The router Worker carries the esbuild-wasm module (about 4 MB compressed of the 10 MB limit).

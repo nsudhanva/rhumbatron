@@ -2,7 +2,7 @@
 
 ## Context
 
-A durable agent needs a model and tool loop (AGENTS.md sections 13.4 and 25). The Cloudflare
+A durable agent needs a model and tool loop. The Cloudflare
 Agents SDK (`agents` 0.27.0) gives `PiHarness` with `@earendil-works/pi-durable` 1.1.0 (beta).
 With it, Pi runs inside a Durable Object, keeps transcripts in its SQLite, and resumes after
 eviction.
@@ -16,7 +16,7 @@ eviction.
   Sonnet while `ALLOW_OPUS` is not `"true"`.
 - Tools (`workers/agents/src/task-tools.ts`): every run gets `list_files`, `read_file`,
   `write_file`, `delete_file`, `run_command`, `complete_task`, and `fail_task`.
-  - `complete_task` (with a typed Intent, section 26.1) and `fail_task` end a run. Both are
+  - `complete_task` (with a typed Intent) and `fail_task` end a run. Both are
     idempotent.
   - Only `implement`, `migrate`, and `test` Tasks open a workspace (ADR 0011). For other Tasks,
     `list_files` and `read_file` read the canonical commit, and the write and command tools answer

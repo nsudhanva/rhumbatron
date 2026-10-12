@@ -2,7 +2,7 @@
 
 ## Context
 
-AGENTS.md section 11.5 prefers `cloudflare_worker` + `cloudflare_worker_version` +
+For Worker deploys, Rhumbatron prefers `cloudflare_worker` + `cloudflare_worker_version` +
 `cloudflare_workers_deployment`. Cloudflare rejects Durable Object class migrations
 (`new_sqlite_classes`, renames, deletes) in version uploads. They need a full script deploy.
 

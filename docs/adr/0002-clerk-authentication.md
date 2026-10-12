@@ -7,16 +7,17 @@ pages. It has no product sign-up flow for end users.
 
 ## Decision
 
-Use Clerk (application `Rhumbatron`) with `@clerk/tanstack-react-start` in `apps/web`. Prod uses
-the Clerk production instance on `rhumbatron.com`.
+Rhumbatron uses Clerk (application `Rhumbatron`) with `@clerk/tanstack-react-start` in `apps/web`.
+Prod uses the Clerk production instance on `rhumbatron.com`.
 
 - `src/start.ts` runs `clerkMiddleware()` after the server-function CSRF middleware.
 - `ClerkProvider` wraps the body contents in `src/routes/__root.tsx`.
 - `/sign-in` and `/sign-up` host the Clerk components.
-- For a visitor that the server saw as signed out, `src/client.tsx` holds the Clerk browser script
+- When the server sees a visitor as signed out, `src/client.tsx` delays the Clerk browser script
   (`src/lib/clerk-deferral.ts`). The script loads on the first pointer, touch, key, or focus event,
   or at the Clerk 15 s script timeout. Clerk loads at once on `/sign-in` and `/sign-up`, with a
-  non-zero `__client_uat` cookie, or with a `__clerk` URL parameter. Server auth does not change.
+  non-zero `__client_uat` cookie, or with a `__clerk` URL parameter. Server auth is the same in all
+  cases.
 - The API Worker verifies tokens with `@clerk/backend` `verifyToken` (`workers/api/src/auth.ts`).
   It checks `azp` against `CLERK_AUTHORIZED_PARTIES` (prod: `https://rhumbatron.com`). A token
   without `azp` passes only when `CLERK_ALLOW_MISSING_AZP` is `"true"`. Prod sets `"false"`.
@@ -36,7 +37,7 @@ the Clerk production instance on `rhumbatron.com`.
 
 ## Consequences
 
-- Authorization stays in Rhumbatron code (AGENTS.md section 40). Clerk only proves identity.
+- Rhumbatron code does all authorization. Clerk proves identity only.
 - Every `/v1` route of the API Worker runs `requireAuth`, except `/v1/version`. `/health` and
   `/v1/version` return only the service name and environment.
 

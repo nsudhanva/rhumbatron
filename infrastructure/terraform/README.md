@@ -2,7 +2,7 @@
 
 Terraform owns every Cloudflare control-plane resource. Do not change remote infrastructure with
 the dashboard, `wrangler deploy`, or direct API writes. Read every plan. Never use
-`-auto-approve`: `bun run tf` refuses it.
+`-auto-approve`. `bun run tf` refuses it.
 
 ## Layout
 
@@ -41,8 +41,8 @@ flowchart TB
 | `security` | Zone settings only. |
 | `observability` | No resources. Log settings are in `worker` and `durable-worker`. |
 
-Each env root keeps some resources inline: queue consumers, Workflows, the docs Worker `rhumbatron-docs-prod` (`envs/prod/docs.tf`, assets only,
-`docs.rhumbatron.com`), the live app wildcard DNS record and routes, Clerk DNS records (prod), and
+Each env root keeps some resources inline. These are the queue consumers, the Workflows, the docs Worker `rhumbatron-docs-prod` (`envs/prod/docs.tf`, assets only,
+`docs.rhumbatron.com`), the live app wildcard DNS record and routes, the Clerk DNS records (prod), and
 the adapters below.
 
 ## Environments
@@ -66,7 +66,7 @@ the adapters below.
 
 Prod is the only remote environment. Local work uses `wrangler dev`.
 
-Hostnames stay one label deep so Universal SSL covers them.
+Each hostname is one label deep, so Universal SSL covers it.
 
 ## Binding names
 
@@ -86,7 +86,7 @@ Every Worker uses the same binding names in `wrangler.jsonc` (local) and Terrafo
 | `LOADER`, `APP_DATA` | Dynamic Worker loader and app data Durable Object, in the apps Worker (ADR 0020) | `rhumbatron-apps-<env>` |
 | Queue producers | Queues | `rhumbatron-<purpose>-<env>` for agent-wakeups, integration, verification, indexing, release, dead-letter |
 
-R2 lifecycle rules are prefix-based. Write expiring objects under `events/`, `evidence/`, or
+The R2 lifecycle rules use prefixes. Write expiring objects under `events/`, `evidence/`, or
 `tmp/`.
 
 ## Wrapper and credentials
@@ -111,8 +111,8 @@ Prod uses the K2 item (ADR 0017) and the Anthropic items (ADR 0021). See ADR 000
 
 ## Backend configuration
 
-Each root reads the bucket and the R2 endpoint from `backend.hcl`. Git ignores it. Copy it from
-`backend.example.hcl` once per root and fill in the account ID:
+Each root reads the bucket and the R2 endpoint from `backend.hcl`. Git ignores this file. Copy it from
+`backend.example.hcl` once per root, and write the account ID in it.
 
 ```hcl
 bucket    = "rhumbatron-terraform-state-global"
@@ -136,15 +136,15 @@ bun run tf:drift:prod                              # prod must report no changes
 `bun run tf global plan -out=global.tfplan`, then `bun run tf global apply global.tfplan`.
 
 Apply order for a fresh account: `bootstrap`, `envs/global`, `envs/prod`. A fresh
-environment applies twice: first with `local.bootstrap = true` (breaks the coordinator and event
-router binding cycle and creates the first Durable Object migrations), then with `false`
+environment applies twice. The first apply uses `local.bootstrap = true`. This value breaks the coordinator and event
+router binding cycle and creates the first Durable Object migrations. The second apply uses `false`
 (ADR 0012, ADR 0017).
 
 ## Temporary adapters
 
-Provider 5.27 has no first-party resource for these items. Each adapter follows AGENTS.md section
-11.4: a `terraform_data` resource runs a script from `scripts/`. Each script refuses to run unless
-`RHUMBATRON_INVOKED_BY=terraform`, reads before it writes, and is safe to run again. Never call
+Provider 5.27 has no first-party resource for these items. For each adapter, a `terraform_data`
+resource runs a script from `scripts/`. Only `terraform apply` invokes an adapter. Each script refuses to run unless
+`RHUMBATRON_INVOKED_BY=terraform`. Each script reads before it writes and is safe to run again. Never call
 these scripts or the API directly.
 
 | Adapter | Resource | Script | Roots | ADR |
@@ -154,12 +154,12 @@ these scripts or the API directly.
 | Vectorize index | `terraform_data.vectorize_index`, `terraform_data.vectorize_index_teardown` | `vectorize-sync.ts` | prod | 0003 |
 | Sandbox Worker and container application | `terraform_data.sandbox_worker`, `terraform_data.sandbox_worker_teardown` | `sandbox-deploy.ts` | prod | 0012 |
 | Apps Worker (Dynamic Worker loader binding) | `terraform_data.apps_worker`, `terraform_data.apps_worker_teardown` | `apps-deploy.ts` | prod | 0020 |
-| D1 schema migrations | `terraform_data.d1_migrations` | `d1-migrate.ts` | prod | AGENTS.md 11.6 |
+| D1 schema migrations | `terraform_data.d1_migrations` | `d1-migrate.ts` | prod | - |
 | Billing budget alerts | `terraform_data.budget_alerts` | `budget-alerts.ts` (operator `cf` CLI login) | global | 0019 |
 
-K2 never deletes streams. Vectorize, the Sandbox Worker and the apps Worker delete only on a real destroy, through
-their teardown resources. Artifacts has no adapter: the namespace is created on first use through
-the `ARTIFACTS` binding (ADR 0010).
+The K2 adapter never deletes streams. The Vectorize, Sandbox Worker, and apps Worker adapters delete only on a real destroy, through
+their teardown resources. Artifacts has no adapter. The `ARTIFACTS` binding creates the namespace on first use
+(ADR 0010).
 
 ```mermaid
 flowchart LR
@@ -179,11 +179,11 @@ file in `migrations/d1` changes. See [`migrations/d1/README.md`](../../migration
 `bun run tf:check` runs `terraform fmt -check`, `terraform init -backend=false`,
 `terraform validate`, and `tflint` for the bootstrap, global, and prod roots. It also
 validates `modules/worker` and `modules/durable-worker` directly. It does not contact the state
-backend and does not create resources.
+backend, and it creates no resources.
 
 ## Bootstrap
 
-A fresh account needs these steps once. The Terraform token and the backend key are created with the
+A fresh account needs these steps once. The operator creates the Terraform token and the backend key with the
 `cf` CLI (ADR 0004).
 
 1. Apply `bootstrap/` with local state. It creates only the state bucket (`prevent_destroy`).

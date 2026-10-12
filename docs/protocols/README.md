@@ -4,17 +4,17 @@ The Zod schemas in `packages/protocol/src` are the protocol source of truth.
 
 | File | Content |
 |---|---|
-| `event.ts` | Event envelope and Event types (AGENTS.md section 17). |
-| `command.ts` | Queue command envelope (section 20). |
+| `event.ts` | Event envelope and Event types. |
+| `command.ts` | Queue command envelope. |
 | `project.ts` | Project, Change, Change statuses, policies, create requests, requesters, request outcomes, clarifications, and the request review (`ChangeReview`, `DeclineChangeRequest`, `ReviewChangeOutcome`). |
 | `roles.ts` | Project roles, the permission matrix (`PERMISSIONS`, `can`), the review rule (`needsReview`), invitation and role-change rules, and the members response. |
 | `board.ts` | The Board response and the column of each Change status (`BOARD_COLUMN_OF`). |
 | `change-title.ts` | Short Change titles: `clampTitle` for the Root Planner title and `fallbackTitle` for a title from the goal. |
 | `work-graph.ts` | Work Graph, Task, and the agent wake payload. |
-| `conflict.ts` | Intent, Challenge, and conflict reports (sections 26 and 32). |
-| `candidate.ts` | Candidate, Evidence, Verification Plan, acceptance results, Integration Judge verdict, Candidate selection, approval, and promotion (sections 34 and 36). |
-| `workspace.ts`, `context.ts` | Workspace manifest and Context Packet (section 27). |
-| `common.ts`, `model.ts` | Risk, complexity, and model tiers, Canonical Generation, route requests, route decisions, and Decision Receipts (section 23). |
+| `conflict.ts` | Intent, Challenge, and conflict reports. |
+| `candidate.ts` | Candidate, Evidence, Verification Plan, acceptance results, Integration Judge verdict, Candidate selection, approval, and promotion. |
+| `workspace.ts`, `context.ts` | Workspace manifest and Context Packet. |
+| `common.ts`, `model.ts` | Risk, complexity, and model tiers, Canonical Generation, route requests, route decisions, and Decision Receipts. |
 | `release.ts`, `api.ts` | Release records, API errors, and health responses. |
 | `app.ts`, `code.ts`, `code-edit.ts` | Live app deployments and preview hosts, the code store keys, and human code edits. |
 | `code-session.ts` | Code page edit sessions: limits, expiry, requests, responses, and refusal reasons (ADR 0029). |
@@ -22,9 +22,9 @@ The Zod schemas in `packages/protocol/src` are the protocol source of truth.
 
 ## API routes
 
-The API Worker (`workers/api/src`) serves `https://api.rhumbatron.com`. Every route except `/health` and `/v1/version` needs a signed-in user. The API reads the caller's role from D1 (`identity.ts`), never from the client. A caller with no access to the Project gets 404.
+The API Worker (`workers/api/src`) serves `https://api.rhumbatron.com`. Every route except `/health` and `/v1/version` needs a signed-in user. The API reads the role of the caller from D1 (`identity.ts`). It never reads the role from the client. A caller with no access to the Project gets 404.
 
-Access values. The roles are `owner`, `admin`, `member`, and `viewer`. `can(role, action)` in `packages/protocol/src/roles.ts` is the one permission matrix (see [Roles and permissions](#roles-and-permissions)).
+The roles are `owner`, `admin`, `member`, and `viewer`. `can(role, action)` in `packages/protocol/src/roles.ts` is the one permission matrix (see [Roles and permissions](#roles-and-permissions)). The Access column uses these values:
 
 - Any role: every role of the Project.
 - Contributor: the owner, an admin, or a member. A viewer gets 403.
@@ -73,7 +73,7 @@ Access values. The roles are `owner`, `admin`, `member`, and `viewer`. `can(role
 | GET | `/v1/changes/:changeId/changesets`, `/v1/changesets/:changeSetId/diff`, `/v1/candidates/:candidateId/diff` | Any role | `code.ts` |
 | POST | `/v1/projects/:projectId/code/edits` | Manager | `code-edit.ts` |
 | POST | `/v1/projects/:projectId/code/sessions` | Manager | `code-sessions.ts` |
-| GET, DELETE | `/v1/code/sessions/:sessionId` and its `/file`, `/rename`, `/exec`, `/submit` routes (see [Code edit sessions](#code-edit-sessions)) | Manager who opened the session | `code-sessions.ts` |
+| GET, PUT, POST, DELETE | `/v1/code/sessions/:sessionId` and its `/file`, `/rename`, `/exec`, `/submit` routes (see [Code edit sessions](#code-edit-sessions)) | Manager who opened the session | `code-sessions.ts` |
 | GET | `/v1/projects/:projectId/product-graph` | Any role | `product-graph.ts` |
 | GET | `/v1/projects/:projectId/suggestions` | Any role | `suggestions.ts` |
 | GET | `/v1/projects/:projectId/dead-letters` | Any role | `dead-letters.ts` |
@@ -89,7 +89,7 @@ Access values. The roles are `owner`, `admin`, `member`, and `viewer`. `can(role
 
 ## Shared Projects
 
-The owner or an admin shares a Project by email with a role (`workers/api/src/members.ts`). A role decides who can act. It never decides between requests: the system does (ADR 0025, ADR 0028).
+The owner or an admin shares a Project by email with a role (`workers/api/src/members.ts`). A role decides who can act. The system decides between requests, and a role never does (ADR 0025, ADR 0028).
 
 | Method | Path | Access | Result | Main errors |
 |---|---|---|---|---|
@@ -115,7 +115,7 @@ A repeat of the caller's last command returns `repeated: true`. A Change gets at
 
 ### Roles and permissions
 
-Access to a Project does not give permission for each action. `PERMISSIONS` in `packages/protocol/src/roles.ts` lists the roles for each action, and the API checks it with `can(role, action)`. The rank of each role (`ROLE_RANK`: owner 0, admin 5, member 10, viewer 30) only orders lists.
+Access to a Project does not give permission for every action. `PERMISSIONS` in `packages/protocol/src/roles.ts` lists the roles for each action, and the API checks it with `can(role, action)`. The rank of each role (`ROLE_RANK`: owner 0, admin 5, member 10, viewer 30) only orders lists.
 
 | Action | Roles |
 |---|---|
@@ -221,9 +221,9 @@ The owner or an admin (`can(role, "code.edit")`) opens an edit session on the Co
 
 Every refusal has `error.details.reason`, one of `CodeSessionRefusalReason` in `code-session.ts`.
 
-Path and content rules: a path is under the repository root, has no `..` part, and has no `.git` part at any depth. A file is text (no NUL byte, valid UTF-8) and at most 256 KB.
+A path must be under the repository root. It must have no `..` part and no `.git` part at any depth. A file must be text (no NUL byte, valid UTF-8) and at most 256 KB.
 
-Terminal rules: a command runs in the session checkout `/workspace/edit-<hex>` of the Project Sandbox, as an unprivileged user of the session, with no token or secret in its environment, and with the network policy of the Project Sandbox. The timeout is 120 s. Each output stream keeps its last 64 KB. After the command, every process of the session stops, and the files that the command changed become session edits. Each command reserves 480 s on the monthly Sandbox meter (`SANDBOX_MONTHLY_SECONDS`) and settles to the time it used plus a 120 s idle tail.
+A terminal command runs in the session checkout `/workspace/edit-<hex>` of the Project Sandbox. It runs as an unprivileged user of the session, with no token or secret in its environment. The network policy of the Project Sandbox applies. The timeout is 120 s. Each output stream keeps its last 64 KB. After the command, every process of the session stops. The files that the command changed become session edits. Each command reserves 480 s on the monthly Sandbox meter (`SANDBOX_MONTHLY_SECONDS`). The reservation then settles to the time that the command used plus a 120 s idle tail.
 
 Sandbox refusals of a command:
 
@@ -233,9 +233,9 @@ Sandbox refusals of a command:
 | `sandbox_busy` | 503 | The Sandbox did not start (`ContainerUnavailableError`), or the readiness probe got no answer in 120 s. The account runs one Sandbox container at a time, and agents or Candidate checks of another Project can use it. The message is "The Sandbox is busy with work for another Project. Only one runs at a time. Try again in a few minutes." |
 | `sandbox_unavailable` | 503 | The Sandbox cannot run commands as an unprivileged user, or the command failed in the Sandbox. |
 
-The first command of a session probes the checkout with the 120 s setup timeout, because it can cold-start the container. A failed probe writes `code_session.probe_failed` to Workers Logs with the session, the Project, and the error. The Code page terminal shows the message of the server for each refusal.
+The first command of a session can cold-start the container, so it probes the checkout with the 120 s setup timeout. A failed probe writes `code_session.probe_failed` to Workers Logs with the session, the Project, and the error. The Code page terminal shows the message of the server for each refusal.
 
-Expiry: a session ends 10 minutes after its last request (`CODE_SESSION_IDLE_MS`) or 2 hours after it opened (`CODE_SESSION_MAX_MS`). Each request checks the limits first. The daily maintenance sweep ends the overdue sessions of all Projects. The end deletes the fork and the edits that are not submitted.
+A session ends 10 minutes after its last request (`CODE_SESSION_IDLE_MS`) or 2 hours after it opened (`CODE_SESSION_MAX_MS`). Each request checks the limits first. The daily maintenance sweep ends the overdue sessions of all Projects. When a session ends, Rhumbatron deletes its fork and the edits that are not submitted.
 
 D1 tables (migration `0030_code_sessions.sql`):
 

@@ -1,12 +1,12 @@
-# ADR 0012: Host the Sandbox class in its own Worker, deployed in one upload
+# ADR 0012: Sandbox class in its own Worker, deployed in one upload
 
 ## Context
 
 A Durable Object class gets a container only when the upload that creates the class also carries the
 container metadata (`containers: [{ name, class_name }]`). Wrangler does this on a first deploy.
-Version uploads (`cloudflare_worker_version`) cannot carry migrations (ADR 0005). So the agents
-Worker cannot hold both its own classes and the container-enabled `Sandbox` class. Provider 5.27
-has no container application resource.
+Version uploads (`cloudflare_worker_version`) cannot carry migrations (ADR 0005). For this reason,
+the agents Worker cannot hold both its own classes and the container-enabled `Sandbox` class.
+Provider 5.27 has no container application resource.
 
 ## Decision
 

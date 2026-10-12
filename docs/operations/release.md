@@ -1,14 +1,14 @@
 # Application Releases Runbook
 
-This runbook covers how a promoted Candidate becomes a live app, and how to check a release.
+This runbook tells how a promoted Candidate becomes a live app. It also tells how to check a release.
 
-Promotion advances the Canonical Generation. A release then serves the promoted commit. `ReleaseWorkflow` (`workers/integration/src/release-workflow.ts`) checks each release with executable Evidence (`AGENTS.md` sections 21.3 and 37). No model decides whether a release is authorized.
+Promotion advances the Canonical Generation. A release then serves the promoted commit. `ReleaseWorkflow` (`workers/integration/src/release-workflow.ts`) checks each release with executable Evidence. No model decides whether a release is authorized.
 
-A release never deletes history. A failed release keeps the Canonical Generation. To recover, promote a new generation: a fix Change, or a rollback.
+A release never deletes history. A failed release keeps the Canonical Generation. To recover, promote a new generation with a fix Change or a rollback.
 
 ## 1. Live app release
 
-Each Project has a live app at `<slug>.rhumbatron.com`. The apps Worker (`rhumbatron-apps-prod`) serves it through Dynamic Workers ([ADR 0020](../adr/0020-live-apps-dynamic-workers.md)). A deploy is runtime data: an R2 bundle and a D1 pointer (`app_deployments`). Terraform does not change for a deploy.
+Each Project has a live app at `<slug>.rhumbatron.com`. The apps Worker (`rhumbatron-apps-prod`) serves it through Dynamic Workers ([ADR 0020](../adr/0020-live-apps-dynamic-workers.md)). A deploy is runtime data. It is an R2 bundle and a D1 pointer (`app_deployments`). Terraform does not change for a deploy.
 
 ```mermaid
 sequenceDiagram
@@ -32,7 +32,7 @@ sequenceDiagram
   end
 ```
 
-1. Start: promotion fast-forwards canonical `main` in the Artifacts repository of the Project. It records a `queued` release with the ID `rel_<project>_<generation>` and sends `release.start` on the `rhumbatron-release` Queue. The integration Worker starts `ReleaseWorkflow` with the release ID as the instance ID.
+1. Start: the promotion fast-forwards canonical `main` in the Artifacts repository of the Project. It records a `queued` release with the ID `rel_<project>_<generation>` and sends `release.start` on the `rhumbatron-release` Queue. The integration Worker starts `ReleaseWorkflow` with the release ID as the instance ID.
 2. Check: the workflow confirms that the generation is still canonical. A newer promotion during the release sets the release to `superseded`.
 3. Bundle: the workflow uses the stored bundle of the promoted commit, the bundle of the same tree, or the bundle of the Candidate preview. Otherwise it builds the bundle from the Artifacts source on the apps Worker. The cap is 60 builds per UTC day (`APP_BUILDS_PER_DAY`).
 4. Pointer: the workflow moves the production pointer by compare-and-swap on the row that it read. The previous version stays.
@@ -56,7 +56,7 @@ A rollback to generation Sk is a new canonical transition from Sn to Sn+1. The n
 
 ### Stuck releases
 
-Every 5 minutes, the event router cron queues `release.recover` for each Change that is `releasing` for more than 45 minutes (`RELEASE_STUCK_AFTER_MS`). It queues at most 10 per sweep. The integration Worker then does one of these:
+Every 5 minutes, the event router cron queues `release.recover` for each Change that is `releasing` for more than 45 minutes (`RELEASE_STUCK_AFTER_MS`). It queues at most 10 per sweep. The integration Worker then does one of these actions.
 
 - A finished release settles the Change to `completed` or `failed`.
 - A release that is still `queued` or `building` is marked `failed`, and the Change fails.

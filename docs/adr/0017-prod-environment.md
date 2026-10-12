@@ -2,10 +2,10 @@
 
 ## Context
 
-AGENTS.md section 10 defines `prod` with its own Terraform state, `-prod` names, and the
-production hostnames. ADR 0024 makes prod the only remote environment. The Cloudflare account is on
-Workers Paid for other projects. Rhumbatron stays inside the free and included limits (AGENTS.md
-section 7.3, rule 50). Rhumbatron shares each account-wide limit with those projects.
+The `prod` environment has its own Terraform state, `-prod` resource names, and the production
+hostnames. Prod is the only remote environment (ADR 0024). The Cloudflare account is on Workers
+Paid for other projects. Rhumbatron stays inside the free and included limits. Rhumbatron shares
+each account-wide limit with those projects.
 
 ## Decision
 
@@ -18,7 +18,7 @@ section 7.3, rule 50). Rhumbatron shares each account-wide limit with those proj
   and the billing budget alerts (ADR 0019).
 - Bundles do not depend on the environment. `bun run cf:bundle` writes them. Bindings carry the
   environment config.
-- `bun run tf prod ...` loads the prod credentials from the Keychain (ADR 0004). Scripts:
+- `bun run tf prod ...` loads the prod credentials from the Keychain (ADR 0004). The scripts are
   `tf:plan:prod`, `tf:apply:prod`, `tf:drift:prod`, and `smoke:prod` (public checks only).
   `bun run tf:drift` checks both roots.
 

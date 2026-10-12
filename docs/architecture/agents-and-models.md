@@ -6,7 +6,7 @@ Main source files:
 
 - `workers/agents/src/agent-do.ts`: AgentDO, run start, run end, budgets.
 - `workers/agents/src/wake-consumer.ts`: the `rhumbatron-agent-wakeups` consumer.
-- `workers/agents/src/limits.ts`: section 44 limits and budget-stop text.
+- `workers/agents/src/limits.ts`: Change limits and budget-stop text.
 - `workers/agents/src/workspace.ts`: the Task workspace and the command allowlist.
 - `packages/model-router/src`: routing rules, Clef-flash routing, escalation, budgets, prices, the spend meter, and the gateway client.
 - `packages/context-compiler/src`: Context Packet assembly and retrieval order.
@@ -16,20 +16,20 @@ Main source files:
 AgentDO is one durable logical Agent.
 It extends the Agents SDK `Agent` class and implements the `AgentRuntime` interface (`start`, `resume`, `cancel`, `getState`).
 `resume` records the event and starts no work.
-Pi types stay inside `agent-do.ts`, `models.ts`, and `task-tools.ts` in `workers/agents/src` (section 25).
+Pi types stay inside `agent-do.ts`, `models.ts`, and `task-tools.ts` in `workers/agents/src`.
 There is one Agent per Task. The Agent ID is `agt_<task>`.
 
 AgentDO keeps its run state in DO SQLite (`agent_runs`, `run_tool_logs`, `run_meter`, `run_workspaces`).
 D1 holds the shared view (`tasks`, `task_runs`, `decision_receipts`).
 AgentDO sleeps when no run is active.
 While a run is active, an interval schedule checks it every 60 seconds.
-After 15 checks the run is stuck and ends as `timeout`.
+After 15 checks, AgentDO treats the run as stuck and ends it as `timeout`.
 A check that finds the Task `cancelled` stops the run.
 
 ### Run start pipeline
 
 `start()` runs deterministic steps before the first model call.
-A refusal fails or blocks the Task with an exact reason.
+A refusal fails or blocks the Task and names the exact reason.
 
 ```mermaid
 flowchart TB
@@ -53,9 +53,9 @@ Notes:
 
 - `spent` is the cost of the Change's Task runs plus its conflict reviews.
 - A Change with spend and no budget left stops the Task with limit `change_budget`.
-- A run starts only when every meter of the Change has room for its first call (`refusedMeter`). Otherwise the Task stops with the limit of the full meter.
+- A run starts only when every meter of the Change has room for its first call (`refusedMeter`). Otherwise, the Task stops with the limit of the full meter.
 - Claims are advisory (ADR 0015). A Claim that another Agent holds does not block the run. The shard records `claim.contended`, and conflict detection uses that signal.
-- A Claim lease is 120 seconds. The one-minute run check and each model call renew a lease at half-life. Every run end releases the Claims of the run.
+- A Claim lease lasts 120 seconds. The one-minute run check and each model call renew a lease at half-life. Every run end releases the Claims of the run.
 
 ### Pi harness loop
 
@@ -105,26 +105,26 @@ Caps inside one run:
 | Pi retries | 1 retry for a transient error, 2 s base delay | `agent-do.ts` |
 
 A run that reaches its call cap or its spend cap ends as `run_call_cap`.
-That counts as a failure at the tier (see [Escalation](#escalation)).
+This end counts as a failure at the tier (see [Escalation](#escalation)).
 
 Commands must match the allowlist (`commandAllowed` in `workspace.ts`): `bun install`, `bun install --frozen-lockfile`, `bun test [paths]`, `bun run typecheck|test|bench|contract|build`, `bun run <name>` when `<name>` is a script in the workspace `package.json`, `bunx tsc --noEmit`, `git status|diff|log`, and `ls`.
 The command tool refuses shell metacharacters and a script name that starts with `-`.
 A script runs in the same Sandbox, with the same network policy, as `bun test`.
-`bun run build` lets an agent check that its UI builds. The workspace then discards the files the build wrote, so the ChangeSet holds no build output. Candidate composition builds the app again (see [Live apps](live-apps.md#client-assets-built-by-the-app)).
+With `bun run build`, an agent checks that its UI builds. The workspace then discards the files that the build wrote, so the ChangeSet holds no build output. Candidate composition builds the app again (see [Live apps](live-apps.md#client-assets-built-by-the-app)).
 
 ## Model routing
 
-The code uses the tier names `haiku`, `sonnet`, and `opus` from `AGENTS.md`.
+The code uses three tier names: `haiku`, `sonnet`, and `opus`.
 Every tier calls Anthropic Claude through the AI Gateway (ADR 0021).
-Opus is off by default: the `opus` tier runs on Sonnet unless `ALLOW_OPUS` is `"true"`.
+Opus is off by default. The `opus` tier runs on Sonnet unless `ALLOW_OPUS` is `"true"`.
 Terraform sets `ALLOW_OPUS` from `var.allow_opus` (default `false`).
 
 ### Deterministic rules, then Clef-flash
 
-`routeByRules` (section 23.2) picks a base tier and applies floors.
+`routeByRules` picks a base tier and applies floors.
 Clef-flash runs only on a first attempt, and only when the rules end at `default`.
 Clef-flash calls count against the shared `clef-flash` counter of 200 calls per UTC day.
-A Clef-flash answer can never go below the floor.
+A Clef-flash answer never goes below the floor.
 
 ```mermaid
 flowchart TB
@@ -182,14 +182,14 @@ flowchart LR
 
 Two call paths use the same gateway, headers, prices, and meter:
 
-- Pi agent runs (`workers/agents/src/models.ts`) use Pi's Anthropic Messages API. Pi puts `cache_control` on the system prompt, the tool definitions, and the latest message. It prices each response from its usage fields.
-- `complete()` (`packages/model-router/src/gateway-client.ts`) serves the Root Planner, the intake gate, the request review and arbiter, conflict review, context compaction, the acceptance check, and the Integration Judge. Each caller goes through `meteredComplete()`. `complete()` caches the system prompt and replays a whole assistant turn, thinking blocks included, on a follow-up call. The caller sets the output cap.
+- Pi agent runs (`workers/agents/src/models.ts`) use Pi's Anthropic Messages API. Pi puts `cache_control` on the system prompt, the tool definitions, and the latest message. Pi prices each response from its usage fields.
+- `complete()` (`packages/model-router/src/gateway-client.ts`) serves the Root Planner, the intake gate, the request review and arbiter, conflict review, context compaction, the acceptance check, and the Integration Judge. Each caller goes through `meteredComplete()`. `complete()` caches the system prompt. On a follow-up call, it replays a whole assistant turn, with its thinking blocks. The caller sets the output cap.
 
-The intake gate and the request comparison use fixed models and fixed rules, not the routing rules above. See [Shared Projects](shared-projects.md).
+The intake gate and the request comparison use their own fixed models and fixed rules. See [Shared Projects](shared-projects.md).
 
 ### Spend limits
 
-Cost per call is exact: uncached input, output with thinking, cache reads, and cache writes at Anthropic list prices (`ANTHROPIC_PRICES` in `packages/model-router/src/models.ts`).
+Rhumbatron computes the exact cost of each call. The cost includes uncached input, output with thinking, cache reads, and cache writes at Anthropic list prices (`ANTHROPIC_PRICES` in `packages/model-router/src/models.ts`).
 
 | Limit | Value | Where |
 |---|---|---|
@@ -198,15 +198,15 @@ Cost per call is exact: uncached input, output with thinking, cache reads, and c
 | Clef-flash calls per UTC day | 200, shared by routing, intake, and the causal router | D1 `usage_counters`, counter `clef-flash` |
 | Request, Project, and user budgets | `changes.budget_usd`, `projects.monthly_budget_usd`, `users.monthly_budget_usd` (ADR 0030) | D1 `usage_counters`, counters `change-usd-micro:<id>`, `project-usd-micro:<id>`, `user-usd-micro:<id>` |
 
-Each call that a Change pays for reserves an estimate on every meter of the Change in one D1 batch, all or nothing, then settles each meter to its exact cost (`reserveMeters`, `settleMeters` in `packages/model-router/src/budget-meters.ts`). See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
-These events are `spend_limited`: a refused reservation, a gateway spend-limit 429, and an Anthropic billing error.
+Before each call that a Change pays for, Rhumbatron reserves an estimate on every meter of the Change. One D1 batch writes all the reservations or none of them. After the call, each meter settles to its exact cost (`reserveMeters`, `settleMeters` in `packages/model-router/src/budget-meters.ts`). See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
+A refused reservation, a gateway spend-limit 429, and an Anthropic billing error are `spend_limited` events.
 `spend_limited` is a budget stop. It never retries and never tries another provider.
 
 ## Escalation
 
 `nextAttempt` (`workers/agents/src/limits.ts`) decides what happens after a failed run.
-It applies `nextStep` (section 23.3) and then `limitAttempts` (section 44) to the Task's whole failure history in D1 `task_runs`.
-Transport failures never escalate (section 42.8).
+It applies `nextStep` and then `limitAttempts` to the whole failure history of the Task in D1 `task_runs`.
+Transport failures never escalate.
 Two intelligence failures at one tier move the Task up one tier.
 
 ```mermaid
@@ -232,23 +232,23 @@ Rules:
 
 - A failed run reads every failure of the Task in the current attempt window, its own included. A retry or escalation schedules the next attempt 5 seconds later. An escalation emits `agent.escalated` with `from`, `to`, and `reason`.
 - The next `start()` reads the same rows, applies the same rules, and routes to the same tier.
-- A person's budget raise after a repeated-failure stop or a request, Project, or user budget stop opens a new attempt window (`tasks.attempts_reset_at`, `restoreAfterBudgetRaise`). A run that exceeds its share of the request budget ends as `run_cost_cap`, and a run whose call a budget refused ends as that budget, so without the new window the old runs would stop the Task again before any new run.
-- When the attempt limit stops a Task and its latest failure is `run_cost_cap`, the stop is a request budget stop (`change_budget`), not an attempt-limit stop.
-- A transport failure (`rate_limited`, `timeout`, `transient`) retries once at the same tier. A second transport failure in a row fails the Task. When the latest failure is a transport failure and the tier has no attempts left, the Task stops; it does not escalate.
-- The daily call cap and the monthly, Project, user, and request budgets stop at once. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit.
+- When a person raises a budget after a stop, a new attempt window opens (`tasks.attempts_reset_at`, `restoreAfterBudgetRaise`). This applies after a repeated-failure stop and after a request, Project, or user budget stop. A run that exceeds its share of the request budget ends as `run_cost_cap`. A run whose call a budget refused ends with the name of that budget. Without the new window, these old runs would stop the Task again before any new run.
+- When the attempt limit stops a Task and its latest failure is `run_cost_cap`, the stop is a request budget stop (`change_budget`).
+- A transport failure (`rate_limited`, `timeout`, `transient`) retries once at the same tier. A second transport failure in a row fails the Task. When the latest failure is a transport failure and the tier has no attempts left, the Task stops without escalation.
+- The daily call cap and the monthly, Project, user, and request budgets stop the Task at once. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit.
 - `replan` is a budget stop with limit `max_attempts_per_tier`. No automatic re-plan runs. The Task becomes `blocked`, and the Change becomes `budget_blocked`.
 - `limitAttempts` allows at most 2 attempts per tier and counts every earlier run at that tier.
 - Conflicting dependency ChangeSets fail the Task at once (`dependency_merge_conflict`).
 - When a Task fails or stops, its pending dependents become `blocked`.
 - The Decision Receipt of the next run records an escalation (reason `two_failures_at_<tier>` or `max_attempts_at_<tier>`).
-- Every attempt gets a fresh Pi session (section 23.3).
+- Every attempt gets a fresh Pi session.
 
 ## Context Packet assembly
 
 The Context Compiler is deterministic and does no I/O.
 `workers/agents/src/retrieval.ts` loads the inputs.
 `compilePacket` orders, trims, and renders them.
-The model never chooses its own scope (section 27.5).
+The model never chooses its own scope.
 
 ```mermaid
 flowchart TB
@@ -275,7 +275,7 @@ flowchart TB
 Rules:
 
 - Every item carries `itemId`, `source`, `sourceVersion`, and `capturedAt`.
-- Over the token limit, `compilePacket` drops the lowest-priority items first. Vectorize matches go first.
+- Over the token limit, `compilePacket` drops the lowest-priority items first. Vectorize matches are the first to go.
 - AgentDO stores the packet hash on the `task_runs` row (`context_hash`). Two runs with the same hash have the same inputs.
 - Vectorize gets at most 1,000 query embeddings per UTC day. It adds only files of the same Project that exist in the indexed tree.
 - `rhumbatron-indexer` builds the exact indexes once per canonical tree, on the `index.build` command.
@@ -284,7 +284,7 @@ Rules:
 ## Stacked workspaces
 
 A Task with dependencies starts from canonical source plus the published ChangeSets of every Task it depends on (`stackFor` in `workers/agents/src/stack.ts`).
-The order is topological, with dependencies first. Ties break on ChangeSet creation time, then Task ID.
+The order is topological, with dependencies first. ChangeSet creation time breaks a tie, then the Task ID.
 The merge order is fixed for the whole run, so a Sandbox restore repeats the same merges.
 
 ```mermaid
@@ -317,7 +317,7 @@ The ChangeSet records this lineage in `intent_json.changeSet` (`ChangeSetIntent`
 | `ownFiles` | Files this Task changed on top of its stack |
 | `patchRef` | R2 key of the stored `git diff`, from `startCommit` when stacked, else from `baseCommit` |
 
-`ws-t3` descends from `ws-t1` and `ws-t2`, so Candidate composition merges them as shared history, not as concurrent edits.
+`ws-t3` descends from `ws-t1` and `ws-t2`, so Candidate composition merges them as shared history.
 The integrate rule can reopen a Task (`route_json.integrate`, [Source and verification](source-and-verification.md#sibling-candidates-and-selection)).
 The reopened Task gets a dependency edge to the other Task, so its re-run stacks on the other Task's ChangeSet.
 Its Context Packet tells it to build against the real routes, field names, and data shapes of that ChangeSet.
