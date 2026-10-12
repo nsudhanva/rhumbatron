@@ -67,8 +67,9 @@ the loss. See [Source and verification](../architecture/source-and-verification.
   - Criteria that other checks cover (quality gate, latency, kept behavior) are not judged.
 - Acceptance gates auto-promotion. It does not decide whether a Candidate can promote. A shortfall
   does not reject a Candidate. It ranks the Candidate (criteria met is the second sort key). A winner that meets each criterion auto-promotes
-  when policy allows. A winner with a criterion that is not met or unclear, or with no acceptance
-  result, gets the human gate in its plan. The Change moves to `awaiting_approval`, and
+  when policy allows (the default policy `policy-1` allows `low` and `medium` risk). A winner
+  with a criterion that is not met or unclear, or with no acceptance result, gets the human gate
+  in its plan. The Change moves to `awaiting_approval`, and
   `approval.requested` states the reason ("Best candidate meets 2 of 3 criteria; not met: calendar
   view. Approve to ship it or cancel the change."). A failed required executable check makes a
   Candidate unpromotable.

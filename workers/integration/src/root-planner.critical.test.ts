@@ -76,6 +76,22 @@ describe("parsePlan", () => {
     expect(parsePlan(plan([task("t1")]))).toMatchObject({ ok: true, plan: { title: "" } });
     expect(titled(42)).toMatchObject({ ok: true, plan: { title: "" } });
   });
+
+  it("records open details as assumptions and never rejects a plan for them", () => {
+    const withAssumptions = (assumptions: unknown) =>
+      parsePlan(JSON.stringify({ ...JSON.parse(plan([task("t1")])), assumptions }));
+    expect(
+      withAssumptions(["Use the classic 16-color set.", 7, "ok", "  ", "  Pixels are 8 px.  "]),
+    ).toMatchObject({
+      ok: true,
+      plan: { assumptions: ["Use the classic 16-color set.", "Pixels are 8 px."] },
+    });
+    const many = Array.from({ length: 12 }, (_, i) => `Assumption number ${i}`);
+    expect(withAssumptions(many)).toMatchObject({ ok: true });
+    const parsed = withAssumptions(many);
+    expect(parsed.ok && parsed.plan.assumptions).toHaveLength(8);
+    expect(parsePlan(plan([task("t1")]))).toMatchObject({ ok: true, plan: { assumptions: [] } });
+  });
 });
 
 describe("bootstrap Task for an empty repository", () => {

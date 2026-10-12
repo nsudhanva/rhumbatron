@@ -13,6 +13,7 @@ export * from "./common.ts";
 export * from "./conflict.ts";
 export * from "./context.ts";
 export * from "./event.ts";
+export * from "./first-come.ts";
 export * from "./model.ts";
 export * from "./project.ts";
 export * from "./release.ts";

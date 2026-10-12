@@ -7,6 +7,7 @@ import type {
   TaskRun,
 } from "../../lib/api";
 import { changeLabel, generation, truncate } from "../../lib/format";
+import { failureOutcome } from "../../lib/recovery";
 import { renderNow } from "../../lib/render-time";
 
 /**
@@ -16,7 +17,11 @@ import { renderNow } from "../../lib/render-time";
  * is a recorded event at its recorded time. Nothing is estimated.
  */
 
-export type BarStatus = "running" | "completed" | "failed" | "cancelled";
+/**
+ * `recovered`: the attempt failed and a later attempt of the Task completed; `retrying`: it failed
+ * and the Task runs or waits to run again (lib/recovery). Only `failed` is a failure that stays.
+ */
+export type BarStatus = "running" | "completed" | "failed" | "retrying" | "recovered" | "cancelled";
 
 export type TimelineBar = {
   key: string;
@@ -28,6 +33,8 @@ export type TimelineBar = {
   end: number | null;
   failureKind: string | null;
   modelCalls: number;
+  /** When the attempt that recovered this failure ended; null unless `recovered`. */
+  recoveredAt: number | null;
 };
 
 export type TimelineTask = {
@@ -136,6 +143,8 @@ export const LIVE_CHANGE_STATUSES = new Set([
   "verifying",
   "awaiting_approval",
   "needs_input",
+  "awaiting_choice",
+  "queued",
   "promoting",
   "releasing",
 ]);
@@ -236,11 +245,19 @@ function markerOf(event: FeedEvent, change: ChangeSummary | undefined): Timeline
 
 function barStatus(run: TaskRun, task: TaskDetail): BarStatus {
   if (run.status === "completed") return "completed";
-  if (run.status === "failed") return "failed";
+  if (run.status === "failed") return failureOutcome(run, task.runs, task.status);
   // A running attempt of a Task that no longer runs was stopped with its Task or Change.
   return task.status === "cancelled" || task.status === "failed" || task.status === "completed"
     ? "cancelled"
     : "running";
+}
+
+/** End of the first later attempt that completed (the recovery), else the Task's last end. */
+function recoveredAt(run: TaskRun, task: TaskDetail): number | null {
+  const next = task.runs.find((r) => r.attempt > run.attempt && r.status === "completed");
+  if (next) return ms(next.endedAt) ?? ms(next.startedAt);
+  const ends = task.runs.map((r) => ms(r.endedAt)).filter((t): t is number => t !== null);
+  return ends.length > 0 ? Math.max(...ends) : null;
 }
 
 export function buildTimeline(input: {
@@ -328,6 +345,7 @@ export function buildTimeline(input: {
               end: status === "running" ? null : (e ?? s),
               failureKind: run.failureKind,
               modelCalls: run.modelCalls,
+              recoveredAt: status === "recovered" ? recoveredAt(run, task) : null,
             } satisfies TimelineBar;
           })
           .filter((b): b is TimelineBar => b !== null);

@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EMPTY, formatClock, formatMs, formatNumber } from "../../lib/format";
 import { usePrefersReducedMotion } from "../../lib/motion";
+import { recoveredTaskFailures } from "../../lib/recovery";
 import { SkeletonRows } from "../project/feedback";
 import { Td, Th, TRow } from "../ui/data-table";
 import { EmptyState } from "../ui/empty-state";
@@ -57,6 +58,8 @@ export function EventStream({
   const paused = frozenAt !== null;
 
   const matching = events;
+  // `task.failed` events a later `task.completed` recovered read as attention, not danger.
+  const recovered = useMemo(() => recoveredTaskFailures(events), [events]);
   const visible = useMemo(
     () => (frozenAt === null ? matching : matching.filter((e) => e.seq <= frozenAt)),
     [matching, frozenAt],
@@ -260,6 +263,7 @@ export function EventStream({
                     systems={systems}
                     columns={columns}
                     scopedToChange={scopedToChange}
+                    recovered={recovered}
                   />
                 ))
               )}
@@ -283,6 +287,7 @@ function EventRows({
   systems,
   columns,
   scopedToChange,
+  recovered,
 }: {
   event: FeedEvent;
   projectId: string;
@@ -291,8 +296,9 @@ function EventRows({
   systems: boolean;
   columns: number;
   scopedToChange: boolean;
+  recovered: ReadonlySet<string>;
 }) {
-  const tone = typeTone(event);
+  const tone = typeTone(event, recovered);
   const detailId = `event-detail-${event.seq}`;
   const lag = ingestLagMs(event);
   const Caret = open ? CaretDown : CaretRight;
@@ -338,6 +344,9 @@ function EventRows({
         </Td>
         <Td className="max-w-0 w-full">
           <span className="block truncate" title={event.summary}>
+            {tone === "attention" && (
+              <span className="font-semibold text-kumo-warning">Retried, recovered · </span>
+            )}
             {event.summary || EMPTY}
           </span>
         </Td>

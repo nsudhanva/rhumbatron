@@ -15,7 +15,7 @@ import { ensureIdentity } from "./identity.ts";
  * Access: every query joins `memberships` on the caller's user ID, the same rule as
  * `canAccessProject`, so a user never sees another tenant's rows. Archived Projects are skipped.
  *
- * Cost: one D1 batch of 13 capped SELECTs per read (list and count share it), plus the 3-statement
+ * Cost: one D1 batch of 15 capped SELECTs per read (list and count share it), plus the 3-statement
  * `ensureIdentity` batch. Each SELECT starts from a rare state (verified Candidates, open dead
  * letters, blocked Changes, confirmed conflicts, requests that need input or review) or a 7-day window through an index, so rows read
  * scale with open and recent items, not with history. Marking read writes one row per new mark.
@@ -40,6 +40,8 @@ const NotificationKind = z.enum([
   "request_proposed",
   "request_included",
   "request_declined",
+  "request_choice_needed",
+  "request_choice_made",
 ]);
 type NotificationKind = z.infer<typeof NotificationKind>;
 
@@ -114,16 +116,23 @@ const ENDED = `('completed', 'cancelled', 'failed')`;
 const read = (alias: string, idSql: string) =>
   `LEFT JOIN notification_reads ${alias} ON ${alias}.user_id = ?1 AND ${alias}.notification_id = ${idSql}`;
 
+/** True for the Project owner or an admin (`change.manageAny`, `change.review`). `?1` = user. */
+const MANAGES = `(EXISTS (SELECT 1 FROM memberships m WHERE m.org_id = p.org_id AND m.user_id = ?1)
+  OR EXISTS (SELECT 1 FROM project_members pm
+             WHERE pm.project_id = p.id AND pm.user_id = ?1 AND pm.role IN ('owner', 'admin')))`;
+
 /**
  * Verified Candidates of open Changes: `approval_required` (plan gates on a human, no decision
  * yet) or `promotion_ready` (approved, or no gate). A rejected approval yields neither. A
  * Candidate whose base is behind a later promotion in the same Project is stale-to-be: skipped.
  * (D1 `projects.canonical_generation` is not the canonical truth; ProjectRootDO is. Promotion
- * re-checks it with compare-and-swap.)
+ * re-checks it with compare-and-swap.) Audience: the people who can approve and ship (the
+ * Project owner and the admins, `candidate.promote`), and the requester. `status_reason` states
+ * why the Candidate waits.
  */
 const VERIFIED_SQL = `
 SELECT c.id AS candidate_id, c.change_id, ch.project_id, p.name AS project_name, ch.goal, ch.title,
-       ch.risk_tier, c.base_generation, c.updated_at,
+       ch.risk_tier, c.base_generation, c.updated_at, c.status_reason, ${MANAGES} AS manages,
        json_extract(c.plan_json, '$.humanApprovalRequired') AS approval_required,
        json_extract(c.score_json, '$.promotable') AS promotable,
        a.decision AS approval_decision, a.created_at AS approval_at,
@@ -135,6 +144,7 @@ LEFT JOIN approvals a ON a.candidate_id = c.id
 ${read("ra", `'approval_required:' || c.id`)}
 ${read("rp", `'promotion_ready:' || c.id`)}
 WHERE c.status = 'verified' AND ch.status NOT IN ${CLOSED}
+  AND (ch.created_by = ?1 OR ${MANAGES})
   AND NOT EXISTS (
     SELECT 1 FROM candidates c2 CROSS JOIN changes ch2 ON ch2.id = c2.change_id
     WHERE c2.status = 'promoted' AND c2.updated_at >= c.created_at
@@ -238,11 +248,6 @@ WHERE ch.status = 'not_selected' AND ch.outcome = 'not_selected' AND ch.created_
   AND ch.updated_at >= ?2
 ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
 
-/** True for the Project owner or an admin (`change.manageAny`, `change.review`). `?1` = user. */
-const MANAGES = `(EXISTS (SELECT 1 FROM memberships m WHERE m.org_id = p.org_id AND m.user_id = ?1)
-  OR EXISTS (SELECT 1 FROM project_members pm
-             WHERE pm.project_id = p.id AND pm.user_id = ?1 AND pm.role IN ('owner', 'admin')))`;
-
 /**
  * request_needs_input (ADR 0025): the requester; for a conflict also the Project owner and the
  * admins (owner or admin member row, or organization member: the `projectRole` rule). An action
@@ -296,6 +301,9 @@ type VerifiedRow = Base & {
   risk_tier: string | null;
   base_generation: number;
   updated_at: string;
+  status_reason: string | null;
+  /** 1 when the caller is the Project owner or an admin: they approve and ship. */
+  manages: number;
   approval_required: number | null;
   promotable: number | null;
   approval_decision: "granted" | "rejected" | null;
@@ -371,11 +379,14 @@ const project = (row: Base) => ({ projectId: row.project_id, projectName: row.pr
 function verifiedItem(row: VerifiedRow): NotificationView | null {
   if (row.promotable === 0) return null;
   const gated = row.approval_required === 1;
+  const manages = row.manages === 1;
+  // The requester who cannot ship is told what the request waits for; an owner or admin acts.
+  const severity = manages ? ("action" as const) : ("attention" as const);
   const base = {
     ...project(row),
     changeId: row.change_id,
     candidateId: row.candidate_id,
-    href: `/candidates/${row.candidate_id}`,
+    href: `/changes/${row.change_id}`,
   };
   if (gated && row.approval_decision === null) {
     const tier = row.risk_tier ?? "this";
@@ -383,11 +394,13 @@ function verifiedItem(row: VerifiedRow): NotificationView | null {
       ...base,
       id: `approval_required:${row.candidate_id}`,
       kind: "approval_required",
-      severity: "action",
-      title: "Approval needed to promote a Candidate",
+      severity,
+      title: manages
+        ? "Approval needed to ship a Candidate"
+        : "Your request waits for an owner or admin to approve it",
       body: joinParts(
         changeTitle(row.title, row.goal),
-        `Policy requires a human decision for ${tier}-risk Changes`,
+        clip(row.status_reason ?? `Policy requires a human decision for ${tier}-risk Changes`, 200),
       ),
       createdAt: row.updated_at,
       read: row.approval_read !== null,
@@ -399,11 +412,13 @@ function verifiedItem(row: VerifiedRow): NotificationView | null {
     ...base,
     id: `promotion_ready:${row.candidate_id}`,
     kind: "promotion_ready",
-    severity: "action",
-    title: `Ready to promote: S${row.base_generation} → S${next}`,
+    severity,
+    title: manages
+      ? `Ready to ship: S${row.base_generation} → S${next}`
+      : `Your request waits for an owner or admin to ship it: S${row.base_generation} → S${next}`,
     body: joinParts(
       changeTitle(row.title, row.goal),
-      gated ? "Approved" : "Verified, no approval required",
+      gated ? "Approved" : clip(row.status_reason ?? "Verified, no approval required", 200),
     ),
     createdAt:
       row.approval_at && row.approval_at > row.updated_at ? row.approval_at : row.updated_at,
@@ -639,6 +654,85 @@ function reviewedItem(row: NotSelectedRow, state: "included" | "declined"): Noti
   };
 }
 
+/**
+ * request_choice_needed (ADR 0032): a later request of another person conflicts with the caller's
+ * request and waits for the caller's choice. Only the earlier requester (`asked_user_id = ?1`). An
+ * action item while the choice is open. Links to the caller's own Change, where the choice is made.
+ */
+const CHOICE_NEEDED_SQL = `
+SELECT w.id, w.first_change_id, w.later_change_id, l.project_id, p.name AS project_name,
+       l.goal, l.title, w.created_at AS updated_at, ul.display_name, ul.email, r.read_at
+FROM request_choices w
+CROSS JOIN changes l ON l.id = w.later_change_id
+${MINE("l.project_id")}
+LEFT JOIN users ul ON ul.id = l.created_by
+${read("r", `'request_choice_needed:' || w.id`)}
+WHERE w.asked_user_id = ?1 AND w.choice IS NULL AND l.status IN ('awaiting_choice', 'queued')
+ORDER BY w.created_at DESC LIMIT ${PER_KIND}`;
+
+/**
+ * request_choice_made: the later requester, within the window, after the earlier requester chose
+ * "apply theirs". "Keep mine" ends the request: `request_not_selected` covers it. `?2` = since.
+ */
+const CHOICE_MADE_SQL = `
+SELECT w.id, w.later_change_id, l.project_id, p.name AS project_name, l.goal, l.title,
+       w.chosen_at AS updated_at, uf.display_name, uf.email, r.read_at
+FROM request_choices w
+CROSS JOIN changes l ON l.id = w.later_change_id
+${MINE("l.project_id")}
+LEFT JOIN users uf ON uf.id = w.asked_user_id
+${read("r", `'request_choice_made:' || w.id`)}
+WHERE w.choice = 'apply_theirs' AND w.chosen_at >= ?2 AND l.created_by = ?1
+ORDER BY w.chosen_at DESC LIMIT ${PER_KIND}`;
+
+type ChoiceRow = Base & {
+  id: string;
+  first_change_id?: string;
+  later_change_id: string;
+  goal: string;
+  title: string | null;
+  updated_at: string;
+  display_name: string | null;
+  email: string | null;
+};
+const personOf = (row: ChoiceRow) =>
+  row.display_name ?? (row.email ? (row.email.split("@")[0] ?? null) : null);
+
+function choiceNeededItem(row: ChoiceRow): NotificationView {
+  const who = personOf(row) ?? "Another person";
+  return {
+    ...project(row),
+    changeId: row.later_change_id,
+    id: `request_choice_needed:${row.id}`,
+    kind: "request_choice_needed",
+    severity: "action",
+    title: `${who}'s request conflicts with yours`,
+    body: joinParts(
+      "Keep your version, or apply theirs after yours",
+      changeTitle(row.title, row.goal),
+    ),
+    href: `/changes/${row.first_change_id ?? row.later_change_id}`,
+    createdAt: row.updated_at,
+    read: !!row.read_at,
+  };
+}
+
+function choiceMadeItem(row: ChoiceRow): NotificationView {
+  const who = personOf(row) ?? "The first requester";
+  return {
+    ...project(row),
+    changeId: row.later_change_id,
+    id: `request_choice_made:${row.id}`,
+    kind: "request_choice_made",
+    severity: "info",
+    title: `${who} will apply your request after theirs`,
+    body: joinParts("It plans when their request finishes", changeTitle(row.title, row.goal)),
+    href: `/changes/${row.later_change_id}`,
+    createdAt: row.updated_at,
+    read: !!row.read_at,
+  };
+}
+
 const RANK: Record<NotificationSeverity, number> = { action: 0, attention: 1, info: 2 };
 
 /**
@@ -668,6 +762,8 @@ export async function deriveNotifications(
     proposed,
     included,
     declined,
+    choiceNeeded,
+    choiceMade,
   ] = await db.batch([
     userOnly(VERIFIED_SQL),
     userOnly(DEAD_LETTER_SQL),
@@ -682,6 +778,8 @@ export async function deriveNotifications(
     userOnly(PROPOSED_SQL),
     statement(reviewedPart("included")),
     statement(reviewedPart("declined")),
+    userOnly(CHOICE_NEEDED_SQL),
+    statement(CHOICE_MADE_SQL),
   ]);
   const rows = <T>(result: D1Result | undefined) => (result?.results ?? []) as T[];
   const items: NotificationView[] = [
@@ -700,6 +798,8 @@ export async function deriveNotifications(
     ...rows<ProposedRow>(proposed).map(proposedItem),
     ...rows<NotSelectedRow>(included).map((row) => reviewedItem(row, "included")),
     ...rows<NotSelectedRow>(declined).map((row) => reviewedItem(row, "declined")),
+    ...rows<ChoiceRow>(choiceNeeded).map(choiceNeededItem),
+    ...rows<ChoiceRow>(choiceMade).map(choiceMadeItem),
   ];
   return items.sort(
     (a, b) =>

@@ -1,4 +1,9 @@
-import { canAffectCandidate, latestEvidence, validateCitations } from "@rhumbatron/evidence";
+import {
+  APPROVE_THEN_SHIP,
+  canAffectCandidate,
+  latestEvidence,
+  validateCitations,
+} from "@rhumbatron/evidence";
 import type { CompletionRequest, CompletionResult } from "@rhumbatron/model-router";
 import {
   AcceptanceResult,
@@ -637,14 +642,15 @@ export async function applySelection(
     ),
   ];
   if (winner) {
-    const row = await env.DB.prepare("SELECT plan_json FROM candidates WHERE id = ?")
+    const row = await env.DB.prepare("SELECT plan_json, status_reason FROM candidates WHERE id = ?")
       .bind(winner)
-      .first<{ plan_json: string | null }>();
+      .first<{ plan_json: string | null; status_reason: string | null }>();
     const plan = parse(VerificationPlan, row?.plan_json ?? null);
     const risk = await env.DB.prepare("SELECT risk_tier FROM changes WHERE id = ?")
       .bind(ctx.changeId)
       .first<{ risk_tier: string | null }>();
     // The gate step leaves `approval.requested` to selection when the Candidate has siblings.
+    // The gate step also stored why the winner waits (`status_reason`).
     if (plan?.humanApprovalRequired) {
       events.push(
         await changeEvent(
@@ -654,6 +660,8 @@ export async function applySelection(
             candidateId: winner,
             riskTier: risk?.risk_tier ?? "medium",
             policyVersion: plan.policyVersion,
+            reason: row?.status_reason ?? null,
+            trigger: "policy",
           },
           { key: winner, actor: ACTOR },
         ),
@@ -667,8 +675,6 @@ export async function applySelection(
 /* ------------------------------------------------------------------------------------------ */
 /* Acceptance and auto-promotion                                                               */
 /* ------------------------------------------------------------------------------------------ */
-
-const APPROVE_OR_CANCEL = "Approve to ship it or cancel the change.";
 
 /**
  * Why the selected Candidate must not auto-promote, or null when acceptance allows it. The
@@ -690,18 +696,15 @@ export function acceptanceShortfall(input: {
     const missing = acceptance
       .filter((a) => a.status !== "met")
       .map((a) => `${a.criterion.slice(0, 80)}${a.status === "unclear" ? " (unclear)" : ""}`);
-    return `${subject} meets ${met} of ${acceptance.length} criteria; not met: ${missing.join("; ")}. ${APPROVE_OR_CANCEL}`;
+    return `${subject} meets ${met} of ${acceptance.length} criteria; not met: ${missing.join("; ")}. ${APPROVE_THEN_SHIP}`;
   }
   const why = latest?.summary.replace(/ \(runner: [^)]+\)$/, "") ?? "the check did not run";
-  return `${subject} has no acceptance result (${why.slice(0, 200)}). ${APPROVE_OR_CANCEL}`;
+  return `${subject} has no acceptance result (${why.slice(0, 200)}). ${APPROVE_THEN_SHIP}`;
 }
 
 /**
- * Holds the selected Candidate for a person when acceptance is short (ADR 0026): its plan gains
- * the human gate (it only adds a gate), its status reason states the shortfall, the Change is
- * `awaiting_approval`, and `approval.requested` carries the reason. The person approves and
- * promotes through the existing path. Returns the reason, or null when auto-promotion may go on.
- * Idempotent: conditional updates and a stable event key.
+ * Holds the selected Candidate for a person when acceptance is short (ADR 0026). Returns the
+ * reason, or null when auto-promotion may go on. See `holdForPerson`.
  */
 export async function holdForAcceptance(
   env: Pick<Env, "DB" | "RESOURCE_SHARD">,
@@ -726,6 +729,24 @@ export async function holdForAcceptance(
     siblings: (await groupSize(env.DB, candidateId)) > 1,
   });
   if (!reason) return null;
+  await holdForPerson(env, candidateId, reason, "acceptance", plan?.policyVersion ?? null);
+  return reason;
+}
+
+/**
+ * Holds a verified Candidate for a person: its plan gains the human gate (it only adds a gate),
+ * its status reason states why, the Change is `awaiting_approval`, and `approval.requested`
+ * carries the reason and the trigger. The person approves and ships through the existing
+ * promotion path. Triggers: `acceptance` (ADR 0026) and `policy` (the policy does not promote
+ * this risk tier automatically). Idempotent: conditional updates and a stable event key.
+ */
+export async function holdForPerson(
+  env: Pick<Env, "DB" | "RESOURCE_SHARD">,
+  candidateId: string,
+  reason: string,
+  trigger: "acceptance" | "policy",
+  policyVersion: string | null,
+): Promise<void> {
   const now = new Date().toISOString();
   await env.DB.batch([
     env.DB.prepare(
@@ -742,27 +763,20 @@ export async function holdForAcceptance(
     ).bind(now, candidateId),
   ]);
   const head = await loadContext(env.DB, candidateId);
-  if (head) {
-    const ctx: ChangeContext = {
-      projectId: head.project_id,
-      orgId: head.org_id,
-      projectSlug: head.slug,
-      changeId: head.change_id,
-      baseGeneration: head.base_generation,
-    };
-    await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
-      await changeEvent(
-        ctx,
-        "approval.requested",
-        {
-          candidateId,
-          reason,
-          trigger: "acceptance",
-          policyVersion: plan?.policyVersion ?? null,
-        },
-        { key: `${candidateId}:acceptance`, actor: ACTOR },
-      ),
-    ]);
-  }
-  return reason;
+  if (!head) return;
+  const ctx: ChangeContext = {
+    projectId: head.project_id,
+    orgId: head.org_id,
+    projectSlug: head.slug,
+    changeId: head.change_id,
+    baseGeneration: head.base_generation,
+  };
+  await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+    await changeEvent(
+      ctx,
+      "approval.requested",
+      { candidateId, reason, trigger, policyVersion },
+      { key: `${candidateId}:${trigger}`, actor: ACTOR },
+    ),
+  ]);
 }

@@ -13,8 +13,11 @@ import type { CandidateDetail, ChangeDetail, ChangeMeta } from "./api";
  * `POST /v1/changes/:changeId/clarify`.
  */
 
-/** One question the system asks the requester before it builds a Change. */
-export type ClarificationQuestion = { id: string; text: string };
+/**
+ * One question the system asks the requester before it builds a Change. `options` are distinct
+ * readings to pick from; the form adds "Something else" with a free-text answer.
+ */
+export type ClarificationQuestion = { id: string; text: string; options?: string[] };
 
 /** Why a Change waits in `needs_input`, and what it asks. Null when nothing is asked. */
 export type ChangeClarification = {

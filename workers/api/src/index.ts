@@ -14,6 +14,7 @@ import { conflicts } from "./conflicts.ts";
 import { cost } from "./cost.ts";
 import { deadLetters } from "./dead-letters.ts";
 import { decisions } from "./decisions.ts";
+import { firstCome } from "./first-come.ts";
 import { fixtures } from "./fixtures.ts";
 import { errorBody, fail, respond } from "./http.ts";
 import { live } from "./live.ts";
@@ -47,6 +48,7 @@ app.get("/v1/version", (c) =>
 
 // Before `projects`: these handlers answer first, so their own requireAuth runs only once.
 app.route("/", members);
+app.route("/", firstCome);
 app.route("/", board);
 app.route("/", live);
 app.route("/", conflicts);

@@ -11,12 +11,12 @@ import type {
 import {
   CANCELLABLE_FROM,
   CHANGE_CANCELLED_REASON,
-  canCancel,
   restoreAfterBudgetRaise,
   TERMINAL_CHANGE_STATUSES,
 } from "./change-status.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
+import { wakeAfterFirst } from "./first-come.ts";
 import { answeredRounds, parseAnswers, type StoredAnswer } from "./intake-context.ts";
 import { recoverSourceConflicts } from "./rebase.ts";
 import { recoverStaleCandidates } from "./recompose.ts";
@@ -63,11 +63,18 @@ const notFound = (changeId: string): ChangeCommandOutcome => ({
 });
 
 /**
- * A Change that waits for an answer (`needs_input`) can be cancelled too: it has no Tasks yet, or
- * its Tasks never started (the cross-request check runs before the Work Graph is stored). So can a
- * `proposed` request: the requester withdraws it before review (ADR 0028).
+ * A Change that waits for an answer (`needs_input`) or for an earlier request (`awaiting_choice`,
+ * `queued`, ADR 0032) can be cancelled too: it has no Tasks yet (the cross-request check runs before
+ * the Work Graph is stored). So can a `proposed` request: the requester withdraws it before review
+ * (ADR 0028).
  */
-const CANCEL_FROM: readonly ChangeStatus[] = [...CANCELLABLE_FROM, "needs_input", "proposed"];
+const CANCEL_FROM: readonly ChangeStatus[] = [
+  ...CANCELLABLE_FROM,
+  "needs_input",
+  "proposed",
+  "awaiting_choice",
+  "queued",
+];
 /** A system decision (arbiter, same requester, intake) cancels as the system, not as a person. */
 const actorKind = (decidedBy: string | undefined) =>
   decidedBy?.startsWith("system:") ? ("system" as const) : ("user" as const);
@@ -123,9 +130,7 @@ export async function cancelChange(
     return recorded(row, true);
   }
   if (
-    !canCancel(row.status) &&
-    row.status !== "needs_input" &&
-    row.status !== "proposed" &&
+    !CANCEL_FROM.includes(row.status) &&
     !(selection && ["failed", "completed"].includes(row.status))
   ) {
     return {
@@ -533,14 +538,14 @@ export async function declineChange(
   return { result: "recorded", changeId: after.id, status: after.status, repeated: !moved };
 }
 
-/** Remove a terminal request from future scope registrations. Safe on a repeat. */
-export async function releaseRequestScope(
-  env: Pick<Env, "PROJECT_ROOT">,
-  projectId: string,
-  changeId: string,
-) {
+/**
+ * Remove a terminal request from future scope registrations, and move on each later request that
+ * waits for it (ADR 0032). Safe on a repeat.
+ */
+export async function releaseRequestScope(env: Env, projectId: string, changeId: string) {
   const roots = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
   await roots.get(roots.idFromName(projectId)).release(changeId);
+  await wakeAfterFirst(env, changeId);
 }
 
 /* ------------------------------------------------------------------------------------------ */

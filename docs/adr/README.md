@@ -32,3 +32,4 @@ The [architecture pages](../architecture/README.md) describe how the system work
 | [0029](./0029-code-edit-sessions.md) | Code page edit sessions with a terminal |
 | [0030](./0030-budget-scopes.md) | Budget scopes for requests, Projects, and users |
 | [0031](./0031-ci-cd.md) | CI/CD: checks on pull requests, Terraform deploy on each push to main |
+| [0032](./0032-first-come-conflicts.md) | First-come conflicts between requests of different people |

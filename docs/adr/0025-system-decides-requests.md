@@ -51,38 +51,50 @@ Research on model cascades and model judges sets the method:
      covered, the kind is `duplicate`. When one or both Sonnet orders say covered without that full
      agreement, the kind is `unclear`, with the quoted criteria. Clef alone never marks a
      duplicate. Haiku is not a confirming vote.
-  4. Clarity: a rule runs first. A goal with fewer than two words that name a product object gets
-     a question. Then Clef-flash runs. P(buildable) >= 0.9 plans, and P(buildable) <= 0.4 asks.
-     Between the two, one Sonnet call lists the distinct readings, each with a quote of the goal.
-     Two or more valid readings ask, with the readings as options.
+  4. Clarity, read against the app. The app context is deterministic and small: up to 60
+     canonical file paths, the `package.json` name and description, the first 600 characters of
+     `README.md`, and up to 10 titles of in-flight and shipped requests of the Project. A rule
+     runs first. A goal with fewer than two words that name a product object gets a question.
+     Then Clef-flash runs with the app context. P(buildable) >= 0.9 plans with no Claude call.
+     Otherwise one Sonnet call (`review_clarity`) reads the request and the app context. It
+     returns questions only for a part that two readings build as materially different products,
+     each with a quote of the goal and 2 to 4 readings as options. It returns small open details
+     (colors, sizes, labels, defaults) as assumptions. Code keeps a question only when its quote
+     is in the goal, it asks one thing, and it has two distinct options. One or more questions
+     ask. No question plans, and the assumptions go to the Root Planner.
 
-  A model never rejects a request. The worst outcome is a question.
+  A model never rejects a request. The worst outcome is a question. Clef-flash can only clear a
+  request or a pair. It never asks alone.
+- Small details are assumptions, not questions. The Root Planner decides each open detail and
+  records it in `assumptions` of the Work Graph. The ChangeWorkflow stores them in
+  `changes.assumptions_json`. The Change page shows them as "Assumptions". A follow-up request
+  changes one.
 - A question makes the Change `needs_input`, with a `ChangeClarification` in
   `changes.clarification_json`. The ChangeWorkflow waits for the event `clarification`. It reads D1
   after each event and once a day. It cancels the Change after 7 days without an answer. The
   requester, the owner, or an admin answers with `POST /v1/changes/:changeId/clarify`:
-  - answers, which go to `clarification_answers_json` and to the goal that the next intake and
-    planner read;
+  - answers, one for each answered question (a picked reading or free text), which go to
+    `clarification_answers_json` and to the goal that the planner reads;
   - `proceed_anyway`;
   - `withdraw`.
 
-  A Change gets at most 3 rounds. After the third answer, the Change plans.
+  The intake gate asks at most one round for a request. After any answer, or after
+  `proceed_anyway`, the request plans and the intake gate does not run again. A duplicate question
+  also asks once. The request comparison after planning can ask more rounds. A Change gets at most
+  3 rounds in total. After the third answer, the Change plans.
 - Request comparison after planning (`request-check.ts`) keeps the deterministic overlap pass, the
   Sonnet review with criterion citations, and the review limit (ADR 0023). The review can return
   `duplicate`, which must quote the earlier criterion that delivers each later criterion. A
   `duplicate` makes the later Change `needs_input` (kind `duplicate`). An unsupported review or the
   review limit makes the later Change `needs_input` (kind `conflict`).
-- A supported conflict between different requesters goes to the system arbiter:
-  `arbitrate_requests` on Sonnet, run twice with A and B swapped. Its input is both goals, both
-  criteria lists, the cited conflicts, and the current app. The verdict is closed: `prefer_a`,
-  `prefer_b`, or `ask`. The rationale cites criterion IDs and packet item IDs, and code validates
-  them. A preference applies only when both runs agree and both are valid. Then the losing-request
-  handling of ADR 0023 runs with `decided_by = system:arbiter`. Any other result makes the later
-  Change `needs_input` (kind `conflict`).
+- A supported conflict between different requesters follows the first-come rule of
+  [ADR 0032](./0032-first-come-conflicts.md). The earlier request keeps working. The later request
+  waits (`awaiting_choice`) until the earlier requester chooses: keep their version, or apply the
+  later request after theirs. No model and no role chooses between two people.
 - Two conflicting requests from the same requester are not a conflict between people. The later
   request replaces the earlier one (`system:same_requester`).
-- Each intake decision and each arbitration is a Decision Receipt in D1 `change_decisions`
-  (`INTAKE`, `REQUEST_ARBITER`), without private reasoning. Intake also records
+- Each intake decision is a Decision Receipt in D1 `change_decisions` (`INTAKE`), without
+  private reasoning. Intake also records
   `change.intake.reviewed`. An answer records `change.clarification.answered`. Model cost counts
   against the Change budget.
 
@@ -96,6 +108,10 @@ Research on model cascades and model judges sets the method:
 | Gate on the model's stated confidence | Verbal confidence is poorly calibrated. Clef probabilities and cross-run agreement are measurable. |
 | Cosine similarity decides duplicates | Short goals such as "Add kanban feature" embed badly. Cosine only shortlists. |
 | Reject a duplicate automatically | A wrong rejection loses a request. A question costs one answer. |
+| Clarity check on the request text only | Without the app, a model reads most requests as open and asks about each product decision. "Change to 16 color palette" is clear in a canvas app with a palette. |
+| A question for each open product decision | Most decisions are small details that the planner can decide. Questions about them delay the build, and people answer "any". Assumptions keep them visible and changeable. |
+| Several decisions in one question | One text box for "a; b; c" gets one vague answer. Each question has its own answer and options. |
+| A new intake round after each answer | The answer starts a second round of questions about the same request. One round is enough: the planner decides what stays open. |
 | A separate review service or vector store | Workers AI, D1, and the existing Workflow cover it. |
 
 ## Consequences
@@ -103,12 +119,15 @@ Research on model cascades and model judges sets the method:
 - An unclear or repeated request waits for its requester before any planning spend. The C1 and C2
   case stops at intake as a duplicate.
 - A request with no related items and a clear goal costs one embedding call, one Clef-flash call,
-  and no Claude call. A pair that Clef-flash cannot clear adds two Sonnet calls (about $0.02). The
-  middle clarity band adds one Sonnet call. A supported conflict adds two arbiter calls.
+  and no Claude call. A pair that Clef-flash cannot clear adds two Sonnet calls (about $0.02). A
+  request that Clef-flash does not clear adds one Sonnet clarity call. The app context adds at
+  most one R2 read (`README.md`) and about 1,000 input tokens. A supported conflict adds no
+  model call: the earlier requester chooses (ADR 0032).
 - Workers AI adds one `AI` binding to the integration Worker (Terraform and `wrangler.jsonc`).
   Embeddings and the reranker cost much less than 1 Neuron per request. Clef-flash stays inside
   the shared counter of 200 calls per day. The free 10,000 Neurons per day cover it.
 - D1 migration `0024_intake_and_system_decisions.sql` adds the clarification columns, the
-  `duplicate` verdict and the pair `round`, and `change_decisions`.
+  `duplicate` verdict and the pair `round`, and `change_decisions`. D1 migration
+  `0032_change_assumptions.sql` adds `changes.assumptions_json`.
 - A waiting Workflow instance holds no compute. An answer to a Change whose first instance has
   ended starts the instance `<changeId>_r<round>`.

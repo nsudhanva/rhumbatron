@@ -57,6 +57,9 @@ const VOCABULARY: Record<string, StatusView> = {
   not_checked: { family: "attention", label: "Gap" },
   gap: { family: "attention", label: "Gap" },
   suspected: { family: "attention", label: "Suspected" },
+  // A failed attempt that a later attempt recovered, or one the Task is retrying (lib/recovery).
+  recovered: { family: "attention", label: "Retried, recovered" },
+  retrying: { family: "attention", label: "Failed, retrying" },
   // danger
   failed: { family: "danger", label: "Fail" },
   fail: { family: "danger", label: "Fail" },

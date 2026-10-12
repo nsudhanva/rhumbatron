@@ -8,10 +8,17 @@ import {
   lacksObject,
   retrieveRelated,
   reviewIntake,
+  validateClarity,
   validateCoverage,
-  validateInterpretations,
 } from "./intake.ts";
-import { type RelatedItem, summarizeCanonical, UNKNOWN_CANONICAL } from "./intake-context.ts";
+import {
+  appContext,
+  intakeMayAsk,
+  type RelatedItem,
+  type StoredAnswer,
+  summarizeCanonical,
+  UNKNOWN_CANONICAL,
+} from "./intake-context.ts";
 
 const c1: RelatedItem = {
   changeId: "chg_c1",
@@ -211,74 +218,183 @@ describe("intake duplicate cascade", () => {
   });
 });
 
+const clarity = (questions: unknown[], assumptions: string[] = []) =>
+  reply("review_clarity", { questions, assumptions });
+
 describe("intake clarity cascade", () => {
   it("asks by rule when the goal names no object, before any Clef score counts", async () => {
     expect(lacksObject("build the kanban")).toBe(true);
     expect(lacksObject("Add kanban feature")).toBe(true);
     expect(lacksObject("Add dark mode to the settings page")).toBe(false);
+    expect(lacksObject("Change to 16 color palette")).toBe(false);
     const { outcome } = await review({
       request: "build the app",
       clef: clef({ buildable: ["buildable", 0.99] }),
-      replies: {
-        list_interpretations: [
-          reply("list_interpretations", { interpretations: [], decisions: [] }),
-        ],
-      },
+      replies: { review_clarity: [clarity([])] },
       targets: [],
     });
     expect(outcome.clarification).toMatchObject({ kind: "unclear" });
+    expect(outcome.clarification?.questions).toHaveLength(1);
   });
 
-  it("asks with distinct readings as options only when their quotes are in the request", async () => {
-    const request = "Show a calendar of missions with reminders";
+  it("asks one question per ambiguity, each with its own readings, only when quotes are in the request", async () => {
+    const request = "Show a calendar of missions with reminders and a crew list";
     const readings = (quote: string) =>
-      reply("list_interpretations", {
-        interpretations: [
-          { summary: "Email reminders before each mission", goalQuote: quote },
-          { summary: "In-app reminder badges on the calendar", goalQuote: quote },
+      clarity(
+        [
+          {
+            text: "How should reminders reach a person",
+            goalQuote: quote,
+            options: ["Email before each mission", "In-app badges on the calendar", "Other"],
+          },
+          {
+            text: "Who is in the crew list?",
+            goalQuote: "a crew list",
+            options: ["Every signed-in user", "People the mission owner adds"],
+          },
         ],
-        decisions: ["How far ahead a reminder fires"],
-      });
+        ["Reminders fire one day before a mission."],
+      );
     const asked = await review({
       request,
       clef: clef({ buildable: ["buildable", 0.6] }),
-      replies: { list_interpretations: [readings("with reminders")] },
+      replies: { review_clarity: [readings("with reminders")] },
       targets: [],
     });
-    expect(asked.outcome.clarification?.questions[0]).toMatchObject({
-      options: ["Email reminders before each mission", "In-app reminder badges on the calendar"],
-    });
+    expect(asked.outcome.clarification?.questions).toEqual([
+      {
+        id: "q1",
+        text: "How should reminders reach a person?",
+        options: ["Email before each mission", "In-app badges on the calendar"],
+      },
+      {
+        id: "q2",
+        text: "Who is in the crew list?",
+        options: ["Every signed-in user", "People the mission owner adds"],
+      },
+    ]);
+    expect(asked.outcome.assumptions).toEqual(["Reminders fire one day before a mission."]);
     const invented = await review({
       request,
       clef: clef({ buildable: ["buildable", 0.6] }),
-      replies: { list_interpretations: [readings("with push notifications")] },
+      replies: { review_clarity: [readings("with push notifications")] },
       targets: [],
     });
-    expect(invented.outcome.decision).toBe("plan");
-    expect(validateInterpretations({ interpretations: "x" }, request)).toBeNull();
+    // The first question's quote is invented; the second one still asks.
+    expect(invented.outcome.clarification?.questions.map((q) => q.id)).toEqual(["q1"]);
+    expect(validateClarity({ questions: "x" }, request)).toBeNull();
   });
 
-  it("plans a clear request (Clef >= 0.9) with no Sonnet call and asks on Clef <= 0.4", async () => {
-    const request = "Add a dark mode toggle to the settings page that persists per user";
-    const clear = await review({
+  it("never crams several questions into one box and drops questions with fewer than two readings", () => {
+    const request = "Change to 16 color palette";
+    const shaped = validateClarity(
+      {
+        questions: [
+          {
+            text: "Please also decide: which colors; which order; which default?",
+            goalQuote: "16 color palette",
+            options: ["Classic 16", "Pastel 16"],
+          },
+          {
+            text: "Which 16 colors?",
+            goalQuote: "16 color",
+            options: ["Classic 16", "classic 16.", "Something else"],
+          },
+          {
+            text: "Which palette changes?",
+            goalQuote: "palette",
+            options: ["The drawing palette", "The theme palette", "A", "B", "C"],
+          },
+        ],
+        assumptions: ["Use the classic 16-color set.", "use the classic 16-color set.", "x"],
+      },
       request,
+    );
+    expect(shaped?.questions).toEqual([
+      {
+        id: "q1",
+        text: "Which palette changes?",
+        options: ["The drawing palette", "The theme palette", "A", "B"],
+      },
+    ]);
+    expect(shaped?.assumptions).toEqual(["Use the classic 16-color set."]);
+  });
+
+  it("plans with assumptions when Sonnet finds no material ambiguity, and lets Clef only clear", async () => {
+    const request = "Change to 16 color palette";
+    const detail = await review({
+      request,
+      clef: clef({ buildable: ["needs_detail", 0.9] }),
+      replies: { review_clarity: [clarity([], ["Use the classic 16-color set."])] },
+      targets: [],
+    });
+    // Clef alone (P(buildable) low) never asks: Sonnet found no question, so the request plans.
+    expect(detail.outcome).toMatchObject({
+      decision: "plan",
+      clarification: null,
+      assumptions: ["Use the classic 16-color set."],
+    });
+    const clear = await review({
+      request: "Add a dark mode toggle to the settings page that persists per user",
       clef: clef({ buildable: ["buildable", 0.93] }),
       replies: {},
       targets: [],
     });
     expect(clear.calls).toEqual([]);
     expect(clear.outcome.decision).toBe("plan");
-    const vague = await review({
-      request,
-      clef: clef({ buildable: ["needs_detail", 0.8] }),
-      replies: {
-        list_interpretations: [
-          reply("list_interpretations", { interpretations: [], decisions: [] }),
-        ],
-      },
-      targets: [],
+  });
+
+  it("gives the clarity check the app: file paths, package facts, README, and recent request titles", async () => {
+    const canonical = summarizeCanonical(["package.json", "src/palette.ts"], ["react"], {
+      name: "place",
+      description: "A shared pixel canvas",
+      readme: "Place: draw on a shared canvas with an 8 color palette.",
     });
-    expect(vague.outcome.decision).toBe("ask");
+    const recent: RelatedItem[] = [
+      { ...recipes, title: "Recipe search", status: "completed" },
+      { ...c1, title: null, status: "running" },
+      { ...recipes, changeId: "chg_r2", title: "Recipe search", status: "completed" },
+    ];
+    const app = appContext(canonical, recent);
+    expect(app).toMatchObject({
+      name: "place",
+      files: ["package.json", "src/palette.ts"],
+      readme: "Place: draw on a shared canvas with an 8 color palette.",
+      requests: [
+        { title: c1.goal, state: "in_flight" },
+        { title: "Recipe search", state: "shipped" },
+      ],
+    });
+    let sent = "";
+    await reviewIntake(
+      {
+        changeId: "chg_p",
+        request: "Change to 16 color palette",
+        packet: buildPacket("Change to 16 color palette", [], canonical, recent),
+        retrieval: { method: "tokens", reranked: false, scores: [], related: [] },
+      },
+      {
+        clef: clef({ buildable: ["buildable", 0.5] }),
+        canSpend: () => true,
+        complete: async (req) => {
+          sent = String(req.messages.at(-1)?.content ?? "");
+          return clarity([]);
+        },
+      },
+    );
+    expect(JSON.parse(sent).app).toMatchObject({ name: "place", files: app.files });
+  });
+
+  it("asks at most one intake round: any answer, or Build it as it is, sends the request to planning", () => {
+    const answer = (action: StoredAnswer["action"]): StoredAnswer => ({
+      round: 1,
+      action,
+      answeredBy: "usr_1",
+      answeredAt: "2026-10-11T00:00:00Z",
+    });
+    expect(intakeMayAsk([])).toBe(true);
+    expect(intakeMayAsk([answer("answers")])).toBe(false);
+    expect(intakeMayAsk([answer("proceed_anyway")])).toBe(false);
   });
 });
 

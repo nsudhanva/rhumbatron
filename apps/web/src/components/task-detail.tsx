@@ -2,6 +2,7 @@ import { Button } from "@cloudflare/kumo";
 import { X } from "@phosphor-icons/react";
 import type { ChangeSetAttribution, ClaimState, Intent, TaskDetail, TaskRun } from "../lib/api";
 import { formatNumber, formatUsd, latestRun, runDuration, timeAgo } from "../lib/format";
+import { failureOutcome } from "../lib/recovery";
 import { Disclosure } from "./change/disclosure";
 import { EmptyState } from "./ui/empty-state";
 import { KeyValue } from "./ui/key-value";
@@ -44,7 +45,7 @@ function isIntent(outcome: TaskRun["outcome"]): outcome is Intent {
 }
 
 /** The latest result in one or two lines. */
-function Result({ run }: { run: TaskRun | undefined }) {
+function Result({ run, task }: { run: TaskRun | undefined; task: TaskDetail }) {
   if (!run) {
     return <p className="text-[13px] text-kumo-subtle">Not started. The agent has not woken.</p>;
   }
@@ -58,9 +59,11 @@ function Result({ run }: { run: TaskRun | undefined }) {
   }
   if (run.status === "failed") {
     const reason = run.outcome && "reason" in run.outcome ? run.outcome.reason : null;
+    // A failure the Task retries is not the end of the Task (lib/recovery).
+    const retrying = failureOutcome(run, task.runs, task.status) !== "failed";
     return (
-      <p className="text-[13px] text-kumo-danger">
-        <span className="font-semibold">FAIL</span>{" "}
+      <p className={retrying ? "text-[13px] text-kumo-warning" : "text-[13px] text-kumo-danger"}>
+        <span className="font-semibold">{retrying ? "FAILED, RETRYING" : "FAIL"}</span>{" "}
         {reason ?? run.failureKind ?? "no reason recorded"}
       </p>
     );
@@ -85,8 +88,10 @@ function Files({
   return null;
 }
 
-function Run({ run }: { run: TaskRun }) {
+function Run({ run, task }: { run: TaskRun; task: TaskDetail }) {
   const outcome = run.outcome;
+  // A failure a later attempt recovered (or the Task retries) is amber, not red (lib/recovery).
+  const failure = run.status === "failed" ? failureOutcome(run, task.runs, task.status) : null;
   return (
     <li className="grid gap-2 border-b border-kumo-rule py-2.5">
       <div className="flex flex-wrap items-center gap-2">
@@ -95,7 +100,7 @@ function Run({ run }: { run: TaskRun }) {
         {run.decidedBy && (
           <span className="font-mono text-[11px] text-kumo-subtle">routed by {run.decidedBy}</span>
         )}
-        <StatusPill status={run.status} className="ml-auto" />
+        <StatusPill status={failure ?? run.status} className="ml-auto" />
       </div>
       <p className="font-mono text-[11px] text-kumo-subtle tabular-nums">
         {formatNumber(run.modelCalls)} calls · {formatNumber(run.inputTokens)} in /{" "}
@@ -104,8 +109,16 @@ function Run({ run }: { run: TaskRun }) {
       {run.routeReasons.length > 0 && (
         <p className="text-[12px] text-kumo-subtle">Route: {run.routeReasons.join(" · ")}</p>
       )}
-      {run.status === "failed" && run.failureKind && (
-        <p className="font-mono text-[11px] text-kumo-danger">{run.failureKind}</p>
+      {failure && run.failureKind && (
+        <p
+          className={
+            failure === "failed"
+              ? "font-mono text-[11px] text-kumo-danger"
+              : "font-mono text-[11px] text-kumo-warning"
+          }
+        >
+          {run.failureKind}
+        </p>
       )}
       {run.status === "completed" && isIntent(outcome) && (
         <div className="grid gap-2 bg-kumo-base p-3">
@@ -182,7 +195,7 @@ export function TaskPanel({
 
       <div className="grid gap-1">
         <h4 className="type-label text-kumo-subtle">Result</h4>
-        <Result run={run} />
+        <Result run={run} task={task} />
       </div>
 
       <Files changeSets={changeSets} run={run} />
@@ -230,7 +243,7 @@ export function TaskPanel({
             <h4 className="type-label text-kumo-subtle">Runs</h4>
             <ol className="grid">
               {task.runs.map((r) => (
-                <Run key={r.attempt} run={r} />
+                <Run key={r.attempt} run={r} task={task} />
               ))}
             </ol>
           </div>

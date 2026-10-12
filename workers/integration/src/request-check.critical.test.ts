@@ -6,7 +6,8 @@ import type { CompletionResult } from "@rhumbatron/model-router";
 import { describe, expect, it, vi } from "vitest";
 import { RequestScopes } from "../../coordinator/src/request-scopes.ts";
 import { createCandidate } from "./candidate-create.ts";
-import { clarifyChange } from "./change-commands.ts";
+import { clarifyChange, releaseRequestScope } from "./change-commands.ts";
+import { chooseFirstCome } from "./first-come.ts";
 import { recomposeStaleCandidate } from "./recompose.ts";
 import { checkRequestPair } from "./request-check.ts";
 import type { RequestInput } from "./request-policy.ts";
@@ -67,14 +68,6 @@ const conflict = () =>
     verdict: "conflicting",
     conflicts: [{ a: "c1", b: "c1", why: "Different sort orders" }],
   });
-/** One arbiter run. `first` is the side shown as "a" in that run. */
-const vote = (verdict: "prefer_a" | "prefer_b" | "ask") =>
-  reply("arbitrate_requests", {
-    verdict,
-    rationale: "Fits the current app",
-    citedCriteria: [{ side: "a", id: "c1" }],
-    citedItems: ["conflict:1"],
-  });
 const toolOf = (req: unknown) =>
   (req as { tools?: { function: { name: string } }[] }).tools?.[0]?.function.name;
 /**
@@ -88,8 +81,7 @@ function script(rest: CompletionResult[], intake: Partial<Record<string, Complet
       const name = toolOf(req);
       if (name && intake[name]) return intake[name] as CompletionResult;
       if (name === "coverage_review") return reply(name, { items: [] });
-      if (name === "list_interpretations")
-        return reply(name, { interpretations: [], decisions: [] });
+      if (name === "review_clarity") return reply(name, { questions: [], assumptions: [] });
       const next = rest.shift();
       if (!next) throw Error(`unexpected model call ${name}`);
       return next;
@@ -268,34 +260,34 @@ function harness() {
 }
 
 describe("request selection by the system on real SQLite", () => {
-  it("persists one review and one arbitration per pair and reuses them on retry", async () => {
+  it("persists one review per pair, asks the first requester once, and reuses both on retry", async () => {
     const h = harness();
     const a = request("chg_a", "alice");
     const b = request("chg_b", "bob");
     h.add(a);
     h.add(b);
     let calls = 0;
-    const replies = [conflict(), vote("prefer_a"), vote("prefer_b")];
     const complete = async () => {
       calls++;
-      return replies.shift() as CompletionResult;
+      return conflict();
     };
     const first = await checkRequestPair(h.env, ctx, a, b, complete);
-    expect(first).toEqual({ costUsd: 0.03, excluded: ["c1"], stop: null });
+    expect(first).toEqual({ costUsd: 0.01, stop: "awaiting_choice" });
     expect(await checkRequestPair(h.env, ctx, a, b, complete)).toEqual({ ...first, costUsd: 0 });
-    expect(calls).toBe(3);
-    expect(h.row("chg_b")).toMatchObject({
-      outcome: "not_selected",
-      outcome_winner_change_id: "chg_a",
-      outcome_decided_by: "system:arbiter",
-    });
+    expect(calls).toBe(1);
+    // The earlier request keeps working; only the later one waits.
+    expect(h.row("chg_a").status).toBe("compiling");
+    expect(h.row("chg_b")).toMatchObject({ status: "awaiting_choice", outcome: null });
+    expect(h.db.prepare("SELECT * FROM request_choices").all()).toMatchObject([
+      { first_change_id: "chg_a", later_change_id: "chg_b", asked_user_id: "alice", choice: null },
+    ]);
     const stored = h.db.prepare("SELECT * FROM request_conflicts").all();
     expect(stored).toHaveLength(1);
-    expect(stored[0]).toMatchObject({ policy: "system_arbiter", decided_by: "system:arbiter" });
+    expect(stored[0]).toMatchObject({ policy: "first_come", decided_by: "alice" });
     expect(JSON.stringify(stored)).not.toContain("private reasoning");
-    expect(h.db.prepare("SELECT decision_type, verdict FROM change_decisions").all()).toMatchObject(
-      [{ decision_type: "REQUEST_ARBITER", verdict: "prefer_a" }],
-    );
+    expect(h.db.prepare("SELECT COUNT(*) AS n FROM change_decisions").get()).toMatchObject({
+      n: 0,
+    });
   });
   it("does not repeat a provider call when saving its result fails, and asks the later requester", async () => {
     const h = harness();
@@ -331,34 +323,22 @@ describe("request selection by the system on real SQLite", () => {
       round: 1,
     });
   });
-  it("asks the later requester on an unsupported review or a disagreeing arbiter, never deciding by role", async () => {
-    for (const replies of [
-      [
-        reply("review_requests", {
-          verdict: "conflicting",
-          conflicts: [{ a: "unknown", b: "c1", why: "unsupported" }],
-        }),
-      ],
-      // Both runs prefer the side shown first: position bias, not agreement.
-      [conflict(), vote("prefer_a"), vote("prefer_a")],
-      [conflict(), vote("ask"), vote("ask")],
-    ]) {
-      const h = harness();
-      const a = request("chg_a", "alice");
-      const b = request("chg_b", "bob");
-      h.add(a);
-      h.add(b);
-      const result = await checkRequestPair(
-        h.env,
-        ctx,
-        a,
-        b,
-        async () => replies.shift() as CompletionResult,
-      );
-      expect(result.stop).toBe("needs_input");
-      expect(h.row(b.changeId).status).toBe("needs_input");
-      expect(h.row(a.changeId).status).toBe("compiling");
-    }
+  it("asks the later requester only when the review is unsupported, never deciding by role", async () => {
+    const h = harness();
+    const a = request("chg_a", "alice");
+    const b = request("chg_b", "bob");
+    h.add(a);
+    h.add(b);
+    const result = await checkRequestPair(h.env, ctx, a, b, async () =>
+      reply("review_requests", {
+        verdict: "conflicting",
+        conflicts: [{ a: "unknown", b: "c1", why: "unsupported" }],
+      }),
+    );
+    expect(result.stop).toBe("needs_input");
+    expect(h.row(b.changeId).status).toBe("needs_input");
+    expect(h.row(a.changeId).status).toBe("compiling");
+    expect(h.db.prepare("SELECT COUNT(*) AS n FROM request_choices").get()).toMatchObject({ n: 0 });
   });
   it("asks about a cited duplicate with the quoted criterion, and refuses an invented quote", async () => {
     for (const quote of ["sorts chg_a", "sorts by popularity"]) {
@@ -468,142 +448,111 @@ describe("ChangeWorkflow with the intake gate on real SQLite", () => {
       [{ decision_type: "INTAKE", verdict: "clear" }],
     );
   });
-  it("replans only the selected criteria, or stops entirely when all criteria lost", async () => {
-    for (const partial of [true, false]) {
-      const h = harness();
-      const a = request("chg_a", "alice");
-      h.add(a);
-      h.scope(a);
-      h.add(request("chg_b", "bob"), "created");
-      script([
-        graph(partial ? undefined : ["Sort products"]),
-        conflict(),
-        vote("prefer_a"),
-        vote("prefer_b"),
-        graph(["Cart stays available"]),
-      ]);
-      const result = await h.run("chg_b");
-      if (partial) {
-        expect(result).toMatchObject({ ready: 1 });
-        expect(h.row("chg_b")).toMatchObject({ status: "running", outcome: "partially_selected" });
-        expect(h.scopes.scope("chg_b")?.criteria).toEqual([
-          { id: "c2", text: "Cart stays available" },
-        ]);
-        expect(JSON.stringify(callsOf("submit_work_graph")[1]?.[2])).toContain("Excluded criteria");
-        expect(h.dispatched).toHaveLength(1);
-        // Intake (2 coverage + 1 clarity), plan, review, 2 arbiter runs, replan: 8 x $0.01.
-        const body = (h.dispatched[0] as { body: { payload: { budgetRemainingUsd: number } } })
-          .body;
-        expect(body.payload.budgetRemainingUsd).toBeCloseTo(0.92);
-      } else {
-        expect(result).toEqual({ status: "not_selected" });
-        expect(h.scopes.scope("chg_b")).toBeNull();
-        expect(h.dispatched).toHaveLength(0);
-      }
-    }
-  });
-  it("stops the card request fully, keeps an independent extra, and asks on a bad dependent", async () => {
-    const owner = {
-      ...request("chg_a", "alice"),
-      goal: "Show the recipe list as a compact table with one row per recipe",
-      criteria: [{ id: "c1", text: "Home page shows recipes as a table with one row per recipe" }],
-    };
-    const cards = [
-      "Recipe list renders as a grid of large cards, three per row",
-      "Each card shows the recipe title",
-    ];
-    const review = (dependentOnConflict?: unknown) =>
-      reply("review_requests", {
-        verdict: "conflicting",
-        conflicts: [{ a: "c1", b: "c1", why: "Table rows versus a card grid" }],
-        ...(dependentOnConflict ? { dependentOnConflict } : {}),
-      });
-    for (const [extra, reviewed, expected] of [
-      [[], review(), "not_selected"],
-      [[], review([{ side: "b", id: "c2", on: "c1" }]), "not_selected"],
-      [["Add a print button to each recipe"], review(), "partially_selected"],
-      [[], review([{ side: "b", id: "c2", on: "c9" }]), "needs_input"],
-    ] as const) {
-      const h = harness();
-      h.add(owner);
-      h.scope(owner);
-      h.add(
-        { ...request("chg_b", "bob"), goal: "Design: show the recipe list as cards" },
-        "created",
-      );
-      const arbiter = expected === "needs_input" ? [] : [vote("prefer_a"), vote("prefer_b")];
-      script([graph([...cards, ...extra]), reviewed, ...arbiter, graph([...extra])]);
-      // The question is never answered here: after 7 days the request is cancelled.
-      const result = await h.run("chg_b");
-      if (expected === "partially_selected") {
-        expect(h.row("chg_b")).toMatchObject({ status: "running", outcome: "partially_selected" });
-        expect(h.scopes.scope("chg_b")?.criteria).toEqual([
-          { id: "c3", text: "Add a print button to each recipe" },
-        ]);
-        expect(h.dispatched).toHaveLength(1);
-      } else if (expected === "needs_input") {
-        expect(result).toEqual({ status: "cancelled" });
-        expect(h.row("chg_b")).toMatchObject({
-          status: "cancelled",
-          blocked_reason: "No answer within 7 days",
-        });
-        expect(h.dispatched).toHaveLength(0);
-      } else {
-        expect(result).toEqual({ status: expected });
-        expect(h.row("chg_b").status).toBe(expected);
-        expect(h.dispatched).toHaveLength(0);
-      }
-      if (expected !== "needs_input") {
-        const stored = h.db.prepare("SELECT review_json FROM request_conflicts").get() as {
-          review_json: string;
-        };
-        expect(JSON.parse(stored.review_json).excluded).toEqual({
-          changeId: "chg_b",
-          criterionIds: ["c1", "c2"],
-        });
-      }
-    }
-  });
-  it("records the earlier loser's dependent criteria for the UI", async () => {
+  it("keeps the first request and ends the later one when the first requester keeps theirs", async () => {
     const h = harness();
-    const a = {
-      ...request("chg_a", "bob"),
-      criteria: [
-        { id: "c1", text: "Recipe list renders as a grid of large cards" },
-        { id: "c2", text: "Each card shows the recipe title" },
-        { id: "c3", text: "Add a print button" },
-      ],
-    };
-    const b = {
-      ...request("chg_b", "alice"),
-      criteria: [{ id: "c1", text: "Home page shows recipes as a table" }],
-    };
-    h.add(a);
-    h.add(b);
-    const replies = [
-      reply("review_requests", {
-        verdict: "conflicting",
-        conflicts: [{ a: "c1", b: "c1", why: "Cards versus table" }],
-      }),
-      vote("prefer_b"),
-      vote("prefer_a"),
-    ];
-    const result = await checkRequestPair(
-      h.env,
-      ctx,
-      a,
-      b,
-      async () => replies.shift() as CompletionResult,
-    );
-    expect(result).toMatchObject({ excluded: [], stop: null });
-    expect(h.row("chg_a").status).toBe("not_selected");
-    const stored = h.db.prepare("SELECT review_json FROM request_conflicts").get() as {
-      review_json: string;
-    };
-    expect(JSON.parse(stored.review_json).excluded).toEqual({
-      changeId: "chg_a",
-      criterionIds: ["c1", "c2"],
+    const a = request("chg_a", "alice");
+    h.add(a, "running");
+    h.scope(a);
+    h.add(request("chg_b", "bob"), "created");
+    h.started.add("chg_b");
+    h.setWait(async (name) => {
+      if (name !== "wait for first come 0") throw Error("timed out");
+      expect(h.row("chg_b").status).toBe("awaiting_choice");
+      // Only the first requester can choose: the later requester and anyone else are refused.
+      expect(
+        await chooseFirstCome(h.env, {
+          changeId: "chg_b",
+          actorUserId: "bob",
+          choice: "apply_theirs",
+        }),
+      ).toMatchObject({ result: "refused", reason: "not_found" });
+      expect(
+        await chooseFirstCome(h.env, {
+          changeId: "chg_b",
+          actorUserId: "alice",
+          choice: "keep_mine",
+        }),
+      ).toMatchObject({ result: "recorded", status: "not_selected", repeated: false });
     });
+    script([graph(), conflict()]);
+    expect(await h.run("chg_b")).toEqual({ status: "not_selected" });
+    expect(h.row("chg_a").status).toBe("running");
+    expect(h.row("chg_b")).toMatchObject({
+      status: "not_selected",
+      outcome: "not_selected",
+      outcome_winner_change_id: "chg_a",
+      outcome_decided_by: "alice",
+      acceptance_criteria_json: JSON.stringify(["Sort products", "Cart stays available"]),
+    });
+    expect(String(h.row("chg_b").outcome_reason)).toContain("chose to keep their version");
+    expect(h.scopes.scope("chg_b")).toBeNull();
+    expect(h.dispatched).toHaveLength(0);
+    expect(h.sent).toEqual([{ type: "first_come", payload: { choiceId: "rw_chg_a_chg_b" } }]);
+  });
+  it("applies the later request after the first one ends, planned on the current tree", async () => {
+    const h = harness();
+    const a = request("chg_a", "alice");
+    h.add(a, "running");
+    h.scope(a);
+    h.add(request("chg_b", "bob"), "created");
+    h.started.add("chg_b");
+    h.setWait(async (name) => {
+      if (name === "wait for first come 0") {
+        expect(
+          await chooseFirstCome(h.env, {
+            changeId: "chg_b",
+            actorUserId: "alice",
+            choice: "apply_theirs",
+          }),
+        ).toMatchObject({ result: "recorded", status: "queued" });
+        // While the first request runs, the later one only waits: no planning, no spend.
+        expect(callsOf("submit_work_graph")).toHaveLength(1);
+        return;
+      }
+      if (name === "wait for first come 1") {
+        h.db.prepare("UPDATE changes SET status = 'completed' WHERE id = 'chg_a'").run();
+        await releaseRequestScope(h.env, "p", "chg_a");
+        expect(h.row("chg_b").status).toBe("compiling");
+        return;
+      }
+      throw Error("timed out");
+    });
+    script([graph(), conflict(), graph(["Use 16 colors"])]);
+    expect(await h.run("chg_b")).toMatchObject({ tasks: 1, ready: 1 });
+    expect(callsOf("submit_work_graph")).toHaveLength(2);
+    // Intake ran once, before the first plan; the second plan follows the first request.
+    expect(h.steps.filter((name) => name.startsWith("intake review"))).toEqual(["intake review"]);
+    expect(h.row("chg_b")).toMatchObject({
+      status: "running",
+      outcome: "follows",
+      outcome_winner_change_id: "chg_a",
+      outcome_decided_by: "alice",
+    });
+    expect(h.db.prepare("SELECT choice FROM request_choices").get()).toMatchObject({
+      choice: "apply_theirs",
+    });
+    expect(h.scopes.scope("chg_b")?.criteria).toEqual([{ id: "c1", text: "Use 16 colors" }]);
+    expect(h.dispatched).toHaveLength(1);
+  });
+  it("plans the later request at once when the first one ends unbuilt before a choice", async () => {
+    const h = harness();
+    const a = request("chg_a", "alice");
+    h.add(a, "running");
+    h.scope(a);
+    h.add(request("chg_b", "bob"), "created");
+    h.started.add("chg_b");
+    h.setWait(async (name) => {
+      if (name !== "wait for first come 0") throw Error("timed out");
+      h.db.prepare("UPDATE changes SET status = 'cancelled' WHERE id = 'chg_a'").run();
+      await releaseRequestScope(h.env, "p", "chg_a");
+    });
+    script([graph(), conflict(), graph()]);
+    expect(await h.run("chg_b")).toMatchObject({ tasks: 1 });
+    expect(h.db.prepare("SELECT choice, chosen_by FROM request_choices").get()).toMatchObject({
+      choice: "moot",
+      chosen_by: "system:first_come",
+    });
+    expect(h.row("chg_b")).toMatchObject({ status: "running", outcome: null });
   });
   it("waits ten times for unscoped earlier work, then asks instead of building", async () => {
     const h = harness();
@@ -632,9 +581,22 @@ describe("ChangeWorkflow with the intake gate on real SQLite", () => {
       expect(outcome).toMatchObject({ status: "recorded", round: 1, changeStatus: "compiling" });
     });
     h.started.add("chg_b");
-    script([graph()]);
+    script([graph()], {
+      review_clarity: reply("review_clarity", {
+        questions: [],
+        assumptions: ["Each mission day gets one board."],
+      }),
+    });
     expect(await h.run("chg_b")).toMatchObject({ tasks: 1 });
     expect(h.steps).toContain("ask for input");
+    // One intake round: after the answer the request plans without a second intake review.
+    expect(h.steps.filter((s) => s.startsWith("intake review"))).toHaveLength(1);
+    expect(callsOf("review_clarity")).toHaveLength(1);
+    // The intake's open details reach the planner, which records its assumptions on the Change.
+    expect(JSON.stringify(callsOf("submit_work_graph")[0]?.[2])).toContain(
+      "Each mission day gets one board.",
+    );
+    expect(h.row("chg_b")).toMatchObject({ assumptions_json: "[]" });
     expect(h.sent).toEqual([{ type: "clarification", payload: { round: 1 } }]);
     // Rule: "Add kanban feature" names one object, so it asks without a model deciding.
     expect(callsOf("submit_work_graph")).toHaveLength(1);

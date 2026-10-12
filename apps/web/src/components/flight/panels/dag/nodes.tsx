@@ -40,6 +40,8 @@ const BORDER_OF: Record<string, Border> = {
   running: "active",
   assigned: "active",
   ready: "ready",
+  // A failure the Task retries is queued work, not a failure (lib/recovery).
+  retrying: "ready",
   failed: "attention",
   blocked: "attention",
   completed: "done",
@@ -300,7 +302,7 @@ function DetailLine({ row, task, roving }: { row: DetailRow; task: TaskState; ro
   switch (row.kind) {
     case "attempt": {
       const r = row.run;
-      const v = statusView(r.status);
+      const v = statusView(r.outcome ?? r.status);
       const detail = [
         `${formatNumber(r.modelCalls)} calls`,
         formatUsd(r.costUsd),

@@ -42,6 +42,9 @@ export const PlannedTask = z.object({
 });
 export type PlannedTask = z.infer<typeof PlannedTask>;
 
+/** Upper bound on the assumptions the Root Planner records for one Change. */
+export const MAX_ASSUMPTIONS = 8;
+
 /** Root Planner output contract (P5-02). */
 export const WorkGraphPlan = z.object({
   /** Cut to MAX_TITLE_CHARS at a word boundary after parsing (`clampTitle`). */
@@ -51,6 +54,15 @@ export const WorkGraphPlan = z.object({
     .describe("A short title for the request, at most 6 words, for example Kanban feature"),
   acceptanceCriteria: z.array(z.string().min(3).max(300)).min(1).max(12),
   invariants: z.array(z.string().min(3).max(300)).max(12),
+  /**
+   * Small product details the goal leaves open that the planner decided (colors, sizes, labels,
+   * defaults). Stored on the Change and shown as "Assumptions"; a follow-up request changes one.
+   */
+  assumptions: z
+    .array(z.string().min(3).max(300))
+    .max(MAX_ASSUMPTIONS)
+    .default([])
+    .describe("Open details you decided, one plain sentence each"),
   riskTier: RiskTier,
   tasks: z.array(PlannedTask).min(1).max(MAX_TASKS_PER_CHANGE),
 });

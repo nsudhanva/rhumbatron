@@ -11,7 +11,9 @@ import type {
   TaskRun,
 } from "../../lib/api";
 import { generation, truncate } from "../../lib/format";
+import { type FailureOutcome, failureOutcome, recoveredTaskFailures } from "../../lib/recovery";
 import { candidateLabels } from "../candidate/model";
+import { statusView } from "../ui/status-pill";
 
 /** Advisory facts extend the web's lifecycle read type. Missing holder data stays unknown. */
 type ClaimFact = Omit<LifecycleClaimFact, "action"> & {
@@ -80,6 +82,11 @@ type Base = {
   actor: string;
   /** One plain sentence. */
   detail: string;
+  /**
+   * On a failed run end and a recorded `task.failed`: whether a later attempt of the Task
+   * recovered it (lib/recovery). Only `failed` reads as a failure (red).
+   */
+  outcome?: FailureOutcome;
 };
 
 export type ActivityEvent = Base &
@@ -302,6 +309,8 @@ export function deriveActivity(input: ActivityInput): ActivityModel {
       const ended = time(run.endedAt);
       if (ended === null || run.status === "running") continue;
       const intent = isIntent(run.outcome) ? run.outcome : null;
+      const outcome =
+        run.status === "failed" ? failureOutcome(run, task.runs, task.status) : undefined;
       const failure =
         run.status === "failed"
           ? [run.failureKind, run.outcome && "reason" in run.outcome ? run.outcome.reason : null]
@@ -324,7 +333,10 @@ export function deriveActivity(input: ActivityInput): ActivityModel {
         detail:
           run.status === "completed"
             ? `${task.key} completes after ${run.modelCalls} model calls.`
-            : `${task.key} fails: ${truncate(failure ?? "failed", 120)}.`,
+            : `${task.key} fails: ${truncate(failure ?? "failed", 120)}.${
+                outcome && outcome !== "failed" ? ` ${statusView(outcome).label}.` : ""
+              }`,
+        ...(outcome ? { outcome } : {}),
       });
       if (intent) {
         push({
@@ -727,6 +739,7 @@ function addRecordedFacts(
 
   // Every other recorded event, unless a derived fact already shows it.
   const covered = new Set(events.map(derivedCover).filter((k): k is string => k !== null));
+  const recovered = recoveredTaskFailures(input.feed ?? []);
   for (const event of input.feed ?? []) {
     if (event.eventType.startsWith("claim.")) continue;
     const cover = feedCover(event);
@@ -747,6 +760,13 @@ function addRecordedFacts(
       type: event.eventType,
       actor: who ?? event.actor.id,
       detail: factDetail(event, who),
+      ...(event.eventType === "task.failed"
+        ? {
+            outcome: recovered.has(event.eventId)
+              ? "recovered"
+              : failureOutcome({ attempt: 0, status: "failed" }, [], lane?.status),
+          }
+        : {}),
     });
   }
 }
@@ -893,8 +913,10 @@ export function foldActivity(
       case "run.end": {
         const lane = lanes[event.laneId];
         if (!lane) break;
+        // A failure the Task retries (and a later attempt recovers) is not a failed lane.
+        const retried = event.outcome === "retrying" || event.outcome === "recovered";
         lane.forked = true;
-        lane.status = event.status;
+        lane.status = retried ? "retrying" : event.status;
         lane.tier = event.tier;
         lane.attempt = event.attempt;
         lane.calls = event.calls;
@@ -903,7 +925,7 @@ export function foldActivity(
             ? event.intent
               ? `Intent: ${event.intent}`
               : "Done"
-            : `Failed · ${event.failure ?? "no reason recorded"}`;
+            : `${retried ? "Failed, retrying" : "Failed"} · ${event.failure ?? "no reason recorded"}`;
         view.current = event.laneId;
         break;
       }

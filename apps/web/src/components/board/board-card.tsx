@@ -100,6 +100,13 @@ export function BoardCard({
           </span>
         )}
       </div>
+      {card.waiting && (
+        <p className="text-[12px] font-medium text-accent-700">
+          {card.waiting.state === "choosing"
+            ? `Waiting for ${card.waiting.firstRequester.name ?? "the first requester"} to choose`
+            : `Waiting for "${card.waiting.firstTitle}" to finish`}
+        </p>
+      )}
       {card.column === "not_built" && card.review.state === "declined" && (
         <p className="text-[12px] text-kumo-subtle">
           Declined

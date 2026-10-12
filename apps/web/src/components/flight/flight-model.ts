@@ -13,6 +13,7 @@ import type {
   WorkspaceFork,
   WorkspaceView,
 } from "../../lib/api";
+import { type FailureOutcome, failureOutcome } from "../../lib/recovery";
 import {
   type ActivityEvent,
   type ActivityInput,
@@ -80,6 +81,11 @@ export type RunState = {
   costUsd: number;
   failureKind: string | null;
   failureReason: string | null;
+  /**
+   * A failed attempt's outcome at the fold instant (lib/recovery): `recovered` when a later
+   * attempt completed, `retrying` when the Task runs or waits to run again. Null unless failed.
+   */
+  outcome: FailureOutcome | null;
   decidedBy: TaskRun["decidedBy"];
   routeReasons: string[];
   escalatedFrom: TaskRun["tier"] | null;
@@ -726,6 +732,7 @@ export function foldFlight(model: FlightModel, at: number | null): FlightState {
           ended && run.status === "failed" && run.outcome && "reason" in run.outcome
             ? run.outcome.reason
             : null,
+        outcome: null,
         decidedBy: run.decidedBy,
         routeReasons: run.routeReasons,
         escalatedFrom: previousTier !== null && previousTier !== run.tier ? previousTier : null,
@@ -742,6 +749,9 @@ export function foldFlight(model: FlightModel, at: number | null): FlightState {
       runs.push(state);
       if (ended && isIntent(run.outcome)) intent = run.outcome;
       previousTier = run.tier;
+    }
+    for (const r of runs) {
+      if (r.status === "failed") r.outcome = failureOutcome(r, runs, lane.status);
     }
     const running = runs.find((r) => r.status === "running") ?? null;
     const changeSets = (model.changeSetsOfTask[task.id] ?? [])

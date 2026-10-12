@@ -165,6 +165,7 @@ const OUTCOMES = new Set([
   "replaces",
   "duplicate",
   "declined",
+  "follows",
 ]);
 
 const REVIEW_STATES = new Set(["proposed", "included", "declined"]);

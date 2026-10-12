@@ -15,6 +15,8 @@ export const ACTIVE_CHANGE_STATUSES = new Set([
   "verifying",
   "awaiting_approval",
   "needs_input",
+  "awaiting_choice",
+  "queued",
   "promoting",
   "releasing",
 ]);
@@ -28,6 +30,8 @@ const CHANGE_OVERRIDES: Record<string, { family: StatusFamily; label: string }> 
   needs_input: { family: "attention", label: "Needs input" },
   proposed: { family: "attention", label: "Proposed" },
   declined: { family: "idle", label: "Declined" },
+  awaiting_choice: { family: "attention", label: "Waiting for a choice" },
+  queued: { family: "attention", label: "Queued" },
 };
 
 export function ChangeStatusPill({ status }: { status: string }) {

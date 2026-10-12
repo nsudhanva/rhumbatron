@@ -36,7 +36,14 @@ export type ChangeRequester = {
 };
 
 export type ChangeOutcome = {
-  kind: "selected" | "partially_selected" | "not_selected" | "replaces" | "duplicate" | string;
+  kind:
+    | "selected"
+    | "partially_selected"
+    | "not_selected"
+    | "replaces"
+    | "duplicate"
+    | "follows"
+    | string;
   reason?: string | null;
   winnerChangeId?: string | null;
   decidedBy?: string | null;
@@ -66,6 +73,8 @@ export type ChangeDetail = {
   goal: string;
   acceptanceCriteria: string[];
   invariants: string[];
+  /** Small product details the Root Planner decided; empty before planning. */
+  assumptions?: string[];
   status: string;
   baseGeneration: number;
   budgetUsd: number;
@@ -1079,7 +1088,11 @@ export type NotificationKind =
   | "request_proposed"
   /** To the requester: an admin included or declined the request. */
   | "request_included"
-  | "request_declined";
+  | "request_declined"
+  /** To the earlier requester: a later request conflicts and waits for their choice (ADR 0032). */
+  | "request_choice_needed"
+  /** To the later requester: the earlier requester applies their request after theirs. */
+  | "request_choice_made";
 
 /** `action`: needs a person until its condition clears. `attention`: stopped or rejected work. */
 export type NotificationSeverity = "action" | "attention" | "info";

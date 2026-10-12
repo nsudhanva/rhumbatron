@@ -3,6 +3,7 @@ import { type Edge, Handle, type Node, type NodeProps, Position } from "@xyflow/
 import { type CSSProperties, useMemo } from "react";
 import type { TaskDetail } from "../lib/api";
 import { latestRun, layoutTasks, truncate } from "../lib/format";
+import { failureOutcome } from "../lib/recovery";
 import { canvasHeight, ReadableFlow } from "./readable-flow";
 import { StatusPill } from "./ui/status-pill";
 
@@ -47,6 +48,10 @@ type TaskFlowNode = Node<TaskNodeData, "task">;
 function TaskNode({ data }: NodeProps<TaskFlowNode>) {
   const { task, selected } = data;
   const run = latestRun(task);
+  // An earlier failure a later attempt recovered is named, in neutral text (lib/recovery).
+  const recovered = task.runs.some(
+    (r) => r.status === "failed" && failureOutcome(r, task.runs, task.status) === "recovered",
+  );
   return (
     <button
       type="button"
@@ -70,6 +75,7 @@ function TaskNode({ data }: NodeProps<TaskFlowNode>) {
       </p>
       <p className="truncate font-mono text-[11px] text-kumo-subtle">
         {run ? `${run.tier} · attempt ${run.attempt}` : "no run yet"}
+        {recovered ? " · retried, recovered" : ""}
       </p>
       <Handle type="source" position={Position.Right} className="opacity-0!" />
     </button>

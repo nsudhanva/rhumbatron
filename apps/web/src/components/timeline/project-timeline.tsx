@@ -50,6 +50,7 @@ import {
 } from "./timeline-model";
 import { attentionAt, REPLAY_LEGEND, replayTicks, replayTimes } from "./timeline-replay";
 import { useTimelineEvents, useTimelineTasks } from "./use-timeline-data";
+import { useTimelineDisclosure } from "./use-timeline-disclosure";
 
 /**
  * Project execution timeline (trace waterfall, agents
@@ -58,6 +59,10 @@ import { useTimelineEvents, useTimelineTasks } from "./use-timeline-data";
  *   person (requester)            one header row per person
  *     Change                      span from request to its last recorded fact, with markers
  *       Task · agent              one row per Task; each attempt is a bar, colored by status
+ *
+ * People and Changes collapse; the browser keeps the choice per Project, and a finished Change
+ * starts collapsed (use-timeline-disclosure.ts). A failed attempt that a later attempt recovered
+ * reads "Retried, recovered" in the warning color; only a failure nothing recovered is red.
  *
  * Markers are recorded events (request, plan, conflict, question, approval, verdicts,
  * promotion, release). Promotions also draw a dashed rule over every row. A "Needs attention"
@@ -109,6 +114,9 @@ const BAR_STYLE: Record<BarStatus, string> = {
   running: "bg-kumo-ink text-kumo-inverse",
   completed: "border border-kumo-success bg-kumo-success-tint text-kumo-success",
   failed: "border border-accent-500 bg-kumo-danger-tint text-kumo-danger",
+  // A failure a later attempt recovered (or is retrying) is attention, not danger (lib/recovery).
+  retrying: "border border-dashed border-kumo-warning bg-kumo-warning-tint text-kumo-warning",
+  recovered: "border border-dashed border-kumo-warning bg-kumo-warning-tint text-kumo-warning",
   cancelled: "border border-dashed border-tone-500 bg-tone-200 text-tone-800",
 };
 
@@ -116,6 +124,8 @@ const BAR_WORD: Record<BarStatus, string> = {
   running: "Running",
   completed: "Done",
   failed: "Failed",
+  retrying: statusView("retrying").label,
+  recovered: statusView("recovered").label,
   cancelled: "Cancelled",
 };
 
@@ -325,22 +335,34 @@ const revealTo = (left: number, width: number): CSSProperties => ({
   clipPath: `inset(-8px calc((${width} - clamp(0, var(--rh-ph) - ${left}, ${width})) * 1px) -8px 0)`,
 });
 
-/** A bar's status at the replay playhead: running until the playhead passes its recorded end. */
-const statusAt = (bar: TimelineBar, at: number | null): BarStatus =>
-  at !== null && (bar.end === null || bar.end > at) ? "running" : bar.status;
+/**
+ * A bar's status at the replay playhead: running until the playhead passes its recorded end. A
+ * recovered failure reads as a retry until the playhead passes the attempt that recovered it.
+ */
+const statusAt = (bar: TimelineBar, at: number | null): BarStatus => {
+  if (at === null) return bar.status;
+  if (bar.end === null || bar.end > at) return "running";
+  if (bar.status === "recovered" && (bar.recoveredAt === null || bar.recoveredAt > at)) {
+    return "retrying";
+  }
+  return bar.status;
+};
 
 /* ------------------------------------------------------------------------------------------ */
 /* Rows                                                                                        */
 /* ------------------------------------------------------------------------------------------ */
 
 type RowBody =
-  | { kind: "person"; key: string; person: TimelineModel["people"][number] }
+  | { kind: "person"; key: string; person: TimelineModel["people"][number]; collapsed: boolean }
   | { kind: "change"; key: string; change: TimelineChange; collapsed: boolean }
   | { kind: "task"; key: string; change: TimelineChange; task: TimelineTask }
   | { kind: "note"; key: string; text: string; danger: boolean };
 type Row = RowBody & { y: number; h: number };
 
-function layoutRows(model: TimelineModel, collapsed: ReadonlySet<string>) {
+function layoutRows(
+  model: TimelineModel,
+  collapsed: { people: ReadonlySet<string>; changes: ReadonlySet<string> },
+) {
   const rows: Row[] = [];
   let y = 0;
   const push = (row: RowBody, h: number) => {
@@ -348,9 +370,11 @@ function layoutRows(model: TimelineModel, collapsed: ReadonlySet<string>) {
     y += h;
   };
   for (const person of model.people) {
-    push({ kind: "person", key: `p:${person.key}`, person }, PERSON_H);
+    const personCollapsed = collapsed.people.has(person.key);
+    push({ kind: "person", key: `p:${person.key}`, person, collapsed: personCollapsed }, PERSON_H);
+    if (personCollapsed) continue;
     for (const change of person.changes) {
-      const isCollapsed = collapsed.has(change.id);
+      const isCollapsed = collapsed.changes.has(change.id);
       push({ kind: "change", key: `c:${change.id}`, change, collapsed: isCollapsed }, CHANGE_H);
       if (isCollapsed) continue;
       if (change.tasksState === "loading") {
@@ -547,15 +571,8 @@ function TimelineBody({
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const screen = useFullScreen(root);
   const full = screen.full;
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
-  const toggle = useCallback((id: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  // Kept per Project in this browser; finished Changes start collapsed.
+  const { collapsed, toggle } = useTimelineDisclosure(projectId, model);
 
   // Scale. Fit shows the whole span; any other zoom keeps its px per ms.
   const [zoom, setZoom] = useState<{ fit: true } | { fit: false; px: number }>({ fit: true });
@@ -933,7 +950,7 @@ function Toolbar({
 Toolbar.displayName = "Toolbar";
 
 function Legend({ truncated }: { truncated: boolean }) {
-  const bars: BarStatus[] = ["running", "completed", "failed", "cancelled"];
+  const bars: BarStatus[] = ["running", "completed", "recovered", "failed", "cancelled"];
   const head = "w-[92px] shrink-0 font-semibold text-kumo-default";
   return (
     <div className="grid gap-1.5 text-[11px] text-kumo-subtle">
@@ -965,7 +982,10 @@ function Legend({ truncated }: { truncated: boolean }) {
           </li>
         </ul>
       </div>
-      <p>Red marks only failures and rejections. Hover a marker or bar for its detail.</p>
+      <p>
+        Red marks only failures and rejections that nothing recovered. Hover a marker or bar for its
+        detail.
+      </p>
       {truncated && (
         <p>Markers cover the newest 800 recorded events; older markers are not drawn.</p>
       )}
@@ -1077,7 +1097,7 @@ function RowView({
   now: number;
   replayAt: number | null;
   plotWidth: number;
-  onToggle: (id: string) => void;
+  onToggle: (kind: "people" | "changes", id: string) => void;
   tip: TipApi;
   tipFor: TipFor;
 }) {
@@ -1091,6 +1111,20 @@ function RowView({
         style={style}
       >
         <div className={cn(leftCell, "items-center gap-2 px-3")} style={{ width: LEFT }}>
+          <button
+            type="button"
+            aria-expanded={!row.collapsed}
+            aria-label={`${row.collapsed ? "Show" : "Hide"} the changes of ${p.name}`}
+            title={row.collapsed ? "Show changes" : "Hide changes"}
+            onClick={() => onToggle("people", p.key)}
+            className="grid size-6 shrink-0 place-items-center hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-accent-500 pointer-coarse:size-11"
+          >
+            {row.collapsed ? (
+              <CaretRight size={14} aria-hidden />
+            ) : (
+              <CaretDown size={14} aria-hidden />
+            )}
+          </button>
           <span
             aria-hidden
             className="grid size-5 shrink-0 place-items-center bg-tone-300 text-[10px] font-extrabold"
@@ -1177,7 +1211,7 @@ function ChangeRow({
   now: number;
   /** Replay playhead; null in live mode. */
   replayAt: number | null;
-  onToggle: (id: string) => void;
+  onToggle: (kind: "changes", id: string) => void;
   tip: TipApi;
   tipFor: TipFor;
 }) {
@@ -1209,7 +1243,7 @@ function ChangeRow({
           aria-expanded={!collapsed}
           aria-label={`${collapsed ? "Show" : "Hide"} the Tasks of ${change.title}`}
           title={collapsed ? "Show Tasks" : "Hide Tasks"}
-          onClick={() => onToggle(change.id)}
+          onClick={() => onToggle("changes", change.id)}
           className="grid size-6 shrink-0 place-items-center hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-accent-500 pointer-coarse:size-11"
         >
           {collapsed ? <CaretRight size={14} aria-hidden /> : <CaretDown size={14} aria-hidden />}

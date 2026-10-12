@@ -32,7 +32,7 @@ planner, and the agents spend model budget on it. Shared Projects (ADR 0023) hav
 - Member request review. The Project setting `memberRequestReview` (D1
   `projects.member_request_review`, default on) makes a member's request start as `proposed`. A
   `proposed` Change has no ChangeWorkflow, makes no model call, and has no admission in
-  ProjectRootDO, so the request comparison and the arbiter never see it. The requests of the owner
+  ProjectRootDO, so the request comparison never sees it. The requests of the owner
   and the admins never need review.
 - An owner or admin includes (`POST /v1/changes/:changeId/include`) or declines
   (`POST /v1/changes/:changeId/decline`) a `proposed` request. Include moves it to `created` at the
@@ -54,7 +54,7 @@ planner, and the agents spend model budget on it. Shared Projects (ADR 0023) hav
 | A separate `requester` role that always needs review, next to a `member` role that never does | Two roles for one difference. One `member` role and one Project setting give the same control. |
 | Review by a model before a person | A model never rejects a request at intake (ADR 0025). Review is a decision about who may spend the Project's budget, which belongs to a person. |
 | Start the ChangeWorkflow at create and pause it before the intake gate | The paused instance holds Workflow state for days, and a pause that fails open spends model budget. A row without an instance costs nothing. |
-| Use the role or rank in the arbiter | The role of a person says nothing about which request fits the app (ADR 0025). |
+| Use the role or rank to decide a conflict between requests | The role of a person says nothing about which request fits the app (ADR 0025). The earlier requester chooses (ADR 0032). |
 
 ## Consequences
 

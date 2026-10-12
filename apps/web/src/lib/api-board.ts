@@ -7,11 +7,14 @@ import {
   BoardColumn,
   type BoardPerson,
   type BoardResponse,
+  type ChooseOutcome,
+  type FirstComeChoice,
   type ProjectRole,
+  type RequestWait,
 } from "@rhumbatron/protocol";
 import { createServerFn } from "@tanstack/react-start";
 
-export type { BoardAgent, BoardCard, BoardColumn, BoardPerson };
+export type { BoardAgent, BoardCard, BoardColumn, BoardPerson, FirstComeChoice, RequestWait };
 export type ProjectBoard = BoardResponse;
 
 /**
@@ -85,4 +88,25 @@ export const updateMemberRole = createServerFn({ method: "POST" })
       `/v1/projects/${data.projectId}/members/${data.userId}`,
       { method: "PATCH", body: { role: data.role } },
     ),
+  );
+
+/**
+ * First-come waits of one Change (ADR 0032): where it is the earlier request (a choice for its
+ * requester) or the later request (it waits). Newest first.
+ */
+export const getRequestWaits = createServerFn()
+  .inputValidator((changeId: string) => changeId)
+  .handler(({ data }) => call<RequestWait[]>(`/v1/changes/${data}/request-waits`));
+
+/**
+ * The earlier requester chooses for the waiting request `changeId`: keep their version, or apply
+ * the later request after theirs. The API refuses everyone else.
+ */
+export const chooseFirstCome = createServerFn({ method: "POST" })
+  .inputValidator((input: { changeId: string; choice: FirstComeChoice }) => input)
+  .handler(({ data }) =>
+    call<Extract<ChooseOutcome, { result: "recorded" }>>(`/v1/changes/${data.changeId}/choose`, {
+      method: "POST",
+      body: { choice: data.choice },
+    }),
   );

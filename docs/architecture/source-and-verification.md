@@ -280,7 +280,7 @@ A failing required check (`build`, `unit`, `contract`, `preview-smoke`, and the 
   3. It moves the Change to `awaiting_approval`.
   4. It records `approval.requested` with the reason, for example "Best candidate meets 2 of 3 criteria; not met: calendar view. Approve to ship it or cancel the change."
 
-  A person then approves and promotes the Candidate through the normal path, or cancels the Change.
+  A person then approves and ships the Candidate through the normal path, or cancels the Change.
 - Storage: the per-criterion results go to `candidates.acceptance_json` and to the R2 report. `criteriaMet`, `criteriaTotal`, and `costUsd` go to `metrics_json`. The cost counts against the Change budget.
 
 ## Sibling Candidates and selection
@@ -349,7 +349,10 @@ Selection:
 - A tie goes to the Integration Judge. It reads only the Evidence snapshot of the tied Candidates (Evidence summaries and acceptance results). It fetches nothing. Its verdict is closed: `prefer_candidate` (with a Candidate ID), `reject_candidate`, `needs_more_evidence`, or `escalate_to_human`. Code validates the cited Evidence IDs. Only a valid `prefer_candidate` selects a winner. Any other result moves the Change to `awaiting_approval`, and a person promotes one Candidate.
 - Each verified loser becomes `rejected` with a reason, for example "Lost to cand_x: met 3 of 3 criteria, this met 2 of 3." Each Candidate of the group stores the outcome in `selection_json`. The decision is a Decision Receipt (`CANDIDATE_SELECTION`) and the Event `candidate.selected`.
 - Only the winner goes on the promotion path: a canonical check, the acceptance hold, policy `autoPromoteRiskTiers`, the approval gate (`approval.requested` for a gated winner), and the compare-and-swap. A Candidate without siblings goes on the same path.
-- A verified winner that cannot auto-promote moves the Change to `awaiting_approval`.
+- A verified winner that cannot auto-promote moves the Change to `awaiting_approval`. The Candidate status reason states why, and `approval.requested` carries the same `reason`:
+  - Plan gate (`trigger: "policy"`, from the gate step or the selection): "Policy policy-1 requires a person to approve high-risk changes. Approve to ship it or cancel the change." An authorization change reads "changes to authorization".
+  - Policy hold (`trigger: "policy"`, `holdForPerson` in `candidate-selection.ts`): the plan has no gate, but the stored policy does not list the tier as automatic, gates the tier, or the Change has no risk tier. The hold adds the human gate to the plan (`policyHoldReason` in `packages/evidence/src/promotion.ts`).
+  - Acceptance hold (`trigger: "acceptance"`), above.
 - A manual promotion is blocked (`selection_pending`) while a sibling composes or verifies.
 
 ## Coverage states and the gate

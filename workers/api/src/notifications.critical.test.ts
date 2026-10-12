@@ -334,4 +334,31 @@ describe("shared Project request notifications", () => {
     });
     expect(countNotifications(after)).toEqual({ unread: 0, action: 1 });
   });
+
+  it("only the earlier requester gets the first-come choice; the later requester hears the result", async () => {
+    const { db, request, kinds, list } = shared();
+    // usr_c (member) asked first; usr_a (the owner) asked later and conflicts.
+    request("chg_first", "running", null);
+    db.exec(`
+      INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd, created_by,
+        created_at, updated_at)
+        VALUES ('chg_later', 'proj_a', 'Use 16 colors', 'awaiting_choice', 1841, 3, 'usr_a', '${T}', '${T}');
+      INSERT INTO request_choices (id, project_id, first_change_id, later_change_id, conflict_id,
+        asked_user_id, created_at)
+        VALUES ('rw_1', 'proj_a', 'chg_first', 'chg_later', 'rc_1', 'usr_c', '${T}');
+    `);
+    expect(await kinds("usr_c")).toEqual(["request_choice_needed:rw_1"]);
+    expect((await list("usr_c"))[0]).toMatchObject({
+      severity: "action",
+      href: "/changes/chg_first",
+      changeId: "chg_later",
+    });
+    // The owner is the later requester here: no admin or owner answers for the earlier requester.
+    expect(await kinds("usr_a")).toEqual([]);
+
+    db.exec(`UPDATE request_choices SET choice = 'apply_theirs', chosen_by = 'usr_c', chosen_at = '${T}';
+      UPDATE changes SET status = 'queued' WHERE id = 'chg_later';`);
+    expect(await kinds("usr_c")).toEqual([]);
+    expect(await kinds("usr_a")).toEqual(["request_choice_made:rw_1"]);
+  });
 });

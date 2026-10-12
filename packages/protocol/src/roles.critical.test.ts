@@ -119,7 +119,9 @@ describe("board columns", () => {
     expect(columns).toEqual({
       proposed: "proposed",
       needs_input: "needs_answer",
+      awaiting_choice: "needs_answer",
       created: "building",
+      queued: "building",
       compiling: "building",
       running: "building",
       budget_blocked: "building",

@@ -29,6 +29,8 @@ const familyOf = (type: string) => type.split(".")[0] ?? type;
 /** Type color: failure danger, completion success, canonical commits brand. */
 function typeTone(event: ActivityEvent): string {
   const t = event.type;
+  // A failure a later attempt recovered (or retries) is attention, not danger (lib/recovery).
+  if (event.outcome === "recovered" || event.outcome === "retrying") return "text-kumo-warning";
   if (event.kind === "check") {
     if (event.status === "fail" || event.status === "error") return "text-kumo-danger";
     if (event.status === "pass" && event.coverage === "checked_supported") {

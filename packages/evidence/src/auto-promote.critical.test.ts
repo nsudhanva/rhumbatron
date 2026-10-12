@@ -2,11 +2,11 @@
 // It must never apply when a human gate applies, when evidence does not pass, or when risk is unknown.
 import type { ProjectPolicy } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
-import { autoPromoteDecision } from "./promotion.ts";
+import { autoPromoteDecision, policyHoldReason } from "./promotion.ts";
 
 const policy: Pick<ProjectPolicy, "humanGateRiskTiers" | "autoPromoteRiskTiers"> = {
   humanGateRiskTiers: ["high", "critical"],
-  autoPromoteRiskTiers: ["low"],
+  autoPromoteRiskTiers: ["low", "medium"],
 };
 
 const input = (over: Partial<Parameters<typeof autoPromoteDecision>[0]> = {}) => ({
@@ -19,8 +19,33 @@ const input = (over: Partial<Parameters<typeof autoPromoteDecision>[0]> = {}) =>
 });
 
 describe("autoPromoteDecision", () => {
-  it("auto-promotes a verified, gated-pass, low-risk Candidate with no human gate", () => {
+  it("auto-promotes a verified, gated-pass, low- or medium-risk Candidate with no human gate", () => {
     expect(autoPromoteDecision(input())).toEqual({ kind: "auto_promote" });
+    expect(autoPromoteDecision(input({ riskTier: "medium" }))).toEqual({ kind: "auto_promote" });
+  });
+
+  it("never auto-promotes high or critical risk, even when listed as automatic", () => {
+    const all = {
+      humanGateRiskTiers: ["high" as const, "critical" as const],
+      autoPromoteRiskTiers: [
+        "low" as const,
+        "medium" as const,
+        "high" as const,
+        "critical" as const,
+      ],
+    };
+    for (const riskTier of ["high", "critical"] as const) {
+      expect(autoPromoteDecision(input({ riskTier, policy: all }))).toEqual({
+        kind: "manual",
+        reason: "approval_required",
+      });
+    }
+  });
+
+  it("never auto-promotes a medium-risk authorization change (plan gate)", () => {
+    expect(
+      autoPromoteDecision(input({ riskTier: "medium", plan: { humanApprovalRequired: true } })),
+    ).toEqual({ kind: "manual", reason: "approval_required" });
   });
 
   it("never auto-promotes when the plan requires a human approval", () => {
@@ -49,7 +74,11 @@ describe("autoPromoteDecision", () => {
   });
 
   it("keeps tiers outside autoPromoteRiskTiers and an unknown tier manual", () => {
-    expect(autoPromoteDecision(input({ riskTier: "medium" }))).toEqual({
+    const lowOnly = {
+      humanGateRiskTiers: ["high" as const],
+      autoPromoteRiskTiers: ["low" as const],
+    };
+    expect(autoPromoteDecision(input({ riskTier: "medium", policy: lowOnly }))).toEqual({
       kind: "manual",
       reason: "tier_not_auto",
     });
@@ -59,5 +88,21 @@ describe("autoPromoteDecision", () => {
     });
     const none = { humanGateRiskTiers: [], autoPromoteRiskTiers: [] };
     expect(autoPromoteDecision(input({ policy: none })).kind).toBe("manual");
+  });
+
+  it("states why the policy holds a Candidate for a person, and never for a gap", () => {
+    const at = { policyVersion: "policy-1", riskTier: "medium" as const };
+    expect(policyHoldReason({ kind: "manual", reason: "tier_not_auto" }, at)).toMatch(
+      /^Policy policy-1 does not ship medium-risk changes automatically\./,
+    );
+    expect(policyHoldReason({ kind: "manual", reason: "approval_required" }, at)).toMatch(
+      /requires a person to approve medium-risk changes/,
+    );
+    expect(
+      policyHoldReason({ kind: "manual", reason: "unknown_risk" }, { ...at, riskTier: null }),
+    ).toMatch(/no risk tier/);
+    expect(policyHoldReason({ kind: "manual", reason: "evidence_gap" }, at)).toBeNull();
+    expect(policyHoldReason({ kind: "manual", reason: "not_verified" }, at)).toBeNull();
+    expect(policyHoldReason({ kind: "auto_promote" }, at)).toBeNull();
   });
 });

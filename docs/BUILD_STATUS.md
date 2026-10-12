@@ -15,7 +15,7 @@ Phase 17a - Shared Projects
 - Approval policy, promotion preconditions, `ProjectRootDO` compare-and-swap, `canonical.advanced`, and stale Candidate recomposition.
 - Phase 14, CI/CD (ADR 0031): `ci.yml` checks each pull request. `production.yml` deploys each push to `main` through Terraform, with a plan guard, a drift check, and the smoke checks.
 - Phase 16, live apps (ADR 0020): previews, the production pointer, the release smoke check, version hosts, rollback, and app removal.
-- Phase 17a, shared Projects (ADR 0023, ADR 0025, ADR 0028): invitations, the owner, admin, member, and viewer roles, member request review, the intake gate, `needs_input` with clarify answers, and the system arbiter. Project deletion for the owner, Leave project for the other roles, and the Settings page.
+- Phase 17a, shared Projects (ADR 0023, ADR 0025, ADR 0028): invitations, the owner, admin, member, and viewer roles, member request review, the intake gate, `needs_input` with clarify answers, and first-come conflicts between people (ADR 0032). Project deletion for the owner, Leave project for the other roles, and the Settings page.
 - The dead-letter consumer with Retry and Dismiss, the per-Change limits on Agents, Sandboxes, and attempts, and the runaway-billing guards (ADR 0019).
 - Authentication with the Clerk production instance (ADR 0002).
 

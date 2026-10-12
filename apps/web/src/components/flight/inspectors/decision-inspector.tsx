@@ -8,7 +8,7 @@ import { KeyValue, type KeyValueItem } from "../../ui/key-value";
 import { Payload } from "../../ui/log-well";
 import { Mono } from "../../ui/mono";
 import { Section } from "../../ui/page";
-import { StatusPill } from "../../ui/status-pill";
+import { StatusPill, statusView } from "../../ui/status-pill";
 import { Tag } from "../../ui/tag";
 import { useFlight } from "../flight-context";
 import {
@@ -172,7 +172,7 @@ function RouteDetails({ decision, state }: { decision: DecisionState; state: Fli
         ) : (
           <KeyValue
             items={[
-              { label: "Status", value: <StatusPill status={run.status} /> },
+              { label: "Status", value: <StatusPill status={run.outcome ?? run.status} /> },
               {
                 label: "Model calls",
                 value:
@@ -201,7 +201,14 @@ function RouteDetails({ decision, state }: { decision: DecisionState; state: Fli
                     {
                       label: "Failure",
                       value: (
-                        <span className="text-kumo-danger">
+                        <span
+                          className={
+                            run.outcome === "failed" ? "text-kumo-danger" : "text-kumo-warning"
+                          }
+                        >
+                          {run.outcome && run.outcome !== "failed"
+                            ? `${statusView(run.outcome).label} · `
+                            : ""}
                           {run.failureKind ? `${run.failureKind.replace(/_/g, " ")}: ` : ""}
                           {run.failureReason ?? "The failure reason is not recorded."}
                         </span>

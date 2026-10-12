@@ -49,6 +49,7 @@ import {
   ProjectApp,
   ProjectReleases,
   ProjectStats,
+  RequestWait,
   RunProgress,
   VersionResponse,
 } from "../packages/protocol/src/index.ts";
@@ -965,6 +966,8 @@ async function run() {
     ["POST", `/v1/changes/${ch}/budget`],
     ["POST", `/v1/changes/${ch}/include`],
     ["POST", `/v1/changes/${ch}/decline`],
+    ["GET", `/v1/changes/${ch}/request-waits`],
+    ["POST", `/v1/changes/${ch}/choose`],
     ["POST", `/v1/changes/${ch}/approve`],
     ["GET", `/v1/changes/${ch}/tasks`],
     ["GET", `/v1/changes/${ch}/candidates`],
@@ -1266,6 +1269,23 @@ async function run() {
     await call("POST", `/v1/changes/${changeId}/decline`, { body: { reason: "x".repeat(501) } }),
     400,
     "invalid_request",
+  );
+  // First-come conflicts (ADR 0032): a Change without a conflict has no wait, and no one chooses.
+  expect(
+    "GET /v1/changes/:id/request-waits",
+    await call("GET", `/v1/changes/${changeId}/request-waits`),
+    200,
+    apiData(RequestWait.array()),
+    (j) => {
+      const waits = (j as { data: unknown[] }).data;
+      return waits.length === 0 ? null : `expected no waits, got ${waits.length}`;
+    },
+  );
+  expectError(
+    "POST /v1/changes/:id/choose without a wait is 404",
+    await call("POST", `/v1/changes/${changeId}/choose`, { body: { choice: "keep_mine" } }),
+    404,
+    "not_found",
   );
   expect(
     "GET /v1/projects/:id/members",

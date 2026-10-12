@@ -48,6 +48,7 @@ import {
 } from "../lib/api";
 import { EMPTY, formatAge, formatClock, formatNumber } from "../lib/format";
 import { type LiveStatus, useProjectLive } from "../lib/live";
+import { recoveredTaskFailures } from "../lib/recovery";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 import { SystemsOnly, useViewMode } from "../lib/view-mode";
 
@@ -396,8 +397,10 @@ function EventStats({ events, loading }: { events: FeedEvent[]; loading: boolean
   const summary = useMemo(() => {
     let failures = 0;
     let commits = 0;
+    // A failure a later attempt recovered is not counted as a failure (lib/recovery).
+    const recovered = recoveredTaskFailures(events);
     for (const event of events) {
-      const tone = typeTone(event);
+      const tone = typeTone(event, recovered);
       if (tone === "danger") failures += 1;
       else if (tone === "brand") commits += 1;
     }

@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { type ChangeSummary, listTasks, type TaskDetail } from "../../lib/api";
 import { changeLabel, formatClock, formatNumber, timeAgo } from "../../lib/format";
+import { recoveredTaskFailures } from "../../lib/recovery";
 import { DagCanvas, edgeSwatch, type LegendItem, nodeSwatch } from "../dag/dag-canvas";
 import { type DagEdgeSpec, type DagNodeSpec, EVENT_GROUPS, eventGroupOf } from "../dag/model";
 import { EmptyState } from "../ui/empty-state";
@@ -12,7 +13,7 @@ import { Mono } from "../ui/mono";
 import { Section } from "../ui/page";
 import { StatusPill } from "../ui/status-pill";
 import { EventDetail } from "./event-stream";
-import { type FeedEvent, ingestLagMs, TONE_TEXT, typeTone } from "./feed-model";
+import { type FeedEvent, ingestLagMs, TONE_TEXT, type TypeTone, typeTone } from "./feed-model";
 
 /**
  * Events graph: the loaded events as a DAG. An event links
@@ -35,7 +36,7 @@ const GROUP_GAP = 40;
 const causeOf = (e: FeedEvent) => (e as FeedEvent & { causedBy?: string | null }).causedBy ?? null;
 
 type Selection =
-  | { kind: "event"; event: FeedEvent }
+  | { kind: "event"; event: FeedEvent; tone: TypeTone }
   | { kind: "change"; changeId: string; change: ChangeSummary | undefined; count: number }
   | { kind: "task"; taskId: string; changeId: string; task: TaskDetail | undefined; count: number }
   | { kind: "project"; count: number };
@@ -56,6 +57,7 @@ function buildGraph(
 
   // Oldest first, so lanes read left to right in time.
   const ordered = [...events].sort((a, b) => a.seq - b.seq);
+  const recovered = recoveredTaskFailures(events);
   const groups = new Map<string, Map<string, FeedEvent[]>>();
   for (const e of ordered) {
     const g = e.changeId ?? "";
@@ -130,7 +132,7 @@ function buildGraph(
       }
       laneEvents.forEach((e, i) => {
         const id = eventNode(e.seq);
-        const tone = typeTone(e);
+        const tone = typeTone(e, recovered);
         const group = eventGroupOf(e.eventType);
         nodes.push({
           id,
@@ -143,7 +145,7 @@ function buildGraph(
           border: tone === "danger" ? "accent" : "divider",
           width: 190,
         });
-        select.set(id, { kind: "event", event: e });
+        select.set(id, { kind: "event", event: e, tone });
         const cause = causeOf(e);
         const causeSeq = cause ? bySeqOfId.get(cause) : undefined;
         if (causeSeq !== undefined) {
@@ -314,7 +316,9 @@ function NodeDetail({
       <>
         <header className="grid gap-1.5">
           <p className="type-kicker text-kumo-accent">Event #{e.seq}</p>
-          <h3 className={`font-mono text-[14px] font-semibold break-all ${TONE_TEXT[typeTone(e)]}`}>
+          <h3
+            className={`font-mono text-[14px] font-semibold break-all ${TONE_TEXT[selection.tone]}`}
+          >
             {e.eventType}
           </h3>
           <p className="text-[13px] text-pretty">{e.summary}</p>

@@ -3,6 +3,7 @@ import { Pause, Play } from "@phosphor-icons/react";
 import { useMemo, useRef, useState } from "react";
 import type { FeedEvent } from "../../lib/api";
 import { formatClock, formatNumber, truncate } from "../../lib/format";
+import { recoveredTaskFailures } from "../../lib/recovery";
 import { EmptyState } from "../ui/empty-state";
 import { SectionError, SkeletonBar } from "./feedback";
 
@@ -13,10 +14,14 @@ import { SectionError, SkeletonBar } from "./feedback";
  * `aria-live="polite"` and goes silent while paused.
  */
 
-/** Failure in danger · completion in success · state-changing commits in brand (accent). */
-function eventTypeClass(event: Pick<FeedEvent, "eventType" | "data">): string {
+/**
+ * Failure in danger · completion in success · state-changing commits in brand (accent). A
+ * `task.failed` that a later `task.completed` of the same Task recovered is attention, not danger.
+ */
+function eventTypeClass(event: Pick<FeedEvent, "eventType" | "data">, recovered: boolean): string {
   const t = event.eventType;
   const status = event.data.status;
+  if (recovered) return "text-kumo-warning";
   if (
     t.endsWith(".failed") ||
     t.endsWith(".rejected") ||
@@ -73,6 +78,7 @@ export function EventStream({
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [shown]);
   const rows = filter ? shown.filter((e) => family(e.eventType) === filter) : shown;
+  const recovered = useMemo(() => recoveredTaskFailures(events), [events]);
   const digits = Math.max(2, String(newest).length);
 
   const pause = () => {
@@ -166,13 +172,26 @@ export function EventStream({
                   <time className="text-kumo-subtle" dateTime={event.occurredAt}>
                     {formatClock(event.occurredAt)}
                   </time>
-                  <span className={cn("truncate font-semibold", eventTypeClass(event))}>
+                  <span
+                    className={cn(
+                      "truncate font-semibold",
+                      eventTypeClass(event, recovered.has(event.eventId)),
+                    )}
+                    title={
+                      recovered.has(event.eventId)
+                        ? `${event.eventType} · Retried, recovered`
+                        : undefined
+                    }
+                  >
                     {event.eventType}
                   </span>
                   <span className="truncate text-kumo-subtle" title={event.actor.id}>
                     {actorLabel(event)}
                   </span>
                   <span className="truncate font-sans text-[12px]" title={event.summary}>
+                    {recovered.has(event.eventId) && (
+                      <span className="font-semibold text-kumo-warning">Retried, recovered · </span>
+                    )}
                     {truncate(event.summary, 200)}
                   </span>
                   <span className="text-right text-kumo-subtle">v{event.eventVersion}</span>

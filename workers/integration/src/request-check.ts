@@ -1,24 +1,21 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import type { CompletionRequest, CompletionResult } from "@rhumbatron/model-router";
-import type { ChangeClarification } from "@rhumbatron/protocol";
+import { type ChangeClarification, conflictPolicy } from "@rhumbatron/protocol";
 import { cancelChange, releaseRequestScope } from "./change-commands.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
-import { type CanonicalSummary, UNKNOWN_CANONICAL } from "./intake-context.ts";
+import { askFirstRequester, storedChoice } from "./first-come.ts";
 import {
-  type Arbitration,
-  arbitrateRequests,
   type Criterion,
-  losingCriterionIds,
   type RequestInput,
   type RequestReview,
   reviewRequests,
   unconfirmedReview,
 } from "./request-policy.ts";
 
-/** Who decides a conflict when the system arbiter chose a request. */
-export const SYSTEM_ARBITER = "system:arbiter";
 /** The same requester asked twice: the later request replaces the earlier one. */
 const SAME_REQUESTER = "system:same_requester";
+/** A question to the later requester (unconfirmed review, or a cited duplicate). */
+const SYSTEM_REVIEW = "system:request_review";
 
 export const requestRoot = (env: Pick<Env, "PROJECT_ROOT">, projectId: string) => {
   const roots = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
@@ -99,8 +96,11 @@ export async function loadRequest(
 
 export type PairOutcome = {
   costUsd: number;
-  excluded: string[];
-  stop: "needs_input" | "not_selected" | null;
+  /**
+   * `needs_input`: the later requester gets a question. `awaiting_choice`: the earlier requester
+   * chooses (ADR 0032). `not_selected`: the later request ended (the earlier requester kept theirs).
+   */
+  stop: "needs_input" | "awaiting_choice" | "not_selected" | null;
 };
 
 export type PairOptions = {
@@ -108,23 +108,23 @@ export type PairOptions = {
   round?: number;
   /** False after the third answer or a "plan anyway": no question, the Change goes on. */
   mayAsk?: boolean;
-  /** False when the review limit or the budget is reached: no arbiter call. */
-  canArbitrate?: boolean;
-  canonical?: CanonicalSummary;
+  /** Plans of the later Change after a first-come wait: a new plan compares the pair again. */
+  sequence?: number;
+  /** The waiting workflow instance of the later Change, woken by a choice. */
+  instanceId?: string;
 };
 
 type Stored = {
   review: RequestReview;
   receipt: Record<string, unknown>;
   costUsd: number;
-  arbiter?: Arbitration;
 };
 
 const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
 
-/** Pair row ID: one row per sorted pair and clarification round of the later Change. */
-const pairId = (first: string, second: string, round = 0) =>
-  `rc_${first}_${second}${round > 0 ? `_r${round}` : ""}`;
+/** Pair row ID: one row per sorted pair, clarification round, and plan of the later Change. */
+const pairId = (first: string, second: string, round = 0, sequence = 0) =>
+  `rc_${first}_${second}${round > 0 ? `_r${round}` : ""}${sequence > 0 ? `_q${sequence}` : ""}`;
 
 /**
  * Compare the earlier request `a` with the later request `b` (the Change that runs this check).
@@ -133,9 +133,10 @@ const pairId = (first: string, second: string, round = 0) =>
  * - `independent` or `compatible`: both go on.
  * - `duplicate` (cited and quoted): `b` waits for its requester (`needs_input`, kind `duplicate`).
  * - `conflicting`, unsupported or past the review limit: `b` waits (kind `conflict`).
- * - `conflicting`, supported: the same requester's later request replaces the earlier one;
- *   otherwise the system arbiter runs twice with the order swapped. Agreement applies the choice;
- *   anything else makes `b` wait (kind `conflict`). Who asked never decides.
+ * - `conflicting`, supported, same requester: the later request replaces the earlier one.
+ * - `conflicting`, supported, different requesters: first come (ADR 0032). `a` keeps working; `b`
+ *   waits (`awaiting_choice`) until the requester of `a` chooses. A stored `apply_theirs` lets `b`
+ *   go on: it plans only after `a` promoted or ended.
  */
 export async function checkRequestPair(
   env: Env,
@@ -146,10 +147,14 @@ export async function checkRequestPair(
   canReview = true,
   options: PairOptions = {},
 ): Promise<PairOutcome> {
+  // The earlier requester already chose to apply this request after theirs (or the question is
+  // moot): it follows the earlier request and plans after it, so no review runs again.
+  const decided = await storedChoice(env, a.changeId, b.changeId);
+  if (decided === "apply_theirs" || decided === "moot") return { costUsd: 0, stop: null };
   const round = options.round ?? 0;
   const mayAsk = options.mayAsk ?? true;
   const [first, second] = [a.changeId, b.changeId].sort() as [string, string];
-  const id = pairId(first, second, round);
+  const id = pairId(first, second, round, options.sequence ?? 0);
   const read = () =>
     env.DB.prepare("SELECT review_json FROM request_conflicts WHERE id = ?")
       .bind(id)
@@ -204,179 +209,71 @@ export async function checkRequestPair(
       )
       .run();
   if (!previous) await save(stored);
-  let costUsd = previous ? 0 : stored.costUsd;
+  const costUsd = previous ? 0 : stored.costUsd;
 
-  // Arbitration for a supported conflict between different requesters. Reserved first, like the
-  // review, so a retry after a provider call reuses the conservative `ask`.
-  const conflicting = review.verdict === "conflicting" && review.supported;
-  const sameRequester = a.requesterUserId === b.requesterUserId;
-  if (conflicting && !sameRequester && !stored.arbiter) {
-    const interrupted: Arbitration = {
-      decision: "ask",
-      rationale: null,
-      costUsd: 0,
-      receipt: { decisionType: "REQUEST_ARBITER", method: "arbiter-interrupted", decision: "ask" },
-    };
-    await save({ ...stored, arbiter: interrupted });
-    stored.arbiter =
-      options.canArbitrate === false
-        ? {
-            ...interrupted,
-            receipt: { decisionType: "REQUEST_ARBITER", method: "review-limit", decision: "ask" },
-          }
-        : await arbitrateRequests(
-            a,
-            b,
-            review.conflicts,
-            options.canonical ?? UNKNOWN_CANONICAL,
-            complete,
-          );
-    costUsd += stored.arbiter.costUsd;
-    await save(stored);
+  const policy = conflictPolicy({
+    verdict: review.verdict,
+    supported: review.supported,
+    earlierRequesterUserId: a.requesterUserId,
+    laterRequesterUserId: b.requesterUserId,
+  });
+  const outcome: PairOutcome = { costUsd, stop: null };
+  const now = () => new Date().toISOString();
+
+  if (policy === "first_come") {
+    // Who asked first decides, and only about their own request. No model and no role decides.
+    const choice =
+      decided === undefined
+        ? await askFirstRequester(env, ctx, {
+            firstChangeId: a.changeId,
+            firstRequesterUserId: a.requesterUserId,
+            laterChangeId: b.changeId,
+            conflictId: id,
+            workflowInstanceId: options.instanceId ?? b.changeId,
+          })
+        : decided;
+    outcome.stop =
+      choice === null
+        ? "awaiting_choice"
+        : choice === "keep_mine" || choice === "expired"
+          ? "not_selected"
+          : null;
     await env.DB.prepare(
-      `INSERT OR IGNORE INTO change_decisions
-         (id, change_id, decision_type, round, verdict, decided_by, receipt_json, created_at)
-       VALUES (?, ?, 'REQUEST_ARBITER', ?, ?, ?, ?, ?)`,
+      "UPDATE request_conflicts SET policy = 'first_come', winner_change_id = ?, loser_change_id = ?, decided_by = ?, decided_at = COALESCE(decided_at, ?) WHERE id = ?",
     )
       .bind(
-        `dec_${id}`,
-        b.changeId,
-        round,
-        stored.arbiter.decision,
-        SYSTEM_ARBITER,
-        JSON.stringify({ ...stored.arbiter.receipt, conflictId: id }),
-        new Date().toISOString(),
+        outcome.stop === null ? b.changeId : a.changeId,
+        outcome.stop === null ? a.changeId : b.changeId,
+        a.requesterUserId,
+        now(),
+        id,
       )
       .run();
-  }
-
-  const selection: { winner: string; loser: string; decidedBy: string } | null = !conflicting
-    ? null
-    : sameRequester
-      ? { winner: b.changeId, loser: a.changeId, decidedBy: SAME_REQUESTER }
-      : stored.arbiter?.decision === "prefer_a"
-        ? { winner: a.changeId, loser: b.changeId, decidedBy: SYSTEM_ARBITER }
-        : stored.arbiter?.decision === "prefer_b"
-          ? { winner: b.changeId, loser: a.changeId, decidedBy: SYSTEM_ARBITER }
-          : null;
-  // The losing side keeps nothing that presupposes a conflicting criterion (cited, dependent, or
-  // naming the losing layout). Recomputed from the stored review on retry: it is deterministic.
-  const lost = selection
-    ? {
-        changeId: selection.loser,
-        criterionIds:
-          selection.loser === b.changeId
-            ? losingCriterionIds(review, "b", b.criteria, a.criteria)
-            : losingCriterionIds(review, "a", a.criteria, b.criteria),
-      }
-    : null;
-  if (lost) await save({ ...stored, excluded: lost });
-
-  const outcome: PairOutcome = { costUsd, excluded: [], stop: null };
-  const question =
-    review.verdict === "duplicate"
-      ? duplicateClarification(review, a)
-      : conflictClarification(review, a, b);
-  if (question && !selection) {
-    if (mayAsk) {
+  } else if (policy === "duplicate" || policy === "ask_requester") {
+    const question =
+      policy === "duplicate"
+        ? duplicateClarification(review, a)
+        : conflictClarification(review, a, b);
+    if (question && mayAsk) {
       outcome.stop = "needs_input";
       const clarification: ChangeClarification = {
         ...question,
-        askedAt: new Date().toISOString(),
+        askedAt: now(),
         round: Math.min(3, round + 1),
       };
       await env.DB.prepare(
         "UPDATE changes SET status = 'needs_input', clarification_json = ?, updated_at = ? WHERE id = ? AND status = 'compiling'",
       )
-        .bind(JSON.stringify(clarification), new Date().toISOString(), b.changeId)
+        .bind(JSON.stringify(clarification), now(), b.changeId)
         .run();
     }
     await env.DB.prepare(
       "UPDATE request_conflicts SET policy = 'ask_requester', decided_by = ?, decided_at = ? WHERE id = ?",
     )
-      .bind(SYSTEM_ARBITER, new Date().toISOString(), id)
+      .bind(SYSTEM_REVIEW, now(), id)
       .run();
-  } else if (selection) {
-    const winner = selection.winner === a.changeId ? a : b;
-    const loser = selection.loser === a.changeId ? a : b;
-    const { decidedBy } = selection;
-    await env.DB.prepare(
-      `UPDATE request_conflicts SET policy = ?, winner_change_id = ?, loser_change_id = ?, decided_by = ?, decided_at = ? WHERE id = ?`,
-    )
-      .bind(
-        decidedBy === SAME_REQUESTER ? "same_requester" : "system_arbiter",
-        winner.changeId,
-        loser.changeId,
-        decidedBy,
-        new Date().toISOString(),
-        id,
-      )
-      .run();
-    const why =
-      decidedBy === SAME_REQUESTER
-        ? "which replaces the earlier request"
-        : `which the system chose: ${clip(stored.arbiter?.rationale ?? "it fits the current app", 200)}`;
-    const reason = `Not selected: it conflicts with ${winner.requesterName ?? winner.requesterUserId}'s request "${winner.goal.slice(0, 60)}", ${why}`;
-    const promoted = await env.DB.prepare(
-      "SELECT id FROM candidates WHERE change_id = ? AND status = 'promoted' LIMIT 1",
-    )
-      .bind(loser.changeId)
-      .first<{ id: string }>();
-    if (loser.changeId === b.changeId) {
-      outcome.excluded = lost?.criterionIds ?? [];
-      await env.DB.prepare(
-        `UPDATE changes SET outcome = 'not_selected', outcome_reason = ?, outcome_winner_change_id = ?, outcome_decided_by = ?, updated_at = ? WHERE id = ? AND status = 'compiling'`,
-      )
-        .bind(reason, winner.changeId, decidedBy, new Date().toISOString(), loser.changeId)
-        .run();
-    } else if (!promoted) {
-      const stopped = await cancelChange(
-        env,
-        { changeId: loser.changeId, actorUserId: decidedBy },
-        { reason, winnerChangeId: winner.changeId, decidedBy },
-      );
-      if (stopped.status === "refused") {
-        // Promotion has started and can already be committed in Root. Never undo it.
-        await env.DB.prepare(
-          "UPDATE changes SET outcome = 'replaces' WHERE id = ? AND status = 'compiling'",
-        )
-          .bind(b.changeId)
-          .run();
-      }
-    }
-    await env.DB.prepare(
-      `UPDATE changes SET outcome = CASE WHEN ? THEN 'replaces' WHEN outcome IN ('partially_selected', 'replaces') THEN outcome ELSE 'selected' END, updated_at = ? WHERE id = ? AND (outcome IS NULL OR outcome IN ('selected', 'replaces', 'partially_selected'))`,
-    )
-      .bind(promoted ? 1 : 0, new Date().toISOString(), winner.changeId)
-      .run();
-    const winnerState = await env.DB.prepare(
-      "SELECT base_generation, status, outcome FROM changes WHERE id = ?",
-    )
-      .bind(winner.changeId)
-      .first<{ base_generation: number; status: string; outcome: string | null }>();
-    if (winnerState && winner.changeId !== ctx.changeId) {
-      const winnerCtx = {
-        ...ctx,
-        changeId: winner.changeId,
-        baseGeneration: winnerState.base_generation,
-      };
-      await appendChangeEvents(env.RESOURCE_SHARD, winnerCtx, [
-        await changeEvent(
-          winnerCtx,
-          "conflict.reviewed",
-          {
-            conflictId: id,
-            winnerChangeId: winner.changeId,
-            loserChangeId: loser.changeId,
-            policy: decidedBy === SAME_REQUESTER ? "same_requester" : "system_arbiter",
-            decidedBy,
-            status: winnerState.status,
-            outcome: winnerState.outcome,
-          },
-          { key: id },
-        ),
-      ]);
-    }
+  } else if (policy === "same_requester") {
+    await replaceEarlier(env, id, a, b);
   }
   await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
     await changeEvent(
@@ -388,14 +285,48 @@ export async function checkRequestPair(
         verdict: review.verdict,
         criteria: review.conflicts,
         decisionReceipt: stored.receipt,
-        arbiter: stored.arbiter?.receipt ?? null,
+        policy,
         status: outcome.stop ?? "compiling",
-        excludedCriterionIds: outcome.excluded,
       },
       { key: id },
     ),
   ]);
   return outcome;
+}
+
+/**
+ * One person asked twice and the requests conflict: the later request replaces the earlier one.
+ * An earlier request with a promoted Candidate stays (a canonical transition is never undone), and
+ * the later request records `replaces`.
+ */
+async function replaceEarlier(env: Env, id: string, a: RequestInput, b: RequestInput) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE request_conflicts SET policy = 'same_requester', winner_change_id = ?, loser_change_id = ?, decided_by = ?, decided_at = ? WHERE id = ?`,
+  )
+    .bind(b.changeId, a.changeId, SAME_REQUESTER, now, id)
+    .run();
+  const reason = `Not selected: it conflicts with ${b.requesterName ?? b.requesterUserId}'s request "${b.goal.slice(0, 60)}", which replaces the earlier request`;
+  const promoted = await env.DB.prepare(
+    "SELECT id FROM candidates WHERE change_id = ? AND status = 'promoted' LIMIT 1",
+  )
+    .bind(a.changeId)
+    .first<{ id: string }>();
+  let replaces = !!promoted;
+  if (!promoted) {
+    const stopped = await cancelChange(
+      env,
+      { changeId: a.changeId, actorUserId: SAME_REQUESTER },
+      { reason, winnerChangeId: b.changeId, decidedBy: SAME_REQUESTER },
+    );
+    // Promotion has started and can already be committed in Root. Never undo it.
+    if (stopped.status === "refused") replaces = true;
+  }
+  await env.DB.prepare(
+    `UPDATE changes SET outcome = CASE WHEN ? THEN 'replaces' WHEN outcome = 'replaces' THEN outcome ELSE 'selected' END, updated_at = ? WHERE id = ? AND (outcome IS NULL OR outcome IN ('selected', 'replaces'))`,
+  )
+    .bind(replaces ? 1 : 0, now, b.changeId)
+    .run();
 }
 
 type Question = Omit<ChangeClarification, "askedAt" | "round">;

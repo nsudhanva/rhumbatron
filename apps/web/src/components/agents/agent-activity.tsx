@@ -69,6 +69,8 @@ const FAMILY_STROKE_FILL: Record<StatusFamily, string> = {
 };
 
 const TYPE_TEXT = (event: ActivityEvent) => {
+  // A failure a later attempt recovered (or is retrying) is attention, not danger (lib/recovery).
+  if (event.outcome && event.outcome !== "failed") return "text-kumo-warning";
   if (event.kind === "run.end" && event.status === "failed") return "text-kumo-danger";
   if (event.kind === "check" && (event.status === "fail" || event.status === "error"))
     return "text-kumo-danger";

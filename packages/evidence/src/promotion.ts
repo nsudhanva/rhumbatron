@@ -49,11 +49,35 @@ export type AutoPromoteDecision =
         | "tier_not_auto";
     };
 
+/** The last sentence of every reason a Candidate waits for a person. */
+export const APPROVE_THEN_SHIP = "Approve to ship it or cancel the change.";
+
+/**
+ * Why a verified Candidate waits for a human approval, in one sentence for `approval.requested`,
+ * the Candidate status reason, and the inbox. `tierGated`: the policy gates the risk tier.
+ * `touchesAuthorization`: the plan gated the Candidate because it changes authorization.
+ */
+export function approvalReason(input: {
+  policyVersion: string;
+  riskTier: RiskTier | null;
+  tierGated: boolean;
+  touchesAuthorization: boolean;
+}): string {
+  const parts = [
+    input.tierGated && input.riskTier ? `${input.riskTier}-risk changes` : null,
+    input.touchesAuthorization ? "changes to authorization" : null,
+  ].filter((part): part is string => part !== null);
+  const what = parts.length > 0 ? parts.join(" and ") : "this change";
+  return `Policy ${input.policyVersion} requires a person to approve ${what}. ${APPROVE_THEN_SHIP}`;
+}
+
 /**
  * Policy `autoPromoteRiskTiers`. A verified Candidate whose required checks
  * pass promotes without a person only when the Change risk tier is listed and no human gate applies.
- * An unknown risk tier is never automatic. The decision only selects the trigger: promotion still
- * re-checks every promotion precondition from authoritative rows (`checkPromotion`).
+ * The human gate is the plan flag `humanApprovalRequired` (authorization changes, and every policy
+ * `humanGateRiskTiers` tier) or a gated tier. An unknown risk tier is never automatic. The decision
+ * only selects the trigger: promotion still re-checks every promotion precondition from
+ * authoritative rows (`checkPromotion`).
  */
 export function autoPromoteDecision(input: {
   candidateStatus: string;
@@ -74,6 +98,30 @@ export function autoPromoteDecision(input: {
     return { kind: "manual", reason: "tier_not_auto" };
   }
   return { kind: "auto_promote" };
+}
+
+/**
+ * Why the policy holds a verified Candidate for a person when its plan has no human gate yet: the
+ * policy gates the tier, does not list it as automatic, or the Change has no risk tier. Null for
+ * the reasons that never wait for a person here (not verified, an evidence gap) and for a plan
+ * that already has the gate (the gate step requested that approval).
+ */
+export function policyHoldReason(
+  decision: AutoPromoteDecision,
+  input: { policyVersion: string; riskTier: RiskTier | null },
+): string | null {
+  if (decision.kind !== "manual") return null;
+  const policy = `Policy ${input.policyVersion}`;
+  switch (decision.reason) {
+    case "approval_required":
+      return approvalReason({ ...input, tierGated: true, touchesAuthorization: false });
+    case "tier_not_auto":
+      return `${policy} does not ship ${input.riskTier}-risk changes automatically. ${APPROVE_THEN_SHIP}`;
+    case "unknown_risk":
+      return `The change has no risk tier, so ${policy} does not ship it automatically. ${APPROVE_THEN_SHIP}`;
+    default:
+      return null;
+  }
 }
 
 /** A human rejection always blocks. A grant counts only for the tree that was approved. */

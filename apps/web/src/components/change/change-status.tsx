@@ -27,6 +27,8 @@ const CHANGE_STATUS: Record<string, { family: StatusFamily; label: string }> = {
   not_selected: { family: "idle", label: "Not selected" },
   proposed: { family: "attention", label: "Proposed" },
   declined: { family: "idle", label: "Declined" },
+  awaiting_choice: { family: "attention", label: "Waiting for a choice" },
+  queued: { family: "attention", label: "Queued" },
 };
 
 export function ChangeStatusWord({ status, className }: { status: string; className?: string }) {
@@ -85,6 +87,16 @@ export function statusLine({
     case "created":
     case "compiling":
       return { text: "Planning: splitting the request into tasks", family: "active" };
+    case "awaiting_choice":
+      return {
+        text: "Waiting: it conflicts with an earlier request, whose requester chooses",
+        family: "attention",
+      };
+    case "queued":
+      return {
+        text: "Queued: it plans when the earlier request finishes",
+        family: "attention",
+      };
     case "needs_input":
       return canAnswer
         ? { text: "Waiting for your answer", family: "attention" }

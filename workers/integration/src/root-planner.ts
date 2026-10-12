@@ -9,6 +9,7 @@ import {
   APP_CONVENTIONS,
   checkWorkGraph,
   clampTitle,
+  MAX_ASSUMPTIONS,
   type PlannedTask,
   type RouteRequest,
   WorkGraphPlan,
@@ -34,6 +35,7 @@ Turn the user's goal into a small dependency graph of Tasks. Rules:
 - Use kind "design" only for decisions other Tasks need first; "test" for verification work; "document" sparingly.
 - acceptanceCriteria are observable results, not activities.
 - invariants are behaviours that must not change, taken from the goal (for example existing cart behaviour).
+- assumptions: the small product details the goal leaves open that you decided (for example which colors, sizes, labels, or defaults), one plain sentence each, at most ${MAX_ASSUMPTIONS}. Decide each open detail instead of planning a question. Empty when the goal decides everything.
 - riskTier: high when a Task changes authorization, data ownership, or migrations; critical only for destructive changes.
 - Do not plan deployment or release Tasks; Rhumbatron releases automatically.
 - Rhumbatron builds and hosts the Project as a live app. Every Task must keep it in this shape:
@@ -43,11 +45,11 @@ Call ${SUBMIT_TOOL} exactly once. Do not write any other text.`;
 
 export type PlannerInput = {
   goal: string;
-  excludedCriteria?: { id: string; text: string }[];
-  selectedCriteria?: { id: string; text: string }[];
   projectName: string;
   /** Current canonical tree's file paths; null when the source is unavailable. */
   files?: string[] | null;
+  /** Open details the intake gate found; the planner decides each one and records it. */
+  openDetails?: string[];
 };
 
 /** Paths listed to the planner; the rest are counted. */
@@ -237,6 +239,13 @@ export function parsePlan(
   if (normalized && typeof normalized === "object" && !Array.isArray(normalized)) {
     const args = normalized as Record<string, unknown>;
     args.title = clampTitle(typeof args.title === "string" ? args.title : null) ?? "";
+    // Assumptions are display text too: drop bad entries and cut the list, never a repair turn.
+    args.assumptions = Array.isArray(args.assumptions)
+      ? args.assumptions
+          .filter((a): a is string => typeof a === "string" && a.trim().length >= 3)
+          .map((a) => a.trim().slice(0, 300))
+          .slice(0, MAX_ASSUMPTIONS)
+      : [];
   }
   const parsed = WorkGraphPlan.safeParse(normalized);
   if (!parsed.success) {
@@ -271,7 +280,7 @@ export async function planChange(
     { role: "system", content: SYSTEM_PROMPT },
     {
       role: "user",
-      content: `Project: ${input.projectName}\n${repositoryLine(input.files)}\nGoal:\n${input.goal}${input.excludedCriteria?.length ? `\nExcluded criteria (must not implement, even incidentally):\n${JSON.stringify(input.excludedCriteria)}\nPlan only these selected criteria:\n${JSON.stringify(input.selectedCriteria)}` : ""}`,
+      content: `Project: ${input.projectName}\n${repositoryLine(input.files)}\nGoal:\n${input.goal}${input.openDetails?.length ? `\nOpen details (decide each one and record your choice in assumptions):\n- ${input.openDetails.join("\n- ")}` : ""}`,
     },
   ];
   const emptyRepository = isEmptyRepository(input.files);
@@ -303,12 +312,11 @@ export async function planChange(
         console.warn(JSON.stringify({ event: "planner.linked_ui_to_api", edges: outcome.linked }));
       }
       return {
-        plan: input.selectedCriteria
-          ? { ...outcome.plan, acceptanceCriteria: input.selectedCriteria.map((c) => c.text) }
-          : outcome.plan,
-        criteria:
-          input.selectedCriteria ??
-          outcome.plan.acceptanceCriteria.map((text, index) => ({ id: `c${index + 1}`, text })),
+        plan: outcome.plan,
+        criteria: outcome.plan.acceptanceCriteria.map((text, index) => ({
+          id: `c${index + 1}`,
+          text,
+        })),
         order: outcome.order,
         attempts: attempt,
         calls,

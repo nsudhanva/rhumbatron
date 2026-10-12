@@ -535,6 +535,20 @@ function ChangeOutcomeLine({ change }: { change: ChangeSummary }) {
       </span>
     );
   }
+  if (change.status === "awaiting_choice") {
+    return (
+      <span className="text-[12px] font-medium text-accent-700">
+        Waiting for the person who asked first to choose
+      </span>
+    );
+  }
+  if (change.status === "queued") {
+    return (
+      <span className="text-[12px] font-medium text-accent-700">
+        Queued: plans when the earlier request finishes
+      </span>
+    );
+  }
   const outcome = change.outcome;
   if (!outcome) return null;
 
@@ -559,6 +573,11 @@ function ChangeOutcomeLine({ change }: { change: ChangeSummary }) {
   }
   if (outcome.kind === "partially_selected") {
     return <span className="text-[12px] text-kumo-subtle">Partially selected</span>;
+  }
+  if (outcome.kind === "follows") {
+    return (
+      <span className="text-[12px] text-kumo-subtle">{reasonAfter("Follows", outcome.reason)}</span>
+    );
   }
   if (outcome.kind === "replaces") {
     return <span className="text-[12px] text-kumo-subtle">Replaces earlier request</span>;

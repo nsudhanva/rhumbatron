@@ -21,6 +21,8 @@ import { nothingSelected } from "./request-policy.ts";
 /**
  * The policy of a Project without a stored `project_policies` row. It protects no
  * resource: protected resources are Project-specific and come only from the stored row.
+ * Low and medium risk promote without a person when every required check and the acceptance
+ * check pass. High and critical risk, and every authorization change, wait for a human approval.
  */
 export const DEFAULT_POLICY: ProjectPolicy = {
   version: "policy-1",
@@ -31,7 +33,7 @@ export const DEFAULT_POLICY: ProjectPolicy = {
   humanGateRiskTiers: ["high", "critical"],
   protectedResources: [],
   networkPolicy: "restricted",
-  autoPromoteRiskTiers: ["low"],
+  autoPromoteRiskTiers: ["low", "medium"],
   requiredChecksByRisk: {
     low: ["build", "targeted"],
     medium: ["build", "targeted", "contract"],

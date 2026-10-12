@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "cf:types": "wrangler types",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test:critical": "vitest run --dir src"
   },
   "dependencies": {
     "@clerk/tanstack-react-start": "1.7.0",
@@ -45,6 +46,7 @@
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.4",
+    "vitest": "5.0.3",
     "wrangler": "4.149.0"
   }
 }

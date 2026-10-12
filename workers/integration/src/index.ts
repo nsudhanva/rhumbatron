@@ -4,9 +4,11 @@ import {
   AnyCommandEnvelope,
   type ApprovalOutcome,
   type ChangeCommandOutcome,
+  type ChooseOutcome,
   type ClarifyChangeOutcome,
   type ClarifyChangeRequest,
   type CodeEditOutcome,
+  type FirstComeChoice,
   type PromotionOutcome,
   type ReleaseInjectionOutcome,
   type ReviewChangeOutcome,
@@ -45,6 +47,7 @@ import {
 import { backfillTreeCode, type CodeBackfill } from "./code-store.ts";
 import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
+import { chooseFirstCome } from "./first-come.ts";
 import { handleFixtureCommand } from "./fixture-changesets.ts";
 import { type HumanEditInput, submitHumanEdit } from "./human-edit.ts";
 import { recoverIntegrations } from "./integrate.ts";
@@ -391,6 +394,18 @@ export default class Integration extends WorkerEntrypoint<Env> {
     request: ClarifyChangeRequest;
   }): Promise<ClarifyChangeOutcome> {
     return clarifyChange(this.env, input);
+  }
+
+  /**
+   * The earlier requester chooses for a later, conflicting request (ADR 0032): keep their version,
+   * or apply the later request after theirs. The API checked that the actor is that requester.
+   */
+  async chooseFirstCome(input: {
+    changeId: string;
+    actorUserId: string;
+    choice: FirstComeChoice;
+  }): Promise<ChooseOutcome> {
+    return chooseFirstCome(this.env, input);
   }
 
   /**

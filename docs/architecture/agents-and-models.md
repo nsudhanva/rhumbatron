@@ -183,7 +183,7 @@ flowchart LR
 Two call paths use the same gateway, headers, prices, and meter:
 
 - Pi agent runs (`workers/agents/src/models.ts`) use Pi's Anthropic Messages API. Pi puts `cache_control` on the system prompt, the tool definitions, and the latest message. Pi prices each response from its usage fields.
-- `complete()` (`packages/model-router/src/gateway-client.ts`) serves the Root Planner, the intake gate, the request review and arbiter, conflict review, context compaction, the acceptance check, and the Integration Judge. Each caller goes through `meteredComplete()`. `complete()` caches the system prompt. On a follow-up call, it replays a whole assistant turn, with its thinking blocks. The caller sets the output cap.
+- `complete()` (`packages/model-router/src/gateway-client.ts`) serves the Root Planner, the intake gate, the request review, conflict review, context compaction, the acceptance check, and the Integration Judge. Each caller goes through `meteredComplete()`. `complete()` caches the system prompt. On a follow-up call, it replays a whole assistant turn, with its thinking blocks. The caller sets the output cap.
 
 The intake gate and the request comparison use their own fixed models and fixed rules. See [Shared Projects](shared-projects.md).
 

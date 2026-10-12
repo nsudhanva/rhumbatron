@@ -64,7 +64,8 @@ export type Requester = z.infer<typeof Requester>;
  * How a request ended up after the intake gate and the cross-request check
  * (docs/architecture/shared-projects.md). `duplicate`: the request closed as a duplicate of
  * `winnerChangeId`, or of the current app when that is null. `declined`: an owner or admin
- * declined the proposed request; `reason` is the decline reason.
+ * declined the proposed request; `reason` is the decline reason. `follows`: the first requester
+ * chose to apply this request after their own request `winnerChangeId` (ADR 0032).
  */
 export const RequestOutcome = z.object({
   kind: z.enum([
@@ -74,6 +75,7 @@ export const RequestOutcome = z.object({
     "replaces",
     "duplicate",
     "declined",
+    "follows",
   ]),
   reason: z.string().nullable(),
   winnerChangeId: Id.nullable(),
@@ -103,6 +105,13 @@ export const ChangeStatus = z.enum([
   "needs_input",
   /** An owner or admin declined the proposed request. Terminal. */
   "declined",
+  /**
+   * The request conflicts with an earlier request of another person. It waits for that person to
+   * choose: keep their version, or apply this request after theirs (ADR 0032). No planning spend.
+   */
+  "awaiting_choice",
+  /** The first requester chose "apply theirs": the request plans after the earlier request ends. */
+  "queued",
 ]);
 export type ChangeStatus = z.infer<typeof ChangeStatus>;
 
@@ -148,7 +157,11 @@ export const ReviewChangeOutcome = z.discriminatedUnion("result", [
 ]);
 export type ReviewChangeOutcome = z.infer<typeof ReviewChangeOutcome>;
 
-/** One question of a clarification. `options` lists distinct readings when the system found them. */
+/**
+ * One question of a clarification. Each question asks one thing and has its own answer.
+ * `options` lists 2 to 4 distinct readings when the system found them; the person picks one or
+ * writes something else.
+ */
 export const ChangeQuestion = z.object({
   id: z.string().min(1).max(64),
   text: z.string().min(1).max(1000),
@@ -252,6 +265,8 @@ export const ChangeDetail = Change.extend({
   supersedesChangeId: Id.nullable().optional(),
   /** Set while the Change is `needs_input`; null otherwise. */
   clarification: ChangeClarification.nullable().optional(),
+  /** Small product details the Root Planner decided (plain sentences); empty before planning. */
+  assumptions: z.array(z.string()).optional(),
   /** Which budget the Change draws on, its spend, and the budget that stopped it (ADR 0030). */
   budget: ChangeBudget.optional(),
 });

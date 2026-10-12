@@ -1,6 +1,7 @@
 import { cn } from "@cloudflare/kumo";
 import { type CSSProperties, useEffect, useMemo, useRef } from "react";
 import { formatClock, formatNumber } from "../../lib/format";
+import { failureOutcome } from "../../lib/recovery";
 import type { Replay } from "../replay/use-replay";
 import {
   type AgentsTiming,
@@ -116,9 +117,12 @@ export function AgentsReplayStrip({
                               "absolute inset-y-0 transition-colors duration-(--rh-dur-ui)",
                               !ended
                                 ? "bg-kumo-ink"
-                                : run.status === "failed"
-                                  ? "bg-kumo-danger"
-                                  : "bg-kumo-success",
+                                : run.status !== "failed"
+                                  ? "bg-kumo-success"
+                                  : // A failure a later attempt recovered is amber (lib/recovery).
+                                    failureOutcome(run, task.runs, task.status) === "failed"
+                                    ? "bg-kumo-danger"
+                                    : "bg-kumo-warning",
                             )}
                             style={{
                               left: `${left * 100}%`,

@@ -10,13 +10,19 @@ import { ReviewActions } from "../components/board/review-actions";
 import { candidateLabels } from "../components/candidate/model";
 import { CandidateSummary } from "../components/change/candidate-summary";
 import { budgetDetail } from "../components/change/change-budget";
-import { CancelChange } from "../components/change/change-controls";
+import { CancelChange, ShipCandidate } from "../components/change/change-controls";
 import { ChangeHeader } from "../components/change/change-header";
-import { ChangeStats, changeSpend, InvariantList } from "../components/change/change-overview";
+import {
+  AssumptionList,
+  ChangeStats,
+  changeSpend,
+  InvariantList,
+} from "../components/change/change-overview";
 import { statusLine } from "../components/change/change-status";
 import { ConflictList } from "../components/change/conflict-list";
 import { Disclosure } from "../components/change/disclosure";
-import { awaitingApproval, NeedsAttention } from "../components/change/needs-attention";
+import { FirstComeCard } from "../components/change/first-come-card";
+import { awaitingApproval, NeedsAttention, shippable } from "../components/change/needs-attention";
 import { CHANGE_FEED_INITIAL, preloadChange } from "../components/change/preload-change";
 import { ChangeFilesChanged } from "../components/code/files-changed";
 import { useEventFeed } from "../components/project/use-event-feed";
@@ -116,7 +122,9 @@ function ChangeView() {
     // from another person, so it keeps the slow poll.
     refetchInterval: (query) =>
       isLive(query.state.data, undefined) ||
-      ["needs_input", "proposed"].includes(query.state.data?.status ?? "")
+      ["needs_input", "proposed", "awaiting_choice", "queued"].includes(
+        query.state.data?.status ?? "",
+      )
         ? fallback
         : false,
     // A demo screen may sit in a background tab; polling still stops once the Change is idle.
@@ -338,12 +346,9 @@ function ChangeView() {
     liveGeneration: liveApp?.generation ?? null,
   });
   const approval = awaitingApproval(candidateList);
-  const promotable = candidateList.find(
-    (c) =>
-      c.status === "verified" &&
-      c.gate?.promotable === true &&
-      (!c.approvalRequired || c.approval?.decision === "granted"),
-  );
+  // Approved, or no approval needed, with no sibling in flight: Ship here, the same promote call
+  // as the Candidate page. Several (a tie a person breaks) open the comparison instead.
+  const shipReady = shippable(candidateList, data.status);
   const operatorIssues =
     (operator.data?.deadLetters.length ?? 0) + (operator.data?.limits.length ?? 0) > 0;
   const taskChangeSets = (changeSets.data ?? []).filter((s) => s.taskId === selectedTask?.id);
@@ -374,14 +379,20 @@ function ChangeView() {
         <CheckCircle size={16} aria-hidden />
         Review and approve
       </Link>
-    ) : promotable && !["promoting", "releasing", "completed"].includes(data.status) ? (
+    ) : shipReady.length === 1 && shipReady[0] ? (
+      <ShipCandidate
+        changeId={data.id}
+        candidateId={shipReady[0].id}
+        baseGeneration={shipReady[0].baseGeneration}
+      />
+    ) : shipReady.length > 1 ? (
       <Link
-        to="/candidates/$candidateId"
-        params={{ candidateId: promotable.id }}
+        to="/compare/$changeId"
+        params={{ changeId: data.id }}
         className={cn(buttonVariants({ variant: "primary" }), "gap-1.5")}
       >
         <RocketLaunch size={16} aria-hidden />
-        Review and promote
+        Compare and ship
       </Link>
     ) : data.status === "completed" && liveApp ? (
       <a
@@ -429,6 +440,7 @@ function ChangeView() {
         candidateLabel={(id) => names.get(id) ?? id}
         canAnswer={canAnswer}
         canRaiseBudget={can(role, "change.raiseBudget")}
+        canShip={operate && can(role, "candidate.promote")}
         hasOperatorIssues={operatorIssues}
         review={
           reviewable ? (
@@ -440,6 +452,8 @@ function ChangeView() {
           ) : null
         }
       />
+
+      <FirstComeCard changeId={data.id} projectId={data.projectId} />
 
       <div
         className={cn(
@@ -470,7 +484,9 @@ function ChangeView() {
                   ? "Tasks appear after the questions above are answered."
                   : data.status === "proposed"
                     ? "Tasks appear after an admin includes the request."
-                    : "This Change has no Work Graph."
+                    : data.status === "awaiting_choice" || data.status === "queued"
+                      ? "Tasks appear after the earlier request finishes, if its requester applies this one."
+                      : "This Change has no Work Graph."
               }
             />
           ) : (
@@ -499,6 +515,12 @@ function ChangeView() {
 
       {!endedBeforePlanning && (
         <>
+          {data.assumptions && data.assumptions.length > 0 && (
+            <Section label="Assumptions">
+              <AssumptionList items={data.assumptions} />
+            </Section>
+          )}
+
           <AgentActivity model={model} ready={ready} compiling={compiling} />
 
           <CandidateSummary

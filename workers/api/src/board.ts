@@ -12,6 +12,7 @@ import {
   changeTitle,
   ModelTier,
   ProjectRole,
+  type RequestWaitSummary,
 } from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -31,7 +32,8 @@ import {
  * and the people with their request counts. Any role can read it.
  *
  * Cost: one D1 batch of 3 SELECTs after the role read. The Change read starts from
- * `idx_changes_project_created` and takes the newest 100 Changes. The Task read takes the Tasks of
+ * `idx_changes_project_created` and takes the newest 100 Changes. A waiting card (`awaiting_choice`,
+ * `queued`) reads its newest `request_choices` row through `idx_request_choices_later`. The Task read takes the Tasks of
  * the same 100 Changes (at most 12 each) with the newest run of each. The member read takes at
  * most 200 rows. The `shipped` and `not_built` columns keep the newest 20 cards each; the counts
  * cover all 100 Changes.
@@ -55,6 +57,8 @@ export type BoardChangeRow = {
   email: string | null;
   requester_role: string | null;
   generation: number | null;
+  /** The newest first-come wait while the Change is `awaiting_choice` or `queued` (ADR 0032). */
+  waiting_json?: string | null;
 } & ReviewColumns;
 
 export type BoardTaskRow = {
@@ -72,6 +76,32 @@ export type BoardMemberRow = {
   display_name: string | null;
   email: string | null;
 };
+
+/** The wait of an `awaiting_choice` or `queued` card: who it waits for, and on which request. */
+function waitingOf(
+  status: ChangeStatus,
+  json: string | null | undefined,
+): RequestWaitSummary | null {
+  if ((status !== "awaiting_choice" && status !== "queued") || !json) return null;
+  try {
+    const w = JSON.parse(json) as {
+      firstChangeId: string;
+      firstTitle: string | null;
+      firstGoal: string | null;
+      userId: string;
+      name: string | null;
+      email: string | null;
+    };
+    return {
+      state: status === "queued" ? "after_first" : "choosing",
+      firstChangeId: w.firstChangeId,
+      firstTitle: changeTitle(w.firstTitle, w.firstGoal ?? ""),
+      firstRequester: { userId: w.userId, name: requesterName(w.name, w.email) },
+    };
+  } catch {
+    return null;
+  }
+}
 
 /** Agent state of one Task on a card. */
 function agentState(taskStatus: string): BoardAgent["state"] {
@@ -145,6 +175,7 @@ export function buildBoard(input: {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       generation: row.generation ?? null,
+      waiting: waitingOf(status.data, row.waiting_json),
     });
   }
   const none = { proposed: 0, active: 0, shipped: 0, notBuilt: 0 };
@@ -191,7 +222,14 @@ export const board = new Hono<AppEnv>().get(
         `SELECT c.id, c.goal, c.title, c.status, c.created_by, c.created_at, c.updated_at,
                 u.display_name, u.email, ${REVIEW_COLUMNS},
                 (SELECT MAX(cd.promoted_generation) FROM candidates cd
-                   WHERE cd.change_id = c.id AND cd.status = 'promoted') AS generation
+                   WHERE cd.change_id = c.id AND cd.status = 'promoted') AS generation,
+                CASE WHEN c.status IN ('awaiting_choice', 'queued') THEN (
+                  SELECT json_object('firstChangeId', w.first_change_id, 'firstTitle', f.title,
+                    'firstGoal', f.goal, 'userId', w.asked_user_id, 'name', uw.display_name,
+                    'email', uw.email)
+                  FROM request_choices w LEFT JOIN changes f ON f.id = w.first_change_id
+                  LEFT JOIN users uw ON uw.id = w.asked_user_id
+                  WHERE w.later_change_id = c.id ORDER BY w.created_at DESC LIMIT 1) END AS waiting_json
          FROM changes c LEFT JOIN users u ON u.id = c.created_by ${REVIEWER_JOIN}
          WHERE c.project_id = ?1 ORDER BY c.created_at DESC LIMIT ${BOARD_CHANGE_LIMIT}`,
       ).bind(projectId),

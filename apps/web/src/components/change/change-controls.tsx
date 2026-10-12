@@ -1,8 +1,9 @@
 import { Button, Input } from "@cloudflare/kumo";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { RocketLaunch } from "@phosphor-icons/react";
+import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { cancelChange, raiseChangeBudget } from "../../lib/api";
-import { formatUsd } from "../../lib/format";
+import { cancelChange, promoteCandidate, raiseChangeBudget } from "../../lib/api";
+import { formatUsd, generation } from "../../lib/format";
 import { SectionError } from "../project/feedback";
 
 /**
@@ -19,17 +20,66 @@ const CANCELLABLE = new Set([
   "verifying",
   "awaiting_approval",
   "budget_blocked",
+  "awaiting_choice",
+  "queued",
 ]);
 
-function useRefreshChange(changeId: string) {
+function useRefreshChange(changeId: string, candidateId?: string) {
   const queryClient = useQueryClient();
   return () =>
-    Promise.all(
-      ["change", "tasks", "candidates"].map((key) =>
+    Promise.all([
+      ...["change", "tasks", "candidates"].map((key) =>
         queryClient.invalidateQueries({ queryKey: [key, changeId] }),
       ),
-    );
+      ...(candidateId
+        ? [queryClient.invalidateQueries({ queryKey: ["candidate", candidateId] })]
+        : []),
+    ]);
 }
+
+/**
+ * Ship: promote one verified Candidate from the Change page. The same API call as Promote on the
+ * Candidate page (`POST /v1/candidates/:id/promote`): the API checks the role, and the integration
+ * Worker plus ProjectRootDO re-check every precondition and run the compare-and-swap. The shared
+ * mutation key shows a running ship on both buttons (header and Needs attention).
+ */
+export function ShipCandidate({
+  changeId,
+  candidateId,
+  baseGeneration,
+}: {
+  changeId: string;
+  candidateId: string;
+  baseGeneration: number;
+}) {
+  const refresh = useRefreshChange(changeId, candidateId);
+  const ship = useMutation({
+    mutationKey: ["promote", candidateId],
+    mutationFn: () => promoteCandidate({ data: candidateId }),
+    onSettled: refresh,
+  });
+  const busy = useIsMutating({ mutationKey: ["promote", candidateId] }) > 0;
+  const route = `${generation(baseGeneration)} → ${generation(baseGeneration + 1)}`;
+  return (
+    <>
+      {ship.isError && (
+        <span role="alert" className="text-[13px] font-semibold text-kumo-danger">
+          Not shipped: {ship.error.message}
+        </span>
+      )}
+      <Button
+        variant="primary"
+        icon={RocketLaunch}
+        loading={busy}
+        disabled={ship.isSuccess || (busy && !ship.isPending)}
+        onClick={() => ship.mutate()}
+      >
+        {ship.isSuccess ? `Shipped ${route}` : `Ship ${route}`}
+      </Button>
+    </>
+  );
+}
+ShipCandidate.displayName = "ShipCandidate";
 
 /** Page action: two clicks, so one stray click never cancels a Change. */
 export function CancelChange({ changeId, status }: { changeId: string; status: string }) {

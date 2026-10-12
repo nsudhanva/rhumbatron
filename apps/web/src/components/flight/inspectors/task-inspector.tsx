@@ -372,7 +372,7 @@ function AttemptsBlock({ task }: { task: TaskState }) {
                     )}
                   </Td>
                   <Td>
-                    <StatusPill status={r.status} />
+                    <StatusPill status={r.outcome ?? r.status} />
                   </Td>
                   <Td numeric>{unknown ? EMPTY : formatNumber(r.modelCalls)}</Td>
                   <Td numeric>{unknown ? EMPTY : formatNumber(r.inputTokens)}</Td>
@@ -399,7 +399,12 @@ function AttemptsBlock({ task }: { task: TaskState }) {
                   <Td className="max-w-[220px]">
                     {r.failureKind ? (
                       <span className="grid">
-                        <span className="font-mono text-[11px] text-kumo-danger">
+                        <span
+                          className={cn(
+                            "font-mono text-[11px]",
+                            r.outcome === "failed" ? "text-kumo-danger" : "text-kumo-warning",
+                          )}
+                        >
                           {r.failureKind}
                         </span>
                         {r.failureReason && (

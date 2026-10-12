@@ -56,7 +56,11 @@ export async function loadProjectPolicy(env: PolicyEnv, projectId: string): Prom
       const cached = Snapshot.safeParse(
         await env.CONFIG.get(key, { type: "json", cacheTtl: EDGE_CACHE_TTL_SECONDS }),
       );
-      if (cached.success) return cached.data.policy;
+      // A cached default answer means "no row": the default of the running code applies, so a
+      // changed DEFAULT_POLICY takes effect at deploy, not after the cache expires.
+      if (cached.success) {
+        return cached.data.source === "default" ? DEFAULT_POLICY : cached.data.policy;
+      }
     } catch (error) {
       log({ event: "policy.cache_read_failed", projectId, message: String(error).slice(0, 200) });
     }

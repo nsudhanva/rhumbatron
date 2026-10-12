@@ -26,7 +26,11 @@ When an owner or admin includes the request, the Change becomes `created` at the
 The ChangeWorkflow runs the intake gate, calls the Root Planner, and compares the plan with the other open requests.
 Then it stores the Work Graph and dispatches the ready Tasks.
 An unclear, duplicate, or conflicting request waits for its requester (`needs_input`).
-[Shared Projects](shared-projects.md#the-intake-gate) describes the intake gate, the request comparison, and the system arbiter (ADR 0025).
+A request that conflicts with an earlier request of another person waits for that person's choice (`awaiting_choice`, then `queued`, ADR 0032). It plans again after the earlier request promotes or ends.
+The intake gate reads the request as a change to the current app: the canonical file paths, the `package.json` name and description, the start of the `README.md`, and recent request titles.
+It asks only when two readings build materially different products. Each question has its own answer, with the readings as options and "Something else". Small details, such as colors, sizes, and defaults, go to the Root Planner as assumptions.
+The intake gate asks at most one round. After an answer, or after "Build it as it is", the request goes to planning.
+[Shared Projects](shared-projects.md#the-intake-gate) describes the intake gate, the request comparison, and first-come conflicts (ADR 0025, ADR 0032).
 
 ```mermaid
 sequenceDiagram
@@ -55,7 +59,7 @@ sequenceDiagram
   end
   CW->>D1: status compiling
   CW->>GW: intake gate (embeddings, reranker, Clef-flash, Sonnet)
-  opt unclear or duplicate
+  opt unclear or duplicate (at most one intake round)
     CW->>D1: status needs_input, clarification
     User->>API: POST /v1/changes/:id/clarify
     API->>CW: integration RPC clarifyChange, event clarification
@@ -64,7 +68,13 @@ sequenceDiagram
   CW->>GW: Root Planner, tool submit_work_graph
   GW-->>CW: WorkGraphPlan (Zod and cycle check)
   CW->>Root: registerScope(), then compare with each earlier request
-  CW->>D1: tasks, task_dependencies, title, status running (one batch)
+  opt supported conflict with an earlier request of another person
+    CW->>D1: request_choices row, status awaiting_choice
+    User->>API: POST /v1/changes/:id/choose (the earlier requester)
+    API->>CW: integration RPC chooseFirstCome, event first_come
+    CW->>GW: after the earlier request ends: Root Planner on the current tree
+  end
+  CW->>D1: tasks, task_dependencies, title, assumptions, status running (one batch)
   CW->>Shard: change.compiled, task.created (outbox)
   CW->>D1: pending to ready when dependencies are completed
   CW->>Shard: task.ready (outbox)
@@ -75,13 +85,15 @@ Notes:
 
 - The Root Planner routes to the `opus` tier (`taskKind = plan`, `complexity = large`). With `ALLOW_OPUS` set to `false` (the Terraform default), the `opus` tier runs on Sonnet 5.5 (ADR 0021).
 - The plan has a short `title` for the request, at most 6 words. The planner sees the goal with the clarification answers, so the title names the final request. `parsePlan` cuts the title to 48 characters at a word boundary. A missing title never causes a repair turn. The ChangeWorkflow writes it to D1 `changes.title` with the Tasks. Without a title, the API shows `fallbackTitle(goal)` (`packages/protocol/src/change-title.ts`).
+- The plan has `assumptions`: up to 8 small product details that the goal leaves open and that the planner decided, for example colors, sizes, or defaults. The planner also gets the open details that the intake gate found. `parsePlan` drops bad entries and cuts the list, so assumptions never cause a repair turn. The ChangeWorkflow writes them to D1 `changes.assumptions_json` (migration `0032_change_assumptions.sql`). The Change page shows them as "Assumptions". To change one, the requester sends a follow-up request.
 - The prompt asks for 2 to 8 Tasks. The schema accepts 1 to 12 (`MAX_TASKS_PER_CHANGE`). The planner makes at most two model calls: the plan and one repair turn.
 - A UI Task that calls routes of another Task must depend on that Task. The prompt states the rule. `parsePlan` (`workers/integration/src/root-planner.ts`) also repairs the plan without a model call. It adds the edge UI → API between a UI Task and an API Task on the same area when no dependency path joins them. The area is the first resource segment, for example `todos` in `todos:ui` and `todos:api`.
 - The Work Graph JSON goes to R2 at `work-graphs/<project>/<change>.json`.
 - Change Events go to the ResourceShardDO that owns `change:<id>`. This keeps ProjectRootDO cold.
 - The API writes the Change to ProjectViewDO directly.
 - The intake gate records `change.intake.reviewed` and an `INTAKE` Decision Receipt in D1 `change_decisions`. An answer records `change.clarification.answered`.
-- A `needs_input` Change waits for the event `clarification` and reads D1 once a day. After 7 days without an answer, the Change is `cancelled`. After 3 answered rounds, the Change plans without another question.
+- An `awaiting_choice` or `queued` Change waits for the event `first_come` and runs `advanceFirstCome` after each wake: every 6 hours while the choice is open, every hour while queued. After 7 days without a choice, the Change is `not_selected`.
+- A `needs_input` Change waits for the event `clarification` and reads D1 once a day. After 7 days without an answer, the Change is `cancelled`. The intake gate asks at most one round. The request comparison can ask more. After 3 answered rounds in total, the Change plans without another question.
 
 ## Part 2: from a wake to a published ChangeSet
 
@@ -179,7 +191,9 @@ Notes:
 - The integrate rule runs before the fork rule. A `confirmed` or `fork_required` conflict between two Tasks on different semantic resources (an API and its UI) creates no Candidate. The dependent Task gets a dependency edge and re-runs once on a stacked workspace with the other Task's ChangeSet. The Change returns to `running`. One Candidate then holds both ChangeSets.
 - `candidate.create` waits while a conflict review reserved in the last 10 minutes is still open. The last Queue delivery composes anyway.
 - A verified Candidate does not promote while a sibling on the same base still composes or verifies. A winner that does not meet every acceptance criterion never auto-promotes. Its Change goes to `awaiting_approval`. See [Source and verification](source-and-verification.md#sibling-candidates-and-selection).
-- Auto-promotion applies when the winner needs no human approval and the Project's policy `autoPromoteRiskTiers` lists the Change risk tier. The policy is the D1 `project_policies` row. Without a row, the policy is `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`), which lists `low`. The CandidateVerificationWorkflow then calls `promoteCandidate` with actor `system:auto-promotion`, and `canonical.promotion.requested` records `trigger: "auto"`. Every promotion precondition applies (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
+- Auto-promotion applies when the winner needs no human approval, meets every acceptance criterion, and the Project's policy `autoPromoteRiskTiers` lists the Change risk tier. The policy is the D1 `project_policies` row. Without a row, the policy is `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`). It lists `low` and `medium` in `autoPromoteRiskTiers`, and `high` and `critical` in `humanGateRiskTiers`. The CandidateVerificationWorkflow then calls `promoteCandidate` with actor `system:auto-promotion`, and `canonical.promotion.requested` records `trigger: "auto"`. Every promotion precondition applies (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
+- These Candidates always wait for a person: a `high` or `critical` Change, an authorization change at any tier (the plan sets `humanApprovalRequired`), a winner with an acceptance shortfall, and a tier that a stored policy does not list as automatic. A destructive migration has the tier `critical` (Root Planner), so it waits too.
+- A Candidate that waits for a person is never silent. The Change goes to `awaiting_approval`. The Candidate status reason states why. `approval.requested` records `reason` and `trigger` (`policy` or `acceptance`). The inbox tells the owner, the admins, and the requester. The Change page shows the reason under Needs attention. An owner or admin approves the Candidate (when approval is required), then ships it with Ship on the Change page or Promote on the Candidate page. Both call `POST /v1/candidates/:id/promote`.
 - The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a live app, else `completed`. The release ends the Change as `completed` (deployed or superseded) or `failed`. See [Live apps](live-apps.md#promotion-and-release).
 - Every end after promotion records `change.completed` or `change.failed`. The projector maps `build.started` to `releasing`. These Events move ProjectViewDO out of `promoting`.
 - A Change that is still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes, the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change (at most 10 per sweep). The integration Worker then re-checks the Change:
@@ -210,7 +224,14 @@ stateDiagram-v2
   needs_input --> compiling: answer or proceed anyway
   needs_input --> cancelled: withdrawn, or no answer in 7 days
   compiling --> failed: planner failed
-  compiling --> not_selected: lost to an earlier request
+  compiling --> not_selected: the same requester asked again
+  compiling --> awaiting_choice: conflict with an earlier request of another person
+  awaiting_choice --> not_selected: keep mine, or no choice in 7 days
+  awaiting_choice --> queued: apply theirs, earlier request in flight
+  awaiting_choice --> compiling: earlier request ended (moot or apply theirs)
+  queued --> compiling: earlier request promoted or ended
+  awaiting_choice --> cancelled: withdrawn
+  queued --> cancelled: withdrawn
   compiling --> running: Work Graph stored
   compiling --> budget_blocked: a budget refused a planner or intake call
   budget_blocked --> compiling: budget raised while planning
@@ -236,9 +257,10 @@ The pure rules are in `workers/integration/src/change-status.ts`.
 
 | Rule | Source |
 |---|---|
-| A person can cancel a Change in `proposed`, `created`, `compiling`, `needs_input`, `running`, `verifying`, `awaiting_approval`, `budget_blocked`, or `blocked`. A Change with a promoted Candidate cannot be cancelled. | `CANCELLABLE_FROM`, `cancelChange` in `change-commands.ts` |
+| A person can cancel a Change in `proposed`, `created`, `compiling`, `needs_input`, `awaiting_choice`, `queued`, `running`, `verifying`, `awaiting_approval`, `budget_blocked`, or `blocked`. A Change with a promoted Candidate cannot be cancelled. | `CANCELLABLE_FROM`, `cancelChange` in `change-commands.ts` |
 | Only an owner or admin moves a `proposed` Change: include to `created`, decline to `declined`. Each update has a guard on `proposed`. A repeat returns the stored result. | `includeChange`, `declineChange` in `change-commands.ts` |
-| A later request that wins the system arbiter makes an earlier Change `not_selected` from any of these statuses, and also from `failed` or `completed`, when the earlier Change has no promoted Candidate. See [Shared Projects](shared-projects.md#the-system-arbiter). | `request-check.ts` |
+| A later conflicting request of the same requester makes the earlier Change `not_selected` from any of these statuses, and also from `failed` or `completed`, when the earlier Change has no promoted Candidate. See [Shared Projects](shared-projects.md#the-same-requester-asks-twice). | `request-check.ts` |
+| Only the earlier requester moves an `awaiting_choice` Change, with a choice. `advanceFirstCome` applies each step with a guard on `awaiting_choice` or `queued`. See [Shared Projects](shared-projects.md#first-come-requests-of-two-people). | `firstComeStep`, `advanceFirstCome` in `first-come.ts` |
 | A merge conflict makes the Change re-run the conflicting Tasks on the new base. After 2 re-runs the Change is `blocked` with the reason "The request could not be merged with newer changes twice. Submit it again." | `MAX_REBASE_RERUNS` in `rebase.ts` |
 | The Change ends as `failed` when every Candidate on the newest base is `rejected` for a reason other than a merge conflict or a cancel, and no Candidate of the Change is `composing`, `verifying`, `verified`, or `promoted`. `blocked_reason` starts with "No Candidate passed its required checks:" and quotes the Candidate reasons. `change.failed` records it with `phase: "verification"`. | `verificationDeadEnd` |
 | A refused compare-and-swap returns the Change to its status before `promoting`. | `leavePromoting` in `promotion.ts` |

@@ -111,6 +111,32 @@ export function CriteriaList({ items }: { items: string[] }) {
   );
 }
 
+/**
+ * Small product details the Root Planner decided because the request left them open. Plain text:
+ * the requester changes one with a follow-up request.
+ */
+export function AssumptionList({ items }: { items: string[] }) {
+  return (
+    <div className="grid gap-2">
+      <ul className="grid">
+        {items.map((item) => (
+          <li
+            key={item}
+            className="grid grid-cols-[14px_minmax(0,1fr)] items-start gap-2.5 border-b border-kumo-rule py-2 text-[13px]"
+          >
+            <span aria-hidden className="mt-[7px] size-1.5 bg-kumo-divider" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-[12px] text-kumo-subtle">
+        The request left these details open, so the planner decided them. To change one, send a
+        follow-up request.
+      </p>
+    </div>
+  );
+}
+
 export function InvariantList({ items }: { items: string[] }) {
   if (items.length === 0) {
     return <p className="text-[13px] text-kumo-subtle">No protected invariants for this Change.</p>;

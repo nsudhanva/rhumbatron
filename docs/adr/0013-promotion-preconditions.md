@@ -61,7 +61,9 @@ request body. Only a verified Candidate that needs approval can get a decision. 
 is final, and an identical repeat returns the stored row. A rejection also sets the Candidate to
 `rejected`. The policy is deterministic (`approvalRequired`, `checkApprovalDecision`). No model
 takes part. The integration Worker records `approval.requested` for a verified Candidate that
-needs approval. That Candidate has no siblings, or it is the winner of a selection (ADR 0026). `approval.granted` or
+needs approval. That Candidate has no siblings, or it is the winner of a selection (ADR 0026).
+The Event has `reason` (one sentence, also the Candidate status reason, from `approvalReason` or
+`policyHoldReason`) and `trigger` (`policy` or `acceptance`). `approval.granted` or
 `approval.rejected` is recorded with the decision.
 
 ### Canonical source after promotion
@@ -110,9 +112,15 @@ on a commit that `main` does not have. The sync uses no Sandbox time.
 - Auto-promotion: after the gate and the selection, the verification workflow calls the pure
   function `autoPromoteDecision` (`autoPromoteRiskTiers`). Then it calls `promoteCandidate` with
   trigger `auto` and actor `system:auto-promotion`. This is the same path, with the same
-  preconditions, as a manual promotion. A plan or policy tier that needs approval is never
-  automatic. An unknown risk tier is never automatic. An acceptance shortfall is never automatic
-  (ADR 0026).
+  preconditions, as a manual promotion. The default policy `policy-1` lists `low` and `medium` as
+  automatic and gates `high` and `critical`. A plan gate (`humanApprovalRequired`, for example an
+  authorization change) or a gated policy tier is never automatic. An unknown risk tier is never
+  automatic. An acceptance shortfall is never automatic (ADR 0026).
+- A Candidate that does not promote automatically is held for a person (`holdForPerson` adds the
+  plan gate when the plan has none). The Change is `awaiting_approval`, `approval.requested`
+  states the reason, and the inbox tells the owner, the admins, and the requester. The Change page
+  has the Ship action. It calls the same `POST /v1/candidates/:candidateId/promote`, so every
+  precondition above applies.
 - Promotion sets the Change status to `promoting`, then to `releasing` or `completed`.
 
 ## Diagram

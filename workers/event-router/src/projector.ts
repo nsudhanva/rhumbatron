@@ -69,6 +69,9 @@ const CHANGE_STATUS: StatusMap = {
   "change.proposed": "proposed",
   "change.included": "created",
   "change.declined": null,
+  // First-come conflicts (ADR 0032): the later request waits for a choice, then plans again.
+  "change.choice.requested": "awaiting_choice",
+  "change.resumed": "compiling",
   "change.compiled": "running",
   "verification.started": "verifying",
   // Complementary Tasks integrate: the dependent Task re-runs before any Candidate composes.
@@ -94,6 +97,12 @@ function changeStatusOf(event: EventEnvelope): string | null | undefined {
       return payload.decision === "ask" ? "needs_input" : "compiling";
     case "change.clarification.answered":
       return payload.action === "withdraw" ? null : "compiling";
+    case "change.choice.made":
+      return payload.status === "not_selected"
+        ? null
+        : typeof payload.status === "string"
+          ? payload.status
+          : undefined;
     case "conflict.reviewed":
       return event.taskId === undefined && payload.status === "needs_input"
         ? "needs_input"

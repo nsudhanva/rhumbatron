@@ -57,17 +57,21 @@ const ICONS: Record<NotificationKind, Icon> = {
   request_proposed: Tray,
   request_included: PlayCircle,
   request_declined: XCircle,
+  request_choice_needed: ArrowsSplit,
+  request_choice_made: PlayCircle,
 };
 
 /**
  * Inline actions for items whose next step is a decision on another page. A proposed request
- * offers Include and Decline: both open the Change, where the decision is made in place.
+ * offers Include and Decline, and a first-come conflict offers Keep mine and Apply theirs: each
+ * opens the Change, where the decision is made in place.
  */
 const ACTIONS: Partial<Record<NotificationKind, string[]>> = {
   approval_required: ["Review"],
   promotion_ready: ["Open"],
   request_needs_input: ["Answer"],
   request_proposed: ["Include", "Decline"],
+  request_choice_needed: ["Keep mine", "Apply theirs"],
 };
 
 /** The icon is the status here, paired with the title's words. */

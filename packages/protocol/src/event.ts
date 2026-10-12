@@ -17,6 +17,12 @@ export const EVENT_TYPES = [
   "change.intake.reviewed",
   /** The requester or the owner answered a `needs_input` Change, or asked to plan anyway. */
   "change.clarification.answered",
+  /** A later request conflicts with an earlier one of another person: it waits for a choice. */
+  "change.choice.requested",
+  /** The first requester chose (keep mine, apply theirs), or the wait ended without a choice. */
+  "change.choice.made",
+  /** A request that waited for an earlier request plans again on the current canonical tree. */
+  "change.resumed",
   /** A Change reached `completed` after promotion: no live app, or its release finished. */
   "change.completed",
   /** A Change reached `failed` after promotion: its release did not deploy or never started. */

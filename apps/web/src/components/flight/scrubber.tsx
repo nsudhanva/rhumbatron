@@ -51,7 +51,11 @@ function notableOf(event: ActivityEvent): Omit<Notable, "id" | "at"> | null {
     case "promoted":
       return { label: "Promotion", fill: "bg-kumo-success" };
     case "run.end":
-      return event.status === "failed" ? { label: "Failure", fill: "bg-tone-500" } : null;
+      if (event.status !== "failed") return null;
+      // A failure a later attempt recovered (or retries) is a retry, not a failure (lib/recovery).
+      return event.outcome === "recovered" || event.outcome === "retrying"
+        ? { label: "Retry", fill: "bg-kumo-warning" }
+        : { label: "Failure", fill: "bg-tone-500" };
     case "candidate.status":
       return event.status === "rejected" ? { label: "Rejection", fill: "bg-tone-500" } : null;
     case "check":
@@ -67,6 +71,7 @@ const LEGEND = [
   { label: "Fork", fill: "bg-kumo-ink" },
   { label: "Conflict", fill: "bg-accent-500" },
   { label: "Failure", fill: "bg-tone-500" },
+  { label: "Retry", fill: "bg-kumo-warning" },
   { label: "Promotion", fill: "bg-kumo-success" },
 ];
 

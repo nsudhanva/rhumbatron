@@ -66,12 +66,23 @@ type ChangeRow = {
   budget_usd: number;
   acceptance_criteria_json: string;
   invariants_json: string;
+  assumptions_json: string | null;
   work_graph_ref: string | null;
   blocked_reason: string | null;
   created_at: string;
   updated_at: string;
 } & RequestColumns &
   ChangeBudgetColumns;
+
+/** `changes.assumptions_json` (migration 0032): a JSON array of strings, or NULL before planning. */
+function parseAssumptions(json: string | null): string[] {
+  try {
+    const value = JSON.parse(json ?? "[]") as unknown;
+    return Array.isArray(value) ? value.filter((a): a is string => typeof a === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 function toDetail(row: ChangeRow, viewerUserId: string): ChangeDetail {
   return {
@@ -81,6 +92,7 @@ function toDetail(row: ChangeRow, viewerUserId: string): ChangeDetail {
     title: changeTitle(row.title, row.goal),
     acceptanceCriteria: JSON.parse(row.acceptance_criteria_json) as string[],
     invariants: JSON.parse(row.invariants_json) as string[],
+    assumptions: parseAssumptions(row.assumptions_json),
     status: ChangeDetail.shape.status.parse(row.status),
     baseGeneration: row.base_generation,
     ...(row.work_graph_ref ? { workGraphRef: row.work_graph_ref } : {}),
@@ -129,7 +141,8 @@ export const changeDetail = new Hono<AppEnv>()
     const { changeId } = c.req.valid("param");
     const row = await c.env.DB.prepare(
       `SELECT c.id, c.project_id, c.goal, c.title, c.status, c.base_generation, c.risk_tier,
-              c.budget_usd, c.acceptance_criteria_json, c.invariants_json, c.work_graph_ref,
+              c.budget_usd, c.acceptance_criteria_json, c.invariants_json, c.assumptions_json,
+              c.work_graph_ref,
               c.blocked_reason, c.created_at, c.updated_at, c.created_by, c.requester_rank,
               c.outcome, c.outcome_reason, c.outcome_winner_change_id, c.outcome_decided_by,
               c.supersedes_change_id, c.clarification_json, u.display_name, u.email,

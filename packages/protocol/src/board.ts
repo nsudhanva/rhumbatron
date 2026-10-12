@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CanonicalGeneration, Id, ModelTier, Timestamp } from "./common.ts";
+import { RequestWaitSummary } from "./first-come.ts";
 import { ChangeReview, type ChangeStatus } from "./project.ts";
 import { ProjectRole } from "./roles.ts";
 
@@ -22,7 +23,9 @@ export type BoardColumn = z.infer<typeof BoardColumn>;
 export const BOARD_COLUMN_OF: Readonly<Record<ChangeStatus, BoardColumn>> = {
   proposed: "proposed",
   needs_input: "needs_answer",
+  awaiting_choice: "needs_answer",
   created: "building",
+  queued: "building",
   compiling: "building",
   running: "building",
   budget_blocked: "building",
@@ -88,6 +91,8 @@ export const BoardCard = z.object({
   updatedAt: Timestamp,
   /** The Canonical Generation that the Change promoted, else null. */
   generation: CanonicalGeneration.nullable(),
+  /** Set while the Change is `awaiting_choice` or `queued` (ADR 0032). */
+  waiting: RequestWaitSummary.nullable().optional(),
 });
 export type BoardCard = z.infer<typeof BoardCard>;
 

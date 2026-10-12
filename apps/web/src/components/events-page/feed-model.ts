@@ -17,9 +17,10 @@ export const FEED_FIRST_LIMIT = 50;
 /**
  * Type color role: failure in danger, completion in success, state-changing
  * commits in brand, everything else default. Status words in the kept payload refine the two
- * generic completion types, so a failed check never reads as a success.
+ * generic completion types, so a failed check never reads as a success. A `task.failed` that a
+ * later `task.completed` of the same Task recovered is attention, not danger (lib/recovery).
  */
-export type TypeTone = "danger" | "success" | "brand" | "default";
+export type TypeTone = "danger" | "attention" | "success" | "brand" | "default";
 
 const FAILURE_STATUS = new Set(["fail", "failed", "error", "rejected", "blocked", "timed_out"]);
 const BRAND_TYPES = new Set(["canonical.advanced", "artifact.promoted"]);
@@ -30,8 +31,13 @@ const SUCCESS_TYPES = new Set([
   "preview.ready",
 ]);
 
-export function typeTone(event: Pick<FeedEvent, "eventType" | "data">): TypeTone {
+export function typeTone(
+  event: Pick<FeedEvent, "eventId" | "eventType" | "data">,
+  /** Event IDs from `recoveredTaskFailures` over the loaded events. */
+  recovered?: ReadonlySet<string>,
+): TypeTone {
   const type = event.eventType;
+  if (recovered?.has(event.eventId)) return "attention";
   const status = typeof event.data.status === "string" ? event.data.status.toLowerCase() : "";
   if (BRAND_TYPES.has(type)) return "brand";
   if (type.endsWith(".failed") || type.endsWith(".rejected")) return "danger";
@@ -43,6 +49,7 @@ export function typeTone(event: Pick<FeedEvent, "eventType" | "data">): TypeTone
 
 export const TONE_TEXT: Record<TypeTone, string> = {
   danger: "text-kumo-danger",
+  attention: "text-kumo-warning",
   success: "text-kumo-success",
   // Brand text at body size uses accent-700 (`text-kumo-accent`), never accent-500.
   brand: "text-kumo-accent",

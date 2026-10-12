@@ -47,8 +47,9 @@ the system chooses between requests. See
      conflict that is not confirmed.
   4. Clef and Haiku never confirm a conflict alone.
   5. At most 4 overlapping pairs get a review per Change.
-- Partial selection: when a losing Change has dispatched no work and has other criteria, the
-  ChangeWorkflow plans it again without the losing criteria. In all other cases, the losing Change
+- A supported conflict between two people follows the first-come rule of
+  [ADR 0032](./0032-first-come-conflicts.md): the earlier request keeps working, and the later
+  request waits for the earlier requester's choice. When one person asks twice, the earlier Change
   becomes `not_selected`, and Rhumbatron cancels its running work.
 - The recompose guard: `recomposeDecision` refuses a `not_selected`, `cancelled`, or `needs_input`
   Change, and a Change with the outcome `not_selected` or `duplicate`. Without the guard, the
@@ -64,7 +65,7 @@ the system chooses between requests. See
 | Read other Changes at plan time, with no ProjectRootDO serialization | Two planners can run at the same moment, and each sees the other without a scope. Both look independent, and both spend model budget. Serialization in ProjectRootDO makes the order exact. |
 | Haiku or Clef alone confirms a conflict | Unclear semantics need a Sonnet review, and Clef-flash never confirms a conflict. A cheap model also cannot stop a Change alone. |
 | Promoted criteria become Project invariants, to catch missed conflicts | It needs protected tests that an agent cannot edit. |
-| Reject the full losing Change | A request that asks for B and C2 then loses B. Partial selection keeps B. |
+| Remove only the losing criteria of the later request | The later requester sees a request that is rejected in part, without a person deciding (ADR 0032). |
 
 ## Consequences
 

@@ -21,9 +21,9 @@ sequenceDiagram
   W->>R: register the scope of each planned Change
   R-->>W: the earlier scopes: C1 for C2
   W->>W: Sonnet review: C2 conflicts with C1
-  W->>W: arbiter runs twice, in both orders
-  W-->>API: the loser is not_selected, or C2 needs_input when the runs disagree
-  B->>API: clarify D (withdraw), clarify C2 (answer)
+  W-->>API: C1 keeps building, C2 awaiting_choice (Alice chooses)
+  A->>API: choose for C2: keep mine, or apply theirs after mine
+  B->>API: clarify D (withdraw)
 ```
 
 ## Requests
@@ -58,16 +58,17 @@ The conflict check compares each Change with the earlier Changes that registered
 |---|---|
 | A | Ships. |
 | B | Ships. |
-| C1 | Ships when both arbiter runs prefer C1. Status `not_selected` when both runs prefer C2. |
-| C2 | Status `not_selected` when both arbiter runs prefer C1. Ships when both runs prefer C2. Status `needs_input` with kind `conflict` when the runs disagree. |
+| C1 | Ships. It came first, so it keeps building. |
+| C2 | Status `awaiting_choice` until Alice chooses. "Keep mine": status `not_selected`. "Apply theirs after mine": status `queued`, then it plans after C1 ships and ships on top of it. |
 | D | Status `needs_input` with kind `duplicate` (or `unclear`) before planning. |
 
 For the conflict, check these items:
 
-1. A `not_selected` Change shows the reason once. The reason names the winning request and quotes the arbiter rationale. `decidedBy` is `system:arbiter`.
-2. A `needs_input` Change shows the question with both backgrounds. Bob and Alice both get the notification.
-3. The "Conflicting requests" card shows both goals, both requesters, the criteria that conflict, and a link to the other request.
-4. The winning Changes reach `completed`, and the live app shows their features.
+1. C2 reads "Waiting for Alice to choose" on its Change page and on the Board. It has no Task while it waits.
+2. Alice gets `request_choice_needed`. C1 shows "Bob's request conflicts with yours" with both backgrounds and the buttons "Keep mine" and "Apply theirs after mine". Bob and the admins see who chooses, but no buttons.
+3. After "Keep mine", C2 is `not_selected` with the reason `Not selected: Alice chose to keep their version of "<C1>".` After "Apply theirs after mine", Bob gets `request_choice_made`, and C2 plans on the tree that has C1.
+4. The "Conflicting requests" card shows both goals, both requesters, the criteria that conflict, and a link to the other request.
+5. The Changes that ship reach `completed`, and the live app shows their features.
 
 For D, check that the question quotes the criterion of A that already counts the items left, and that D has no Task.
 
@@ -76,17 +77,17 @@ If Bob calls a route for the owner and the admins, the API returns 403.
 ## Answer the questions
 
 1. Sign in as Bob. Open the Change D. Click Withdraw. Make sure that D is `cancelled` with the reason "Withdrawn by the requester".
-2. If C2 is `needs_input`, open it. Answer the question, for example "Use light yellow only on the weekend sections". Make sure that C2 goes back to `compiling` and plans with the answer.
-3. Sign in as Alice. Make sure that Alice can answer a question on a Change of Bob.
+2. Make sure that Bob cannot choose for C2. The API returns 403.
+3. Sign in as Alice. Open C1 and choose "Apply theirs after mine". Make sure that C2 is `queued`, then plans after C1 ships.
 4. Make sure that Bob cannot raise a budget or cancel a Change of Alice. The API returns 403.
 
-A Change gets at most 3 rounds of questions. Rhumbatron cancels a Change that gets no answer for 7 days.
+The intake gate asks at most one round for a request. A Change gets at most 3 rounds of questions in total. Rhumbatron cancels a Change that gets no answer for 7 days.
 
 ## Cost
 
 - Each request gets the Project default budget. That budget is 3 USD when the Project sets none ([protocols](../protocols/README.md#project-settings)).
 - The intake gate makes one Clef-flash call per request. For a related request, it adds two Sonnet coverage runs, one in each order.
-- A Sonnet review runs for each pair of overlapping requests, at most 4 for each Change. A conflict adds two arbiter runs.
+- A Sonnet review runs for each pair of overlapping requests, at most 4 for each Change. A conflict between two people adds no model call. "Apply theirs after mine" adds one plan of C2.
 - Model spend counts against the prod cap of 100 USD per calendar month (ADR 0021). Run `bun run cost:report` before and after the demo ([costs.md](../operations/costs.md)).
 
 ## Cleanup

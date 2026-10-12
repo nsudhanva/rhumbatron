@@ -2,6 +2,7 @@
 import { cn } from "@cloudflare/kumo";
 import { type CSSProperties, useId, useMemo } from "react";
 import { formatDuration, formatNumber } from "../../../lib/format";
+import type { FailureOutcome } from "../../../lib/recovery";
 import { CALLS_PER_RUN } from "../../agents/activity-model";
 import { FAMILY_FILL, statusView } from "../../ui/status-pill";
 import { useFlight } from "../flight-context";
@@ -49,7 +50,8 @@ import {
  * Agent swimlanes (agents working simultaneously, trace waterfall): one lane per
  * Task with an agent, on a time axis shared with the workspace lanes. Each attempt is a bar
  * filled by model tier (letter inside: H, S, O); a failed attempt is hatched with its failure
- * kind; an escalation is a step-up glyph. Typed facts of the lane (Ready, Claim, Intent,
+ * kind (a failure a later attempt recovered or retries has a dashed warning edge and no hatch,
+ * lib/recovery); an escalation is a step-up glyph. Typed facts of the lane (Ready, Claim, Intent,
  * ChangeSet, Challenge, Done, Fail) are square markers above the bar; facts at the same or nearly
  * the same instant collapse into one count marker ("3 facts") that lists them in its title. A
  * marker label takes the free space right or left of its marker, truncated or omitted when there
@@ -86,6 +88,7 @@ type MarkKind =
   | "changeset"
   | "challenge"
   | "done"
+  | "retried"
   | "fail";
 
 type Mark = {
@@ -109,6 +112,7 @@ const MARK_STYLE: Record<MarkKind, string> = {
   changeset: "bg-tone-600",
   challenge: "bg-accent-500",
   done: "bg-kumo-success",
+  retried: "bg-kumo-warning border border-kumo-ink",
   fail: "bg-accent-500 border border-kumo-ink",
 };
 
@@ -116,6 +120,7 @@ const MARK_STYLE: Record<MarkKind, string> = {
 const LABEL_RANK: Record<MarkKind, number> = {
   challenge: 0,
   fail: 1,
+  retried: 2,
   expired: 2,
   done: 3,
   changeset: 4,
@@ -141,12 +146,21 @@ type Slot = {
 const MARK_TEXT: Partial<Record<MarkKind, string>> = {
   challenge: "text-kumo-accent font-semibold",
   fail: "text-kumo-danger",
+  retried: "text-kumo-warning",
   expired: "text-kumo-warning",
   done: "text-kumo-success",
 };
 
 const str = (data: Record<string, unknown>, key: string) =>
   typeof data[key] === "string" ? (data[key] as string) : null;
+
+/** Done, Fail, or Retried for a failure a later attempt recovered or retries (lib/recovery). */
+const markOfEnd = (done: boolean, outcome: FailureOutcome | undefined) =>
+  done
+    ? { kind: "done" as const, label: "Done" }
+    : outcome === "recovered" || outcome === "retrying"
+      ? { kind: "retried" as const, label: "Retried" }
+      : { kind: "fail" as const, label: "Fail" };
 
 /** Lane facts, one pass over the folded events (plus published ChangeSets of the Workspace). */
 function laneMarks(state: FlightState, clockOf: (ms: number) => string): Map<string, Mark[]> {
@@ -174,8 +188,7 @@ function laneMarks(state: FlightState, clockOf: (ms: number) => string): Map<str
         push(e.laneId, {
           ...base,
           key: e.id,
-          kind: e.status === "completed" ? "done" : "fail",
-          label: e.status === "completed" ? "Done" : "Fail",
+          ...markOfEnd(e.status === "completed", e.outcome),
           ref: { kind: "event", id: e.id },
         });
         break;
@@ -226,12 +239,10 @@ function laneMarks(state: FlightState, clockOf: (ms: number) => string): Map<str
             ref: { kind: "event", id: e.id },
           });
         } else if (e.eventType === "task.completed" || e.eventType === "task.failed") {
-          const done = e.eventType === "task.completed";
           push(e.laneId, {
             ...base,
             key: e.id,
-            kind: done ? "done" : "fail",
-            label: done ? "Done" : "Fail",
+            ...markOfEnd(e.eventType === "task.completed", e.outcome),
             ref: { kind: "event", id: e.id },
           });
         } else if (e.eventType === "changeset.proposed") {
@@ -732,24 +743,26 @@ function AttemptBar({
   const x0 = scale.x(run.startedAt);
   const x1 = scale.x(run.endedAt ?? scale.cursor);
   const width = Math.max(3, x1 - x0);
-  const failed = run.status === "failed";
+  // A failure a later attempt recovered (or retries) is not drawn as a failure (lib/recovery).
+  const retried = run.outcome === "recovered" || run.outcome === "retrying";
+  const failed = run.status === "failed" && !retried;
   const running = run.status === "running";
   const progress = running ? Math.min(1, run.modelCalls / CALLS_PER_RUN[run.tier]) : 0;
   const enterRef = useEnter<HTMLDivElement>(
     animated.has(run.attempt === 1 ? `${task.id}:fork` : `${task.id}:run${run.attempt}:start`),
   );
-  const label = `${task.key} attempt ${run.attempt} on ${run.tier}, ${statusView(run.status).label}${
+  const label = `${task.key} attempt ${run.attempt} on ${run.tier}, ${statusView(run.outcome ?? run.status).label}${
     run.failureKind ? ` (${run.failureKind})` : ""
   }, ${formatNumber(run.modelCalls)} calls`;
   const inner =
     width >= 90
-      ? `${TIER_LETTER[run.tier]} · ${failed && run.failureKind ? run.failureKind : `attempt ${run.attempt}`}`
+      ? `${TIER_LETTER[run.tier]} · ${(failed || retried) && run.failureKind ? run.failureKind : `attempt ${run.attempt}`}`
       : width >= 14
         ? TIER_LETTER[run.tier]
         : "";
   // The failure kind goes under the bar when it does not fit inside and the next bar is not there.
   const room = (next ? scale.x(next.startedAt) : scale.width) - x0;
-  const under = failed && run.failureKind && width < 90 ? run.failureKind : null;
+  const under = (failed || retried) && run.failureKind && width < 90 ? run.failureKind : null;
   const ref: EntityRef = { kind: "decision", id: `route:${task.id}:${run.attempt}` };
   const { selected } = useIsHighlighted(ref);
   return (
@@ -768,6 +781,7 @@ function AttemptBar({
             ROVING_ITEM,
             TIER_FILL[run.tier],
             failed && "border border-accent-500",
+            retried && "border border-dashed border-kumo-warning",
           )}
           style={{ left: x0, top: BAR_Y, width, height: BAR_H, scrollMarginLeft: LEFT + 8 }}
         >
@@ -813,7 +827,10 @@ function AttemptBar({
       {under && room > 24 && (
         <span
           aria-hidden
-          className="pointer-events-none absolute truncate font-mono text-[10px] leading-none text-kumo-danger"
+          className={cn(
+            "pointer-events-none absolute truncate font-mono text-[10px] leading-none",
+            retried ? "text-kumo-warning" : "text-kumo-danger",
+          )}
           style={{
             left: x0 + (run.escalatedFrom ? 34 : 0),
             top: UNDER_Y + 3,
@@ -1068,7 +1085,7 @@ function LanesTable({ ids, start }: { ids: string[]; start: number }) {
                   {t.runs
                     .map(
                       (r) =>
-                        `attempt ${r.attempt} ${r.tier} ${statusView(r.status).label} from ${relTime(r.startedAt - start)}${r.failureKind ? ` (${r.failureKind})` : ""}`,
+                        `attempt ${r.attempt} ${r.tier} ${statusView(r.outcome ?? r.status).label} from ${relTime(r.startedAt - start)}${r.failureKind ? ` (${r.failureKind})` : ""}`,
                     )
                     .join("; ") || "none"}
                 </td>

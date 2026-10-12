@@ -1,12 +1,14 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import {
+  approvalReason,
   autoPromoteDecision,
   buildVerificationPlan,
   type CheckGap,
   CLIENT_ASSETS_CHECK_ID,
   checkCompatibility,
   gateRequiredChecks,
+  policyHoldReason,
 } from "@rhumbatron/evidence";
 import { type CompletionRequest, ModelCallError } from "@rhumbatron/model-router";
 import {
@@ -68,6 +70,7 @@ import {
   applySelection,
   groupSize,
   holdForAcceptance,
+  holdForPerson,
   type JudgeRun,
   prepareSelection,
   runIntegrationJudge,
@@ -893,6 +896,16 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         // A passing probe result can still miss the check deadline. Report the gate gap in
         // that case, never a success summary as the reason for rejecting the Candidate.
         const smokeReason = smokeRecord?.status !== "pass" ? smokeRecord?.summary : undefined;
+        // A gated Candidate states why it waits for a person; a rejected one states the gap.
+        const waitReason =
+          gate.promotable && verificationPlan.humanApprovalRequired
+            ? approvalReason({
+                policyVersion: verificationPlan.policyVersion,
+                riskTier: loaded.riskTier,
+                tierGated: policy.humanGateRiskTiers.includes(loaded.riskTier),
+                touchesAuthorization: loaded.touchesAuthorization,
+              })
+            : null;
         const reason = gate.promotable
           ? null
           : smokeGap && smokeReason
@@ -902,7 +915,13 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
           `UPDATE candidates SET status = ?, status_reason = ?, score_json = ?, updated_at = ?
              WHERE id = ? AND status = 'verifying'`,
         )
-          .bind(status, reason, JSON.stringify(score), new Date().toISOString(), candidateId)
+          .bind(
+            status,
+            reason ?? waitReason,
+            JSON.stringify(score),
+            new Date().toISOString(),
+            candidateId,
+          )
           .run();
         const events: EventEnvelope[] = [
           await changeEvent(
@@ -927,6 +946,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
                 candidateId,
                 riskTier: loaded.riskTier,
                 policyVersion: verificationPlan.policyVersion,
+                reason: waitReason,
+                trigger: "policy",
               },
               { key: candidateId, actor: ACTOR },
             ),
@@ -999,19 +1020,24 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
           .bind(candidateId)
           .first<{ status: string }>(),
       ]);
-      const riskTier = change?.risk_tier ?? null;
+      const stored = change?.risk_tier ?? null;
+      const riskTier = stored === null ? null : RiskTier.catch("medium").parse(stored);
       const decided = autoPromoteDecision({
         candidateStatus: candidate?.status ?? "missing",
         promotable: true,
         plan: { humanApprovalRequired: plan.humanApprovalRequired },
-        riskTier: riskTier === null ? null : RiskTier.catch("medium").parse(riskTier),
+        riskTier,
         policy,
       });
-      if (
-        decided.kind === "manual" &&
-        (decided.reason === "approval_required" || decided.reason === "tier_not_auto")
-      ) {
-        // Either way a person decides next, so the Change shows as waiting, not stuck verifying.
+      // The plan has no human gate, but the policy still sends the Candidate to a person: add
+      // the gate, state why, and request the approval, so the wait is never silent.
+      const policyHold = plan.humanApprovalRequired
+        ? null
+        : policyHoldReason(decided, { policyVersion: policy.version, riskTier });
+      if (policyHold) {
+        await holdForPerson(this.env, candidateId, policyHold, "policy", policy.version);
+      } else if (decided.kind === "manual" && decided.reason === "approval_required") {
+        // The gate step or the selection requested the approval; the Change shows as waiting.
         await this.env.DB.prepare(
           `UPDATE changes SET status = 'awaiting_approval', updated_at = ?
            WHERE id = ? AND status = 'verifying'`,

@@ -9,6 +9,7 @@ The Zod schemas in `packages/protocol/src` are the protocol source of truth.
 | `project.ts` | Project, Change, Change statuses, policies, create requests, requesters, request outcomes, clarifications, and the request review (`ChangeReview`, `DeclineChangeRequest`, `ReviewChangeOutcome`). |
 | `roles.ts` | Project roles, the permission matrix (`PERMISSIONS`, `can`), the review rule (`needsReview`), invitation and role-change rules, and the members response. |
 | `board.ts` | The Board response and the column of each Change status (`BOARD_COLUMN_OF`). |
+| `first-come.ts` | First-come conflicts (ADR 0032): `conflictPolicy`, `firstComeStep`, `canChooseFirstCome`, `RequestWait`, `ChooseRequest`, and `ChooseOutcome`. |
 | `change-title.ts` | Short Change titles: `clampTitle` for the Root Planner title and `fallbackTitle` for a title from the goal. |
 | `work-graph.ts` | Work Graph, Task, and the agent wake payload. |
 | `conflict.ts` | Intent, Challenge, and conflict reports. |
@@ -52,6 +53,8 @@ The roles are `owner`, `admin`, `member`, and `viewer`. `can(role, action)` in `
 | POST | `/v1/changes/:changeId/clarify` | Manager, or the requester of the Change (Contributor) | `clarify.ts` |
 | GET, POST, DELETE | Members and invitations (see [Shared Projects](#shared-projects)) | See the table there | `members.ts` |
 | GET | `/v1/changes/:changeId/request-conflicts` | Any role | `members.ts` |
+| GET | `/v1/changes/:changeId/request-waits` | Any role | `first-come.ts` |
+| POST | `/v1/changes/:changeId/choose` | Only the requester of the earlier, conflicting request | `first-come.ts` |
 | GET | `/v1/projects/:projectId/board` | Any role | `board.ts` |
 | GET, POST | `/v1/changes/:changeId/candidates` | Any role (GET), Manager (POST) | `candidates.ts` |
 | GET | `/v1/candidates/:candidateId`, `/evidence`, `/evidence/:checkId/output` | Any role | `candidates.ts` |
@@ -85,6 +88,10 @@ The roles are `owner`, `admin`, `member`, and `viewer`. `can(role, action)` in `
 | POST | `/v1/projects/:projectId/rollback` | Manager | `apps.ts` |
 | GET, POST | `/v1/notifications`, `/v1/notifications/count`, `/v1/notifications/read` | Signed-in user | `notifications.ts` |
 
+`approval.requested` has `candidateId`, `policyVersion`, `reason` (why the Candidate waits for a person, one sentence), and `trigger`: `policy` (a plan gate or a policy hold) or `acceptance` (an acceptance shortfall, ADR 0026). A plan gate also has `riskTier`.
+
+`GET /v1/notifications` lists `approval_required` and `promotion_ready` for a verified Candidate to the Project owner, the admins (severity `action`), and the requester (severity `attention`). The body has the reason, and `href` is the Change page.
+
 `POST /v1/projects/:projectId/changes` makes the `clientRequestId` unique for each requester. Two users can send the same `clientRequestId` without a collision. A request without `budgetUsd` gets the Project default budget (see [Project settings](#project-settings)).
 
 ## Shared Projects
@@ -107,11 +114,11 @@ An invitation binds to a verified email of the signed-in user. If the email is n
 
 `clarify` takes one of these bodies:
 
-- `{ answers: [{ questionId, text }] }`: 1 to 3 answers to questions of the open round. The Change returns to `compiling` with the answers in its goal context.
+- `{ answers: [{ questionId, text }] }`: 1 to 3 answers to questions of the open round. The text is a picked option or free text. A question without an answer becomes a planner assumption. The Change returns to `compiling` with the answers in its goal context.
 - `{ action: "proceed_anyway" }`: the Change plans without another question in this round.
 - `{ action: "withdraw" }`: the Change is cancelled with the reason "Withdrawn by the requester".
 
-A repeat of the caller's last command returns `repeated: true`. A Change gets at most 3 rounds of questions. A Change that gets no answer for 7 days is cancelled.
+A repeat of the caller's last command returns `repeated: true`. The intake gate asks at most one round. A Change gets at most 3 rounds of questions in total. A Change that gets no answer for 7 days is cancelled.
 
 ### Roles and permissions
 
@@ -140,7 +147,7 @@ Access to a Project does not give permission for every action. `PERMISSIONS` in 
 |---|---|---|---|---|
 | POST | `/v1/changes/:changeId/include` | Manager | `changeId`, `status` (`created`, or the later status on a repeat), and `repeated`. Body `{}`. The ChangeWorkflow starts once, with the Change ID as instance ID. | 403, 404, 409 (not `proposed`) |
 | POST | `/v1/changes/:changeId/decline` | Manager | `changeId`, `status` (`declined`), and `repeated`. Body `{ reason? }`, at most 500 characters. | 400, 403, 404, 409 (not `proposed`) |
-| GET | `/v1/projects/:projectId/board` | Any role | `BoardResponse`: `people` (`userId`, `name`, `role`, `isYou`, `counts` with `proposed`, `active`, `shipped`, `notBuilt`), `cards` (`changeId`, `title`, `goal`, `status`, `column`, `requester` with `role`, `tasks` with `done` and `total`, `agents` with `agentId`, `taskTitle`, `tier`, `state`, `review`, `createdAt`, `updatedAt`, `generation`), and `canReview`. The newest 100 Changes; the `shipped` and `not_built` columns show the newest 20 each. | 404 |
+| GET | `/v1/projects/:projectId/board` | Any role | `BoardResponse`: `people` (`userId`, `name`, `role`, `isYou`, `counts` with `proposed`, `active`, `shipped`, `notBuilt`), `cards` (`changeId`, `title`, `goal`, `status`, `column`, `requester` with `role`, `tasks` with `done` and `total`, `agents` with `agentId`, `taskTitle`, `tier`, `state`, `review`, `createdAt`, `updatedAt`, `generation`, and `waiting` for an `awaiting_choice` or `queued` Change: `state` (`choosing` or `after_first`), `firstChangeId`, `firstTitle`, `firstRequester`), and `canReview`. The newest 100 Changes; the `shipped` and `not_built` columns show the newest 20 each. | 404 |
 
 While the Project setting `memberRequestReview` is `true` (the default), `POST /v1/projects/:projectId/changes` by a member creates the Change with status `proposed`. It starts no ChangeWorkflow and makes no model call. The requests of the owner and the admins never need review. The requester withdraws a `proposed` request with `POST /v1/changes/:changeId/cancel`. [Shared Projects](../architecture/shared-projects.md#request-review) describes the flow and the Board columns.
 
@@ -154,7 +161,8 @@ While the Project setting `memberRequestReview` is `true` (the default), `POST /
 | `POST /v1/projects/:projectId/changes`, the Change list, and `GET /v1/changes/:changeId` | `review` | `state` (`not_needed`, `proposed`, `included`, or `declined`), `decidedBy` (`userId`, `name`, or null), `decidedAt`, and `reason` (the decline reason). A withdrawn `proposed` request keeps `state: proposed`. |
 | Change list and `GET /v1/changes/:changeId` | `outcome` | How the request ended after the intake gate or the cross-request check. Null when no check decided it. |
 | Change list and `GET /v1/changes/:changeId` | `supersedesChangeId` | Null for every request the API creates. |
-| Change list and `GET /v1/changes/:changeId` | `clarification` | `ChangeClarification` while the Change is `needs_input`, else null: `kind` (`unclear`, `duplicate`, `conflict`), `summary`, `questions` (`id`, `text`, optional `options`), `relatedChangeId`, `relatedGoal`, `relatedTitle` (the related Change's title, added on read), `askedAt`, `round` (1 to 3). |
+| Change list and `GET /v1/changes/:changeId` | `clarification` | `ChangeClarification` while the Change is `needs_input`, else null: `kind` (`unclear`, `duplicate`, `conflict`), `summary`, `questions` (`id`, `text`, optional `options`: 2 to 4 readings), `relatedChangeId`, `relatedGoal`, `relatedTitle` (the related Change's title, added on read), `askedAt`, `round` (1 to 3). Each question asks one thing and has its own answer. |
+| `GET /v1/changes/:changeId` | `assumptions` | The small product details that the Root Planner decided because the goal left them open, as plain sentences (D1 `changes.assumptions_json`, migration `0032_change_assumptions.sql`). Empty before planning. |
 
 ### Change statuses for requests
 
@@ -162,21 +170,42 @@ While the Project setting `memberRequestReview` is `true` (the default), `POST /
 |---|---|
 | `proposed` | A member's request waits for an owner or admin to include it. No ChangeWorkflow runs and no model call is made. |
 | `declined` | An owner or admin declined the proposed request. Terminal. |
-| `not_selected` | The request lost a conflict. The system arbiter chose the other request, or the same requester asked again and the later request replaces the earlier one. The Change does no more work. |
+| `not_selected` | The request lost a conflict. The earlier requester kept their version (or did not choose within 7 days), or the same requester asked again and the later request replaces the earlier one. The Change does no more work. |
+| `awaiting_choice` | The request conflicts with an earlier request of another person. It waits for that person to choose. No planning spend. |
+| `queued` | The earlier requester chose to apply this request after theirs. It plans again when the earlier request promotes or ends. |
 | `needs_input` | The request is unclear, repeats another request or the current app, or conflicts and the system could not decide. The Change waits for an answer (`clarification`). |
 
 ### Request outcome kinds
 
-`outcome.kind` has one of these values. The outcome also has `reason`, `winnerChangeId`, and `decidedBy` (`system:arbiter`, `system:same_requester`, or the user ID of the person who declined).
+`outcome.kind` has one of these values. The outcome also has `reason`, `winnerChangeId`, and `decidedBy` (`system:same_requester`, `system:first_come` for a choice that expired, or the user ID of the person who declined or chose).
 
 | Kind | Meaning |
 |---|---|
 | `selected` | The request won the conflict check, or it has no conflict. |
-| `partially_selected` | The request lost one or more criteria. The planner plans again without them. |
 | `not_selected` | The request lost the conflict check. `winnerChangeId` names the request that won. |
 | `replaces` | The request won against an earlier request that had already promoted. |
 | `duplicate` | The request closed as a duplicate. `winnerChangeId` names the related request. It is null when the current app already delivers the request. |
 | `declined` | An owner or admin declined the proposed request. `reason` is the decline reason, or null. |
+| `follows` | The earlier requester chose to apply this request after theirs. `winnerChangeId` names the earlier request. |
+
+### First-come conflicts
+
+A supported conflict between requests of two people makes the later request wait for the earlier requester (ADR 0032, [Shared Projects](../architecture/shared-projects.md#first-come-requests-of-two-people)).
+
+| Method | Path | Access | Result | Main errors |
+|---|---|---|---|---|
+| GET | `/v1/changes/:changeId/request-waits` | Any role | Up to 10 `RequestWait` items where the Change is the earlier or the later request, newest first: `id`, `firstChangeId`, `firstTitle`, `firstRequester`, `laterChangeId`, `laterTitle`, `laterGoal`, `laterRequester`, `conflicts` (up to 3 criterion pairs as text), `choice` (`keep_mine`, `apply_theirs`, `expired`, `moot`, or null), `chosenAt`, `askedAt`, `expiresAt`, `laterStatus`, and `canChoose` (true only for the earlier requester while the choice is open). | 404 |
+| POST | `/v1/changes/:changeId/choose` | The requester of the earlier request, while they belong to the Project. The owner, the admins, and the later requester get 403. | `ChooseOutcome`: `recorded` with `changeId`, `choice`, `status` (the later request's status after the choice), and `repeated`. Body `{ "choice": "keep_mine" }` or `{ "choice": "apply_theirs" }`. `:changeId` is the waiting (later) request. | 400, 403, 404 (no wait), 409 (another choice recorded, or the request does not wait) |
+
+Events on the later request:
+
+| Event | Payload |
+|---|---|
+| `change.choice.requested` | `choiceId`, `firstChangeId`, `askedUserId`, `conflictId`, `status: "awaiting_choice"` |
+| `change.choice.made` | `choiceId`, `firstChangeId`, `choice` (`keep_mine`, `apply_theirs`, `expired`, `moot`), `status` (the next status) |
+| `change.resumed` | `choiceId`, `firstChangeId`, `baseGeneration`: the request plans again on the current canonical tree |
+
+Notifications: `request_choice_needed` (an action item for the earlier requester only) and `request_choice_made` (the later requester, after `apply_theirs`). After `keep_mine` or an expired choice, the later requester gets `request_not_selected`.
 
 ## Project settings
 

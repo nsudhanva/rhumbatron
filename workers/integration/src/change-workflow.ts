@@ -1,11 +1,12 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { opusAllowed } from "@rhumbatron/model-router";
-import { cancelChange, closeNeedsInput, releaseRequestScope } from "./change-commands.ts";
+import { closeNeedsInput, releaseRequestScope } from "./change-commands.ts";
 import { changeComplete } from "./change-meter.ts";
 import { readTreeFiles } from "./code-store.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent, qualify } from "./events.ts";
+import { advanceFirstCome, FIRST_COME_EVENT, resumedWaits } from "./first-come.ts";
 import {
   buildPacket,
   clefModel,
@@ -18,6 +19,7 @@ import {
   answeredRounds,
   type CanonicalSummary,
   goalWithAnswers,
+  intakeMayAsk,
   loadRelatedRequests,
   parseAnswers,
   readCanonicalSummary,
@@ -29,9 +31,8 @@ import {
   readRequestScope,
   releaseClosedRequests,
   requestRoot,
-  SYSTEM_ARBITER,
 } from "./request-check.ts";
-import { nothingSelected, requestsOverlap, selectedCriteria } from "./request-policy.ts";
+import { requestsOverlap } from "./request-policy.ts";
 import { type PlannerResult, type PlannerStepResult, planChangeResult } from "./root-planner.ts";
 
 /**
@@ -39,7 +40,10 @@ import { type PlannerResult, type PlannerStepResult, planChangeResult } from "./
  * compile the Work Graph, compare it with the other open requests, persist Tasks, and dispatch the
  * ready ones. When the intake gate or the request comparison asks a question, the Change is
  * `needs_input` and the workflow waits for the answer (`clarification` event, re-checked daily,
- * at most 7 days), then runs the next pass with the answers in the goal. At most 3 rounds.
+ * at most 7 days), then runs the next pass with the answers in the goal. When the comparison finds
+ * a conflict with an earlier request of another person, the Change waits for that person's choice
+ * (`awaiting_choice`, then `queued`, ADR 0032) and plans again after the earlier request ends. The intake gate asks at
+ * most one round; after any answer the request plans. The request comparison asks at most 3 rounds.
  * Every step is idempotent, because Workflows retries steps.
  */
 
@@ -47,6 +51,13 @@ export type ChangeWorkflowParams = { changeId: string };
 
 /** Days a `needs_input` Change waits for an answer before it is cancelled. */
 const ANSWER_DAYS = 7;
+/**
+ * Re-checks of a first-come wait (ADR 0032): every 6 hours while the choice is open, every hour
+ * while queued. A wake event ends each wait early. After the last re-check the instance ends; the
+ * end of the earlier request then starts a new instance.
+ */
+const FIRST_COME_CHECKS = 150;
+const WAITING_FIRST = ["awaiting_choice", "queued"];
 const MAX_ROUNDS = 3;
 type WorkersAi = { run(model: string, input: unknown): Promise<unknown> };
 type AnswerState = { status: string; answers: StoredAnswer[]; expired: boolean };
@@ -138,7 +149,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       {
         changeId: ctx.changeId,
         request: goal,
-        packet: buildPacket(goal, retrieval.related, canonical),
+        packet: buildPacket(goal, retrieval.related, canonical, related),
         retrieval,
       },
       {
@@ -181,6 +192,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
     return {
       decision: outcome.decision,
       clarification: outcome.clarification,
+      assumptions: outcome.assumptions ?? [],
       costUsd: outcome.costUsd,
     };
   }
@@ -238,6 +250,31 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       }),
     );
     return step.do(`read answer${tag} final`, () => readAnswerState(this.env, changeId));
+  }
+
+  /**
+   * Waits while the Change is `awaiting_choice` or `queued` (ADR 0032). Each wake and each re-check
+   * runs `advanceFirstCome`, so the D1 rows decide: the choice, the end of the earlier request, or
+   * the 7-day limit. Returns the status after the wait; `compiling` plans again.
+   */
+  private async waitForFirstCome(step: WorkflowStep, changeId: string, tag: string) {
+    let status = "awaiting_choice";
+    for (let i = 0; i < FIRST_COME_CHECKS; i += 1) {
+      const state = await step.do(`advance first come${tag} ${i}`, () =>
+        advanceFirstCome(this.env, changeId),
+      );
+      status = state.status;
+      if (!WAITING_FIRST.includes(status)) return status;
+      try {
+        await step.waitForEvent(`wait for first come${tag} ${i}`, {
+          type: FIRST_COME_EVENT,
+          timeout: status === "queued" ? "1 hour" : "6 hours",
+        });
+      } catch {
+        // Timed out: re-check the rows.
+      }
+    }
+    return status;
   }
 
   override async run(event: Readonly<WorkflowEvent<ChangeWorkflowParams>>, step: WorkflowStep) {
@@ -302,13 +339,17 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
     let answers = loaded.answers;
     // A new instance after an answer to a Change asked before this instance existed (resume).
     let skipAsk = answers.at(-1)?.action === "proceed_anyway";
+    // Small open details the intake found; the planner decides and records each one.
+    let openDetails: string[] = [];
     let admitted = false;
     let spent = 0;
     let planned: PlannerResult;
     let goal: string;
     let canonical: CanonicalSummary;
     let current: NonNullable<Awaited<ReturnType<typeof loadRequest>>>;
-    const excluded = new Set<string>();
+    // Plans after a first-come wait (ADR 0032): the request already passed intake, and each plan
+    // compares the pairs again.
+    let resumed = await step.do("read resumed waits", () => resumedWaits(this.env, changeId));
     for (let pass = 0; ; pass += 1) {
       const tag = pass === 0 ? "" : ` ${pass}`;
       const answered = answeredRounds(answers);
@@ -318,7 +359,8 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         readCanonicalSummary(this.env, ctx.projectId),
       );
 
-      if (mayAsk) {
+      // One intake round per request: after any answer the request goes to planning.
+      if (mayAsk && resumed === 0 && intakeMayAsk(answers)) {
         const remaining = loaded.budgetUsd - spent;
         const intake = await step.do(
           `intake review${tag}`,
@@ -326,6 +368,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
           () => this.intake(ctx, goal, canonical, answered + 1, remaining),
         );
         spent += intake.costUsd;
+        openDetails = intake.assumptions ?? [];
         if (intake.decision === "ask" && intake.clarification) {
           const clarification = intake.clarification;
           const asked = await step.do(`ask for input${tag}`, () =>
@@ -377,7 +420,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
             // Unknown source is not an empty repository and must not force a bootstrap Task.
             const files = await canonicalFiles(this.env, ctx.projectId).catch(() => null);
             return planChangeResult(
-              { goal, projectName: loaded.projectName, files },
+              { goal, projectName: loaded.projectName, files, openDetails },
               (req) => this.complete(req, changeId),
               { allowOpus: opusAllowed(this.env.ALLOW_OPUS) },
             );
@@ -457,7 +500,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         const root = requestRoot(this.env, ctx.projectId);
         // The receipt is immutable: a later pass keeps its order and earlier set, new criteria.
         const receipt = await root.registerScope(scope);
-        if (pass > 0) await root.updateScope(scope);
+        if (pass > 0 || resumed > 0) await root.updateScope(scope);
         await this.env.DB.prepare(
           "UPDATE changes SET scope_registered_at = COALESCE(scope_registered_at, ?) WHERE id = ?",
         )
@@ -476,7 +519,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       });
       let reviews = 0;
       let askedInCompare = false;
-      excluded.clear();
+      let waitsForFirst = false;
       // Diagnostic: which earlier requests this one compares with (ids only).
       console.warn(
         JSON.stringify({
@@ -525,6 +568,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         a.scoped = scope.scoped;
         const overlaps = requestsOverlap(a, registrant);
         const affordable = spent < loaded.budgetUsd;
+        const instanceId = (event as { instanceId?: string }).instanceId ?? changeId;
         const pair = await step.do(
           `compare request ${earlier.changeId}${tag}`,
           { retries: { limit: 1, delay: "15 seconds", backoff: "constant" }, timeout: "4 minutes" },
@@ -536,7 +580,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
               registrant,
               (req) => this.complete(req, changeId),
               !overlaps || (reviews < 4 && affordable),
-              { round: answered, mayAsk, canArbitrate: affordable, canonical },
+              { round: answered, mayAsk, sequence: resumed, instanceId },
             ),
         );
         if (overlaps) reviews += 1;
@@ -546,7 +590,44 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
           askedInCompare = true;
           break;
         }
-        for (const id of pair.excluded) excluded.add(id);
+        if (pair.stop === "awaiting_choice") {
+          waitsForFirst = true;
+          break;
+        }
+      }
+      if (waitsForFirst) {
+        const waiting = planned;
+        // Keep what was asked for visible while the request waits.
+        await step.do(`keep waiting request visible${tag}`, async () => {
+          await this.env.DB.prepare(
+            `UPDATE changes SET title = COALESCE(?, title), acceptance_criteria_json = ?,
+               invariants_json = ?, risk_tier = ?
+             WHERE id = ? AND status IN ('awaiting_choice', 'queued')`,
+          )
+            .bind(
+              waiting.plan.title || null,
+              JSON.stringify(waiting.plan.acceptanceCriteria),
+              JSON.stringify(waiting.plan.invariants),
+              waiting.plan.riskTier,
+              changeId,
+            )
+            .run();
+        });
+        const status = await this.waitForFirstCome(step, changeId, tag);
+        if (status !== "compiling") return { status };
+        // The earlier request promoted or ended: plan again on the current canonical tree.
+        const next = await step.do(`read resumed request${tag}`, async () => {
+          const row = await this.env.DB.prepare("SELECT base_generation FROM changes WHERE id = ?")
+            .bind(changeId)
+            .first<{ base_generation: number }>();
+          return {
+            resumed: await resumedWaits(this.env, changeId),
+            baseGeneration: row?.base_generation ?? ctx.baseGeneration,
+          };
+        });
+        resumed = next.resumed;
+        ctx.baseGeneration = next.baseGeneration;
+        continue;
       }
       if (askedInCompare) {
         const state = await this.waitForAnswer(step, changeId, `${tag} compare`);
@@ -562,114 +643,6 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       }
       break;
     }
-    if (excluded.size > 0) {
-      const remaining = selectedCriteria(planned.criteria, [...excluded]);
-      if (nothingSelected(remaining)) {
-        await step.do("stop unselected request", async () => {
-          // Keep what was asked for visible on the request, although nothing of it is built.
-          await this.env.DB.prepare(
-            `UPDATE changes SET title = ?, acceptance_criteria_json = ?, invariants_json = ?,
-               risk_tier = ?
-             WHERE id = ? AND status = 'compiling'`,
-          )
-            .bind(
-              planned.plan.title || null,
-              JSON.stringify(planned.plan.acceptanceCriteria),
-              JSON.stringify(planned.plan.invariants),
-              planned.plan.riskTier,
-              changeId,
-            )
-            .run();
-          const fields = await this.env.DB.prepare(
-            "SELECT outcome_reason, outcome_winner_change_id, outcome_decided_by FROM changes WHERE id = ?",
-          )
-            .bind(changeId)
-            .first<{
-              outcome_reason: string;
-              outcome_winner_change_id: string;
-              outcome_decided_by: string;
-            }>();
-          await cancelChange(
-            this.env,
-            { changeId, actorUserId: fields?.outcome_decided_by ?? SYSTEM_ARBITER },
-            {
-              reason: fields?.outcome_reason ?? "Not selected: conflicts with an earlier request",
-              winnerChangeId: fields?.outcome_winner_change_id ?? "",
-              decidedBy: fields?.outcome_decided_by ?? SYSTEM_ARBITER,
-            },
-          );
-        });
-        return { status: "not_selected" };
-      }
-      const losing = planned.criteria.filter((criterion) => excluded.has(criterion.id));
-      let replanned: PlannerStepResult;
-      try {
-        replanned = await step.do(
-          "replan selected criteria",
-          { retries: { limit: 0, delay: "1 second" }, timeout: "5 minutes" },
-          async () => {
-            const files = await canonicalFiles(this.env, ctx.projectId).catch(() => null);
-            return planChangeResult(
-              {
-                goal,
-                projectName: loaded.projectName,
-                files,
-                excludedCriteria: losing,
-                selectedCriteria: remaining,
-              },
-              (req) => this.complete(req, changeId),
-              { allowOpus: opusAllowed(this.env.ALLOW_OPUS) },
-            );
-          },
-        );
-      } catch {
-        replanned = { ok: false, errors: ["Planning the selected criteria failed"] };
-      }
-      if (!replanned.ok) {
-        await step.do("fail partial plan", async () => {
-          await this.env.DB.prepare(
-            "UPDATE changes SET status = 'failed', blocked_reason = ?, updated_at = ? WHERE id = ? AND status = 'compiling'",
-          )
-            .bind("Planning the selected criteria failed", new Date().toISOString(), changeId)
-            .run();
-          await releaseRequestScope(this.env, ctx.projectId, changeId);
-          await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
-            await changeEvent(ctx, "change.failed", {
-              status: "failed",
-              reason: "Planning the selected criteria failed",
-            }),
-          ]);
-        });
-        return { failed: true };
-      }
-      planned = replanned.planned;
-      spent += planned.calls.reduce((sum, call) => sum + call.costUsd, 0);
-      const replannedGraph = planned;
-      await step.do("mark partially selected", async () => {
-        await this.env.DB.prepare(
-          "UPDATE changes SET outcome = 'partially_selected', outcome_reason = replace(outcome_reason, 'Not selected:', 'Partially selected:') WHERE id = ? AND status = 'compiling'",
-        )
-          .bind(changeId)
-          .run();
-        await requestRoot(this.env, ctx.projectId).updateScope({
-          changeId,
-          requesterUserId: current.requesterUserId,
-          requesterRank: current.requesterRank,
-          criteria: replannedGraph.criteria,
-          resources: scopeResources(ctx, replannedGraph),
-          registeredAt: new Date().toISOString(),
-        });
-        await appendChangeEvents(this.env.RESOURCE_SHARD, ctx, [
-          await changeEvent(
-            ctx,
-            "conflict.reviewed",
-            { outcome: "partially_selected", excludedCriterionIds: [...excluded] },
-            { key: "partial-selection" },
-          ),
-        ]);
-      });
-    }
-
     const workGraphRef = `work-graphs/${ctx.projectId}/${changeId}.json`;
     await step.do("persist work graph", async () => {
       await this.env.EVIDENCE.put(workGraphRef, JSON.stringify(planned), {
@@ -725,7 +698,8 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         ...statements,
         this.env.DB.prepare(
           `UPDATE changes SET status = 'running', title = ?, risk_tier = ?,
-             acceptance_criteria_json = ?, invariants_json = ?, work_graph_ref = ?, updated_at = ?
+             acceptance_criteria_json = ?, invariants_json = ?, assumptions_json = ?,
+             work_graph_ref = ?, updated_at = ?
            WHERE id = ? AND status = 'compiling'`,
         ).bind(
           // Blank when the planner gave no usable title: the API then derives one from the goal.
@@ -733,6 +707,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
           plan.riskTier,
           JSON.stringify(plan.acceptanceCriteria),
           JSON.stringify(plan.invariants),
+          JSON.stringify(plan.assumptions ?? []),
           workGraphRef,
           now,
           changeId,

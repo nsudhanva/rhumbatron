@@ -985,9 +985,8 @@ async function a8(ctx: Ctx) {
       `${loser.outcome?.kind} winner ${loser.outcome?.winnerChangeId}`,
     );
     ctx.check(
-      loser.outcome?.decidedBy === "system:same_requester" ||
-        loser.outcome?.decidedBy === "system:arbiter",
-      "decided by the system",
+      loser.outcome?.decidedBy === "system:same_requester",
+      "decided by the system: the same requester's later request replaces the earlier one",
       `${loser.outcome?.decidedBy}`,
     );
     ctx.check(
