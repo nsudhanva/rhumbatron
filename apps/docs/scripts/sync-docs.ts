@@ -86,12 +86,7 @@ function splitTitle(markdown: string, source: string): { title: string; body: st
 
 /** Keeps the README parts that describe the product; setup and command tables live elsewhere. */
 function landingBody(readme: string): string {
-  const keep = new Set([
-    "The problem",
-    "How it works",
-    "What makes it different",
-    "Built on Cloudflare",
-  ]);
+  const keep = new Set(["The problem", "How it works", "Design choices", "Built on Cloudflare"]);
   const [intro = "", ...rest] = readme.split(/^(?=## )/m);
   const kept = rest.filter((part) => keep.has(/^## (.+)$/m.exec(part)?.[1]?.trim() ?? ""));
   const links = [
@@ -143,7 +138,8 @@ for (const [index, source] of sources.entries()) {
 }
 
 const readme = splitTitle(await readFile(join(repoRoot, "README.md"), "utf8"), "README.md");
-const tagline = /^>\s*(.+)$/m.exec(readme.body)?.[1] ?? "";
+// The first sentence of the README intro paragraph.
+const tagline = /^(Rhumbatron [^.]+\.)/m.exec(readme.body)?.[1] ?? "";
 pages.push({
   source: "README.md",
   output: "index.md",

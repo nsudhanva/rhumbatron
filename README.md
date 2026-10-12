@@ -1,15 +1,10 @@
 # Rhumbatron
 
-**Many agents. Many possible futures. One verified codebase.**
+**[rhumbatron.com](https://rhumbatron.com)** (sign in with Google) · [Documentation](https://docs.rhumbatron.com)
 
-Rhumbatron is a collaboration platform for teams of people and AI agents that change one codebase at the same time. You describe an outcome in plain language. Rhumbatron plans the work, wakes only the agents that the work needs, lets them build in parallel in isolated Git workspaces, detects conflicts between their *intentions* before a merge, verifies each possible result with executable evidence, and ships one verified version.
+Rhumbatron lets a team of people and AI agents change one codebase at the same time. You describe an outcome in plain language. Rhumbatron plans the work and wakes only the agents the work needs. The agents build in parallel, each in its own Git workspace. Rhumbatron finds conflicts between what the agents intend to change before anything merges, runs builds, tests, and browser checks on each possible result, and ships the version that passes.
 
-> Git detects textual conflicts. Rhumbatron detects conflicts between intentions and possible software futures.
-
-- **Live:** [rhumbatron.com](https://rhumbatron.com). Sign in with Google.
-- **Documentation:** [docs.rhumbatron.com](https://docs.rhumbatron.com)
-- **Built for:** the Cloudflare competition *Build the Next-Gen Git Platform on Cloudflare*
-- **Team:** Sudhanva Narayana ([@nsudhanva](https://github.com/nsudhanva)) and Maanasa Narayan ([@maanasanarayan](https://github.com/maanasanarayan))
+Sudhanva Narayana ([@nsudhanva](https://github.com/nsudhanva)) and Maanasa Narayan ([@maanasanarayan](https://github.com/maanasanarayan)) built it for the Cloudflare competition *Build the Next-Gen Git Platform on Cloudflare*.
 
 ---
 
@@ -20,9 +15,9 @@ Repositories, branches, and pull requests assume a small number of human authors
 - Two agents can produce changes that merge cleanly as text but are wrong together, for example two different data models for the same feature.
 - A merge queue serializes work and wastes the parallelism that agents give.
 - Review by a person does not scale to the volume of changes that agents produce.
-- "The model is confident" is not a release gate.
+- A model's confidence in its own change is not evidence that the change works.
 
-Rhumbatron replaces the pull request with a different unit of work and a different merge rule: **many agents can propose many futures, and only verified evidence can advance the canonical state.**
+In Rhumbatron, agents can propose several versions of a change, but only a version that passes its checks can update the main codebase.
 
 ## How it works
 
@@ -44,26 +39,26 @@ flowchart LR
 ```
 
 1. **Request.** A person describes an outcome. An intake check asks the requester a question when the request is unclear or duplicates an open request or a shipped feature. Nothing is planned or spent until the request is clear.
-2. **Plan.** A planner model turns the request into a **Work Graph**: Tasks, dependencies, acceptance criteria, protected invariants, and a risk tier.
-3. **Wake only what is needed.** A causal router wakes an agent only when its Task is ready and an event affects it. Many logical agents can exist; only the agents with ready work run.
-4. **Build in isolation.** Each agent works in its own fork of the canonical repository in **Cloudflare Artifacts**, with a shell in a Cloudflare **Sandbox**.
-5. **Coordinate through typed state, not chat.** Before an agent edits, it declares a typed **Intent** (resources, files, contract and data changes, assumptions) and takes a lease (**Claim**) on a semantic resource such as `wishlist:membership`.
-6. **Detect semantic conflicts.** Deterministic rules compare Intents first. A model reviews only an ambiguous overlap. Complementary Tasks integrate. Two valid but incompatible designs **fork into separate Candidates** instead of a debate.
+2. **Plan.** A planner model turns the request into a Work Graph of Tasks, dependencies, acceptance criteria, protected invariants, and a risk tier.
+3. **Wake only the agents with work.** A causal router wakes an agent only when its Task is ready and an event affects it. Many logical agents can exist; only the agents with ready work run.
+4. **Build in isolation.** Each agent works in its own fork of the canonical repository in Cloudflare Artifacts, with a shell in a Cloudflare Sandbox.
+5. **Coordinate through typed state.** Before an agent edits, it declares a typed Intent (resources, files, contract and data changes, assumptions) and takes a lease, called a Claim, on a semantic resource such as `wishlist:membership`.
+6. **Detect semantic conflicts.** Deterministic rules compare Intents first. A model reviews only an ambiguous overlap. Complementary Tasks integrate. Two valid but incompatible designs become separate Candidates, and the check results decide between them.
 7. **Verify with evidence.** Each Candidate is composed in its own Artifacts fork, built, and checked: build, unit, contract, protected invariants, security, performance, browser flows, and an acceptance check against the original request. A missing, skipped, or timed-out check is a gap. It never counts as a pass.
-8. **Select and promote.** Sibling Candidates wait for each other and are ranked by evidence, never by who finished first. One atomic **compare-and-swap** advances the **Canonical Generation** (for example `S41 → S42`). A stale Candidate cannot promote; it is recomposed on the new state.
+8. **Select and promote.** Sibling Candidates wait for each other and are ranked by evidence, never by who finished first. One atomic compare-and-swap advances the Canonical Generation (for example `S41 → S42`). A stale Candidate cannot promote; it is recomposed on the new state.
 9. **Ship.** The promoted version builds and deploys as the Project's live app at `<project>.rhumbatron.com`, with a smoke check and a pointer that moves back if the check fails.
 
-## What makes it different
+## Design choices
 
 | Area | Rhumbatron |
 |---|---|
-| Unit of work | A **Change** (an outcome) compiled into a Work Graph, not a branch or a pull request |
-| Concurrency | Many agents in parallel, each in its own Artifacts fork. Activation is sparse and causal: an agent wakes only when its work is ready |
-| Coordination | Typed Intents, renewable Claims, and Challenges on semantic resources. Agents share structured state, not chat history |
-| Conflict handling | Conflicts between designs are found before a merge. Incompatible designs become competing **Candidates** that evidence decides between |
+| Unit of work | A Change: an outcome compiled into a Work Graph of Tasks |
+| Concurrency | Many agents in parallel, each in its own Artifacts fork. An agent wakes only when its work is ready, so most agents stay asleep |
+| Coordination | Typed Intents, renewable Claims, and Challenges on semantic resources. Agents coordinate through this typed state |
+| Conflict handling | Conflicts between designs are found before a merge. Incompatible designs become competing Candidates, and evidence decides between them |
 | Context | Each agent gets a compiled context packet: its Task, criteria, invariants, nearby Intents, exact dependencies, and prior failures. Exact retrieval comes first, semantic search second. Packets are stored for replay |
 | Review | Executable evidence is the gate. Model findings must cite evidence IDs, and an unsupported finding cannot change state. People approve where policy requires it |
-| Merge | One atomic compare-and-swap per generation. No merge races, no force pushes, no lost updates |
+| Merge | One atomic compare-and-swap per generation, so two promotions can never overwrite each other |
 | Teams | Project roles (owner, admin, member, viewer). A member's request waits for an owner or admin to include or decline it. The Board shows every request by person and by stage |
 | Cost | Budgets per request, per Project per month, and per person per month. Small Tasks route to cheaper models; stronger models are used only on recorded failure or risk |
 
@@ -71,36 +66,36 @@ flowchart LR
 
 | View | What it shows |
 |---|---|
-| **Overview** | Live app, Canonical Generation, the execution timeline with replay, and every request |
-| **Board** | Requests by person and by stage: Proposed, Needs answer, Building, Checking, Shipped, Not built |
-| **Change** | The goal, acceptance criteria, protected invariants, Work Graph, agent activity, conflicts, Candidates, and the convergence view `possible changes → Candidates → verified future → canonical` |
-| **Flight Control** | Execution DAG, agent swimlanes, workspace lanes, codebase heatmap, Candidate arena, evidence explorer, and time-machine replay |
-| **Candidates and Compare** | Side-by-side evidence for competing futures, approval, and promotion |
-| **Code** | Every version of the source, and an in-browser editor with a terminal that submits edits as a normal request |
-| **Agents, Events, Verification, Costs** | Live and replayable views of agents, the causal event stream, check results, and spend by model and Task |
+| Overview | Live app, Canonical Generation, the execution timeline with replay, and every request |
+| Board | Requests by person and by stage: Proposed, Needs answer, Building, Checking, Shipped, Not built |
+| Change | The goal, acceptance criteria, protected invariants, Work Graph, agent activity, conflicts, Candidates, and a summary of how many Intents became Candidates and which one shipped |
+| Flight Control | Execution DAG, agent swimlanes, workspace lanes, codebase heatmap, Candidate arena, evidence explorer, and time-machine replay |
+| Candidates and Compare | Side-by-side check results for competing Candidates, approval, and promotion |
+| Code | Every version of the source, and an in-browser editor with a terminal that submits edits as a normal request |
+| Agents, Events, Verification, Costs | Live and replayable views of agents, the causal event stream, check results, and spend by model and Task |
 
 ## Built on Cloudflare
 
-Rhumbatron runs entirely on Cloudflare's developer platform. Terraform manages every Cloudflare resource.
+Rhumbatron runs on Cloudflare's developer platform, and Terraform manages every Cloudflare resource.
 
 | Cloudflare product | Role in Rhumbatron |
 |---|---|
-| **Workers** | Ten Workers: web (TanStack Start), API (Hono), coordinator, agents, event router, integration, indexer, Sandbox host, live apps, and docs |
-| **Artifacts** | Canonical Git repository per Project, one fork per agent workspace, one fork per Candidate, and one per code-edit session |
-| **Durable Objects (SQLite)** | `ProjectRootDO` (canonical generation, compare-and-swap promotion), `ResourceShardDO` (Claims and Intents), `ProjectViewDO` (live read model and WebSockets), `AgentDO` (durable agent state), `AppDataDO` (live app data) |
-| **Sandbox / Containers** | Isolated Linux for agent shells, builds, tests, and Candidate verification |
-| **Dynamic Workers** | Builds and hosts every Project's live app and its Candidate previews |
-| **Workflows** | `ChangeWorkflow`, `CandidateVerificationWorkflow`, `ReleaseWorkflow` |
-| **Queues** | Agent wake-ups, integration, verification, indexing, release, dead letters |
-| **K2** | Durable causal event log, fed by a transactional outbox in Durable Object SQLite |
-| **D1** | Product metadata: Projects, Changes, Tasks, Candidates, evidence index, approvals |
-| **R2** | Evidence reports, context packets, patches, app bundles, and the event archive |
-| **Workers KV** | Read-heavy configuration such as Project policy |
-| **Vectorize** | Semantic memory over code and past Changes |
-| **Workers AI** | Fast bounded decisions (Clef-flash), embeddings, and reranking for request intake |
-| **AI Gateway** | Single path to Anthropic Claude models, with spend limits and usage logs |
-| **Browser Run** | Browser checks of Candidate previews |
-| **Analytics Engine, Workers Logs** | Model routing, wake-ups, cost, and latency metrics |
+| Workers | Ten Workers: web (TanStack Start), API (Hono), coordinator, agents, event router, integration, indexer, Sandbox host, live apps, and docs |
+| Artifacts | Canonical Git repository per Project, one fork per agent workspace, one fork per Candidate, and one per code-edit session |
+| Durable Objects (SQLite) | `ProjectRootDO` (canonical generation, compare-and-swap promotion), `ResourceShardDO` (Claims and Intents), `ProjectViewDO` (live read model and WebSockets), `AgentDO` (durable agent state), `AppDataDO` (live app data) |
+| Sandbox / Containers | Isolated Linux for agent shells, builds, tests, and Candidate verification |
+| Dynamic Workers | Builds and hosts every Project's live app and its Candidate previews |
+| Workflows | `ChangeWorkflow`, `CandidateVerificationWorkflow`, `ReleaseWorkflow` |
+| Queues | Agent wake-ups, integration, verification, indexing, release, dead letters |
+| K2 | Durable causal event log, fed by a transactional outbox in Durable Object SQLite |
+| D1 | Product metadata: Projects, Changes, Tasks, Candidates, evidence index, approvals |
+| R2 | Evidence reports, context packets, patches, app bundles, and the event archive |
+| Workers KV | Read-heavy configuration such as Project policy |
+| Vectorize | Semantic memory over code and past Changes |
+| Workers AI | Fast bounded decisions (Clef-flash), embeddings, and reranking for request intake |
+| AI Gateway | Single path to Anthropic Claude models, with spend limits and usage logs |
+| Browser Run | Browser checks of Candidate previews |
+| Analytics Engine, Workers Logs | Model routing, wake-ups, cost, and latency metrics |
 
 Models: Claude Sonnet 5.5 for normal coding, Claude Haiku 5.5 for small and high-volume work, and Claude Opus 5.5 for high-risk design when it is enabled. The agent loop runs on the Cloudflare Agents SDK.
 
@@ -124,7 +119,7 @@ flowchart LR
   integ -->|release| apps[Dynamic Workers<br/>live apps]
 ```
 
-The [architecture guide](docs/architecture/README.md) covers each part in depth: the [change lifecycle](docs/architecture/change-lifecycle.md), [agents and models](docs/architecture/agents-and-models.md), [events and commands](docs/architecture/events-and-commands.md), [source and verification](docs/architecture/source-and-verification.md), [live apps](docs/architecture/live-apps.md), and [shared Projects](docs/architecture/shared-projects.md). Design decisions are recorded as [ADRs](docs/adr/).
+The [architecture guide](docs/architecture/README.md) covers each part in depth: the [change lifecycle](docs/architecture/change-lifecycle.md), [agents and models](docs/architecture/agents-and-models.md), [events and commands](docs/architecture/events-and-commands.md), [source and verification](docs/architecture/source-and-verification.md), [live apps](docs/architecture/live-apps.md), and [shared Projects](docs/architecture/shared-projects.md). The [ADRs](docs/adr/) record the design decisions.
 
 ## Try it
 
@@ -182,11 +177,11 @@ The [deployment runbook](docs/operations/deploy.md) has the details. Terraform i
 
 ## Reliability and safety
 
-- **Atomic promotion.** One compare-and-swap per Canonical Generation. A stale Candidate is recomposed, never merged blindly.
+- **Atomic promotion.** One compare-and-swap per Canonical Generation. A stale Candidate is recomposed on the new state before it can promote.
 - **Evidence gates.** A missing, skipped, or timed-out check never passes. Model findings must cite evidence that code validates.
 - **Idempotency.** Stable event and command IDs, deduplicating consumers, and a transactional outbox: a K2 outage delays the dashboard but never forks the canonical state.
 - **Failure handling.** Expiring Claims, Sandbox loss recovery from Artifacts, bounded retries, a visible dead-letter queue, and rollback as a new canonical transition.
-- **Isolation.** Agents never hold infrastructure credentials. Tools are granted by role. Edit-session commands run as an unprivileged user without secrets.
+- **Isolation.** Agents never hold infrastructure credentials. Each agent role gets its own set of tools. Edit-session commands run as an unprivileged user without secrets.
 - **Cost limits.** Budgets per request, Project, and person; a monthly model-spend cap; capped Sandbox and Browser Run time; and a pause switch in Terraform.
 
 ## Testing
@@ -218,10 +213,8 @@ scripts/                  Bundling, checks, smoke tests, journeys, cost report
 
 ## Team
 
-| | |
-|---|---|
-| **Sudhanva Narayana** | [@nsudhanva](https://github.com/nsudhanva) |
-| **Maanasa Narayan** | [@maanasanarayan](https://github.com/maanasanarayan) |
+- Sudhanva Narayana ([@nsudhanva](https://github.com/nsudhanva))
+- Maanasa Narayan ([@maanasanarayan](https://github.com/maanasanarayan))
 
 ## License
 
