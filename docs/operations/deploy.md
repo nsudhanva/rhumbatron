@@ -78,6 +78,8 @@ bun run tf global apply global.tfplan
 
 Only one deploy runs at a time. A newer push waits, and replaces any deploy that is still in the queue.
 
+The budget alerts adapter (`terraform_data.budget_alerts` in `envs/global`) needs the `cf` CLI login of an operator. CI does not apply a plan that changes it. The deploy shows a warning and continues with prod. Apply `envs/global` on an operator machine (`bun run tf global apply`). After a behavior change to `scripts/budget-alerts.ts`, add `-replace=terraform_data.budget_alerts`.
+
 To apply a destructive plan on purpose, run the workflow manually from the Actions tab and select `allow_destructive`.
 
 The deploy secrets are in the GitHub environment `production`. Only `main` can use that environment.

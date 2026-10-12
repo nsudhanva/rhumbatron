@@ -109,9 +109,22 @@ jobs:
           code=0
           bun scripts/tf.ts global plan -out=global.tfplan -lock-timeout=5m -detailed-exitcode -no-color || code=$?
           if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then exit "$code"; fi
-          echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           bun scripts/tf.ts global show -json global.tfplan > "$RUNNER_TEMP/global.json"
           bun scripts/plan-guard.ts "$RUNNER_TEMP/global.json" global
+          # The budget alerts adapter needs an operator's `cf` CLI login, which CI does not have.
+          # A plan that changes it waits for an operator: CI skips the global apply and drift check.
+          operator=$(bun -e 'const p = JSON.parse(await Bun.file(process.argv[1]).text());
+            const hit = (p.resource_changes ?? []).some((c) => c.address === "terraform_data.budget_alerts"
+              && !(c.change.actions.length === 1 && c.change.actions[0] === "no-op"));
+            console.log(hit)' "$RUNNER_TEMP/global.json")
+          if [ "$operator" = "true" ]; then
+            echo "::warning::envs/global changes terraform_data.budget_alerts. Apply envs/global on an operator machine (bun run tf global apply)."
+            echo "changes=false" >> "$GITHUB_OUTPUT"
+            echo "operator=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "operator=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Plan prod
         id: plan_prod
@@ -136,7 +149,9 @@ jobs:
       - name: Drift check (a second plan must show no changes)
         run: |
           set -euo pipefail
-          bun scripts/tf.ts global plan -detailed-exitcode -lock-timeout=5m -no-color > /dev/null
+          if [ "${{ steps.plan_global.outputs.operator }}" != "true" ]; then
+            bun scripts/tf.ts global plan -detailed-exitcode -lock-timeout=5m -no-color > /dev/null
+          fi
           bun scripts/tf.ts prod plan -detailed-exitcode -lock-timeout=5m -no-color > /dev/null
 
       - name: Smoke checks

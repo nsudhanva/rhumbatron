@@ -32,7 +32,7 @@ $.env(cliEnv);
 const ours = ((await $`cf alerting policies list`.quiet().json()) as Policy[]).filter((p) =>
   p.name.startsWith(PREFIX),
 );
-const remove = (p: Policy) => $`cf alerting policies delete ${p.id}`.quiet();
+const remove = (p: Policy) => $`cf alerting policies delete --force ${p.id}`.quiet();
 
 if (mode === "destroy") {
   for (const p of ours) await remove(p);
@@ -58,23 +58,26 @@ const create = (usd: string) =>
     mechanisms: { email: emails.map((id) => ({ id })) },
   })}`.quiet();
 
+const inSync = (p: Policy, usd: string) =>
+  p.alert_type === "billing_budget_alert" &&
+  p.enabled &&
+  p.filters?.total_spend_dollars?.join() === usd &&
+  (p.mechanisms?.email ?? [])
+    .map((e) => e.id)
+    .sort()
+    .join() === emails.join();
+
 for (const usd of levels) {
-  const existing = ours.find((p) => p.name === nameOf(usd));
-  const inSync =
-    existing?.alert_type === "billing_budget_alert" &&
-    existing.enabled &&
-    existing.filters?.total_spend_dollars?.join() === usd &&
-    (existing.mechanisms?.email ?? [])
-      .map((e) => e.id)
-      .sort()
-      .join() === emails.join();
-  if (existing && inSync) {
+  // Keep one policy that matches; delete every other policy with this name, including duplicates.
+  const named = ours.filter((p) => p.name === nameOf(usd));
+  const keep = named.find((p) => inSync(p, usd));
+  for (const p of named) if (p !== keep) await remove(p);
+  if (keep) {
     console.log(`budget alert at $${usd} is in sync`);
     continue;
   }
-  if (existing) await remove(existing);
   await create(usd);
-  console.log(`${existing ? "replaced" : "created"} budget alert at $${usd}`);
+  console.log(`${named.length > 0 ? "replaced" : "created"} budget alert at $${usd}`);
 }
 
 for (const p of ours) {

@@ -28,14 +28,18 @@ module "security" {
 # first line; this alert catches anything they miss, in any product. An API adapter
 # creates it: provider 5.27 rejects alert_type billing_budget_alert.
 locals {
-  repo_root = abspath("${path.root}/../../../..")
+  # Relative to the root module, where Terraform runs local-exec. An absolute path would tie the
+  # stored input, and the destroy provisioner that reads it, to one machine.
+  repo_root = "../../../.."
 }
 
+# The adapter needs the `cf` CLI login of an operator, so CI never applies a change to it (see
+# .github/workflows/production.yml). After a behavior change to scripts/budget-alerts.ts, run
+# `bun run tf global apply -replace=terraform_data.budget_alerts` on an operator machine.
 resource "terraform_data" "budget_alerts" {
   triggers_replace = {
     levels = jsonencode(var.budget_alert_usd)
     email  = sha256(var.alert_email)
-    script = filesha256("${local.repo_root}/scripts/budget-alerts.ts")
   }
   input = {
     repo_root = local.repo_root
