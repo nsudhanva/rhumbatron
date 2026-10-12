@@ -230,7 +230,7 @@ flowchart LR
 | `contract` | contract | Compare the route table of the base and of the Candidate with the declared contract changes. Dynamic Worker extraction, or `bun run contract` in the Sandbox | 120 s (30 s in the Dynamic Worker) |
 | `protected-invariant-cart` | protected-invariant | `bun test test/cart.invariant.test.ts` | 120 s |
 | `performance` | performance | `bun run bench`. Metric `p95Ms` must be below the limit | 120 s |
-| `security` | security | `bun test --test-name-pattern authorization` | 180 s |
+| `security` | security | `bun test --test-name-pattern authorization`. The app conventions (`APP_CONVENTIONS`) tell agents to name the denial tests this way. No matching test is a gap | 180 s |
 | `browser` | browser | One Browser Run session (see below) | 90 s |
 | `acceptance` | acceptance | Optional. Haiku judges each acceptance criterion against the Candidate patch and the composed files. Code validates each citation | 180 s |
 | `preview-smoke` | smoke | Publish the Candidate preview and run the release probes against it | 30 s |
