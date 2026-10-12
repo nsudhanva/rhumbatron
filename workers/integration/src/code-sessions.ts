@@ -977,6 +977,30 @@ function parseNameStatus(output: string): { status: string; path: string }[] {
   return out;
 }
 
+const SANDBOX_BUSY =
+  "The Sandbox is busy with work for another Project. Only one runs at a time. Try again in a few minutes.";
+
+/**
+ * True when the Sandbox refused to start because the account runs its maximum number of containers
+ * (one, a cost rule). Agents and Candidate checks of another Project hold it.
+ */
+function containerUnavailable(error: unknown): boolean {
+  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+  return /ContainerUnavailableError|maximum number of running container instances/i.test(text);
+}
+
+/** Records why the readiness probe of a session checkout failed (Workers Logs). */
+function probeFailed(row: SessionRow, error: string) {
+  console.warn(
+    JSON.stringify({
+      event: "code_session.probe_failed",
+      sessionId: row.id,
+      projectId: row.project_id,
+      error: error.slice(0, 300),
+    }),
+  );
+}
+
 /**
  * Prepares the session checkout: clone the fork at the base commit when it is missing, then reset
  * it to base plus the edits when the edits changed since the last sync. Returns notes for stderr.
@@ -989,13 +1013,26 @@ async function prepareCheckout(
   const dir = sessionDir(row.id);
   const qdir = shellQuote(dir);
   const marker = `${dir}.rev`;
-  const probe = await run(
-    sandbox,
-    `if [ "$(id -u)" != 0 ] || ! command -v setpriv >/dev/null 2>&1; then echo unsupported; elif [ -d ${qdir}/.git ]; then echo "ready $(cat ${shellQuote(marker)} 2>/dev/null)"; else echo missing; fi`,
-    { timeoutMs: GIT_TIMEOUT_MS },
-  );
+  let probe: Run;
+  try {
+    // The first command of a session can cold-start the container: give it the setup time.
+    probe = await run(
+      sandbox,
+      `if [ "$(id -u)" != 0 ] || ! command -v setpriv >/dev/null 2>&1; then echo unsupported; elif [ -d ${qdir}/.git ]; then echo "ready $(cat ${shellQuote(marker)} 2>/dev/null)"; else echo missing; fi`,
+      { timeoutMs: SETUP_TIMEOUT_MS },
+    );
+  } catch (error) {
+    probeFailed(row, String(error));
+    if (containerUnavailable(error)) return refuse("sandbox_busy", SANDBOX_BUSY);
+    throw error;
+  }
   const state = probe.stdout.trim();
+  if (probe.timedOut) {
+    probeFailed(row, `no answer in ${SETUP_TIMEOUT_MS / 1000} s`);
+    return refuse("sandbox_busy", SANDBOX_BUSY);
+  }
   if (probe.exitCode !== 0 || state === "unsupported") {
+    probeFailed(row, `exit ${probe.exitCode}: ${(probe.stderr || state).slice(0, 200)}`);
     return refuse(
       "sandbox_unavailable",
       "The Sandbox cannot run commands as an unprivileged user, so the terminal is off.",
@@ -1328,10 +1365,12 @@ export async function execCodeSessionCommand(
           error: String(error).slice(0, 300),
         }),
       );
-      outcome = refuse(
-        "sandbox_unavailable",
-        "The Sandbox did not run the command. Try again in a minute.",
-      );
+      outcome = containerUnavailable(error)
+        ? refuse("sandbox_busy", SANDBOX_BUSY)
+        : refuse(
+            "sandbox_unavailable",
+            "The Sandbox did not run the command. Try again in a minute.",
+          );
     } finally {
       const endedAt = Date.now();
       const billed = awakeSeconds({ startedAt, endedAt, awakeUntil: row.sandbox_awake_until });

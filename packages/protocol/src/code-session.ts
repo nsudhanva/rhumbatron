@@ -242,7 +242,12 @@ export const CodeSessionRefusalReason = z.enum([
   "busy",
   /** The monthly Sandbox seconds are used up (`SANDBOX_MONTHLY_SECONDS`). */
   "sandbox_cap",
-  /** The Sandbox cannot run the command as an unprivileged user, so it runs nothing. */
+  /**
+   * The Sandbox did not start or did not answer in time. One Sandbox container runs for the whole
+   * account, so the terminal waits while agents or Candidate checks use it for another Project.
+   */
+  "sandbox_busy",
+  /** The Sandbox cannot run the command as an unprivileged user, or it failed, so it runs nothing. */
   "sandbox_unavailable",
 ]);
 export type CodeSessionRefusalReason = z.infer<typeof CodeSessionRefusalReason>;
@@ -283,6 +288,7 @@ export function sessionRefusalStatus(
       return 415;
     case "sandbox_cap":
       return 429;
+    case "sandbox_busy":
     case "sandbox_unavailable":
       return 503;
     default:

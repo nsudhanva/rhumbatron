@@ -48,16 +48,14 @@ function failureOf(error: unknown): Failure {
         message: "Another command runs in this session. Wait for it to end.",
       };
     }
-    if (error.reason === "sandbox_unavailable") {
-      return {
-        kind: "error",
-        message: "The Sandbox cannot run commands right now, so it ran nothing. Try again later.",
-      };
-    }
     if (error.status === 408 || error.status === 504) {
       return { kind: "timeout", message: "The command timed out after 120 s and was stopped." };
     }
-    return { kind: "error", message: `${error.message} (HTTP ${error.status})` };
+    // Any other refusal (sandbox_busy, sandbox_unavailable, ...) carries the server's own words.
+    return {
+      kind: "error",
+      message: `${error.message} (${error.reason ?? `HTTP ${error.status}`})`,
+    };
   }
   const message = error instanceof Error ? error.message : String(error);
   return /timed? ?out/i.test(message)

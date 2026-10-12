@@ -215,7 +215,7 @@ The owner or an admin (`can(role, "code.edit")`) opens an edit session on the Co
 | PUT | `/v1/code/sessions/:sessionId/file` | Body `{ path, content }`: creates or changes the file. Returns `changedFiles` and `expiresAt`. | 400 (path), 409 (a command runs), 410, 413 (over 256 KB, or more than 200 changed files), 415 (binary) |
 | DELETE | `/v1/code/sessions/:sessionId/file?path=` | Deletes the file. Same result as PUT. | 400, 404, 409, 410 |
 | POST | `/v1/code/sessions/:sessionId/rename` | Body `{ from, to }`. Same result as PUT. | 400, 404, 409 (target exists, a command runs), 410 |
-| POST | `/v1/code/sessions/:sessionId/exec` | Body `{ command (1 to 2,000 characters), cwd? }`. Returns `exitCode` (124 at the timeout), `stdout`, `stderr`, `durationMs`, `truncated`, `timedOut`, `changedFiles`, and `expiresAt`. | 400, 409 (a command runs), 410, 429 `sandbox_cap`, 503 `sandbox_unavailable` |
+| POST | `/v1/code/sessions/:sessionId/exec` | Body `{ command (1 to 2,000 characters), cwd? }`. Returns `exitCode` (124 at the timeout), `stdout`, `stderr`, `durationMs`, `truncated`, `timedOut`, `changedFiles`, and `expiresAt`. | 400, 409 (a command runs), 410, 429 `sandbox_cap`, 503 `sandbox_busy`, 503 `sandbox_unavailable` |
 | POST | `/v1/code/sessions/:sessionId/submit` | Body `{ message (1 to 200 characters), authorName? }`. `201` with `changeId`, `changeSetId`, `candidateIds`, and `status: "created"`; a repeat returns `200` with `status: "existing"`. The session ends. | 409 (`no_change`, `stale_base`, a command runs), 410 |
 | DELETE | `/v1/code/sessions/:sessionId` | `sessionId` and `status`. Ends the session and deletes the fork and the edits. A repeat is safe. | 404 |
 
@@ -224,6 +224,16 @@ Every refusal has `error.details.reason`, one of `CodeSessionRefusalReason` in `
 Path and content rules: a path is under the repository root, has no `..` part, and has no `.git` part at any depth. A file is text (no NUL byte, valid UTF-8) and at most 256 KB.
 
 Terminal rules: a command runs in the session checkout `/workspace/edit-<hex>` of the Project Sandbox, as an unprivileged user of the session, with no token or secret in its environment, and with the network policy of the Project Sandbox. The timeout is 120 s. Each output stream keeps its last 64 KB. After the command, every process of the session stops, and the files that the command changed become session edits. Each command reserves 480 s on the monthly Sandbox meter (`SANDBOX_MONTHLY_SECONDS`) and settles to the time it used plus a 120 s idle tail.
+
+Sandbox refusals of a command:
+
+| Reason | HTTP | Cause |
+|---|---|---|
+| `sandbox_cap` | 429 | The monthly Sandbox meter is used up. |
+| `sandbox_busy` | 503 | The Sandbox did not start (`ContainerUnavailableError`), or the readiness probe got no answer in 120 s. The account runs one Sandbox container at a time, and agents or Candidate checks of another Project can use it. The message is "The Sandbox is busy with work for another Project. Only one runs at a time. Try again in a few minutes." |
+| `sandbox_unavailable` | 503 | The Sandbox cannot run commands as an unprivileged user, or the command failed in the Sandbox. |
+
+The first command of a session probes the checkout with the 120 s setup timeout, because it can cold-start the container. A failed probe writes `code_session.probe_failed` to Workers Logs with the session, the Project, and the error. The Code page terminal shows the message of the server for each refusal.
 
 Expiry: a session ends 10 minutes after its last request (`CODE_SESSION_IDLE_MS`) or 2 hours after it opened (`CODE_SESSION_MAX_MS`). Each request checks the limits first. The daily maintenance sweep ends the overdue sessions of all Projects. The end deletes the fork and the edits that are not submitted.
 

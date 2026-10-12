@@ -477,6 +477,15 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       let reviews = 0;
       let askedInCompare = false;
       excluded.clear();
+      // Diagnostic: which earlier requests this one compares with (ids only).
+      console.log(
+        JSON.stringify({
+          event: "request.compare_set",
+          changeId,
+          order: registration.order,
+          earlier: registration.earlier.map((e) => e.changeId),
+        }),
+      );
       for (const earlier of registration.earlier) {
         let scope = await step.do(`read scope ${earlier.changeId}${tag}`, () =>
           readRequestScope(this.env, ctx.projectId, earlier.changeId),
@@ -487,12 +496,32 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
             readRequestScope(this.env, ctx.projectId, earlier.changeId),
           );
         }
-        if (!scope) continue;
+        if (!scope) {
+          console.log(
+            JSON.stringify({
+              event: "request.compare_skipped",
+              changeId,
+              earlier: earlier.changeId,
+              why: "released",
+            }),
+          );
+          continue;
+        }
         const known = scope;
         const a = await step.do(`load request ${earlier.changeId}${tag}`, () =>
           loadRequest(this.env, earlier.changeId, known.criteria, known.resources),
         );
-        if (!a || ["cancelled", "not_selected", "failed", "completed"].includes(a.status)) continue;
+        if (!a || ["cancelled", "not_selected", "failed", "completed"].includes(a.status)) {
+          console.log(
+            JSON.stringify({
+              event: "request.compare_skipped",
+              changeId,
+              earlier: earlier.changeId,
+              why: a ? a.status : "missing",
+            }),
+          );
+          continue;
+        }
         a.scoped = scope.scoped;
         const overlaps = requestsOverlap(a, registrant);
         const affordable = spent < loaded.budgetUsd;

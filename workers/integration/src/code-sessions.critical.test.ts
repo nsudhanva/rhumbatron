@@ -3,12 +3,13 @@
 // session refuses the request, kills its processes in the awake Sandbox, and deletes its fork.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const box = vi.hoisted(() => ({ commands: [] as string[] }));
+const box = vi.hoisted(() => ({ commands: [] as string[], fail: null as Error | null }));
 
 vi.mock("@cloudflare/sandbox", () => ({
   getSandbox: () => ({
     async exec(command: string) {
       box.commands.push(command);
+      if (box.fail) throw box.fail;
       return { exitCode: 0, stdout: "", stderr: "" };
     },
   }),
@@ -89,6 +90,7 @@ function fakeEnv(options: { atCap?: boolean }) {
 
 beforeEach(() => {
   box.commands.length = 0;
+  box.fail = null;
 });
 
 describe("terminal commands and the Sandbox meter", () => {
@@ -106,6 +108,25 @@ describe("terminal commands and the Sandbox meter", () => {
     expect(reserve?.args).toEqual([expect.stringMatching(/^\d{4}-\d{2}$/), 480, 480, 480, 72000]);
     expect(fake.runs.some((r) => r.sql.includes("SET exec_started_at = NULL"))).toBe(true);
     expect(fake.runs.some((r) => r.sql.includes("code_session_commands"))).toBe(false);
+  });
+
+  it("refuses as sandbox_busy when the one-container cap holds the Sandbox, and releases the lock", async () => {
+    const fake = fakeEnv({});
+    const error = new Error("Maximum number of running container instances exceeded");
+    error.name = "ContainerUnavailableError";
+    box.fail = error;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const outcome = await execCodeSessionCommand(fake.env, {
+      sessionId: SESSION,
+      userId: "usr_owner",
+      command: "ls",
+    });
+    expect(outcome).toMatchObject({ status: "refused", reason: "sandbox_busy" });
+    expect(
+      warn.mock.calls.some(([line]) => String(line).includes("code_session.probe_failed")),
+    ).toBe(true);
+    expect(fake.runs.some((r) => r.sql.includes("SET exec_started_at = NULL"))).toBe(true);
+    warn.mockRestore();
   });
 
   it("refuses a cwd outside the checkout before any lock or reservation", async () => {
