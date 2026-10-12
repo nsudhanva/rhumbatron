@@ -5,19 +5,10 @@
  * real repository. ProjectRootDO.assignSource enforces the same rule again at the write.
  */
 
-/** What the first commit holds: an empty repository, or the Acme Shop fixture (internal scripts). */
-export type SourceSeed = "blank" | "acme-shop";
-
 type CanonicalLike = { artifactRef: string; generation: number } | null;
 
 export function needsSourceSeed(canonical: CanonicalLike): boolean {
   return !!canonical && canonical.artifactRef === "unassigned" && canonical.generation === 0;
-}
-
-/** The seed a `project.provision` payload asks for. Old commands named it `template`. */
-export function seedOf(payload: unknown): SourceSeed {
-  const p = (payload ?? {}) as { fixture?: unknown; template?: unknown };
-  return p.fixture === "acme-shop" || p.template === "acme-shop" ? "acme-shop" : "blank";
 }
 
 export type SeedOutcome = "seeded" | "has_source" | "missing";

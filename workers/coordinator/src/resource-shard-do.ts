@@ -104,7 +104,7 @@ type ClaimRow = {
 /** Finished claim rows stay this long so a repeated release stays a no-op success. */
 const TERMINAL_RETENTION_MS = 24 * 60 * 60 * 1000;
 
-/** Contention rows feed conflict detection of a running Change; a week covers any demo Change. */
+/** Contention rows feed conflict detection of a running Change; a week covers a typical Change. */
 const CONTENTION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 type ContentionRow = {

@@ -10,7 +10,7 @@ import { canAccessProject, ensureIdentity } from "./identity.ts";
 /**
  * Product Graph read model. Deterministic, no model call:
  *
- * - Source areas and imports: the stored Product Graph of the canonical tree (P7-04), written by
+ * - Source areas and imports: the stored Product Graph of the canonical tree, written by
  *   rhumbatron-indexer to R2 `index/<project>/<tree>/product-graph.json` and pointed at by D1
  *   `project_indexes`. When the canonical tree has no index yet, the newest indexed tree is used
  *   and marked not current. With no index, the graph has no source areas.

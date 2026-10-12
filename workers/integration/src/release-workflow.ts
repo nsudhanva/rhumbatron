@@ -243,7 +243,7 @@ export class ReleaseWorkflow extends WorkflowEntrypoint<Env, ReleaseParams> {
       });
     }
 
-    // P16-12: the old version goes live again, as a new recorded transition. Canonical keeps the
+    // The old version goes live again, as a new recorded transition. Canonical keeps the
     // promoted generation; recovery is the next promotion or a rollback.
     const restored = await step.do(
       "restore previous version",

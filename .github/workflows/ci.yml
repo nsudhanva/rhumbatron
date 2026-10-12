@@ -62,9 +62,6 @@ jobs:
       - name: Binding drift (wrangler.jsonc against Terraform)
         run: bun run check:bindings
 
-      - name: Demo fixtures are current
-        run: bun run check:fixtures
-
       - name: Dependency hygiene (knip, sherif)
         run: bun run check:deps
 

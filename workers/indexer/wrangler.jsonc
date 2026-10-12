@@ -37,7 +37,7 @@
   },
   // Read-only canonical source (ADR 0010): one read token per build.
   "artifacts": [{ "binding": "ARTIFACTS", "namespace": "rhumbatron-projects-local" }],
-  // Semantic memory (P7-05): 384 dims, cosine, namespace = Project ID (ADR 0003).
+  // Semantic memory: 384 dims, cosine, namespace = Project ID (ADR 0003).
   "vectorize": [{ "binding": "MEMORY", "index_name": "rhumbatron-memory-local" }],
   // Embeddings only (@cf/baai/bge-small-en-v1.5), capped per UTC day in code.
   "ai": { "binding": "AI" },

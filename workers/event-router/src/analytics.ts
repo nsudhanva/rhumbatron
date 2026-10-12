@@ -1,9 +1,9 @@
 import type { EventEnvelope } from "@rhumbatron/protocol";
 
 /**
- * Analytics projector (HOM-202). The `analytics-projector` K2
- * subscription turns lifecycle Events into Workers Analytics Engine data points. Deterministic: a
- * fixed table maps Event types to Analytics Engine metric names; every other Event writes nothing.
+ * Analytics projector. The `analytics-projector` K2 subscription turns lifecycle Events into
+ * Workers Analytics Engine data points. Deterministic: a fixed table maps Event types to Analytics
+ * Engine metric names; every other Event writes nothing.
  *
  * Points go to their own dataset (binding EVENT_METRICS, `rhumbatron_event_metrics_<env>`), so they
  * never double-count the points the agents and indexer Workers write at the source (METRICS).
@@ -15,7 +15,7 @@ import type { EventEnvelope } from "@rhumbatron/protocol";
  *   double1 1 (count), double2 Canonical Generation
  *
  * Volume: one point per mapped Event. A Change emits about 50 to 150 Events, and about a third of
- * them map, so a busy demo day of 20 Changes writes about 1,000 points, 1 percent of the 100,000
+ * them map, so a busy day of 20 Changes writes about 1,000 points, 1 percent of the 100,000
  * free daily data points.
  */
 

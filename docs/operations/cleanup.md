@@ -7,8 +7,8 @@ This runbook covers smoke Project cleanup, Project deletion, the daily fork swee
 `scripts/smoke.ts` creates temporary Projects on prod. `scripts/cleanup-projects.ts` deletes them through `DELETE /v1/projects/:id` on `https://api.rhumbatron.com`, as the Clerk smoke user.
 
 - The script selects the active Projects of the smoke user with a slug that matches `/^(smoke|sandbox)-\d+$/`.
-- It keeps every other Project, for example `acme-shop-demo`.
-- `--all` selects every active Project of the smoke user, fixtures included.
+- It keeps every other Project, for example a demo Project.
+- `--all` selects every active Project of the smoke user.
 - `scripts/e2e.ts` and `scripts/journeys.ts` delete their own Projects at the end of each run.
 
 Set `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` for the prod Clerk instance (see the root `README.md`). Then:

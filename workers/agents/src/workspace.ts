@@ -4,13 +4,9 @@ import {
   changeSetPatchKey,
   patchCommand,
   patchMetadata,
-  unifiedFilePatch,
   WorkspaceManifest,
   workspaceManifestKey,
 } from "@rhumbatron/protocol";
-import git from "isomorphic-git";
-import http from "isomorphic-git/http/web";
-import { createFsFromVolume, Volume } from "memfs";
 import {
   admitSandbox,
   type LimitKey,
@@ -21,32 +17,8 @@ import {
 import { type StackSource, stackedOn } from "./stack.ts";
 
 /**
- * Task Workspace:
- *
- * When AGENT_FILES_IN_WORKER is "true" (opt-in; off by default):
- * - Keeps the agent's working tree in the AgentDO (DO SQLite or memory storage), plus a dirty set.
- * - list_files, read_file, write_file, and delete_file work with NO Sandbox container time.
- * - On publish, commits dirty files to the Artifacts fork with isomorphic-git in the Worker.
- * - Stacked tasks start from the merged ChangeSet commit, evaluated via isomorphic-git.
- * - run_command starts a Sandbox container lazily only when called, syncing dirty files before
- *   execution and reading back changed files afterwards. If run_command is never called, no
- *   container starts.
- *
- * Otherwise (the default):
- * - All file tools and commands run on a checkout in the Sandbox container.
+ * Task Workspace: all file tools and commands run on a checkout in the Sandbox container.
  */
-
-const DIR = "/repo";
-const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-
-type MemFs = Parameters<typeof git.init>[0]["fs"] & {
-  promises: {
-    readFile(p: string, o?: string): Promise<string | Uint8Array>;
-    writeFile(p: string, c: string | Uint8Array): Promise<void>;
-    unlink(p: string): Promise<void>;
-    mkdir(p: string, o?: object): Promise<void>;
-  };
-};
 
 /**
  * Hard stop at the monthly Sandbox hours, counted conservatively. ADR 0017 sets prod at 20
@@ -166,10 +138,6 @@ export type WorkspaceRef = {
   stackTime?: number;
   /** Also retained in AgentDO state, so a failed R2 open write can be retried on publish/close. */
   manifest?: WorkspaceManifest;
-  /** Present when the agent's working tree is maintained in the Worker without an initial Sandbox container. */
-  filesInWorker?: boolean;
-  /** True when the Sandbox container has been started lazily for run_command. */
-  sandboxStarted?: boolean;
 };
 
 export type Published = {
@@ -193,157 +161,10 @@ export type WorkspaceEnv = {
   DB: D1Database;
   EVIDENCE: R2Bucket;
   SANDBOX_MONTHLY_SECONDS?: string;
-  AGENT_FILES_IN_WORKER?: string;
-  HTTP?: typeof http;
 };
 
 /* ------------------------------------------------------------------------------------------ */
-/* Working Tree Storage (AgentDO SQLite or in-memory)                                         */
-/* ------------------------------------------------------------------------------------------ */
-
-export type TreeEntry = {
-  content: string | null;
-  deleted: boolean;
-  dirty: boolean;
-};
-
-export interface WorkspaceTree {
-  get(path: string): TreeEntry | undefined;
-  set(path: string, entry: TreeEntry): void;
-  delete(path: string): void;
-  list(): string[];
-  dirty(): { path: string; content: string | null; deleted: boolean }[];
-  clear(): void;
-}
-
-export class SqlWorkspaceTree implements WorkspaceTree {
-  constructor(
-    private readonly sql: SqlStorage,
-    private readonly runId: string,
-  ) {}
-
-  get(path: string): TreeEntry | undefined {
-    const row = this.sql
-      .exec<{ content: string | null; deleted: number; dirty: number }>(
-        "SELECT content, deleted, dirty FROM run_workspace_tree WHERE run_id = ? AND path = ?",
-        this.runId,
-        path,
-      )
-      .toArray()[0];
-    if (!row) return undefined;
-    return {
-      content: row.content,
-      deleted: row.deleted === 1,
-      dirty: row.dirty === 1,
-    };
-  }
-
-  set(path: string, entry: TreeEntry): void {
-    this.sql.exec(
-      `INSERT INTO run_workspace_tree (run_id, path, content, deleted, dirty)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(run_id, path) DO UPDATE SET
-         content = excluded.content,
-         deleted = excluded.deleted,
-         dirty = excluded.dirty`,
-      this.runId,
-      path,
-      entry.content,
-      entry.deleted ? 1 : 0,
-      entry.dirty ? 1 : 0,
-    );
-  }
-
-  delete(path: string): void {
-    this.sql.exec(
-      `INSERT INTO run_workspace_tree (run_id, path, content, deleted, dirty)
-       VALUES (?, ?, NULL, 1, 1)
-       ON CONFLICT(run_id, path) DO UPDATE SET
-         content = NULL,
-         deleted = 1,
-         dirty = 1`,
-      this.runId,
-      path,
-    );
-  }
-
-  list(): string[] {
-    return this.sql
-      .exec<{ path: string }>(
-        "SELECT path FROM run_workspace_tree WHERE run_id = ? AND deleted = 0 ORDER BY path",
-        this.runId,
-      )
-      .toArray()
-      .map((r) => r.path);
-  }
-
-  dirty(): { path: string; content: string | null; deleted: boolean }[] {
-    return this.sql
-      .exec<{ path: string; content: string | null; deleted: number }>(
-        "SELECT path, content, deleted FROM run_workspace_tree WHERE run_id = ? AND dirty = 1 ORDER BY path",
-        this.runId,
-      )
-      .toArray()
-      .map((r) => ({
-        path: r.path,
-        content: r.content,
-        deleted: r.deleted === 1,
-      }));
-  }
-
-  clear(): void {
-    this.sql.exec("DELETE FROM run_workspace_tree WHERE run_id = ?", this.runId);
-  }
-}
-
-export class MemoryWorkspaceTree implements WorkspaceTree {
-  private readonly entries = new Map<string, TreeEntry>();
-
-  get(path: string): TreeEntry | undefined {
-    return this.entries.get(path);
-  }
-
-  set(path: string, entry: TreeEntry): void {
-    this.entries.set(path, entry);
-  }
-
-  delete(path: string): void {
-    this.entries.set(path, { content: null, deleted: true, dirty: true });
-  }
-
-  list(): string[] {
-    return [...this.entries.entries()]
-      .filter(([_, e]) => !e.deleted)
-      .map(([p]) => p)
-      .sort();
-  }
-
-  dirty(): { path: string; content: string | null; deleted: boolean }[] {
-    return [...this.entries.entries()]
-      .filter(([_, e]) => e.dirty)
-      .map(([path, e]) => ({ path, content: e.content, deleted: e.deleted }))
-      .sort((a, b) => a.path.localeCompare(b.path));
-  }
-
-  clear(): void {
-    this.entries.clear();
-  }
-}
-
-const memoryTrees = new Map<string, MemoryWorkspaceTree>();
-
-export function getWorkspaceTree(sql: SqlStorage | undefined, runId: string): WorkspaceTree {
-  if (sql) return new SqlWorkspaceTree(sql, runId);
-  let tree = memoryTrees.get(runId);
-  if (!tree) {
-    tree = new MemoryWorkspaceTree();
-    memoryTrees.set(runId, tree);
-  }
-  return tree;
-}
-
-/* ------------------------------------------------------------------------------------------ */
-/* Path Validation and Output Formatting                                                      */
+/* Path Validation                                                                            */
 /* ------------------------------------------------------------------------------------------ */
 
 export const safePath = (path: string): string => {
@@ -356,23 +177,6 @@ export const safePath = (path: string): string => {
   }
   return clean;
 };
-
-function formatDiffStat(changes: { path: string; additions: number; deletions: number }[]): string {
-  if (changes.length === 0) return "";
-  let additions = 0;
-  let deletions = 0;
-  const lines = changes.map((c) => {
-    additions += c.additions;
-    deletions += c.deletions;
-    const total = c.additions + c.deletions;
-    const plus = "+".repeat(Math.min(c.additions, 40));
-    const minus = "-".repeat(Math.min(c.deletions, 40));
-    return ` ${c.path} | ${total} ${plus}${minus}`;
-  });
-  const fileWord = changes.length === 1 ? "1 file" : `${changes.length} files`;
-  lines.push(` ${fileWord} changed, ${additions} insertions(+), ${deletions} deletions(-)`);
-  return lines.join("\n");
-}
 
 /* ------------------------------------------------------------------------------------------ */
 /* Sandbox and Git Helpers                                                                    */
@@ -519,7 +323,6 @@ async function readAuth(env: WorkspaceEnv, name: string) {
   return {
     remote: info.remote,
     header: { GIT_AUTH: `Authorization: Bearer ${secret}` },
-    onAuth: () => ({ username: "x", password: secret }),
     revoke: async () => {
       using again = await env.ARTIFACTS.get(name);
       await again.revokeToken(token.id).catch(() => false);
@@ -539,209 +342,13 @@ export async function openWorkspace(
     runId: string;
     baseCommit: string;
     stack?: readonly StackSource[];
-    sql?: SqlStorage;
   },
 ): Promise<WorkspaceRef | WorkspaceRefused> {
-  // Off by default: the Worker-side path is not proven on prod. Opt in with
-  // AGENT_FILES_IN_WORKER = "true".
-  const filesInWorker = env.AGENT_FILES_IN_WORKER === "true";
   const fork = `ws-${input.runId.slice(4)}`;
   const dir = `/workspace/${input.runId.slice(-24)}`;
   const stack = input.stack ?? [];
   const stackTime = Math.floor(Date.now() / 1000);
 
-  if (filesInWorker) {
-    // Worker-side workspace: no Sandbox admission, no reservation, no container starts.
-    let remoteHost = "artifacts.example";
-    let startCommit = input.baseCommit;
-
-    const undo = async () => {
-      await env.ARTIFACTS.delete?.(fork)?.catch(() => false);
-    };
-
-    try {
-      using canonical = await env.ARTIFACTS.get(input.projectId);
-      try {
-        await canonical.fork(fork, {
-          description: `Workspace for ${input.runId}`,
-          defaultBranchOnly: true,
-        });
-      } catch {
-        using existing = await env.ARTIFACTS.get(fork);
-        await existing.info();
-      }
-
-      using repo = await env.ARTIFACTS.get(fork);
-      const info = await repo.info();
-      if (info.remote) {
-        try {
-          remoteHost = new URL(info.remote).hostname;
-        } catch {}
-      }
-      const token = await repo.createToken("write", 600);
-      const secret = token.plaintext.split("?expires=")[0] ?? token.plaintext;
-      const onAuth = () => ({ username: "x", password: secret });
-      const gitHttp = env.HTTP ?? http;
-
-      try {
-        const fs = createFsFromVolume(new Volume()) as unknown as MemFs;
-        await git.init({ fs, dir: DIR, defaultBranch: "main" });
-        await git.addRemote({ fs, dir: DIR, remote: "origin", url: info.remote, force: true });
-        await git.fetch({
-          fs,
-          http: gitHttp,
-          dir: DIR,
-          remote: "origin",
-          url: info.remote,
-          ref: "main",
-          singleBranch: true,
-          tags: false,
-          onAuth,
-        });
-        const head = await git.resolveRef({ fs, dir: DIR, ref: "refs/remotes/origin/main" });
-        await git.writeRef({ fs, dir: DIR, ref: "refs/heads/main", value: head, force: true });
-        await git.checkout({ fs, dir: DIR, ref: "main", force: true });
-
-        if (stack.length > 0) {
-          const date = {
-            name: "Rhumbatron",
-            email: "bot@rhumbatron.com",
-            timestamp: stackTime,
-            timezoneOffset: 0,
-          };
-          for (const source of stack) {
-            const theirs = await readAuth(env, source.fork);
-            try {
-              await git.addRemote({
-                fs,
-                dir: DIR,
-                remote: source.changeSetId,
-                url: theirs.remote,
-                force: true,
-              });
-              await git.fetch({
-                fs,
-                http: gitHttp,
-                dir: DIR,
-                remote: source.changeSetId,
-                url: theirs.remote,
-                ref: "main",
-                singleBranch: true,
-                tags: false,
-                onAuth: theirs.onAuth,
-              });
-            } finally {
-              await theirs.revoke();
-            }
-            try {
-              await git.merge({
-                fs,
-                dir: DIR,
-                ours: "main",
-                theirs: source.commit,
-                author: date,
-                committer: date,
-                message: `Stack ${source.changeSetId}`,
-              });
-            } catch (err: unknown) {
-              await undo();
-              const errObj = err as {
-                code?: string;
-                name?: string;
-                data?: { filepaths?: string[] };
-              };
-              if (errObj?.code === "MergeConflictError" || errObj?.name === "MergeConflictError") {
-                const conflictedFiles = errObj.data?.filepaths ?? [];
-                const ids = stack.map((s) => s.changeSetId);
-                const before = ids.slice(0, ids.indexOf(source.changeSetId));
-                return {
-                  refused: "dependency_merge_conflict",
-                  changeSetId: source.changeSetId,
-                  files: conflictedFiles,
-                  message: `dependency_merge_conflict: ${source.changeSetId} does not merge with ${before.join(", ") || "the canonical base"} (${conflictedFiles.join(", ") || "conflicts"}). The dependencies of this Task conflict, so it cannot start from their work.`,
-                };
-              }
-              throw err;
-            }
-          }
-          const mergedHead = await git.resolveRef({ fs, dir: DIR, ref: "refs/heads/main" });
-          const pushed = await git.push({
-            fs,
-            http: gitHttp,
-            dir: DIR,
-            url: info.remote,
-            ref: "main",
-            onAuth,
-          });
-          if (!pushed.ok)
-            throw new Error(`push rejected: ${JSON.stringify(pushed.refs).slice(0, 200)}`);
-          startCommit = mergedHead;
-        } else {
-          startCommit = head;
-        }
-
-        const tree = getWorkspaceTree(input.sql, input.runId);
-        tree.clear();
-        const fileList = await git.listFiles({ fs, dir: DIR, ref: "main" });
-        for (const filepath of fileList) {
-          try {
-            const { blob } = await git.readBlob({ fs, dir: DIR, oid: startCommit, filepath });
-            const isBinary = blob.includes(0);
-            const content = isBinary ? null : decoder.decode(blob);
-            tree.set(filepath, { content, deleted: false, dirty: false });
-          } catch {}
-        }
-      } finally {
-        await repo.revokeToken(token.id).catch(() => false);
-      }
-    } catch (error) {
-      await undo();
-      throw error;
-    }
-
-    const ws: WorkspaceRef = {
-      projectId: input.projectId,
-      runId: input.runId,
-      fork,
-      dir,
-      baseCommit: input.baseCommit,
-      openedAt: Date.now(),
-      stack: [...stack],
-      startCommit,
-      stackTime,
-      filesInWorker: true,
-      sandboxStarted: false,
-    };
-
-    if (input.change) {
-      ws.manifest = {
-        manifestVersion: 1,
-        projectId: ws.projectId,
-        changeId: input.change.changeId,
-        taskId: input.change.taskId,
-        runId: ws.runId,
-        fork: ws.fork,
-        remoteHost,
-        baseCommit: ws.baseCommit,
-        startCommit,
-        stackedOn: stackedOn(stack),
-        sandbox: {
-          id: sandboxId(ws.projectId),
-          dir: ws.dir,
-          openedAt: new Date(ws.openedAt).toISOString(),
-          sleepAfter: SLEEP_TAIL_SECONDS,
-        },
-        toolsAllowed: [...WORKSPACE_TOOLS],
-        commandAllowlistVersion: COMMAND_ALLOWLIST_VERSION,
-        files: [],
-        status: "open",
-      };
-      await writeManifest(env, ws);
-    }
-    return ws;
-  }
-
-  // Fallback: Sandbox path when AGENT_FILES_IN_WORKER is "false"
   const now = new Date().toISOString();
   const change = input.change;
   if (
@@ -810,8 +417,6 @@ export async function openWorkspace(
     stack: [...stack],
     startCommit: prepared.startCommit,
     stackTime,
-    filesInWorker: false,
-    sandboxStarted: true,
   };
   if (change) {
     ws.manifest = {
@@ -878,7 +483,6 @@ export async function runCommand(
   env: WorkspaceEnv,
   ws: WorkspaceRef,
   command: string,
-  tree?: WorkspaceTree,
 ): Promise<string> {
   const cmd = command.trim();
   const notAllowed = `Not allowed: ${cmd}\nAllowed: ${ALLOWED_TEXT}.`;
@@ -886,127 +490,6 @@ export async function runCommand(
   // `bun run <name>` with another name passes only when package.json defines it (checked below).
   if (script === null && !commandAllowed(cmd)) return notAllowed;
 
-  if (ws.filesInWorker) {
-    const activeTree = tree ?? getWorkspaceTree(undefined, ws.runId);
-    const pkg = activeTree.get("package.json");
-    if (!commandAllowed(cmd, packageScripts(pkg && !pkg.deleted ? pkg.content : null))) {
-      return notAllowed;
-    }
-    const sandbox = sandboxFor(env, ws.projectId);
-
-    // Lazily start the Sandbox container only when run_command is called:
-    if (!ws.sandboxStarted) {
-      const now = new Date().toISOString();
-      if (ws.manifest) {
-        if (
-          !(await admitSandbox(env.DB, {
-            runId: ws.runId,
-            changeId: ws.manifest.changeId,
-            now,
-          }))
-        ) {
-          await noteSandboxRefused(env.DB, ws.manifest.taskId, now);
-          return `${sandboxLimitReason()} Declare your Intent without code changes, or call fail_task.`;
-        }
-      }
-      if (!(await reserveSeconds(env, OPEN_RESERVATION_SECONDS))) {
-        await releaseSandbox(env.DB, ws.runId, now);
-        return "The monthly Sandbox budget is used up. Declare your Intent without code changes.";
-      }
-
-      const own = await readAuth(env, ws.fork);
-      try {
-        await sandbox.exec(`rm -rf ${ws.dir} && mkdir -p ${ws.dir}`);
-        const clone = await run(
-          sandbox,
-          `git -c "http.extraHeader=$GIT_AUTH" clone ${own.remote} .`,
-          ws.dir,
-          own.header,
-        );
-        if (!clone.ok) throw new Error(`clone failed (${clone.exitCode})`);
-      } finally {
-        await own.revoke();
-      }
-      await run(
-        sandbox,
-        "git config user.name Rhumbatron && git config user.email bot@rhumbatron.com",
-        ws.dir,
-      );
-      await run(sandbox, "bun install", ws.dir);
-      ws.sandboxStarted = true;
-    } else {
-      // Reconnect / restore if lost
-      const head = await run(sandbox, "git rev-parse HEAD", ws.dir).catch(() => null);
-      if (!head?.ok) {
-        const own = await readAuth(env, ws.fork);
-        try {
-          await sandbox.exec(`rm -rf ${ws.dir} && mkdir -p ${ws.dir}`);
-          const clone = await run(
-            sandbox,
-            `git -c "http.extraHeader=$GIT_AUTH" clone ${own.remote} .`,
-            ws.dir,
-            own.header,
-          );
-          if (!clone.ok) throw new Error(`clone failed (${clone.exitCode})`);
-        } finally {
-          await own.revoke();
-        }
-        await run(
-          sandbox,
-          "git config user.name Rhumbatron && git config user.email bot@rhumbatron.com",
-          ws.dir,
-        );
-        await run(sandbox, "bun install", ws.dir);
-      }
-    }
-
-    // Sync dirty files into Sandbox checkout before the command:
-    const dirtyFiles = activeTree.dirty();
-    for (const file of dirtyFiles) {
-      const clean = safePath(file.path);
-      if (file.deleted) {
-        await sandbox.exec(`rm -f ${ws.dir}/${clean}`);
-      } else if (file.content !== null) {
-        const parent = clean.includes("/") ? clean.slice(0, clean.lastIndexOf("/")) : "";
-        if (parent) await sandbox.exec(`mkdir -p ${ws.dir}/${parent}`);
-        await sandbox.writeFile(`${ws.dir}/${clean}`, file.content);
-      }
-    }
-
-    // Execute the command:
-    const before = isBuildCommand(cmd) ? await statusPaths(sandbox, ws.dir) : null;
-    const result = await run(sandbox, cmd, ws.dir);
-    const discarded = before ? await discardOutputs(sandbox, ws.dir, before) : [];
-
-    // After command runs, read back any files the command changed:
-    const statusResult = await run(sandbox, "git status --porcelain", ws.dir);
-    const lines = statusResult.output
-      .split("\n")
-      .map((l) => l.trimEnd())
-      .filter(Boolean);
-    for (const line of lines) {
-      if (line.length < 4) continue;
-      const status = line.slice(0, 2);
-      const filePath = line.slice(3).trim();
-      if (!filePath) continue;
-      const targetPath = filePath.includes(" -> ")
-        ? (filePath.split(" -> ")[1]?.trim() ?? filePath)
-        : filePath;
-      const clean = safePath(targetPath);
-      if (status.includes("D")) {
-        activeTree.delete(clean);
-      } else {
-        const readFileResult = await sandbox.readFile(`${ws.dir}/${clean}`).catch(() => null);
-        const content =
-          readFileResult && "content" in readFileResult ? String(readFileResult.content) : "";
-        activeTree.set(clean, { content, deleted: false, dirty: true });
-      }
-    }
-
-    return `exit ${result.exitCode}\n${result.output}${discardedNote(discarded)}`;
-  }
-
-  // Fallback: Sandbox path
   const restored = await ensureCheckout(env, ws);
   const sandbox = sandboxFor(env, ws.projectId);
   if (script !== null && !FIXED_SCRIPTS.has(script)) {
@@ -1068,14 +551,8 @@ export async function writeWorkspaceFile(
   ws: WorkspaceRef,
   path: string,
   content: string,
-  tree?: WorkspaceTree,
 ): Promise<string> {
   const clean = safePath(path);
-  if (ws.filesInWorker) {
-    const activeTree = tree ?? getWorkspaceTree(undefined, ws.runId);
-    activeTree.set(clean, { content, deleted: false, dirty: true });
-    return `wrote ${clean} (${content.length} chars)`;
-  }
   const restored = await ensureCheckout(env, ws);
   const sandbox = sandboxFor(env, ws.projectId);
   const parent = clean.includes("/") ? clean.slice(0, clean.lastIndexOf("/")) : "";
@@ -1088,20 +565,8 @@ export async function readWorkspaceFile(
   env: WorkspaceEnv,
   ws: WorkspaceRef,
   path: string,
-  tree?: WorkspaceTree,
 ): Promise<string> {
   const clean = safePath(path);
-  if (ws.filesInWorker) {
-    const activeTree = tree ?? getWorkspaceTree(undefined, ws.runId);
-    const entry = activeTree.get(clean);
-    if (!entry || entry.deleted) {
-      throw new Error(`No such file: ${clean}`);
-    }
-    if (entry.content === null) {
-      throw new Error("This file is binary.");
-    }
-    return clip(entry.content);
-  }
   const restored = await ensureCheckout(env, ws);
   const file = await sandboxFor(env, ws.projectId).readFile(`${ws.dir}/${clean}`);
   const content = "content" in file ? String(file.content) : "";
@@ -1112,18 +577,8 @@ export async function deleteWorkspaceFile(
   env: WorkspaceEnv,
   ws: WorkspaceRef,
   path: string,
-  tree?: WorkspaceTree,
 ): Promise<string> {
   const clean = safePath(path);
-  if (ws.filesInWorker) {
-    const activeTree = tree ?? getWorkspaceTree(undefined, ws.runId);
-    const entry = activeTree.get(clean);
-    if (!entry || entry.deleted) {
-      throw new Error(`No such file: ${clean}`);
-    }
-    activeTree.delete(clean);
-    return `deleted ${clean}`;
-  }
   const restored = await ensureCheckout(env, ws);
   const sandbox = sandboxFor(env, ws.projectId);
   await sandbox.exec(`rm -f ${ws.dir}/${clean}`);
@@ -1134,15 +589,7 @@ export async function listWorkspaceFiles(
   env: WorkspaceEnv,
   ws: WorkspaceRef,
   prefix?: string,
-  tree?: WorkspaceTree,
 ): Promise<string> {
-  if (ws.filesInWorker) {
-    const activeTree = tree ?? getWorkspaceTree(undefined, ws.runId);
-    const all = activeTree.list();
-    const cleanPrefix = prefix ? prefix.replace(/^\.?\//, "") : "";
-    const files = cleanPrefix ? all.filter((f) => f.startsWith(cleanPrefix)) : all;
-    return files.join("\n") || "No files match.";
-  }
   const sandbox = sandboxFor(env, ws.projectId);
   const out = await run(sandbox, "git ls-files", ws.dir);
   const files = out.output.trim().split("\n").filter(Boolean);
@@ -1152,7 +599,7 @@ export async function listWorkspaceFiles(
 }
 
 /**
- * Stores the ChangeSet's own `git diff` for the Files changed view (P16-17).
+ * Stores the ChangeSet's own `git diff` for the Files changed view.
  */
 async function storePatch(
   env: WorkspaceEnv,
@@ -1188,201 +635,7 @@ export async function publishWorkspace(
   env: WorkspaceEnv,
   ws: WorkspaceRef,
   message: string,
-  tree?: WorkspaceTree,
 ): Promise<Published | null> {
-  if (ws.filesInWorker) {
-    const activeTree = tree ?? getWorkspaceTree(undefined, ws.runId);
-    const dirtyFiles = activeTree.dirty();
-    if (dirtyFiles.length === 0) return null;
-
-    using repo = await env.ARTIFACTS.get(ws.fork);
-    const info = await repo.info();
-    const token = await repo.createToken("write", 600);
-    const secret = token.plaintext.split("?expires=")[0] ?? token.plaintext;
-    const onAuth = () => ({ username: "x", password: secret });
-    const gitHttp = env.HTTP ?? http;
-
-    try {
-      const fs = createFsFromVolume(new Volume()) as unknown as MemFs;
-      await git.init({ fs, dir: DIR, defaultBranch: "main" });
-      await git.addRemote({ fs, dir: DIR, remote: "origin", url: info.remote, force: true });
-      await git.fetch({
-        fs,
-        http: gitHttp,
-        dir: DIR,
-        remote: "origin",
-        url: info.remote,
-        ref: "main",
-        singleBranch: true,
-        tags: false,
-        onAuth,
-      });
-      const head = await git.resolveRef({ fs, dir: DIR, ref: "refs/remotes/origin/main" });
-      await git.writeRef({ fs, dir: DIR, ref: "refs/heads/main", value: head, force: true });
-      await git.checkout({ fs, dir: DIR, ref: "main", force: true });
-
-      const diffChanges: {
-        path: string;
-        before: string;
-        after: string;
-        oldBlob?: string;
-        newBlob?: string;
-        additions: number;
-        deletions: number;
-      }[] = [];
-
-      for (const file of dirtyFiles) {
-        let before = "";
-        let oldBlob: string | undefined;
-        try {
-          const read = await git.readBlob({ fs, dir: DIR, oid: head, filepath: file.path });
-          oldBlob = read.oid;
-          if (!read.blob.includes(0)) {
-            before = decoder.decode(read.blob);
-          }
-        } catch {
-          // New file
-        }
-
-        if (file.deleted) {
-          await fs.promises.unlink(`${DIR}/${file.path}`).catch(() => {});
-          await git.remove({ fs, dir: DIR, filepath: file.path });
-          const diff = unifiedFilePatch({
-            path: file.path,
-            before,
-            after: "",
-            ...(oldBlob ? { oldBlob } : {}),
-          });
-          diffChanges.push({
-            path: file.path,
-            before,
-            after: "",
-            ...(oldBlob ? { oldBlob } : {}),
-            additions: diff.additions,
-            deletions: diff.deletions,
-          });
-        } else {
-          const content = file.content ?? "";
-          const full = `${DIR}/${file.path}`;
-          const parent = file.path.includes("/")
-            ? file.path.slice(0, file.path.lastIndexOf("/"))
-            : "";
-          if (parent) await fs.promises.mkdir(`${DIR}/${parent}`, { recursive: true });
-          await fs.promises.writeFile(full, content);
-          await git.add({ fs, dir: DIR, filepath: file.path });
-          const diff = unifiedFilePatch({
-            path: file.path,
-            before,
-            after: content,
-            ...(oldBlob ? { oldBlob } : {}),
-          });
-          diffChanges.push({
-            path: file.path,
-            before,
-            after: content,
-            ...(oldBlob ? { oldBlob } : {}),
-            additions: diff.additions,
-            deletions: diff.deletions,
-          });
-        }
-      }
-
-      const commitTime = Math.floor(Date.now() / 1000);
-      const signature = {
-        name: "Rhumbatron",
-        email: "bot@rhumbatron.com",
-        timestamp: commitTime,
-        timezoneOffset: 0,
-      };
-      const commit = await git.commit({
-        fs,
-        dir: DIR,
-        message: message.replace(/["$`\\]/g, "").slice(0, 120),
-        author: signature,
-        committer: signature,
-      });
-
-      const pushed = await git.push({
-        fs,
-        http: gitHttp,
-        dir: DIR,
-        url: info.remote,
-        ref: "main",
-        onAuth,
-      });
-      if (!pushed.ok)
-        throw new Error(`push rejected: ${JSON.stringify(pushed.refs).slice(0, 200)}`);
-
-      for (const change of diffChanges) {
-        if (change.after !== "") {
-          try {
-            const { oid } = await git.readBlob({
-              fs,
-              dir: DIR,
-              oid: commit,
-              filepath: change.path,
-            });
-            change.newBlob = oid;
-          } catch {}
-        }
-      }
-
-      const patches = diffChanges
-        .map(
-          (c) =>
-            unifiedFilePatch({
-              path: c.path,
-              before: c.before,
-              after: c.after,
-              ...(c.oldBlob ? { oldBlob: c.oldBlob } : {}),
-              ...(c.newBlob ? { newBlob: c.newBlob } : {}),
-            }).patch,
-        )
-        .filter(Boolean);
-      const fullPatch = patches.join("\n");
-
-      let patchRef: string | undefined;
-      if (ws.manifest) {
-        try {
-          const bounded = boundPatch(fullPatch);
-          const key = changeSetPatchKey(ws.projectId, `cs_${ws.runId.slice(4)}`);
-          const fromCommit = ws.startCommit ?? ws.baseCommit;
-          await env.EVIDENCE.put(key, bounded.patch, {
-            httpMetadata: { contentType: "text/x-diff; charset=utf-8" },
-            customMetadata: patchMetadata({ base: fromCommit, head: commit, ...bounded }),
-          });
-          patchRef = key;
-        } catch {
-          console.warn(JSON.stringify({ event: "workspace.patch_write_failed", runId: ws.runId }));
-        }
-      }
-
-      const diffStat = formatDiffStat(diffChanges);
-      const files = dirtyFiles.map((f) => f.path);
-      const stack = ws.stack ?? [];
-      const stacked = stack.length > 0 && !!ws.startCommit;
-
-      if (ws.manifest) {
-        ws.manifest = { ...ws.manifest, files, status: "published" };
-        await writeManifest(env, ws);
-      }
-
-      return {
-        fork: ws.fork,
-        commit,
-        baseCommit: ws.baseCommit,
-        diffStat,
-        files,
-        stackedOn: stackedOn(stack),
-        ...(stacked && ws.startCommit ? { startCommit: ws.startCommit, ownFiles: files } : {}),
-        ...(patchRef ? { patchRef } : {}),
-      };
-    } finally {
-      await repo.revokeToken(token.id).catch(() => false);
-    }
-  }
-
-  // Fallback: Sandbox path
   if (await ensureCheckout(env, ws)) {
     throw new Error("Sandbox lost before publish; uncommitted workspace edits are gone");
   }
@@ -1447,7 +700,7 @@ export async function publishWorkspace(
 /* closeWorkspace                                                                             */
 /* ------------------------------------------------------------------------------------------ */
 
-export async function closeWorkspace(env: WorkspaceEnv, ws: WorkspaceRef, tree?: WorkspaceTree) {
+export async function closeWorkspace(env: WorkspaceEnv, ws: WorkspaceRef) {
   if (ws.manifest) {
     if (ws.manifest.status === "open") {
       try {
@@ -1474,22 +727,6 @@ export async function closeWorkspace(env: WorkspaceEnv, ws: WorkspaceRef, tree?:
     await writeManifest(env, ws);
   }
 
-  if (ws.filesInWorker) {
-    // Only settle seconds and release Sandbox slot if the Sandbox container was actually started!
-    if (ws.sandboxStarted) {
-      const elapsed = Math.ceil((Date.now() - ws.openedAt) / 1000) + SLEEP_TAIL_SECONDS;
-      await settleSeconds(env.DB, elapsed - OPEN_RESERVATION_SECONDS);
-      await releaseSandbox(env.DB, ws.runId, new Date().toISOString());
-      try {
-        await sandboxFor(env, ws.projectId).exec(`rm -rf ${ws.dir}`);
-      } catch {}
-    }
-    const activeTree = tree ?? getWorkspaceTree(undefined, ws.runId);
-    activeTree.clear();
-    return;
-  }
-
-  // Fallback: Sandbox path
   const elapsed = Math.ceil((Date.now() - ws.openedAt) / 1000) + SLEEP_TAIL_SECONDS;
   await settleSeconds(env.DB, elapsed - OPEN_RESERVATION_SECONDS);
   await releaseSandbox(env.DB, ws.runId, new Date().toISOString());

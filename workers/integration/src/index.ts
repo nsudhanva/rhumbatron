@@ -48,7 +48,6 @@ import { backfillTreeCode, type CodeBackfill } from "./code-store.ts";
 import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { chooseFirstCome } from "./first-come.ts";
-import { handleFixtureCommand } from "./fixture-changesets.ts";
 import { type HumanEditInput, submitHumanEdit } from "./human-edit.ts";
 import { recoverIntegrations } from "./integrate.ts";
 import { cleanupProject, FORK_RETENTION_DAYS, sweepForks } from "./project-cleanup.ts";
@@ -58,7 +57,7 @@ import { recoverSourceConflicts } from "./rebase.ts";
 import { settleStaleBehind } from "./recompose.ts";
 import { injectReleaseFailure, recoverStuckRelease } from "./release.ts";
 import { requestRollback } from "./rollback.ts";
-import { type SourceSeed, seedOf, seedSourceIfUnassigned } from "./source-seed.ts";
+import { seedSourceIfUnassigned } from "./source-seed.ts";
 import { startWorkflow, workflowStartFor } from "./workflow-commands.ts";
 
 export { ChangeWorkflow } from "./change-workflow.ts";
@@ -92,18 +91,18 @@ async function isArchived(env: Env, projectId: string) {
 }
 
 /** Seeds the Project's first commit when its canonical source is unassigned (source-seed.ts). */
-async function seedSource(env: Env, projectId: string, seed: SourceSeed) {
+async function seedSource(env: Env, projectId: string) {
   const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
   const stub = root.get(root.idFromName(projectId));
   const provisioned: object[] = [];
   const outcome = await seedSourceIfUnassigned({
     getCanonical: () => stub.getCanonical(),
     provision: async () => {
-      provisioned.push(await provisionProject(env, { projectId, seed }));
+      provisioned.push(await provisionProject(env, projectId));
     },
   });
   console.warn(
-    JSON.stringify({ event: "project.provisioned", projectId, seed, outcome, ...provisioned[0] }),
+    JSON.stringify({ event: "project.provisioned", projectId, outcome, ...provisioned[0] }),
   );
 }
 
@@ -123,7 +122,7 @@ async function handleCommand(
 ): Promise<"continue" | "wait" | undefined> {
   const command = AnyCommandEnvelope.safeParse(body);
   if (!command.success) return;
-  // Workflow start commands: `verification.start` and `release.start` from their own Queues (HOM-202). The
+  // Workflow start commands: `verification.start` and `release.start` from their own Queues. The
   // instance ID is the command's idempotency key, so a redelivery finds the running instance.
   const start = workflowStartFor(command.data);
   if (start) {
@@ -139,7 +138,7 @@ async function handleCommand(
     return;
   }
   if (command.data.commandType === "project.cleanup") {
-    // Live apps (P16-20): the app's data stores go too. Prod only; bounded per delivery.
+    // Live apps: the app's data stores go too. Prod only; bounded per delivery.
     const app = env.APPS ? await removeApp(env, command.data.projectId) : null;
     const result = await cleanupProject(env, command.data.projectId);
     console.warn(
@@ -147,7 +146,7 @@ async function handleCommand(
     );
     return result.status === "partial" || app?.status === "partial" ? "continue" : undefined;
   }
-  // "Remove app" (P16-20): the API already answers 410; delete data stores, bundles, and rows.
+  // "Remove app": the API already answers 410; delete data stores, bundles, and rows.
   if (command.data.commandType === "app.remove") {
     const result = await removeApp(env, command.data.projectId);
     console.warn(
@@ -161,7 +160,7 @@ async function handleCommand(
       now: Date.now(),
       retentionDays: FORK_RETENTION_DAYS,
     });
-    // P16-22: preview rows (and their data) expire with their 7-day bundles.
+    // Preview rows (and their data) expire with their 7-day bundles.
     const previews = await expirePreviews(env);
     // ADR 0029: Code page edit sessions past their idle or 2-hour limit end; their forks go.
     const sessions = await expireCodeSessions(env, { now: Date.now() });
@@ -170,7 +169,7 @@ async function handleCommand(
     );
     return result.more ? "continue" : undefined;
   }
-  // A Change stuck in `releasing` (event router sweep, HOM-204). Bounded: one Change per command.
+  // A Change stuck in `releasing` (event router sweep). Bounded: one Change per command.
   if (command.data.commandType === "release.recover") {
     if (!command.data.changeId) return;
     const result = await recoverStuckRelease(env, command.data.changeId);
@@ -192,24 +191,20 @@ async function handleCommand(
     return;
   }
   if (command.data.commandType === "project.provision") {
-    await seedSource(env, command.data.projectId, seedOf(command.data.payload));
-    // Live apps (ADR 0020): the S0 bundle and production pointer. Prod only; dev returns disabled.
+    await seedSource(env, command.data.projectId);
+    // Live apps (ADR 0020): the S0 bundle and production pointer. A no-op without `APPS`.
     if (env.APPS) await logAppProvision(env, command.data.projectId);
     return;
   }
-  // "Deploy app" for a Project that existed before live apps, or a retry after a failed build. A
-  // Project created before every Project got a repository gets its empty repository first.
+  // "Deploy app" for a Project without a live app, or a retry after a failed build. A Project
+  // without a repository gets its empty repository first.
   if (command.data.commandType === "app.provision") {
-    await seedSource(env, command.data.projectId, "blank");
+    await seedSource(env, command.data.projectId);
     await logAppProvision(env, command.data.projectId);
     return;
   }
-  // Dev-only Wishlist fixture ChangeSets (P9-08); refused outside dev inside the handler.
-  if (command.data.commandType === "fixture.publish") {
-    return handleFixtureCommand(env, command.data);
-  }
   if (command.data.commandType === "candidate.verify") {
-    // Older API deployments queued this after creating the Candidate; createCandidate now starts it.
+    // createCandidate starts verification itself. A queued command starts the same Workflow.
     const parsed = CandidateVerifyPayload.safeParse(command.data.payload);
     if (parsed.success) await startCandidateVerification(env, parsed.data.candidateId);
     return;
@@ -306,7 +301,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
   /**
    * Creates (or finds) one Candidate of a Change and starts its verification.
    * The API authenticated the user and checked Project membership. `changeSetIds` narrows the
-   * composition to a subset of the proposed ChangeSets (competing designs, P9-08).
+   * composition to a subset of the proposed ChangeSets (competing designs).
    */
   async createCandidate(input: {
     changeId: string;
@@ -315,7 +310,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
     return createCandidate(this.env, input);
   }
 
-  /** P11-03/P11-04: preconditions, then ProjectRootDO compare-and-swap. */
+  /** Preconditions, then ProjectRootDO compare-and-swap. */
   async promoteCandidate(input: {
     candidateId: string;
     actorUserId: string;
@@ -409,8 +404,8 @@ export default class Integration extends WorkerEntrypoint<Env> {
   }
 
   /**
-   * P13-12: a real smoke failure on the Project's latest deployed release, marked injected. The
-   * API checked membership and the FIXTURES_ENABLED guard. The Canonical Generation never moves.
+   * A real smoke failure on the Project's latest deployed release, marked injected. The
+   * API checked that the actor is the Project owner or an admin. The Canonical Generation never moves.
    */
   async injectReleaseFailure(input: {
     projectId: string;
@@ -420,7 +415,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
   }
 
   /**
-   * P16-16: copies one canonical tree's files to the code store when a code read finds it missing
+   * Copies one canonical tree's files to the code store when a code read finds it missing
    * or partial. The API checked membership; only canonical trees of this Project are accepted.
    */
   async backfillTreeCode(input: { projectId: string; treeSha: string }): Promise<CodeBackfill> {
@@ -428,7 +423,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
   }
 
   /**
-   * P16-19: one file saved on the Code page becomes a new Change with one human ChangeSet, then
+   * One file saved on the Code page becomes a new Change with one human ChangeSet, then
    * composes and verifies like agent work. The API checked membership and the edit limits.
    */
   async submitHumanEdit(input: HumanEditInput): Promise<CodeEditOutcome> {
@@ -500,7 +495,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
   }
 
   /**
-   * P16-13: roll back to Sk as the new transition Sn -> Sn+1 with Sk's tree, through the same
+   * Roll back to Sk as the new transition Sn -> Sn+1 with Sk's tree, through the same
    * Candidate, approval, and compare-and-swap path as any promotion. The API checked membership.
    */
   async requestRollback(input: {
@@ -512,7 +507,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
     return requestRollback(this.env, input);
   }
 
-  /** P11-01: one human decision on a gated Candidate. */
+  /** One human decision on a gated Candidate. */
   async decideApproval(input: {
     candidateId: string;
     approverUserId: string;

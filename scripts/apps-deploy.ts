@@ -1,5 +1,5 @@
 /**
- * Temporary apps Worker adapter (ADR 0020). Provider 5.27 has no
+ * Apps Worker adapter (ADR 0020). Provider 5.27 has no
  * `worker_loader` binding type, so `cloudflare_worker_version` cannot carry the Worker Loader
  * binding. Invoked only by terraform_data.apps_worker (envs/prod).
  *

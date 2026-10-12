@@ -321,7 +321,7 @@ function HoverCard({
       return false;
     }
     // Covered (under the sticky chrome, or scrolled out of its panel): close instead of floating
-    // over whatever now hides the element.
+    // over whatever hides the element.
     const cx = Math.min(vw - 1, Math.max(0, (a.left + a.right) / 2));
     const cy = Math.min(vh - 1, Math.max(0, (a.top + a.bottom) / 2));
     const hit = document.elementFromPoint(cx, cy);

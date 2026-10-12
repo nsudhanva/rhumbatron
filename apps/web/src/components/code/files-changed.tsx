@@ -49,7 +49,7 @@ function ChangeSetDiff({ changeSet }: { changeSet: ChangeSetAttribution }) {
 }
 
 /**
- * Files changed on the Change page (P16-18): each ChangeSet with its agent, Task and Intent
+ * Files changed on the Change page: each ChangeSet with its agent, Task and Intent
  * summary; its per-file diff opens in place.
  */
 export function ChangeFilesChanged({ changeId }: { changeId: string }) {

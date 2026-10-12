@@ -56,7 +56,7 @@ async function fastForward(env: Env, projectId: string, candidateId: string, com
       tags: false,
       onAuth: source.onAuth,
     });
-    // Throws when the fork no longer holds the composed commit.
+    // Throws when the fork does not hold the composed commit.
     await git.readCommit({ fs, dir: DIR, oid: commit });
     await git.writeRef({ fs, dir: DIR, ref: LOCAL, value: commit, force: true });
     // isomorphic-git refuses a non-fast-forward; receive-pack also checks the old `main` value.

@@ -6,7 +6,7 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "~> 5.27"
     }
-    # Reads K2 stream IDs back from the temporary K2 adapter (ADR 0006).
+    # Reads K2 stream IDs back from the K2 adapter (ADR 0006).
     external = {
       source  = "hashicorp/external"
       version = "~> 2.4"

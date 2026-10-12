@@ -66,7 +66,7 @@ describe("classifyCheck", () => {
 
   it("a failing test or an over-budget p95 is a supported failure", () => {
     expect(
-      classifyCheck(check("protected-invariant-cart"), {
+      classifyCheck(check("unit"), {
         exitCode: 1,
         output: " 12 pass\n 1 fail\n",
         timedOut: false,

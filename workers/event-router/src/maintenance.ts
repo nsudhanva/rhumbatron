@@ -1,11 +1,11 @@
 import { type CommandEnvelope, RELEASE_STUCK_AFTER_MS } from "@rhumbatron/protocol";
 
 /**
- * Daily maintenance on the existing safety-net cron (HOM-195). Once a day it
- * queues one `forks.sweep` and re-queues `project.cleanup` for archived Projects that still have
- * leftovers. The integration Worker does the work, bounded per message. The same Projects get an
- * `index.purge` for rhumbatron-indexer (stored indexes and vectors), and up to 10 active Projects
- * without a ready index get a backfill `index.build`.
+ * Daily maintenance on the safety-net cron. Once a day it queues one `forks.sweep` and re-queues
+ * `project.cleanup` for archived Projects that still have leftovers. The integration Worker does
+ * the work, bounded per message. The same Projects get an `index.purge` for rhumbatron-indexer
+ * (stored indexes and vectors), and up to 10 active Projects without a ready index get a backfill
+ * `index.build`.
  * Cost per day: three D1 reads and at most 31 Queue messages. Subrequests: 4 on that one tick.
  */
 
@@ -112,10 +112,10 @@ const DEDUPE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_DEDUPE_PRUNE = 5000;
 
 /**
- * Stuck-release sweep (HOM-204). Every 5 minutes (minute 4, 9, ... of the
- * hour, never the daily maintenance tick) one indexed read (`idx_changes_status_updated`) finds
- * Changes still `releasing` after RELEASE_STUCK_AFTER_MS, oldest first, and queues one
- * `release.recover` per Change for the integration Worker, which re-checks and decides.
+ * Stuck-release sweep. Every 5 minutes (minute 4, 9, ... of the hour, never the daily maintenance
+ * tick) one indexed read (`idx_changes_status_updated`) finds Changes still `releasing` after
+ * RELEASE_STUCK_AFTER_MS, oldest first, and queues one `release.recover` per Change for the
+ * integration Worker, which re-checks and decides.
  * Cost: 288 D1 reads per day; Queue messages only for stuck Changes. Subrequests: at most 2.
  */
 const RELEASE_SWEEP_EVERY_MINUTES = 5;

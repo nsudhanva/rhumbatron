@@ -29,11 +29,11 @@ Rhumbatron uses these developer tools.
 ## Consequences
 
 - Contributors need `gitleaks`, `terraform`, and `tflint` on `PATH`.
-- `bun run check` runs lint, typecheck, guardrails, the fixture check
-  (`scripts/build-fixtures.ts --check`), knip, sherif, gitleaks, and the Terraform checks.
+- `bun run check` runs lint, typecheck, guardrails, the D1 migration guard, knip, sherif,
+  gitleaks, and the Terraform checks.
 - `bun install` installs the Git hooks through the `prepare` script.
 - `.github/workflows/ci.yml` runs the checks on each pull request. It uses no secrets and no
-  remote state. The checks are lint, guardrails, binding drift, fixtures, knip, sherif, the D1
+  remote state. The checks are lint, guardrails, binding drift, knip, sherif, the D1
   migration guard, typecheck, critical tests, build, bundles, the Terraform checks, and gitleaks.
 - `.github/workflows/production.yml` deploys each push to `main` through Terraform (ADR 0031).
 - The checks against prod (`e2e`, `test:ui`, `lighthouse`, `journeys`) run on a developer machine.

@@ -6,11 +6,11 @@ import {
 import { AnyCommandEnvelope, type CommandEnvelope } from "@rhumbatron/protocol";
 
 /**
- * Dead-letter consumer (P13-10). A command reaches
- * `rhumbatron-dead-letter-<env>` after its consumer's bounded retries. For each one this records
- * the command in D1 (`dead_letters`, migration 0011), marks the related Task `blocked` (or names
- * the failure on the Change when there is no Task), and records `task.failed` through the Change's
- * shard outbox. An operator then retries or dismisses it (workers/api dead-letters.ts).
+ * Dead-letter consumer. A command reaches `rhumbatron-dead-letter-<env>` after its consumer's
+ * bounded retries. For each one this records the command in D1 (`dead_letters`, migration 0011),
+ * marks the related Task `blocked` (or names the failure on the Change when there is no Task), and
+ * records `task.failed` through the Change's shard outbox. An operator then retries or dismisses it
+ * (workers/api dead-letters.ts).
  *
  * Idempotent on `command_id`: a redelivered dead-letter message (same body) changes nothing. A
  * different copy of the same command (an operator retry has a higher `attempt`; a re-dispatch has a
@@ -25,7 +25,7 @@ export type OriginQueue = "agent-wakeups" | "integration" | "verification" | "re
 /** The Queue a command type travels on. Retry sends the command back to it. */
 export const originQueue = (commandType: string): OriginQueue => {
   if (commandType === "agent.wake") return "agent-wakeups";
-  // Workflow start commands (HOM-202).
+  // Workflow start commands.
   if (commandType === "verification.start") return "verification";
   if (commandType === "release.start") return "release";
   return "integration";

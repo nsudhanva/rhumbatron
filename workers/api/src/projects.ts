@@ -19,7 +19,6 @@ import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { resolveBudgetScope } from "./budgets.ts";
-import { fixturesEnabled } from "./fixtures.ts";
 import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity, PROJECT_VISIBLE_SQL, projectRole } from "./identity.ts";
 import {
@@ -44,7 +43,7 @@ const DEFAULT_POLICIES: ProjectPolicies = {
   modelPolicyVersion: "policy-1",
 };
 
-/** Placeholder canonical source until Artifacts exist (Phase 8). */
+/** Canonical source of a Project before its Artifacts repository is assigned. */
 const UNASSIGNED_ARTIFACT = { artifactRef: "unassigned", treeSha: "empty" };
 
 const projectRoot = (env: Env, projectId: string) => {
@@ -189,12 +188,11 @@ async function sendCleanup(env: Env, projectId: string) {
 }
 
 /**
- * Queues source provisioning: the Project's Artifacts repo with one commit (a `.gitignore`), or the
- * Acme Shop fixture for internal demo and smoke scripts. The integration Worker seeds only a
- * Project whose canonical source is unassigned, so a repeat never overwrites a repository. The
- * command ID is stable per Project, so a retry is harmless.
+ * Queues source provisioning: the Project's Artifacts repo with one commit (a `.gitignore`). The
+ * integration Worker seeds only a Project whose canonical source is unassigned, so a repeat never
+ * overwrites a repository. The command ID is stable per Project, so a retry is harmless.
  */
-async function sendProvision(env: Env, projectId: string, fixture?: "acme-shop") {
+async function sendProvision(env: Env, projectId: string) {
   await env.INTEGRATION_COMMANDS.send(
     {
       commandId: `cmd_${projectId.slice(5)}_provision`,
@@ -202,7 +200,7 @@ async function sendProvision(env: Env, projectId: string, fixture?: "acme-shop")
       projectId,
       attempt: 0,
       createdAt: new Date().toISOString(),
-      payload: fixture ? { fixture } : {},
+      payload: {},
     },
     { contentType: "json" },
   );
@@ -210,15 +208,8 @@ async function sendProvision(env: Env, projectId: string, fixture?: "acme-shop")
 
 type CreateProjectContext = Context<AppEnv>;
 
-/**
- * Creates a Project owned by the caller's personal organization, then queues its repository.
- * Shared by the public route (empty repository) and the fixture route (Acme Shop source).
- */
-async function createProject(
-  c: CreateProjectContext,
-  body: CreateProjectRequest,
-  fixture?: "acme-shop",
-) {
+/** Creates a Project owned by the caller's personal organization, then queues its empty repository. */
+async function createProject(c: CreateProjectContext, body: CreateProjectRequest) {
   const { userId, orgId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
   const projectId = `proj_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
@@ -257,7 +248,7 @@ async function createProject(
   });
   // The integration Worker creates the Artifacts repo with its first commit (S0), so agents always
   // have a repository to write to (ADR 0010, ADR 0020).
-  await sendProvision(c.env, projectId, fixture);
+  await sendProvision(c.env, projectId);
   const project = await loadProject(c.env, projectId);
   if (!project || !(await canAccessProject(c.env.DB, userId, projectId))) {
     throw new Error("Project was not readable after creation");
@@ -270,17 +261,10 @@ export const projects = new Hono<AppEnv>()
   .use("/v1/projects/*", requireAuth)
   .use("/v1/changes/*", requireAuth)
 
-  // P3-08: create a Project owned by the caller's personal organization.
+  // Create a Project owned by the caller's personal organization.
   .post("/v1/projects", validate("json", CreateProjectRequest), (c) =>
     createProject(c, c.req.valid("json")),
   )
-
-  // Internal demo and smoke scripts: a Project seeded with the Acme Shop fixture.
-  // Not part of the product; 404 where fixtures are off.
-  .post("/v1/fixtures/projects", requireAuth, validate("json", CreateProjectRequest), async (c) => {
-    if (!fixturesEnabled(c.env)) return fail(c, 404, "not_found", "Not found");
-    return createProject(c, c.req.valid("json"), "acme-shop");
-  })
 
   // Projects the caller can open, newest first (UI navigation). Archived Projects are hidden.
   .get("/v1/projects", validate("query", ListProjectsQuery), async (c) => {
@@ -364,8 +348,8 @@ export const projects = new Hono<AppEnv>()
     });
   })
 
-  // Creates the empty repository of a Project that has no source yet (Projects created before
-  // every Project got one). A no-op for a Project with source.
+  // Creates the empty repository of a Project that has no source. A no-op for a Project with
+  // source.
   .post("/v1/projects/:projectId/provision", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");
@@ -379,7 +363,7 @@ export const projects = new Hono<AppEnv>()
     return c.json({ data: { queued: true } }, 202);
   })
 
-  // Integration smoke check: the Project Sandbox runs the fixture's Bun tests.
+  // Integration smoke check: the Project Sandbox runs the canonical source's Bun tests.
   .post("/v1/projects/:projectId/sandbox-smoke", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");
@@ -451,7 +435,7 @@ export const projects = new Hono<AppEnv>()
     return respond(c, apiData(Project), { data: { ...project, role } });
   })
 
-  // P3-10: human-scale read model from ProjectViewDO.
+  // Human-scale read model from ProjectViewDO.
   .get("/v1/projects/:projectId/snapshot", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");
@@ -464,7 +448,7 @@ export const projects = new Hono<AppEnv>()
   })
 
   /**
-   * P3-09: create a Change at the current Canonical Generation. Idempotent on clientRequestId.
+   * Create a Change at the current Canonical Generation. Idempotent on clientRequestId.
    * A member's request starts as `proposed` while the Project setting `memberRequestReview` is on
    * (ADR 0028): no ChangeWorkflow, no model call, no admission to ProjectRootDO until an owner or
    * admin includes it. Owner and admin requests never need review.

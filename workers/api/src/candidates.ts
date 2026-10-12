@@ -57,7 +57,7 @@ const integration = (env: Env) => env.INTEGRATION as unknown as IntegrationRpc;
 
 const ChangeIdParam = z.object({ changeId: z.string().regex(/^chg_[a-z0-9-]+$/) });
 const CandidateIdParam = z.object({ candidateId: z.string().regex(/^cand_[a-z0-9]+$/) });
-/** Optional create body: compose only these proposed ChangeSets (competing designs, P9-08). */
+/** Optional create body: compose only these proposed ChangeSets (competing designs). */
 const CandidateSubset = z.object({
   changeSetIds: z
     .array(z.string().regex(/^cs_[A-Za-z0-9_-]+$/))
@@ -374,7 +374,7 @@ export const candidates = new Hono<AppEnv>()
   )
 
   /**
-   * P11-02: one human decision on a gated Candidate of this Change. The approver is
+   * One human decision on a gated Candidate of this Change. The approver is
    * the authenticated member; the body cannot name anyone else. The first decision is final.
    */
   .post(
@@ -421,7 +421,7 @@ export const candidates = new Hono<AppEnv>()
   )
 
   /**
-   * P11-03/P11-04: promote a verified Candidate. The integration Worker re-checks
+   * Promote a verified Candidate. The integration Worker re-checks
    * every precondition from authoritative rows; ProjectRootDO runs the compare-and-swap. Safe to
    * retry: a repeat returns `alreadyPromoted`. Stale and blocked outcomes return 409 with details.
    */

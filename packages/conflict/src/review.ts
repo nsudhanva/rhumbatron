@@ -1,4 +1,4 @@
-// Model review of one semantic conflict (P9-05, P9-06).
+// Model review of one semantic conflict.
 // Pure: packet building, output parsing, citation checks, escalation rules, and the deterministic
 // application of a verdict. No I/O and no model calls; the agents Worker runs the call.
 //

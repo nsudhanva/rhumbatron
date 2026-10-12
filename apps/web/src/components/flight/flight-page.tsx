@@ -278,18 +278,15 @@ function HeaderStrip({
   model,
   socket,
   changeId,
-  fixture,
   live,
 }: {
   state: FlightState;
   model: FlightModel;
   socket: LiveStatus;
   changeId: string;
-  fixture: boolean;
   live: boolean;
 }) {
   const change = model.input.change;
-  const Heading = fixture ? "h2" : "h1";
   const providers = useMemo(() => {
     const names = new Set<string>();
     for (const t of Object.values(state.tasks)) {
@@ -303,9 +300,9 @@ function HeaderStrip({
     <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b-2 border-kumo-divider px-3 py-2">
       <div className="flex min-w-0 flex-[1_1_320px] items-baseline gap-2">
         <span className="type-kicker shrink-0 text-kumo-accent">Flight Control</span>
-        <Heading className="min-w-0 truncate text-[15px] font-bold" title={change.goal}>
+        <h1 className="min-w-0 truncate text-[15px] font-bold" title={change.goal}>
           {changeLabel(change)}
-        </Heading>
+        </h1>
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <span className="font-mono text-[13px] font-semibold tabular-nums">
@@ -318,7 +315,6 @@ function HeaderStrip({
             {p}
           </Tag>
         ))}
-        {fixture && <Tag variant="accent">Fixture</Tag>}
       </div>
       <dl className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <Count label="Woken" value={`${n(c.woken)} / ${n(c.tasks)}`} />
@@ -361,15 +357,12 @@ export function FlightPage({
   socket,
   projectId,
   changeId,
-  fixture = false,
 }: {
   model: FlightModel;
   ready: boolean;
   socket: LiveStatus;
   projectId: string;
   changeId: string;
-  /** Design reference: labels the page as fixture data. */
-  fixture?: boolean;
 }) {
   const time = useFlightTime();
   const focus = useFlightStore((s) => s.focus);
@@ -436,7 +429,6 @@ export function FlightPage({
             model={model}
             socket={socket}
             changeId={changeId}
-            fixture={fixture}
             live={live}
           />
           <Scrubber />

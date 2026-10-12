@@ -23,7 +23,7 @@ export const releaseCheckId = (generation: number, injected = false) =>
 const NEXT: Record<ReleaseStatus, readonly ReleaseStatus[]> = {
   queued: ["building", "failed", "superseded"],
   building: ["deployed", "failed", "smoke_failed", "superseded"],
-  // Only failure injection (P13-12) re-checks a finished deployment.
+  // Only failure injection re-checks a finished deployment.
   deployed: ["smoke_failed"],
   failed: [],
   smoke_failed: [],

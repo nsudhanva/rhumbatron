@@ -46,7 +46,7 @@ type CandidateEnv = {
   SANDBOX: DurableObjectNamespace;
   ARTIFACTS: Artifacts;
   DB: D1Database;
-  /** Where the Candidate patch goes (P16-17). Absent in tests that do not compose. */
+  /** Where the Candidate patch goes. Absent in tests that do not compose. */
   EVIDENCE?: R2Bucket;
   VERIFICATION_COMMANDS?: Env["VERIFICATION_COMMANDS"];
 };
@@ -445,7 +445,7 @@ export async function composeCandidate(
 }
 
 /**
- * Stores `git diff base..composed` for the Files changed view (P16-17), bounded by
+ * Stores `git diff base..composed` for the Files changed view, bounded by
  * MAX_PATCH_BYTES. Files that the composition build generated stay out of it. A read model
  * only: a failure is logged and composition continues. Repeated steps write the same bytes to
  * the same key.
@@ -585,7 +585,7 @@ export async function runContractCheck(
   }
 }
 
-/** Removes the Candidate directory. The fork keeps the composed source until the fork sweep (HOM-195). */
+/** Removes the Candidate directory. The fork keeps the composed source until the fork sweep. */
 export async function removeCandidateDir(
   env: CandidateEnv,
   projectId: string,

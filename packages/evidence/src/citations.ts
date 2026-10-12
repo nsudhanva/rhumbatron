@@ -1,6 +1,6 @@
 /**
  * Citation validation. Every model finding must cite Evidence IDs or
- * Context Packet item IDs that the model actually received, for the same Project and Candidate.
+ * Context Packet item IDs that the model received, for the same Project and Candidate.
  * A finding that fails is kept visible as `unsupported` and can never change Candidate state.
  */
 

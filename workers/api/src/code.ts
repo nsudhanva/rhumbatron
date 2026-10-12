@@ -26,7 +26,7 @@ import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Code view (P16-17): file contents of canonical trees, ChangeSet and Candidate diffs, and the
+ * Code view: file contents of canonical trees, ChangeSet and Candidate diffs, and the
  * version history. Reads D1, ProjectRootDO, and R2 objects under `source/<project>/` that the
  * integration and agents Workers write (packages/protocol code.ts). Every R2 key is built from
  * the Project ID of a row the caller is a member of, never from request text.
@@ -146,7 +146,7 @@ function attribution(row: AttributionRow, projectId: string): ChangeSetAttributi
     status: row.status,
     files: changeSet?.ownFiles ?? changeSet?.files ?? [],
     patchRecorded: changeSet?.patchRef === changeSetPatchKey(projectId, row.id),
-    // A human ChangeSet (P16-19): the person's name, else their user ID. Null for agents.
+    // A human ChangeSet: the person's name, else their user ID. Null for agents.
     editedBy: intent?.actor ? (intent.actor.name ?? intent.actor.id) : null,
     createdAt: row.created_at,
   };

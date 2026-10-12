@@ -24,9 +24,6 @@ allowance.
 - Promotion fast-forwards `main` of the canonical repository after the compare-and-swap (ADR 0013).
 - The integration Worker creates push and read tokens per call with a 600-second TTL. It never
   stores or logs them.
-- The Acme Shop fixture in `fixtures/` serves internal smoke scripts. `scripts/build-fixtures.ts`
-  embeds it into `*.fixture.gen.ts`. The fixture routes answer only where `FIXTURES_ENABLED` is
-  `"true"` or the environment is local.
 - Artifacts import accepts only public URLs. A private GitHub repository cannot seed a Project.
 
 ## Cost

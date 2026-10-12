@@ -250,10 +250,8 @@ flowchart LR
 
 The browser check starts the composed app in the Sandbox. The browser reaches it only through request interception.
 The preview host has no public URL. The check blocks every other request.
-The flow depends on the app:
-
-- An app without the Acme Shop catalog: the home page shows text, and `GET /api/health` answers 200.
-- The Acme Shop fixture: the Wishlist flow, or a cart flow when the shop has no Wishlist.
+The flow is the same for every app: the home page loads and shows text, and `GET /api/health` answers 200.
+The check saves up to 8 screenshots to R2 as Evidence.
 
 One session lasts at most 55 s. A Candidate gets at most 2 browser runs.
 The `BROWSER_DAILY_SECONDS` meter (960 s per UTC day) applies before a session opens.

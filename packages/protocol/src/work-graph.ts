@@ -45,7 +45,7 @@ export type PlannedTask = z.infer<typeof PlannedTask>;
 /** Upper bound on the assumptions the Root Planner records for one Change. */
 export const MAX_ASSUMPTIONS = 8;
 
-/** Root Planner output contract (P5-02). */
+/** Root Planner output contract. */
 export const WorkGraphPlan = z.object({
   /** Cut to MAX_TITLE_CHARS at a word boundary after parsing (`clampTitle`). */
   title: z

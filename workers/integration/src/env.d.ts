@@ -15,7 +15,7 @@ interface Env {
   BROWSER_DAILY_SECONDS?: string;
   /**
    * Live apps bundle builder (ADR 0020): service binding to the apps Worker's `AppBuilder`
-   * entrypoint. Prod only; absent on dev, where `app.provision` is a no-op.
+   * entrypoint. Without it `app.provision` is a no-op.
    */
   APPS?: {
     build(

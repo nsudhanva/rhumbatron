@@ -28,4 +28,4 @@ account shares these limits with other projects (ADR 0017).
 - `scripts/cleanup-projects.ts` targets prod. It reads `CLERK_SECRET_KEY` and
   `CLERK_SMOKE_USER_ID` of the prod Clerk instance from the environment.
 - Critical tests prove each injected fault. The only fault path on prod is the release failure
-  injection route. It needs `FIXTURES_ENABLED` and the Project owner or an admin (ADR 0020).
+  injection route. It needs the Project owner or an admin (ADR 0020).

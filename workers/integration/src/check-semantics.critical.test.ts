@@ -79,7 +79,6 @@ const pass = (name: string): BrowserStep => ({ name, ok: true, ms: 10 });
 const ran = (steps: BrowserStep[], over: Partial<Extract<BrowserRun, { kind: "ran" }>> = {}) =>
   ({
     kind: "ran",
-    scenario: "wishlist",
     steps,
     total: 3,
     deadlineHit: false,
@@ -121,13 +120,13 @@ describe("browser check", () => {
   });
 
   it("a step that observed wrong app behavior fails with checked_supported", () => {
-    const denied: BrowserStep = {
-      name: "later collaborator write is denied",
+    const unhealthy: BrowserStep = {
+      name: "API health answers",
       ok: false,
-      failure: { kind: "assert", detail: "write after revoke returned 200" },
+      failure: { kind: "assert", detail: "GET /api/health returned 500" },
       ms: 5,
     };
-    expect(classifyBrowser(ran([pass("a"), denied]))).toMatchObject({
+    expect(classifyBrowser(ran([pass("a"), unhealthy]))).toMatchObject({
       status: "fail",
       coverage: "checked_supported",
       metrics: { stepsPassed: 1, stepsTotal: 3 },

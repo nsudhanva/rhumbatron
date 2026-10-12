@@ -9,15 +9,13 @@ import {
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
-import { fixturesEnabled } from "./fixtures.ts";
 import { errorBody, fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity, projectRole } from "./identity.ts";
 
 /**
  * Releases of a Project (ADR 0020). Read-only from D1: the
- * integration Worker's ReleaseWorkflow owns every release row. The failure injection route (P13-12)
- * is an RPC to the integration Worker and answers only where the fixture routes answer
- * (FIXTURES_ENABLED, local); elsewhere 404, as if absent.
+ * integration Worker's ReleaseWorkflow owns every release row. The failure injection route
+ * is an RPC to the integration Worker; only the Project owner or an admin can call it.
  *
  * Cost: a read is 1 D1 query (releases by `idx_releases_project`).
  */
@@ -93,13 +91,8 @@ export const releases = new Hono<AppEnv>()
     },
   )
 
-  .use("/v1/projects/:projectId/releases/inject-failure", async (c, next) => {
-    if (!fixturesEnabled(c.env)) return fail(c, 404, "not_found", "Route not found");
-    await next();
-  })
-
   /**
-   * P13-12: a real smoke failure on the latest deployed release, marked injected: the live app
+   * A real smoke failure on the latest deployed release, marked injected: the live app
    * is probed through the apps router with the normal smoke probes plus a route that does not exist. The Canonical
    * Generation does not change; recovery is the next promotion. Safe to repeat.
    */

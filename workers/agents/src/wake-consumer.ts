@@ -12,8 +12,7 @@ import { admitAgent } from "./limits.ts";
 /**
  * Consumer for `rhumbatron-agent-wakeups`. It checks that the
  * wake is still relevant, assigns the Task, and records `task.assigned` and `agent.woken`.
- * A ready Task then starts a run on its AgentDO (Pi, Phase 6). Other wake reasons are recorded only
- * until conflict handling (Phase 9) gives agents a resume path.
+ * A ready Task then starts a run on its AgentDO (Pi). Other wake reasons are only recorded.
  */
 
 type TaskRow = {
@@ -56,7 +55,7 @@ export async function handleWake(env: Env, body: unknown): Promise<Outcome> {
   if (task && wake.reason === "task_ready" && task.assigned_agent_id === wake.agentId)
     return "duplicate";
 
-  // A stale wake terminates quickly and counts as a false wakeup (P5-10).
+  // A stale wake terminates quickly and counts as a false wakeup.
   if (!isWakeStillRelevant({ taskId, reason: wake.reason }, task) || !task) {
     env.METRICS.writeDataPoint({
       blobs: ["agent_wakeup", "false", wake.reason],

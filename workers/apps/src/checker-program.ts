@@ -50,7 +50,7 @@ export function sandboxOnlyFeatures(sources: readonly string[]): string[] {
 }
 
 /**
- * Support the fixture's CONTRACT_ROOT imports without giving a script a filesystem. Only literal
+ * Support the CONTRACT_ROOT imports of scripts/contract.ts without giving a script a filesystem. Only literal
  * `${root}/...` imports are rewritten; other dynamic paths fail closed in the Dynamic Worker.
  */
 export function contractScript(source: string) {

@@ -11,18 +11,18 @@ import { ChangeStatusWord } from "./change-status";
 
 /**
  * Two requests whose acceptance criteria cannot both hold (expanded view of one row in the
- * conflict list). The system decides; this shows both requests, the cited criteria, and the
- * decision with its reason. No person overrides it here.
+ * conflict list). It shows both requests, the cited criteria, and the decision with its reason.
+ * The earlier requester chooses on the first-come card (ADR 0032); nobody overrides it here.
  */
 
-/** The conflict read may carry the decision reason; older rows do not. */
+/** The conflict read may carry the decision reason; some rows have none. */
 type WithReason = RequestConflictDetail & { reason?: string | null };
 
 function sideName(side: RequestConflictSide) {
   return side.requester.isYou ? "You" : (side.requester.name ?? "A member");
 }
 
-/** Who decided, in words. `system:arbiter` is the automatic arbiter. */
+/** Who decided, in words. A `system:` prefix marks an automatic decision. */
 function decidedByWords(decidedBy: string | null) {
   if (!decidedBy) return null;
   if (decidedBy === "system:arbiter") return "Decided automatically by the arbiter";

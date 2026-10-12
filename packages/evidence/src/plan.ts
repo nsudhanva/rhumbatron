@@ -7,8 +7,8 @@ import type {
 } from "@rhumbatron/protocol";
 
 /**
- * Risk-based Verification Plan. Commands target the Acme Shop
- * toolchain (`fixtures/acme-shop`): they run inside the Candidate Sandbox at the repository root.
+ * Risk-based Verification Plan. Commands target the app conventions (`APP_CONVENTIONS` in
+ * packages/protocol): they run inside the Candidate Sandbox at the repository root.
  */
 
 export type VerificationTouches = {
@@ -27,7 +27,7 @@ export type BuildVerificationPlanInput = {
   riskTier: RiskTier;
   policy: Pick<ProjectPolicy, "version" | "humanGateRiskTiers" | "requiredChecksByRisk">;
   touches: VerificationTouches;
-  /** Wishlist API p95 budget in the demo benchmark. */
+  /** API p95 budget in ms for the performance check. Default 200. */
   p95BudgetMs?: number;
   /** APPS is available and the Project has an app, including its pending first deployment. */
   liveAppEnabled?: boolean;
@@ -90,7 +90,6 @@ function invariantSlug(invariant: string, index: number): string {
 }
 
 const LATENCY = /\bp9[59]\b|\blatency\b/i;
-const CART = /\bcarts?\b/i;
 /** Parts of the shop whose existing behavior the contract diff and the project tests cover. */
 const ENDPOINT_SUBJECT =
   /\b(products?|catalog(ue)?|listings?|api|apis|routes?|endpoints?|http|responses?)\b/i;
@@ -102,8 +101,8 @@ const ROUTE_REF = /\b(GET|POST|PUT|PATCH|DELETE|HEAD)\s+\//;
 
 /**
  * True when the invariant protects existing product, catalog, API, route, or endpoint behavior.
- * The Acme fixture proves it deterministically: `bun run contract` fails on any undeclared route
- * change, and `bun test` (test/catalog.test.ts) pins product list, detail, 404, and 401 behavior.
+ * The app proves it deterministically: `bun run contract` fails on any undeclared route change,
+ * and `bun test` pins the behavior of the existing routes.
  */
 function protectsExistingEndpoints(invariant: string): boolean {
   return (
@@ -209,26 +208,7 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
   touches.protectedInvariants.forEach((invariant, index) => {
     // A latency invariant is what the performance check measures; a procedure would only be a gap.
     if (touches.performanceConstraint && LATENCY.test(invariant)) return;
-    const isCart = CART.test(invariant);
     const isRegression = protectsExistingEndpoints(invariant);
-    if (isCart) {
-      // One Cart invariant check covers every invariant that names the Cart.
-      const cart = checks.find((c) => c.checkId === "protected-invariant-cart");
-      if (cart) {
-        cart.reason += `; ${invariant}`;
-      } else {
-        checks.push({
-          checkId: "protected-invariant-cart",
-          kind: "protected-invariant",
-          reason: `Protected invariant: ${invariant}`,
-          command: "bun test test/cart.invariant.test.ts",
-          timeoutMs: 120_000,
-          required: true,
-          expected: exit0,
-          evidenceOutput: [...STD],
-        });
-      }
-    }
     if (isRegression) {
       // Existing endpoint behavior is what the route-table diff and the project tests prove.
       const note = `Protected invariant (mapped: existing endpoints -> contract + unit): ${invariant}`;
@@ -241,7 +221,7 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
         else checks.push(make(note));
       }
     }
-    if (isCart || isRegression) return;
+    if (isRegression) return;
     if (protectsAppBehavior(invariant)) {
       const note = `Protected invariant (mapped: app behavior -> project tests): ${invariant}`;
       const unit = checks.find((c) => c.checkId === "unit");
@@ -299,10 +279,8 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
       kind: "browser",
       reason: "High-risk user-facing change: run the end-to-end flow in Browser Run.",
       procedure:
-        "Start the composed app in the Sandbox (bun run dev) and open it in one Browser Run " +
-        "session. With Wishlist UI, run this flow: owner creates and shares, " +
-        "collaborator adds and removes, owner revokes, a later collaborator write is denied. " +
-        "Otherwise open the shop, add to cart, and verify the total. Every step must pass.",
+        "Open the Candidate preview in one Browser Run session. The home page must show " +
+        "text, GET /api/health must answer, and the check saves screenshots. Every step must pass.",
       // One session of at most 55 s plus screenshot upload; Sandbox restore is not counted.
       timeoutMs: BROWSER_CHECK_TIMEOUT_MS,
       required: true,

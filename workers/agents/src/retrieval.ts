@@ -8,9 +8,9 @@ import {
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 
 /**
- * Context Compiler input loader for agent runs (P7-06). Reads the stored
- * indexes of the canonical tree (rhumbatron-indexer) and, after them, at most one Vectorize query.
- * Never throws: without an index the packet keeps only the exact file list.
+ * Context Compiler input loader for agent runs. Reads the stored indexes of the canonical tree
+ * (rhumbatron-indexer) and, after them, at most one Vectorize query. Never throws: without an index
+ * the packet keeps only the exact file list.
  *
  * Free-limit guard: at most QUERY_DAILY_CAP query embeddings per UTC day. One query is
  * about 100 tokens of bge-small-en-v1.5 (well under 1 Neuron) and 384 queried dimensions.

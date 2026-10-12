@@ -9,14 +9,14 @@ import {
 } from "@rhumbatron/protocol";
 
 /**
- * Live app release decisions (Phase 16 milestone B, ADR 0020). Pure: the integration Worker reads
+ * Live app release decisions (ADR 0020). Pure: the integration Worker reads
  * D1 and ProjectRootDO, then applies these decisions with guarded writes. Deterministic; no model
  * decides whether an app version is served. Unit tested in
  * app-release-model.critical.test.ts.
  */
 
 /* ------------------------------------------------------------------------------------------ */
-/* Previews (P16-10)                                                                           */
+/* Previews                                                                                    */
 /* ------------------------------------------------------------------------------------------ */
 
 /** One preview row of a Change, with the state of its Candidate. */
@@ -35,7 +35,7 @@ export type PreviewPlan =
   /** Every slot holds a Candidate that can still ship: no preview for this one. */
   | { kind: "skip"; reason: "limit" };
 
-/** Candidates whose preview nobody needs: they can no longer ship from it. */
+/** Candidates whose preview nobody needs: they cannot ship from it. */
 const EVICTABLE: ReadonlySet<string> = new Set(["stale", "rejected", "promoted"]);
 
 /**
@@ -64,7 +64,7 @@ export function planPreview(input: {
 }
 
 /* ------------------------------------------------------------------------------------------ */
-/* Production pointer (P16-11, P16-12)                                                         */
+/* Production pointer                                                                          */
 /* ------------------------------------------------------------------------------------------ */
 
 /** What the production row serves. */
@@ -134,7 +134,7 @@ export function restorableTarget(previous: PointerState): PointerTarget | null {
 }
 
 /* ------------------------------------------------------------------------------------------ */
-/* Rollback (P16-13)                                                                           */
+/* Rollback                                                                                    */
 /* ------------------------------------------------------------------------------------------ */
 
 export type RollbackFacts = {
@@ -164,7 +164,7 @@ export type RollbackDecision =
 /**
  * Rollback transition rule. Rolling back to Sk from Sn is the new
  * transition Sn -> Sn+1 whose tree equals Sk's tree. Allowed only from the generation the caller
- * saw, only to an earlier, known generation, and only when the tree actually changes. History is
+ * saw, only to an earlier, known generation, and only when the tree changes. History is
  * never deleted: Sn stays in the log, and Sn+1 is a new version.
  */
 export function decideRollback(facts: RollbackFacts): RollbackDecision {
@@ -255,7 +255,7 @@ export function rollbackPlan(input: {
 }
 
 /* ------------------------------------------------------------------------------------------ */
-/* Stale Candidate recomposition (P16-14)                                                      */
+/* Stale Candidate recomposition                                                               */
 /* ------------------------------------------------------------------------------------------ */
 
 /** Recompositions per Candidate lineage; then the Candidate is blocked (needs a person). */

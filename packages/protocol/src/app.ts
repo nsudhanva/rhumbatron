@@ -2,12 +2,12 @@ import { z } from "zod";
 import { Timestamp } from "./common.ts";
 
 /**
- * Live apps (Phase 16, ADR 0020). Every Project runs at `<label>.<domain>`, and a Candidate preview
+ * Live apps (ADR 0020). Every Project runs at `<label>.<domain>`, and a Candidate preview
  * at `<preview-id>--<label>.<domain>`. The hosts are one label deep, so Universal SSL covers them.
  * These rules are shared by the apps router, the integration Worker, and the API.
  */
 
-/** The production channel of an app. Preview channels are `preview:<preview-id>` (milestone B). */
+/** The production channel of an app. Preview channels are `preview:<preview-id>`. */
 export const APP_PRODUCTION_CHANNEL = "production";
 
 /**
@@ -139,7 +139,7 @@ export function isAppBuildInput(path: string): boolean {
 /** One source file sent to the bundle builder: UTF-8 text, or base64 for binary files. */
 export type AppSourceFile = { path: string; text?: string; base64?: string };
 
-/** RPC input of the apps Worker's `AppBuilder.build` (ADR 0020, P16-06). */
+/** RPC input of the apps Worker's `AppBuilder.build` (ADR 0020). */
 export type AppBuildInput = {
   projectId: string;
   commit: string;
@@ -182,7 +182,7 @@ export type AppCheckResult = {
 };
 
 /* ------------------------------------------------------------------------------------------ */
-/* Milestone B: previews, releases, versions, rollback (P16-10..P16-13)                        */
+/* Previews, releases, versions, rollback                                                     */
 /* ------------------------------------------------------------------------------------------ */
 
 /** Previews per Change: the Candidate limit (policy `maxCandidates`). */
@@ -250,8 +250,8 @@ export const AppRemoveOutcome = z.object({ status: z.enum(["removing", "not_foun
 export type AppRemoveOutcome = z.infer<typeof AppRemoveOutcome>;
 
 /**
- * P16-13: roll the Project back to the tree of an earlier generation Sk. The caller names the
- * generation it saw as current (`expectedGeneration`), so a rollback requested on an old page is
+ * Rolls the Project back to the tree of an earlier generation Sk. The caller names the
+ * generation it saw as current (`expectedGeneration`), so a rollback requested on a stale page is
  * refused instead of undoing work the person never saw.
  */
 export const RollbackRequest = z.object({

@@ -2,7 +2,7 @@ import type { CommandEnvelope } from "@rhumbatron/protocol";
 import { z } from "zod";
 
 /**
- * Workflow start commands (HOM-202). "Start verification" travels on
+ * Workflow start commands. "Start verification" travels on
  * `rhumbatron-verification-<env>` and "start release" on `rhumbatron-release-<env>`. The integration
  * Worker consumes both and starts the existing Workflow. The command carries the idempotency key,
  * and the Workflow instance ID is that key (Candidate ID, release ID), as before: a redelivery, a
@@ -115,7 +115,7 @@ type RequestEnv = StartEnv & {
 
 /**
  * Sends a start command to its Queue. Only when the send fails (or the Queue is not bound) does it
- * start the Workflow directly, the path before HOM-202. Either way the instance ID is the same, so
+ * start the Workflow directly. Either way the instance ID is the same, so
  * a send that failed ambiguously and was still delivered finds the existing instance.
  */
 export async function requestWorkflowStart(

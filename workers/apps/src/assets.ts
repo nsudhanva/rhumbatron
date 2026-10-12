@@ -4,7 +4,7 @@ import { type AppBundle, assetObjectKey } from "./bundle.ts";
 import { loadBundle } from "./store.ts";
 
 /**
- * Static assets of one app version (P16-07), per the Dynamic Workers static assets guide. The
+ * Static assets of one app version, per the Dynamic Workers static assets guide. The
  * manifest is in bundle.json; each file is one R2 object under the bundle prefix. The router
  * serves matching assets before the app runs, as Workers static assets do. Apps can also call
  * `env.ASSETS.fetch(request)` themselves; this entrypoint is that binding. `props.bundleKey` is

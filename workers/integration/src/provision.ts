@@ -4,21 +4,19 @@ import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import { createFsFromVolume, Volume } from "memfs";
 import { storeTreeCode, walkTree } from "./code-store.ts";
-import acmeShop from "./fixtures/acme-shop.fixture.gen.ts";
-import type { SourceSeed } from "./source-seed.ts";
 
 /**
  * Project source provisioning. One Artifacts repo per Project, named by the
  * Project ID. The first commit holds only a `.gitignore` (git needs one file for a tree); agents
- * build the app from nothing. Internal demo and smoke scripts seed the Acme Shop fixture instead.
+ * build the app from nothing.
  * isomorphic-git pushes the commit from an in-memory file system, then it becomes
  * Canonical Generation 0. Safe to repeat; it never seeds a Project whose canonical source is
  * assigned (`needsSourceSeed`).
  */
 
-const SEEDS: Record<SourceSeed, { files: Record<string, string>; message: string }> = {
-  blank: { files: { ".gitignore": "node_modules\n" }, message: "Empty repository (S0)" },
-  "acme-shop": { files: acmeShop, message: "Acme Shop baseline (S0)" },
+const EMPTY_REPOSITORY = {
+  files: { ".gitignore": "node_modules\n" },
+  message: "Empty repository (S0)",
 };
 
 const DIR = "/repo";
@@ -32,12 +30,12 @@ type Provisioned = {
   files: number;
 };
 
-/** File index of one canonical tree, stored once per tree in R2 (Context Compiler input, P7-02). */
+/** File index of one canonical tree, stored once per tree in R2 (Context Compiler input). */
 export type SourceIndex = { commit: string; treeSha: string; files: string[] };
 
 /**
  * Writes the file index of one canonical tree once, then copies its file contents to the code
- * store (P16-16). Readers resolve the canonical commit from the index
+ * store. Readers resolve the canonical commit from the index
  * (`source/<project>/<tree>/index.json`), so it must exist only once that commit is on `main`.
  * `previousTreeSha` is the canonical tree this one replaced: its blobs need no copy check.
  * Returns the number of indexed files, or 0 when the index already existed.
@@ -54,7 +52,7 @@ export async function ensureSourceIndex(
   let entries: Awaited<ReturnType<typeof walkTree>> | undefined;
   const existing = await env.EVIDENCE.get(key);
   if (existing) {
-    // A rollback (P16-13) makes an earlier tree canonical again under a new commit. Readers resolve
+    // A rollback makes an earlier tree canonical again under a new commit. Readers resolve
     // the canonical commit from this index, so it must name the commit now on `main`.
     const index = (await existing.json().catch(() => null)) as SourceIndex | null;
     if (index && index.commit !== head.commit) {
@@ -96,7 +94,7 @@ function isNotFound(error: unknown) {
   return code === "NOT_FOUND" || (error instanceof Error && /not.?found/i.test(error.message));
 }
 
-/** Pushes the template as one commit on `main`. Tokens live 10 minutes and never leave this call. */
+/** Pushes the first commit on `main`. Tokens live 10 minutes and never leave this call. */
 async function seed(
   remote: string,
   token: string,
@@ -133,24 +131,20 @@ async function seed(
   return commit;
 }
 
-export async function provisionProject(
-  env: Env,
-  input: { projectId: string; seed: SourceSeed },
-): Promise<Provisioned> {
-  const files = SEEDS[input.seed];
+export async function provisionProject(env: Env, projectId: string): Promise<Provisioned> {
   let seeded = false;
   let repo: ArtifactsRepo;
   try {
-    repo = await env.ARTIFACTS.get(input.projectId);
+    repo = await env.ARTIFACTS.get(projectId);
   } catch (error) {
     if (!isNotFound(error)) throw error;
-    const created = await env.ARTIFACTS.create(input.projectId, {
-      description: `Rhumbatron project ${input.projectId}`,
+    const created = await env.ARTIFACTS.create(projectId, {
+      description: `Rhumbatron project ${projectId}`,
       setDefaultBranch: "main",
     });
-    await seed(created.remote, created.token, files);
+    await seed(created.remote, created.token, EMPTY_REPOSITORY);
     seeded = true;
-    repo = await env.ARTIFACTS.get(input.projectId);
+    repo = await env.ARTIFACTS.get(projectId);
   }
 
   let [head] = await repo.log({ ref: "main", limit: 1 });
@@ -158,21 +152,19 @@ export async function provisionProject(
     // Created earlier but the seed did not land: push it now with a short-lived token.
     const info = await repo.info();
     const token = await repo.createToken("write", 600);
-    await seed(info.remote, token.plaintext, files);
+    await seed(info.remote, token.plaintext, EMPTY_REPOSITORY);
     seeded = true;
     [head] = await repo.log({ ref: "main", limit: 1 });
   }
-  if (!head) throw new Error(`repo ${input.projectId} has no commits`);
+  if (!head) throw new Error(`repo ${projectId} has no commits`);
 
-  const fileCount = await ensureSourceIndex(env, repo, input.projectId, {
+  const fileCount = await ensureSourceIndex(env, repo, projectId, {
     commit: head.hash,
     treeSha: head.treeHash,
   });
 
-  const artifactRef = `artifacts://${input.projectId}@main`;
+  const artifactRef = `artifacts://${projectId}@main`;
   const root = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
-  await root
-    .get(root.idFromName(input.projectId))
-    .assignSource({ artifactRef, treeSha: head.treeHash });
+  await root.get(root.idFromName(projectId)).assignSource({ artifactRef, treeSha: head.treeHash });
   return { artifactRef, commit: head.hash, treeSha: head.treeHash, seeded, files: fileCount };
 }

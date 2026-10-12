@@ -10,7 +10,7 @@ import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts
 import { requestWorkflowStart, verificationCommand } from "./workflow-commands.ts";
 
 /**
- * Stale Candidate recomposition (P16-14). A Candidate whose
+ * Stale Candidate recomposition. A Candidate whose
  * base fell behind canonical is not retried blind: the same ChangeSets are composed again on the
  * new canonical state as a new Candidate, which runs the full verification again. At most
  * MAX_RECOMPOSES times per lineage; then the stale Candidate is marked blocked for a person.

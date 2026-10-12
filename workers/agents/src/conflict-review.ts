@@ -66,15 +66,14 @@ import {
 } from "./conflicts.ts";
 
 /**
- * Model review of recorded semantic conflicts (P9-05 and
- * P9-06). Runs off the agent's run path: AgentDO schedules it after `declareIntentAndDetect`
- * records a conflict, so a slow or failed review never blocks a run.
+ * Model review of recorded semantic conflicts. Runs off the agent's run path: AgentDO schedules it
+ * after `declareIntentAndDetect` records a conflict, so a slow or failed review never blocks a run.
  *
  * Per conflict: Sonnet first; Opus only when `shouldEscalate` says so and Opus is on (ALLOW_OPUS,
  * ADR 0021); while Opus is off, Sonnet's verdict is final. At most one review per tier per
  * conflict: the tier's slot in `review_json.reviews` is reserved with one conditional D1 update
- * before the call. Each call is admitted like an agent call: the Change budget, the
- * daily call cap, and the monthly Anthropic budget (meteredComplete). Code applies a verdict through
+ * before the call. Each call is admitted like an agent call: the Change budget, the daily call cap,
+ * and the monthly Anthropic budget (meteredComplete). Code applies a verdict through
  * `applyVerdict`; the model output is a hypothesis with citations, never authority.
  */
 

@@ -1,12 +1,12 @@
 /**
- * Temporary billing budget alert adapter (ADR 0019). Provider 5.27 rejects alert_type
+ * Billing budget alert adapter (ADR 0019). Provider 5.27 rejects alert_type
  * `billing_budget_alert`, and the Terraform API token has no Notifications permission, so this
  * adapter writes through the `cf` CLI login of the operator who runs `terraform apply`.
  * Invoked only by terraform_data.budget_alerts (sync and destroy). Read-before-write; safe to run
  * again. Owns only policies named `rhumbatron-budget-*`.
  *
  * sync: one policy per spend level. Creates missing levels; replaces drifted ones; deletes levels
- *   that are no longer configured.
+ *   that are not configured.
  * destroy: deletes every `rhumbatron-budget-*` policy.
  */
 import { $ } from "bun";

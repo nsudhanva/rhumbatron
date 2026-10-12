@@ -1,5 +1,5 @@
 /**
- * Small syntax highlighter for the code view (P16-18): comments, strings, numbers and keywords
+ * Small syntax highlighter for the code view: comments, strings, numbers and keywords
  * for the languages template Projects use. No dependency; anything it does not know is plain.
  * Tokens are produced for the whole text, so block comments and template strings span lines.
  */

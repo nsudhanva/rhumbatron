@@ -5,14 +5,13 @@
  * Usage: bun run cleanup:projects [--dry-run] [--all]
  *
  * Matches only slugs `smoke-<digits>` and `sandbox-<digits>` (scripts/smoke.ts). Every other
- * Project, such as `acme-shop-demo`, is kept. `--all` matches every active Project the smoke user
- * owns, fixtures included. Archiving goes through `DELETE /v1/projects/:id`,
+ * Project, such as a demo Project, is kept. `--all` matches every active Project the smoke user
+ * owns. Archiving goes through `DELETE /v1/projects/:id`,
  * the same path the product uses: the integration Worker then deletes each Project's Artifacts
  * repos and R2 source and context objects. `--dry-run` lists the matches and changes nothing.
  */
 const api = "https://api.rhumbatron.com";
 const SMOKE_SLUG = /^(smoke|sandbox)-\d+$/;
-const NEVER = new Set(["acme-shop-demo"]);
 const PAGE = 200;
 
 const secretKey = process.env.CLERK_SECRET_KEY;
@@ -93,8 +92,7 @@ async function listActive(): Promise<Summary[]> {
   return ((await response.json()) as { data: Summary[] }).data;
 }
 
-const isSmoke = (p: Summary) =>
-  p.status === "active" && (all || (SMOKE_SLUG.test(p.slug) && !NEVER.has(p.slug)));
+const isSmoke = (p: Summary) => p.status === "active" && (all || SMOKE_SLUG.test(p.slug));
 const line = (p: Summary) => `  ${p.id}  ${p.slug.padEnd(22)} ${p.name.padEnd(16)} ${p.createdAt}`;
 
 let exitCode = 0;

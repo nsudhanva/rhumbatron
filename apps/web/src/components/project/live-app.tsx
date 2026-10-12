@@ -7,9 +7,9 @@ import { Mono } from "../ui/mono";
 const LINK = "inline-flex min-h-6 items-center text-kumo-link underline-offset-2 hover:underline";
 
 /**
- * "Live at <host> · Open app" under the Project title (Phase 16, ADR 0020). Renders nothing where
- * live apps are off (local runs). A Project from before live apps gets a "Deploy app" action. "Remove
- * app" (P16-20) confirms in place; the Project and its history stay.
+ * "Live at <host> · Open app" under the Project title (ADR 0020). Renders nothing where
+ * live apps are off (local runs). A Project with source and no live app gets a "Deploy app" action. "Remove
+ * app" confirms in place; the Project and its history stay.
  */
 export function LiveAppLine({
   projectId,

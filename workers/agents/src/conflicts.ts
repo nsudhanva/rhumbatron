@@ -25,10 +25,10 @@ import {
 } from "@rhumbatron/protocol";
 
 /**
- * Intent declaration and semantic-conflict detection for one Change (P9-04
- * and P9-07). Every Intent of a Change lives on the ResourceShardDO that owns
- * `change:<id>`, so one `listIntents` call sees the whole Change. Detection is deterministic: no
- * model call decides a conflict here. The model review runs later (conflict-review.ts).
+ * Intent declaration and semantic-conflict detection for one Change. Every Intent of a Change lives
+ * on the ResourceShardDO that owns `change:<id>`, so one `listIntents` call sees the whole Change.
+ * Detection is deterministic: no model call decides a conflict here. The model review runs later
+ * (conflict-review.ts).
  */
 
 /** The stored policy row read for protected resources (D1 `project_policies`). */
@@ -59,12 +59,12 @@ export async function readProtectedResources(db: D1Database, projectId: string) 
   return protectedResourcesFrom(row);
 }
 
-/** Candidate statuses that no longer count against `max_candidate_count`. */
+/** Candidate statuses that do not count against `max_candidate_count`. */
 export const INACTIVE_CANDIDATE_STATUSES = ["rejected", "stale", "promoted"];
 
 /**
  * `conflicts.review_json`. `decidedBy` names who set the current state. `reviews` holds the model
- * reviews (P9-05, P9-06; conflict-review.ts), applied or not, so unsupported findings stay visible.
+ * reviews (conflict-review.ts), applied or not, so unsupported findings stay visible.
  */
 export type ConflictReview = {
   state: ConflictState;
@@ -77,10 +77,10 @@ export type ConflictReview = {
 };
 
 /**
- * Synchronous second opinion on a deterministic report at detection time, after the
- * deterministic checks and before a Sonnet review. It must not confirm a conflict without a hard signal from the detector. The model review
- * (Sonnet, P9-05; Opus escalation, P9-06) does not use this hook: it runs after the conflict is
- * recorded, off the agent's run path (conflict-review.ts).
+ * Synchronous second opinion on a deterministic report at detection time, after the deterministic
+ * checks and before a Sonnet review. It must not confirm a conflict without a hard signal from the
+ * detector. The model review (Sonnet, then Opus on escalation) does not use this hook: it runs
+ * after the conflict is recorded, off the agent's run path (conflict-review.ts).
  */
 export type ConflictReviewer = (
   report: ConflictReport,
@@ -197,8 +197,8 @@ export function integratedPairs(
 
 /**
  * Pure planning step: detect over each Task's latest Intent, review, and keep each suspected or
- * confirmed pair that is not in `done`. `activeCandidates` grows by two for every fork planned here, so the Candidate limit
- * holds across several conflicts of one Change.
+ * confirmed pair that is not in `done`. `activeCandidates` grows by two for every fork planned
+ * here, so the Candidate limit holds across several conflicts of one Change.
  */
 export async function planConflicts(input: {
   intents: readonly Intent[];

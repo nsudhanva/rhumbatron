@@ -9,7 +9,7 @@ import {
 } from "@rhumbatron/protocol";
 
 /**
- * Code store (P16-16): the bytes of every canonical tree, readable by tree and path from R2.
+ * Code store: the bytes of every canonical tree, readable by tree and path from R2.
  * Blobs are content-addressed (`source/<project>/blobs/<blob sha>`), so a file that did not change
  * between generations is never copied twice. A tree's `code.json` maps its paths to blobs.
  *

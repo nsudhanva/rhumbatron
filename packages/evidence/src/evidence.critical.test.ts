@@ -91,20 +91,19 @@ describe("buildVerificationPlan", () => {
     expect(ids(plan("critical", {}))).toEqual(expect.arrayContaining(["contract", "security"]));
   });
 
-  it("always requires the Cart invariant when a protected invariant names the Cart", () => {
+  it("maps an invariant on existing app behavior to the project tests, never a fixed test file", () => {
     const invariants = [
       "Existing cart add, remove, quantity, and total behavior must remain unchanged.",
     ];
     for (const tier of ["low", "medium", "high"] as const) {
       const p = plan(tier, { protectedInvariants: invariants });
-      const cart = p.checks.find((c) => c.checkId === "protected-invariant-cart");
-      expect(cart?.command).toBe("bun test test/cart.invariant.test.ts");
-      expect(ids(p)).toContain("protected-invariant-cart");
+      expect(ids(p)).toContain("unit");
+      expect(p.checks.filter((c) => c.kind === "protected-invariant")).toEqual([]);
     }
   });
 
   it("maps existing product and endpoint invariants to contract + unit, never a procedure gap", () => {
-    // cand_0e70893092f00a213057151b was rejected on a skipped procedure for the first wording.
+    // No wording may fall through to a skipped procedure check: that rejects the Candidate.
     const invariants = [
       "existing product behavior and endpoints unchanged",
       "Keep existing product listing behavior unchanged",
@@ -126,7 +125,7 @@ describe("buildVerificationPlan", () => {
   });
 
   it("maps route-named and keep-as-is invariants on a generated app to deterministic checks", () => {
-    // cand_7270af31 (blank Project on prod) was rejected on this unmapped procedure gap.
+    // An unmapped procedure gap rejects the Candidate of an agent-built app.
     const route = plan("low", {
       protectedInvariants: ['GET /api/health keeps returning {"ok":true} with status 200'],
     });
@@ -137,7 +136,7 @@ describe("buildVerificationPlan", () => {
     expect(behavior.checks.find((c) => c.checkId === "unit")?.reason).toContain(
       "app behavior -> project tests",
     );
-    // cand_8af0bc96 (same prod Change) was rejected on this plain requirement.
+    // A plain requirement must not become a procedure gap either.
     const plain = plan("low", {
       protectedInvariants: ["Todos are strictly separate per day (Oct 16, 17, 18)"],
     });
@@ -146,13 +145,11 @@ describe("buildVerificationPlan", () => {
     expect(behavior.checks.filter((c) => c.kind === "protected-invariant")).toEqual([]);
   });
 
-  it("a cart and product invariant needs both the Cart check and the endpoint regression", () => {
+  it("a cart and product invariant maps to the endpoint regression checks", () => {
     const p = plan("low", {
       protectedInvariants: ["Keep existing cart and product behavior unchanged."],
     });
-    expect(ids(p)).toEqual(
-      expect.arrayContaining(["unit", "contract", "protected-invariant-cart"]),
-    );
+    expect(ids(p)).toEqual(expect.arrayContaining(["unit", "contract"]));
   });
 
   it("an invariant that maps to no deterministic Evidence stays a visible required gap", () => {
@@ -582,7 +579,7 @@ describe("contract route parsing", () => {
       ).undeclared,
     ).toEqual([]);
   });
-  it("reads every route of a declaration that lists several (prod, cand_a13e0220)", () => {
+  it("reads every route of a declaration that lists several", () => {
     const declared =
       "New routes: POST /api/todos/:id/items, PATCH /api/todos/:id/items/:itemId, DELETE /api/todos/:id/items/:itemId";
     const added = [

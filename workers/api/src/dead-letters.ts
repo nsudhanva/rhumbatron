@@ -91,7 +91,7 @@ type Producers = Pick<Env, "DB" | "AGENT_WAKEUPS" | "INTEGRATION_COMMANDS">;
 function queueFor(env: Producers, queue: string): Queue | null {
   if (queue === "agent-wakeups") return env.AGENT_WAKEUPS;
   if (queue === "integration") return env.INTEGRATION_COMMANDS;
-  // Workflow start commands (HOM-202). The integration Worker consumes the verification, release,
+  // Workflow start commands. The integration Worker consumes the verification, release,
   // and integration Queues with one handler, so its main Queue starts the same instance.
   if (queue === "verification" || queue === "release") return env.INTEGRATION_COMMANDS;
   return null;

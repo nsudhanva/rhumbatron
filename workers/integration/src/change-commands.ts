@@ -75,7 +75,7 @@ const CANCEL_FROM: readonly ChangeStatus[] = [
   "awaiting_choice",
   "queued",
 ];
-/** A system decision (arbiter, same requester, intake) cancels as the system, not as a person. */
+/** A system decision (first come, same requester, intake) cancels as the system. */
 const actorKind = (decidedBy: string | undefined) =>
   decidedBy?.startsWith("system:") ? ("system" as const) : ("user" as const);
 

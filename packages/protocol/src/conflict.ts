@@ -149,9 +149,9 @@ export const ConflictReport = z.object({
 export type ConflictReport = z.infer<typeof ConflictReport>;
 
 /**
- * Closed verdict vocabulary of a model conflict review (P9-05,
- * P9-06). Application code rejects any other value. A verdict is a hypothesis: code applies
- * it only when its citations are valid and the deterministic rules allow it.
+ * Closed verdict vocabulary of a model conflict review. Application code rejects any other value. A
+ * verdict is a hypothesis: code applies it only when its citations are valid and the deterministic
+ * rules allow it.
  */
 export const ConflictReviewVerdict = z.enum([
   "benign_overlap",

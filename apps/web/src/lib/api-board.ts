@@ -63,7 +63,7 @@ export const getProjectBoard = createServerFn()
 
 type ReviewResult = { changeId: string; status: string };
 
-/** Admin or owner: a proposed request starts building (409 when it is no longer proposed). */
+/** Admin or owner: a proposed request starts building (409 when it is not proposed). */
 export const includeChange = createServerFn({ method: "POST" })
   .inputValidator((changeId: string) => changeId)
   .handler(({ data }) =>

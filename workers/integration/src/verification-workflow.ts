@@ -135,7 +135,7 @@ type Loaded = {
   acceptanceCriteria: string[];
   touchesAuthorization: boolean;
   canonical: { generation: number; treeSha: string; commit: string | null } | null;
-  /** P16-14: depth of recomposition; absent in a step result cached before this field existed. */
+  /** Depth of recomposition. A cached step result can lack it. */
   recomposeCount?: number;
   changeSets: ChangeSetRow[];
   /** ChangeSet IDs the Candidate was created with. */
@@ -356,7 +356,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
             throw new Error(`Canonical source of S${snapshot.generation} is not synced yet`);
           }
           const indexed = index ? ((await index.json()) as { commit?: string }).commit : undefined;
-          // A rollback reuses an earlier tree with a new commit (P16-13). The canonical ref names
+          // A rollback reuses an earlier tree with a new commit. The canonical ref names
           // the commit on `main`; until the source sync points the tree's index at it, wait.
           const named = canonicalCommitOf(snapshot.artifactRef);
           if (
@@ -402,7 +402,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     );
     if (!loaded) return { skipped: "missing" };
     // A Candidate marked stale before this run (the event router's `canonical.advanced` sweep) is
-    // composed again here; recomposition is idempotent per composition key (P16-14).
+    // composed again here; recomposition is idempotent per composition key.
     if (loaded.status === "stale") {
       const recomposed = await step.do("recompose stale", () =>
         recomposeQuietly(this.env, candidateId),
@@ -438,7 +438,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       if (halt.halted === "candidate_final") {
         // The event router marks an in-flight Candidate stale after `canonical.advanced`, and
         // only this run notices it. Without a recomposition here the Change would sit in
-        // `verifying` with nothing running (P16-14).
+        // `verifying` with nothing running.
         const recomposed = await step.do("recompose if stale", async () => {
           const row = await this.env.DB.prepare("SELECT status FROM candidates WHERE id = ?")
             .bind(candidateId)
@@ -464,7 +464,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         "stale",
         `Base S${ctx.baseGeneration} is behind canonical S${loaded.canonical.generation}.`,
       );
-      // P16-14: compose the same ChangeSets again on the new canonical state (bounded).
+      // Compose the same ChangeSets again on the new canonical state (bounded).
       const recomposed = await step.do("recompose stale", () =>
         recomposeQuietly(this.env, candidateId),
       );
@@ -473,7 +473,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     const baseCommit = loaded.canonical.commit;
 
     // Deterministic compatibility before any Sandbox time. A shared file is left to
-    // the real merge below, which reports an actual source conflict instead of a guess.
+    // the real merge below, which reports a real source conflict instead of a guess.
     const found = new Set(loaded.changeSets.map((c) => c.id));
     const missing = loaded.changeSetIds.filter((id) => !found.has(id));
     if (missing.length > 0) {
@@ -489,7 +489,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       return { status: "rejected", reason: "malformed_changeset" };
     }
     const { sources } = parsed;
-    // P16-14: a recomposed Candidate carries ChangeSets written on an older canonical state. The
+    // A recomposed Candidate carries ChangeSets written on an older canonical state. The
     // real merge onto the new base and the full check run decide; the base-generation rule does not.
     const composable =
       (loaded.recomposeCount ?? 0) > 0
@@ -563,11 +563,11 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
 
     let lastSandboxAt = reservation.at;
     let plan: VerificationPlan | null = null;
-    /** The composed source, for the live preview after the checks (P16-10). */
+    /** The composed source, for the live preview after the checks. */
     let composedRef: { commit: string; tree: string } | null = null;
     let halt: Halt | null = null;
     try {
-      // Step 2 (P10-03): compose the ChangeSets in Work Graph order.
+      // Step 2: compose the ChangeSets in Work Graph order.
       let composedOrHalt: (Composition & { at: number }) | Halt;
       try {
         composedOrHalt = await step.do(
@@ -994,8 +994,8 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
 
     // After the gate: a gated Candidate waits for a person; a Candidate
     // that policy `autoPromoteRiskTiers` allows promotes through the same path as a manual promote.
-    // Canonical moved while the checks ran: this Candidate can no longer promote. Mark it stale and
-    // recompose it on the new canonical state (P16-14) instead of waiting for a person.
+    // Canonical moved while the checks ran: this Candidate cannot promote. Mark it stale and
+    // recompose it on the new canonical state instead of waiting for a person.
     const moved = await step.do("check canonical", async () => {
       const root = this.env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
       const snapshot = await root.get(root.idFromName(ctx.projectId)).getCanonical();
@@ -1465,7 +1465,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   }
 
   /**
-   * Browser check (P10-11): the composed app in the Sandbox, one capped Browser Run
+   * Browser check: the composed app in the Sandbox, one capped Browser Run
    * session, screenshots in R2 beside the report. A refused budget, a missing preview, or a
    * session deadline is recorded as a gap, never a pass.
    */
@@ -1546,7 +1546,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     await this.recordEvidence(ctx, candidateId, {
       checkId: check.checkId,
       kind: check.kind,
-      // Security: at least one authorization test must run; zero matched is a gap (P10-10).
+      // Security: at least one authorization test must run; zero matched is a gap.
       outcome: check.kind === "security" ? classifySecurity(check, run) : classifyCheck(check, run),
       startedAt: run.startedAt,
       completedAt: run.completedAt,

@@ -8,13 +8,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": [
-      "**",
-      "!**/routeTree.gen.ts",
-      "!**/*.fixture.gen.ts",
-      "!**/worker-configuration.d.ts",
-      "!**/.terraform"
-    ]
+    "includes": ["**", "!**/routeTree.gen.ts", "!**/worker-configuration.d.ts", "!**/.terraform"]
   },
   "formatter": {
     "enabled": true,

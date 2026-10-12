@@ -28,7 +28,7 @@ function harness(options: { canonical?: () => Promise<unknown> } = {}) {
     .filter((f) => f.endsWith(".sql"))
     .sort())
     db.exec(readFileSync(join(MIGRATIONS, file), "utf8"));
-  // The prod shape: a partially selected Change, its one Task completed, one proposed ChangeSet,
+  // The prod shape: a Change in `verifying`, its one Task completed, one proposed ChangeSet,
   // and its only Candidate marked stale by the router while its checks ran. Canonical is S4.
   db.exec(`INSERT INTO projects (id, org_id, name, slug, status, canonical_generation, created_at, updated_at)
     VALUES ('${PROJECT}', 'org_1', 'Recipes', 'recipe-app', 'active', 4, '${T}', '${T}');

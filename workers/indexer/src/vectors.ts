@@ -6,7 +6,7 @@ import {
 } from "@rhumbatron/context-compiler";
 
 /**
- * Semantic memory (P7-05). One vector per code file, keyed by Project and path, so a Project holds
+ * Semantic memory. One vector per code file, keyed by Project and path, so a Project holds
  * at most one vector per current file however many trees it had. A new tree re-embeds only files
  * whose embedding text changed and deletes the vectors of removed files (stale cleanup).
  *

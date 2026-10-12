@@ -1,5 +1,5 @@
 /**
- * Temporary Sandbox Worker adapter (ADR 0012). Provider 5.27 cannot attach a container to a
+ * Sandbox Worker adapter (ADR 0012). Provider 5.27 cannot attach a container to a
  * Durable Object class, and has no container application resource. Invoked only by
  * terraform_data.sandbox_worker.
  *

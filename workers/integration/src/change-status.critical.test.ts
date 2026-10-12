@@ -65,7 +65,7 @@ describe("restoreAfterBudgetRaise", () => {
     expect(restoreAfterBudgetRaise(g)).toEqual({
       ready: ["b"],
       pending: ["c", "d"],
-      // Runs that hit the old budget no longer count against the attempt limit.
+      // Runs that hit the earlier budget do not count against the attempt limit.
       newAttemptWindow: ["b"],
     });
   });
@@ -90,7 +90,7 @@ describe("restoreAfterBudgetRaise", () => {
   });
 });
 
-describe("releaseRecovery (HOM-204)", () => {
+describe("releaseRecovery", () => {
   const promotedAt = "2026-10-09T10:00:00.000Z";
   const at = (minutes: number) => Date.parse(promotedAt) + minutes * 60_000;
   const recover = (
@@ -145,7 +145,7 @@ describe("releaseRecovery (HOM-204)", () => {
   });
 });
 
-describe("verificationHalt (HOM-204)", () => {
+describe("verificationHalt", () => {
   it("stops on a cancelled Change before anything else", () => {
     expect(verificationHalt("cancelled", "verifying")).toBe("change_cancelled");
     expect(verificationHalt("cancelled", "rejected")).toBe("change_cancelled");

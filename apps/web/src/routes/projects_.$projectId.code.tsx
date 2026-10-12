@@ -28,9 +28,9 @@ import { can } from "../lib/permissions";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
- * Code (P16-18): the files of any Canonical Generation, with the version history
+ * Code: the files of any Canonical Generation, with the version history
  * and which agents changed what. Defaults to the live canonical tree. A text file of the live tree
- * can be edited (P16-19): Save creates a new Change that ships only after its checks pass.
+ * can be edited: Save creates a new Change that ships only after its checks pass.
  * An owner or admin can also start an edit session (`edit` in the URL): an IDE with a file tree,
  * tabs, an editor and a terminal over a fork of the live tree. Submit turns every change into one
  * Change. The IDE module loads only when a session starts.

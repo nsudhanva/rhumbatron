@@ -273,9 +273,6 @@ export function useShellContext(): ShellContext {
   if (projectId && isProjectPage(section)) {
     trail.push({ label: PROJECT_PAGES[section], link: projectPageLink(projectId, section) });
   }
-  // A static crumb belongs here, not in `usePageMeta`: the server renders it, so the header
-  // does not grow after hydration (a client-only crumb shifted /design by 27px at 412px wide).
-  if (routeId === "/design") trail.push({ label: "Design reference" });
   trail.push(...subViewTrail(routeId, search ?? {}, changes.data));
 
   return {

@@ -10,8 +10,8 @@ export type CheckRunner = "dynamic-worker" | "sandbox";
  * - unit
  * - contract
  *
- * Performance (benchmarks), Browser (sessions), Security (pattern-matched tests),
- * and Cart invariants (specific invariant test file) require Sandbox execution.
+ * Performance (benchmarks), Browser (sessions), and Security (pattern-matched tests) require
+ * Sandbox execution.
  * When the APPS service binding is absent (local development or a test), all checks use Sandbox.
  */
 export function isAppCheckerEligible(
@@ -19,7 +19,6 @@ export function isAppCheckerEligible(
   hasAppsBinding: boolean,
 ): boolean {
   if (!hasAppsBinding) return false;
-  if (check.checkId === "protected-invariant-cart") return false;
   // Composition already decided it: the workflow records it with no runner.
   if (check.checkId === CLIENT_ASSETS_CHECK_ID) return false;
   return check.kind === "build" || check.kind === "unit" || check.kind === "contract";

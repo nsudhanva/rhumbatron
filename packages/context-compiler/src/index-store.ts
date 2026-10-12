@@ -1,5 +1,5 @@
 /**
- * Stored indexes of one canonical tree (P7-02 to P7-05).
+ * Stored indexes of one canonical tree.
  * The indexer Worker writes them; the Context Compiler and the Product Graph API read them.
  *
  * R2 layout, one prefix per tree (content-addressed by the Git tree SHA, so a tree is built once):

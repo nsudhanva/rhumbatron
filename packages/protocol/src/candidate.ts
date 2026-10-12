@@ -19,7 +19,7 @@ export const ChangeSetIntent = z.object({
   assumptions: z.array(z.string()).default([]),
   acceptanceEvidence: z.array(z.string()).default([]),
   /**
-   * A person, not an agent, wrote this ChangeSet (P16-19: an edit on the Code page). Absent for
+   * A person, not an agent, wrote this ChangeSet (an edit on the Code page). Absent for
    * agent ChangeSets. Display only: authority comes from the API's membership check.
    */
   actor: z

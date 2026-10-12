@@ -18,12 +18,11 @@ describe("runner selection eligibility", () => {
     }
   });
 
-  it("routes performance, browser, security, and Cart invariant checks to Sandbox even in prod", () => {
+  it("routes performance, browser, security, and invariant checks to Sandbox even in prod", () => {
     const sandboxChecks: Pick<VerificationCheck, "kind" | "checkId">[] = [
       { checkId: "performance", kind: "performance" },
       { checkId: "browser", kind: "browser" },
       { checkId: "security", kind: "security" },
-      { checkId: "protected-invariant-cart", kind: "protected-invariant" },
       { checkId: "protected-invariant-1", kind: "protected-invariant" },
     ];
     for (const check of sandboxChecks) {
@@ -39,7 +38,6 @@ describe("runner selection eligibility", () => {
       { checkId: "performance", kind: "performance" },
       { checkId: "browser", kind: "browser" },
       { checkId: "security", kind: "security" },
-      { checkId: "protected-invariant-cart", kind: "protected-invariant" },
     ];
     for (const check of allChecks) {
       expect(isAppCheckerEligible(check, false)).toBe(false);

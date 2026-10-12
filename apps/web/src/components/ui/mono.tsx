@@ -1,6 +1,6 @@
 import { cn } from "@cloudflare/kumo";
 import type { ReactNode } from "react";
-import { EMPTY, formatNumber } from "../../lib/format";
+import { EMPTY } from "../../lib/format";
 
 /**
  * Machine values: IDs, hashes, timestamps, paths, commands. Never re-cased.
@@ -37,37 +37,3 @@ export function Mono({
   );
 }
 Mono.displayName = "Mono";
-
-/**
- * A number that does not jitter: mono, tabular, thousands separators, unit after a space
- * (`164 ms`). Missing values render as an em dash. Pass a preformatted string through
- * `children` when a helper from lib/format already shaped it (`formatUsd`, `formatDuration`).
- *
- *   <Num value={p95} unit="ms" />
- *   <Num>{formatUsd(cost)}</Num>
- */
-export function Num({
-  value,
-  unit,
-  fractionDigits,
-  children,
-  className,
-}: {
-  value?: number | null;
-  unit?: string;
-  fractionDigits?: number;
-  children?: ReactNode;
-  className?: string;
-}) {
-  const text =
-    children ??
-    (value === null || value === undefined
-      ? EMPTY
-      : `${formatNumber(value, fractionDigits)}${unit ? ` ${unit}` : ""}`);
-  return (
-    <span className={cn("font-mono text-[12px] whitespace-nowrap tabular-nums", className)}>
-      {text}
-    </span>
-  );
-}
-Num.displayName = "Num";

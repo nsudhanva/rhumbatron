@@ -7,7 +7,7 @@ import {
 import { loaderId } from "./bundle.ts";
 
 /**
- * Pointer selection (ADR 0020, P16-04): which bundle a host serves. The pointer rows live in D1
+ * Pointer selection (ADR 0020): which bundle a host serves. The pointer rows live in D1
  * `app_deployments` (migration 0018). A row keeps the last good bundle while a newer build runs or
  * after it fails, so a failed build never takes a live app down. Removing the production app
  * removes its previews too.

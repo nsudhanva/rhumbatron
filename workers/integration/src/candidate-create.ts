@@ -30,7 +30,7 @@ import {
 
 /**
  * Policy `maxCandidates`. Counts every Candidate of the Change, in any state, except
- * recompositions of a stale Candidate (P16-14): they replace their root, bounded per lineage.
+ * recompositions of a stale Candidate: they replace their root, bounded per lineage.
  */
 export const MAX_CANDIDATES = 3;
 
@@ -289,7 +289,7 @@ function stackedOnOf(intentJson: string | null): string[] {
 }
 
 async function loadProposed(env: Env, changeId: string): Promise<ProposedChangeSet[]> {
-  // ChangeSet `cs_<run>` is published by run `run_<run>` (agents and the Wishlist fixture).
+  // ChangeSet `cs_<run>` is published by run `run_<run>` (agents and human edits).
   const rows = await env.DB.prepare(
     `SELECT cs.id, r.task_id, cs.intent_json FROM changesets cs
      LEFT JOIN task_runs r ON r.id = 'run_' || substr(cs.id, 4)
@@ -490,7 +490,7 @@ async function openChange(
 
 /**
  * API entry (RPC `createCandidate`): one Candidate from every proposed ChangeSet, or from the
- * given subset (competing designs, P9-08). No ChangeSets yields the canonical baseline Candidate.
+ * given subset (competing designs). No ChangeSets yields the canonical baseline Candidate.
  * The caller authenticated the user and checked Project membership.
  */
 export async function createCandidate(

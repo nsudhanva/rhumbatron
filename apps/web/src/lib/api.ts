@@ -282,14 +282,14 @@ export const deployProjectApp = createServerFn({ method: "POST" })
     call<{ status: "queued" | "disabled" }>(`/v1/projects/${data}/app`, { method: "POST" }),
   );
 
-/** "Remove app" (P16-20): 410 at once, then cleanup deletes bundles, data, and rows. */
+/** "Remove app": 410 at once, then cleanup deletes bundles, data, and rows. */
 export const removeProjectApp = createServerFn({ method: "POST" })
   .inputValidator((projectId: string) => projectId)
   .handler(({ data }) =>
     call<{ status: "removing" | "not_found" }>(`/v1/projects/${data}/app`, { method: "DELETE" }),
   );
 
-/** Live preview of one Candidate (P16-10). `enabled` is false where apps are not served. */
+/** Live preview of one Candidate. `enabled` is false where apps are not served. */
 export type CandidatePreviewView = {
   enabled: boolean;
   preview: {
@@ -305,7 +305,7 @@ export const getCandidatePreview = createServerFn()
   .inputValidator((candidateId: string) => candidateId)
   .handler(({ data }) => call<CandidatePreviewView>(`/v1/candidates/${data}/preview`));
 
-/** "Roll back to Sk" (P16-13): a new canonical transition with Sk's tree. */
+/** "Roll back to Sk": a new canonical transition with Sk's tree. */
 export type RollbackResult =
   | {
       status: "promoted";
@@ -891,7 +891,7 @@ export type AgentRunView = {
   failureKind: string | null;
   failureReason: string | null;
   decidedBy: string | null;
-  /** Model provider from the Decision Receipt (ADR 0021: anthropic); null on older receipts. */
+  /** Model provider from the Decision Receipt (ADR 0021: anthropic); null when the receipt names none. */
   provider: "anthropic" | "openrouter" | "google-vertex-ai" | null;
   reasons: string[];
   /** The previous attempt's tier when this attempt moved up a tier. */
@@ -1134,7 +1134,7 @@ export const markNotificationsRead = createServerFn({ method: "POST" })
     call<{ marked: number }>("/v1/notifications/read", { method: "POST", body: { ids: data } }),
   );
 
-/* Code view (P16-17, P16-18): canonical file contents, diffs, and version history. */
+/* Code view: canonical file contents, diffs, and version history. */
 
 /** Who produced a ChangeSet. `files` are the files it changed itself. */
 export type ChangeSetAttribution = {
@@ -1148,7 +1148,7 @@ export type ChangeSetAttribution = {
   summary: string;
   status: string;
   files: string[];
-  /** False for ChangeSets published before patches were stored. */
+  /** False when the ChangeSet has no stored patch. */
   patchRecorded: boolean;
   /** The person who wrote a human ChangeSet (an edit on the Code page), else null. */
   editedBy: string | null;
@@ -1246,7 +1246,7 @@ export type CodeEditResult = {
   candidateIds: string[];
 };
 
-/** P16-19: save one file as a human ChangeSet on a new Change. 409 when canonical moved. */
+/** Saves one file as a human ChangeSet on a new Change. 409 when canonical moved. */
 export const submitCodeEdit = createServerFn({ method: "POST" })
   .inputValidator(
     (input: {

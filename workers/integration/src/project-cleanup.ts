@@ -5,7 +5,7 @@ import { policyKey } from "./policy.ts";
 import { type ForkRow, forksOwnedBy, isProjectId, type OwnedFork } from "./repo-names.ts";
 
 /**
- * Project deletion cleanup and the fork sweep (HOM-195).
+ * Project deletion cleanup and the fork sweep.
  *
  * `project.cleanup`: after `DELETE /v1/projects/:id` archives a Project, everything the Project
  * created is deleted. Every delivery purges the ProjectRootDO and ProjectViewDO again (the API
@@ -81,7 +81,7 @@ type ForkEnv = Pick<Env, "DB" | "ARTIFACTS" | "EVIDENCE">;
 
 type CleanupEnv = ForkEnv &
   Pick<Env, "PROJECT_ROOT" | "PROJECT_VIEW" | "RESOURCE_SHARD" | "AGENT"> & {
-    /** Present on prod only. Dev has no live apps. */
+    /** Absent where live apps are off. */
     APPS?: unknown;
     CONFIG?: Pick<KVNamespace, "delete">;
   };

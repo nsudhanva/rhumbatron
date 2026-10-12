@@ -25,8 +25,8 @@ module "security" {
 
 # Runaway-billing backstop (ADR 0019). Cloudflare has no hard spend cap, so the account emails the
 # owner when usage-based spend crosses each level. Code guards (alarm-guard.ts, causal caps) are the
-# first line; this alert catches anything they miss, in any product. Temporary adapter: provider
-# 5.27 rejects alert_type billing_budget_alert.
+# first line; this alert catches anything they miss, in any product. An API adapter
+# creates it: provider 5.27 rejects alert_type billing_budget_alert.
 locals {
   repo_root = abspath("${path.root}/../../../..")
 }

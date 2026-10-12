@@ -246,7 +246,7 @@ function markerOf(event: FeedEvent, change: ChangeSummary | undefined): Timeline
 function barStatus(run: TaskRun, task: TaskDetail): BarStatus {
   if (run.status === "completed") return "completed";
   if (run.status === "failed") return failureOutcome(run, task.runs, task.status);
-  // A running attempt of a Task that no longer runs was stopped with its Task or Change.
+  // An attempt marked running whose Task has ended stopped with its Task or Change.
   return task.status === "cancelled" || task.status === "failed" || task.status === "completed"
     ? "cancelled"
     : "running";

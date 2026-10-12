@@ -50,9 +50,8 @@ each account-wide limit with those projects.
 - Clerk: `CLERK_ALLOW_MISSING_AZP` is `"false"`. `CLERK_AUTHORIZED_PARTIES` comes from
   `var.clerk_authorized_parties` (default `["https://rhumbatron.com"]`). The list must include that
   origin and contain only `https` origins. See ADR 0002.
-- `FIXTURES_ENABLED` is `"true"` on the API Worker. The fixture routes (the Acme Shop fixture, the
-  Wishlist design-conflict fixture, and the release failure injection) answer on prod. Without the
-  binding, they answer only in `local`.
+- The release failure injection route answers on prod for the Project owner or an admin
+  (ADR 0020).
 - Caps: `SANDBOX_MONTHLY_SECONDS` is 72,000 (20 hours). `BROWSER_DAILY_SECONDS` is 960. Each is
   80 % of the Workers Paid included allowance.
 - K2: 8 streams, 7-day retention, 4 subscriptions per stream (ADR 0006).

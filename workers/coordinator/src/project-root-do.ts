@@ -16,9 +16,8 @@ import {
 } from "./request-scopes.ts";
 
 /**
- * Authoritative owner of one Project's cold, project-wide truth.
- * One instance per Project: `env.PROJECT_ROOT.idFromName(projectId)`.
- * Cold Project truth: canonical state, promotion, and request admission go through here.
+ * Authoritative owner of one Project's cold, project-wide truth: canonical state, promotion, and
+ * request admission order. One instance per Project: `env.PROJECT_ROOT.idFromName(projectId)`.
  */
 
 export type InitializeInput = {
@@ -26,7 +25,7 @@ export type InitializeInput = {
   orgId: string;
   artifactRef: string;
   treeSha: string;
-  /** Starting Canonical Generation (the demo starts at 1841). */
+  /** Starting Canonical Generation. Default 0. */
   generation?: number;
   policyVersion: string;
 };

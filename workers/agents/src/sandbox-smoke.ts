@@ -3,7 +3,7 @@ import { closeWorkspace, openWorkspace, runCommand, type WorkspaceRef } from "./
 
 /**
  * Integration smoke check "Sandbox executes Bun", with no model calls:
- * fork the canonical repo, check it out in the Project Sandbox, run the fixture tests, then close
+ * fork the canonical repo, check it out in the Project Sandbox, run the project tests, then close
  * the workspace and delete the fork so nothing is left behind.
  */
 export type SandboxSmokeResult = {

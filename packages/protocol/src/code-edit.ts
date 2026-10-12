@@ -3,10 +3,10 @@ import { utf8Length } from "./code.ts";
 import type { RiskTier } from "./common.ts";
 
 /**
- * Human edits (Phase 16 P16-19). A person edits one file on
- * the Code page. Save creates a new Change with one human ChangeSet. That Change goes through the
- * same composition, verification, and promotion as agent work: only verified evidence advances
- * the Canonical State. Everything here is deterministic; no model sees an edit.
+ * Human edits. A person edits one file on the Code page. Save creates a new Change with one human
+ * ChangeSet. That Change goes through the same composition, verification, and promotion as agent
+ * work: only verified evidence advances the Canonical State. Everything here is deterministic; no
+ * model sees an edit.
  */
 
 /** Largest file a person can save from the Code page. */

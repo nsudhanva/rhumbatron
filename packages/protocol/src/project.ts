@@ -66,6 +66,7 @@ export type Requester = z.infer<typeof Requester>;
  * `winnerChangeId`, or of the current app when that is null. `declined`: an owner or admin
  * declined the proposed request; `reason` is the decline reason. `follows`: the first requester
  * chose to apply this request after their own request `winnerChangeId` (ADR 0032).
+ * `partially_selected` stays valid only because stored rows hold it; no request gets it.
  */
 export const RequestOutcome = z.object({
   kind: z.enum([
@@ -99,7 +100,10 @@ export const ChangeStatus = z.enum([
   "budget_blocked",
   /** Source could not merge after two bounded rebase reruns. */
   "blocked",
-  /** A conflicting request lost to the request the system arbiter chose (shared-projects.md). */
+  /**
+   * The request ends without a build because a conflicting request goes ahead: the earlier
+   * requester kept their version, or the choice expired (ADR 0032).
+   */
   "not_selected",
   /** The request is unclear, a duplicate, or conflicts: the workflow waits for an answer. */
   "needs_input",

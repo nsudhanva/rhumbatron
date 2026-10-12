@@ -22,17 +22,16 @@ import { judgeProbe, type Probe, type ProbeResult } from "./release-model.ts";
 import { candidateFork } from "./repo-names.ts";
 
 /**
- * Live app releases (Phase 16 milestone B, ADR 0020): Candidate previews (P16-10), the production
- * pointer after promotion and its smoke check (P16-11, P16-12), version hosts (P16-13), app removal
- * (P16-20), and preview expiry (P16-22). Prod only: every entry point is a no-op without the `APPS`
- * binding, so dev builds, checks, and promotes Projects without hosting them.
+ * Live app releases (ADR 0020): Candidate previews, the production pointer after promotion and its
+ * smoke check, version hosts, app removal, and preview expiry. Prod only: every entry point is a
+ * no-op without the `APPS` binding.
  *
  * Writes are runtime data (D1 `app_deployments`, R2 bundles), never Terraform.
  * Every write is guarded and safe to repeat: rows are keyed by Project and channel, bundles by
  * commit, and the pointer moves only by compare-and-swap on the row it read.
  *
  * Cost per preview or rebuilt production bundle: one Artifacts read per tree and per source file
- * (about 25 for Acme), a few R2 writes, and one builder RPC, within the daily build cap. A
+ * (about 25 for a small app), a few R2 writes, and one builder RPC, within the daily build cap. A
  * production bundle copied from a preview costs only R2 operations.
  */
 
@@ -45,7 +44,7 @@ const PREVIEW_RETENTION_DAYS = 7;
 const WIPES_PER_PASS = 25;
 const R2_PAGE = 1000;
 
-/** Daily cap on app bundle builds (P16-21): each reads source from Artifacts and runs esbuild. */
+/** Daily cap on app bundle builds: each reads source from Artifacts and runs esbuild. */
 export const APP_BUILDS_PER_DAY = 60;
 
 /** Takes one build from today's meter. False when the cap is reached: the build does not run. */
@@ -141,7 +140,7 @@ const storeName = (projectId: string, channel: string) =>
   channel === APP_PRODUCTION_CHANNEL ? projectId : `${projectId}#${channel}`;
 
 /* ------------------------------------------------------------------------------------------ */
-/* Previews (P16-10)                                                                           */
+/* Previews                                                                                    */
 /* ------------------------------------------------------------------------------------------ */
 
 export type PreviewOutcome =
@@ -276,7 +275,7 @@ async function removeChannels(env: Env, projectId: string, channels: readonly st
 }
 
 /* ------------------------------------------------------------------------------------------ */
-/* Production bundle and pointer (P16-11, P16-12)                                             */
+/* Production bundle and pointer                                                              */
 /* ------------------------------------------------------------------------------------------ */
 
 const bundleJson = (key: string) => `${key}/bundle.json`;
@@ -527,7 +526,7 @@ export async function probeApp(
 }
 
 /* ------------------------------------------------------------------------------------------ */
-/* Removal and expiry (P16-20, P16-22)                                                        */
+/* Removal and expiry                                                                         */
 /* ------------------------------------------------------------------------------------------ */
 
 export type AppRemoval = {
@@ -561,7 +560,7 @@ export const isAppTombstone = (row: {
   row.bundle_key === null;
 
 /**
- * Removes a Project's app and keeps the Project (P16-20). The API already marked every row
+ * Removes a Project's app and keeps the Project. The API already marked every row
  * `removed`, so the hosts answer 410 at once. This deletes the data stores, the bundles, and the
  * preview and version rows, then reduces the production row to a tombstone (`isAppTombstone`), so
  * the hosts keep answering 410. Bounded per delivery; `partial` asks for another delivery. Safe
@@ -628,7 +627,7 @@ export async function removeApp(env: Env, projectId: string): Promise<AppRemoval
 }
 
 /**
- * Deletes preview rows older than the bundle retention, with their data stores (P16-22). The R2
+ * Deletes preview rows older than the bundle retention, with their data stores. The R2
  * lifecycle rule already expired their bundles. Version rows and production are never touched.
  * Bounded: one pass per daily sweep.
  */

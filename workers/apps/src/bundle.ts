@@ -2,7 +2,7 @@ import { isAppBuildInput } from "@rhumbatron/protocol";
 import { z } from "zod";
 
 /**
- * App bundle format (ADR 0020, P16-06). One bundle per Project commit, stored in R2:
+ * App bundle format (ADR 0020). One bundle per Project commit, stored in R2:
  *
  *   apps/<project>/<commit>/bundle.json          modules, settings, asset manifest
  *   apps/<project>/<commit>/assets/<path>        static assets, one object each

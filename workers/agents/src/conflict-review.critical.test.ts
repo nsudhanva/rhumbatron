@@ -1,8 +1,8 @@
-// Conflict review orchestration (P9-05, P9-06). Runs the
-// real migrations and review SQL against SQLite (node:sqlite) with a scripted model. A budget
-// refusal must leave the conflict unchanged and call no model; an applied dismissal must leave a
-// Decision Receipt; an unsupported finding must not change state; a high-risk disagreement goes to
-// Opus once, and each tier reviews a conflict at most once.
+// Conflict review orchestration. Runs the real migrations and review SQL against SQLite
+// (node:sqlite) with a scripted model. A budget refusal must leave the conflict unchanged and call
+// no model; an applied dismissal must leave a Decision Receipt; an unsupported finding must not
+// change state; a high-risk disagreement goes to Opus once, and each tier reviews a conflict at
+// most once.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";

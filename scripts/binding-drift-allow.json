@@ -67,12 +67,6 @@
       "reason": "Runtime variable set only by Terraform (environment config travels in bindings); local code uses its default."
     },
     {
-      "worker": "workers/agents",
-      "side": "wrangler-only",
-      "names": ["AGENT_FILES_IN_WORKER"],
-      "reason": "Opt-in test switch, off by default; remote Workers leave it unset, which means off (workspace.ts)."
-    },
-    {
       "worker": "workers/api",
       "side": "terraform-only",
       "names": ["CLERK_SECRET_KEY"],
@@ -83,12 +77,6 @@
       "side": "terraform-only",
       "names": ["ANTHROPIC_MONTHLY_BUDGET_USD", "SANDBOX_MONTHLY_SECONDS"],
       "reason": "Cap value set from Terraform locals (ADR 0017); code falls back to a default locally."
-    },
-    {
-      "worker": "workers/api",
-      "side": "terraform-only",
-      "names": ["FIXTURES_ENABLED"],
-      "reason": "Gate for demo fixture routes; Terraform sets it, local environments enable fixtures by name (fixtures.ts)."
     },
     {
       "worker": "workers/api",

@@ -29,7 +29,7 @@ import type { AppDataDO } from "./data.ts";
 import { routeAppRequest } from "./router.ts";
 
 /**
- * Bundle builder (P16-06, ADR 0020). Runs in this Worker with `@cloudflare/worker-bundler`
+ * Bundle builder (ADR 0020). Runs in this Worker with `@cloudflare/worker-bundler`
  * (esbuild-wasm), not in the Sandbox: no container time. The integration Worker reads the source of
  * one commit from Artifacts and calls `build` over its `APPS` service binding (prod only). npm
  * dependencies are fetched from the public registry at build time.
@@ -164,7 +164,7 @@ export class AppBuilder extends WorkerEntrypoint<Env> {
   }
 
   /**
-   * One GET through the router for the app's host (P16-11 smoke check), with a fresh pointer
+   * One GET through the router for the app's host (smoke check), with a fresh pointer
    * read. It never leaves Cloudflare, so it works whatever the public route state is, and it runs
    * the app under the same limits as a visitor's request.
    */
@@ -193,7 +193,7 @@ export class AppBuilder extends WorkerEntrypoint<Env> {
   }
 
   /**
-   * Deletes app data stores (P16-20 app removal, expired previews). Store names are the ones the
+   * Deletes app data stores (app removal, expired previews). Store names are the ones the
    * router derives: the Project ID for production, `<project>#preview:<id>` for a preview.
    */
   async wipeData(storeNames: string[]): Promise<{ wiped: number }> {

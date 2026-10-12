@@ -27,7 +27,7 @@
   ],
   // App bundles under apps/ and app-previews/ (ADR 0020).
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
-  // Per-app key-value storage behind the DATA binding (P16-09).
+  // Per-app key-value storage behind the DATA binding.
   "durable_objects": { "bindings": [{ "name": "APP_DATA", "class_name": "AppDataDO" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AppDataDO"] }]
 }

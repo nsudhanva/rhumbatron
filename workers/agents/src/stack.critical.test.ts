@@ -214,16 +214,13 @@ beforeEach(() => {
 
 describe("openWorkspace with a dependency stack", () => {
   const open = (d1: D1Database) =>
-    openWorkspace(
-      { DB: d1, ARTIFACTS: artifacts, SANDBOX: {}, AGENT_FILES_IN_WORKER: "false" } as never,
-      {
-        projectId: "proj_1",
-        change: { changeId: "chg_1", taskId: "tsk_t4" },
-        runId: "run_t4_1",
-        baseCommit: BASE,
-        stack,
-      },
-    );
+    openWorkspace({ DB: d1, ARTIFACTS: artifacts, SANDBOX: {} } as never, {
+      projectId: "proj_1",
+      change: { changeId: "chg_1", taskId: "tsk_t4" },
+      runId: "run_t4_1",
+      baseCommit: BASE,
+      stack,
+    });
 
   it("starts from the canonical base plus each dependency, merged in order", async () => {
     const { d1 } = fakeD1();

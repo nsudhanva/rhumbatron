@@ -9,7 +9,6 @@ import { SegmentedSteps } from "../ui/meter";
 import { Mono } from "../ui/mono";
 import { type StatusFamily, StatusPill, statusView } from "../ui/status-pill";
 import { Tag } from "../ui/tag";
-import { previewActivityInput } from "./activity-fixture";
 import {
   type ActivityEvent,
   type ActivityModel,
@@ -18,7 +17,6 @@ import {
   type CandidateSpec,
   type CandidateView,
   type ConflictView,
-  deriveActivity,
   foldActivity,
   type LaneSpec,
   type LaneView,
@@ -126,7 +124,6 @@ export function AgentActivity({
   model,
   ready,
   compiling = false,
-  linkCandidates = true,
   className,
 }: {
   model: ActivityModel;
@@ -134,8 +131,6 @@ export function AgentActivity({
   ready: boolean;
   /** The Root Planner is still compiling the Work Graph. */
   compiling?: boolean;
-  /** Candidate names link to their page. Off in the fixture preview. */
-  linkCandidates?: boolean;
   className?: string;
 }) {
   const headingId = useId();
@@ -191,7 +186,6 @@ export function AgentActivity({
               player={player}
               now={now}
               complete={complete}
-              linkCandidates={linkCandidates}
             />
           )}
         </div>
@@ -254,7 +248,6 @@ function Graph({
   player,
   now,
   complete,
-  linkCandidates,
 }: {
   model: ActivityModel;
   view: ActivityView;
@@ -262,7 +255,6 @@ function Graph({
   player: ActivityPlayer;
   now: number;
   complete: boolean;
-  linkCandidates: boolean;
 }) {
   const promotedGeneration = view.promoted?.generation;
   return (
@@ -331,7 +323,6 @@ function Graph({
                   current={view.current === spec.id}
                   animate={player.animated.has(`${spec.id}:fork`)}
                   arrivalInFlight={state.arrival !== null && player.inFlight.has(state.arrival)}
-                  link={linkCandidates}
                 />
                 <div className="h-full border-b border-kumo-rule" />
               </Row>
@@ -480,14 +471,12 @@ function CandidateRow({
   current,
   animate,
   arrivalInFlight,
-  link,
 }: {
   spec: CandidateSpec;
   state: CandidateView;
   current: boolean;
   animate: boolean;
   arrivalInFlight: boolean;
-  link: boolean;
 }) {
   const name = spec.name;
   if (!state.forked) {
@@ -510,17 +499,13 @@ function CandidateRow({
       {state.arrival && <Flash key={state.arrival} delayed={arrivalInFlight} />}
       <div className="relative grid min-w-0">
         <span className="truncate text-[13px] font-semibold">
-          {link ? (
-            <Link
-              to="/candidates/$candidateId"
-              params={{ candidateId: spec.id }}
-              className="hover:underline"
-            >
-              {name}
-            </Link>
-          ) : (
-            name
-          )}
+          <Link
+            to="/candidates/$candidateId"
+            params={{ candidateId: spec.id }}
+            className="hover:underline"
+          >
+            {name}
+          </Link>
         </span>
         <span
           className="truncate font-mono text-[11px] text-kumo-subtle tabular-nums"
@@ -1144,13 +1129,3 @@ function EventList({
     </section>
   );
 }
-
-/**
- * @public Fixture preview for design review, for example inside routes/design.tsx. Press Replay
- * to watch the Wishlist story converge. Not used by any product page.
- */
-export function AgentActivityPreview() {
-  const model = useMemo(() => deriveActivity(previewActivityInput()), []);
-  return <AgentActivity model={model} ready linkCandidates={false} />;
-}
-AgentActivityPreview.displayName = "AgentActivityPreview";

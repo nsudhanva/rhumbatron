@@ -36,7 +36,6 @@ The roles are `owner`, `admin`, `member`, and `viewer`. `can(role, action)` in `
 |---|---|---|---|
 | GET | `/health`, `/v1/version` | Public | `index.ts` |
 | POST | `/v1/projects` | Signed-in user | `projects.ts` |
-| POST | `/v1/fixtures/projects` | Signed-in user. 404 unless `FIXTURES_ENABLED` is `true`. | `projects.ts` |
 | GET | `/v1/projects` | Signed-in user | `projects.ts` |
 | GET | `/v1/projects/:projectId`, `/snapshot`, `/changes` | Any role | `projects.ts` |
 | POST | `/v1/projects/:projectId/changes` | Contributor. A member's request can start as `proposed` (see [Request review](#request-review)). | `projects.ts` |
@@ -61,7 +60,6 @@ The roles are `owner`, `admin`, `member`, and `viewer`. `can(role, action)` in `
 | GET | `/v1/candidates/:candidateId/evidence/:checkId/screenshots/:n` | Any role | `screenshots.ts` |
 | POST | `/v1/changes/:changeId/approve` | Manager | `candidates.ts` |
 | POST | `/v1/candidates/:candidateId/promote` | Manager | `candidates.ts` |
-| GET, POST | `/v1/changes/:changeId/fixture-changesets` | Any role. 404 unless `FIXTURES_ENABLED` is `true`. | `fixtures.ts` |
 | GET | `/v1/changes/:changeId/conflicts` | Any role | `conflicts.ts` |
 | GET | `/v1/changes/:changeId/decisions` | Any role | `decisions.ts` |
 | GET | `/v1/changes/:changeId/events`, `/claims`, `/progress` | Any role | `activity.ts` |
@@ -82,7 +80,7 @@ The roles are `owner`, `admin`, `member`, and `viewer`. `can(role, action)` in `
 | GET | `/v1/projects/:projectId/dead-letters` | Any role | `dead-letters.ts` |
 | POST | `/v1/dead-letters/:id/retry`, `/v1/dead-letters/:id/dismiss` | Manager | `dead-letters.ts` |
 | GET | `/v1/projects/:projectId/releases` | Any role | `releases.ts` |
-| POST | `/v1/projects/:projectId/releases/inject-failure` | Manager. 404 unless `FIXTURES_ENABLED` is `true`. | `releases.ts` |
+| POST | `/v1/projects/:projectId/releases/inject-failure` | Manager | `releases.ts` |
 | GET | `/v1/projects/:projectId/app`, `/v1/candidates/:candidateId/preview` | Any role | `apps.ts` |
 | POST, DELETE | `/v1/projects/:projectId/app` | Manager | `apps.ts` |
 | POST | `/v1/projects/:projectId/rollback` | Manager | `apps.ts` |

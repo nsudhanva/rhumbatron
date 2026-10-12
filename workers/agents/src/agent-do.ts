@@ -78,7 +78,6 @@ import { taskExtension } from "./task-tools.ts";
 import {
   closeWorkspace,
   deleteWorkspaceFile,
-  getWorkspaceTree,
   listWorkspaceFiles,
   openWorkspace,
   type Published,
@@ -86,7 +85,6 @@ import {
   readWorkspaceFile,
   runCommand,
   type WorkspaceRef,
-  type WorkspaceTree,
   writeWorkspaceFile,
 } from "./workspace.ts";
 
@@ -302,7 +300,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     );
   }
 
-  /** Budget gate before every model request (P6-09). Throwing fails the request, then the run. */
+  /** Budget gate before every model request. Throwing fails the request, then the run. */
   private async beforeModelCall(tier: ModelTier) {
     const run = this.activeRun();
     if (!run) throw new Error("no active run");
@@ -310,7 +308,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     if (run.outcome && BUDGET_OUTCOMES.includes(run.outcome)) {
       throw new Error("budget stop reached");
     }
-    // A new call after a provider failure means Pi retried; the failure no longer ends the run.
+    // A call after a provider failure means Pi retried; the failure does not end the run.
     if (run.outcome && TRANSPORT_OUTCOMES.has(run.outcome)) {
       this.ctx.storage.sql.exec(
         "UPDATE agent_runs SET outcome = NULL WHERE run_id = ?",
@@ -522,7 +520,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     }
   }
 
-  /** AgentRuntime.start (P6-02). Idempotent: an active run for the same Task is returned as is. */
+  /** AgentRuntime.start. Idempotent: an active run for the same Task is returned as is. */
   async start(input: AgentRunInput): Promise<AgentRunResult> {
     const active = this.activeRun();
     if (active) {
@@ -552,7 +550,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
 
     const allRuns = await this.taskRuns(input.taskId);
     // Escalation over the Task's whole failure history. A person's
-    // budget raise after a repeated-failure stop opens a new attempt window (0021).
+    // budget raise after a repeated-failure stop opens a fresh attempt window (ADR 0021).
     const allowOpus = opusAllowed(this.env.ALLOW_OPUS);
     const { failures, step: next } = nextAttempt(allRuns, task.attempts_reset_at, { allowOpus });
     const attempt = allRuns.length + 1;
@@ -564,7 +562,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       this.env.DB.prepare(
         "SELECT COALESCE(SUM(r.cost_usd), 0) AS n FROM task_runs r JOIN tasks t ON t.id = r.task_id WHERE t.change_id = ?",
       ).bind(input.changeId),
-      // Conflict reviews (P9-05, P9-06) spend from the same Change budget.
+      // Conflict reviews spend from the same Change budget.
       this.env.DB.prepare(CONFLICT_REVIEW_SPEND_SQL).bind(input.changeId),
     ]);
     // Recorded spend (Claude is paid, ADR 0021) comes off the Change budget first.
@@ -579,7 +577,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       return { runId: "", accepted: false, state: { status: "idle" } };
     }
 
-    // Route (P6-07): rules, then Clef-flash for the generic case; escalation decides retries (P6-10).
+    // Route: rules, then Clef-flash for the generic case; escalation decides retries.
     let tier: ModelTier;
     let receipt: Record<string, unknown>;
     if (next) {
@@ -697,8 +695,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       }
     }
 
-    // Context Packet (P7-01, P7-09): deterministic, stored in R2 by hash before the model runs.
-    // Indexed retrieval (P7-06): exact indexes of the canonical tree first, Vectorize last.
+    // Context Packet: deterministic, stored in R2 by hash before the model runs.
+    // Indexed retrieval: exact indexes of the canonical tree first, Vectorize last.
     const intents = await this.intentsFor(input.changeId, task);
     const retrieval = source
       ? await taskRetrieval(this.env, {
@@ -807,7 +805,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       now,
     );
 
-    // Decision Receipt (P6-08), run row, and the running status commit together.
+    // Decision Receipt, run row, and the running status commit together.
     await this.env.DB.batch([
       this.env.DB.prepare(
         `INSERT OR IGNORE INTO decision_receipts (id, task_id, agent_id, decision_type, decided_by, selected_tier, receipt_json, created_at)
@@ -981,7 +979,6 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
             this.env,
             ws,
             `${input.taskId}: ${String(result.intent.summary ?? "")}`,
-            this.tree(run.run_id),
           );
       } catch (error) {
         log({
@@ -991,7 +988,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         });
         result = { ok: false, kind: "invalid_output", reason: "ChangeSet could not be published" };
       } finally {
-        await closeWorkspace(this.env, ws, this.tree(run.run_id));
+        await closeWorkspace(this.env, ws);
       }
     }
     if (result.ok && published)
@@ -1129,7 +1126,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
             taskId: input.taskId,
             conflicts: conflicts.map((c) => `${c.id}:${c.review.state}`),
           });
-          // Model review (P9-05, P9-06) runs from a durable schedule, never on this run's path.
+          // Model review runs from a durable schedule, never on this run's path.
           const job: ConflictReviewJob = { ctx, conflictIds: conflicts.map((c) => c.id) };
           await this.scheduleGuarded(1, "reviewConflicts", job);
         }
@@ -1322,16 +1319,6 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       "CREATE TABLE IF NOT EXISTS run_workspaces (run_id TEXT PRIMARY KEY, ws_json TEXT NOT NULL)",
     );
     this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS run_workspace_tree (
-        run_id TEXT NOT NULL,
-        path TEXT NOT NULL,
-        content TEXT,
-        deleted INTEGER NOT NULL DEFAULT 0,
-        dirty INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (run_id, path)
-      )`,
-    );
-    this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS run_tool_logs (
         ordinal INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL,
         tool TEXT NOT NULL, target TEXT NOT NULL, output TEXT NOT NULL
@@ -1361,7 +1348,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     return { purged: rows.length > 0 };
   }
 
-  /** Conflict and dependency resumes arrive in Phase 9; until then the event is only recorded. */
+  /** Resume events are only recorded: this runtime has no resume path. */
   async resume(runId: string, event: AgentResumeEvent): Promise<AgentRunResult> {
     log({ event: "agent.resume_ignored", runId, kind: event.kind, eventId: event.eventId });
     return { runId, accepted: false, state: await this.getState(runId) };
@@ -1649,10 +1636,6 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     );
   }
 
-  private tree(runId: string): WorkspaceTree {
-    return getWorkspaceTree(this.ctx.storage.sql, runId);
-  }
-
   private workspaceRef(runId: string): WorkspaceRef | null {
     const row = this.ctx.storage.sql
       .exec<{ ws_json: string }>("SELECT ws_json FROM run_workspaces WHERE run_id = ?", runId)
@@ -1692,7 +1675,6 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       runId: source.run.run_id,
       baseCommit: source.commit,
       stack: source.stack,
-      sql: this.ctx.storage.sql,
     });
     if ("refused" in ws) {
       // Dependencies that do not merge: no fork, no Sandbox time left behind; the Task fails.
@@ -1713,22 +1695,18 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
 
   private async writeSourceFile(path: string, content: string): Promise<string> {
     const ws = await this.workspace();
-    return typeof ws === "string"
-      ? ws
-      : writeWorkspaceFile(this.env, ws, path, content, this.tree(ws.runId));
+    return typeof ws === "string" ? ws : writeWorkspaceFile(this.env, ws, path, content);
   }
 
   private async deleteSourceFile(path: string): Promise<string> {
     const ws = await this.workspace();
-    return typeof ws === "string"
-      ? ws
-      : deleteWorkspaceFile(this.env, ws, path, this.tree(ws.runId));
+    return typeof ws === "string" ? ws : deleteWorkspaceFile(this.env, ws, path);
   }
 
   private async runSourceCommand(command: string): Promise<string> {
     const ws = await this.workspace();
     if (typeof ws === "string") return ws;
-    const result = await runCommand(this.env, ws, command, this.tree(ws.runId));
+    const result = await runCommand(this.env, ws, command);
     this.ctx.storage.sql.exec(
       "INSERT OR REPLACE INTO run_workspaces (run_id, ws_json) VALUES (?, ?)",
       ws.runId,
@@ -1825,7 +1803,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     if (!source) return NO_SOURCE;
     const ws = this.workspaceRef(source.run.run_id);
     if (ws) {
-      return listWorkspaceFiles(this.env, ws, prefix, this.tree(ws.runId));
+      return listWorkspaceFiles(this.env, ws, prefix);
     }
     const all = [...new Set([...source.files, ...source.stack.flatMap((s) => s.files)])].sort();
     const files = all.filter((f) => !prefix || f.startsWith(prefix.replace(/^\.?\//, "")));
@@ -1844,7 +1822,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       ws = opened;
     }
     if (ws)
-      return readWorkspaceFile(this.env, ws, path, this.tree(ws.runId)).catch(
+      return readWorkspaceFile(this.env, ws, path).catch(
         (e) => `Cannot read ${path}: ${String(e).slice(0, 120)}`,
       );
     const clean = path.replace(/^\.?\//, "");

@@ -51,7 +51,7 @@ export const RequestWait = z.object({
   askedAt: Timestamp,
   /** When the wait ends without a choice. */
   expiresAt: Timestamp,
-  /** Status of the later request now. */
+  /** Current status of the later request. */
   laterStatus: ChangeStatus,
   /** True only for the earlier requester while the choice is open. */
   canChoose: z.boolean(),

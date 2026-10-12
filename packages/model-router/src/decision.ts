@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 /**
- * Bounded decision models. Business code depends only on `DecisionModel`.
- * A Jev adapter (P5-08) implements the same interface; Clef is Jev-compatible, so only the endpoint differs.
- * Never logs `state`, which can hold task or repository text.
+ * Bounded decision models. Business code depends only on `DecisionModel`. A Jev adapter implements
+ * the same interface; Clef is Jev-compatible, so only the endpoint differs. Never logs `state`,
+ * which can hold task or repository text.
  */
 
 // Source: https://developers.cloudflare.com/workers-ai/models/clef-flash/ and .../clef/

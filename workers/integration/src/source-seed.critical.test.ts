@@ -1,7 +1,7 @@
 // Seeding writes a Project's first commit. The invariant: only a Project whose canonical source is
 // unassigned at Generation 0 is ever seeded, so no command can overwrite a real repository.
 import { describe, expect, it, vi } from "vitest";
-import { needsSourceSeed, seedOf, seedSourceIfUnassigned } from "./source-seed.ts";
+import { needsSourceSeed, seedSourceIfUnassigned } from "./source-seed.ts";
 
 const unassigned = { artifactRef: "unassigned", generation: 0 };
 const assigned = { artifactRef: "artifacts://proj_1@main", generation: 0 };
@@ -40,16 +40,5 @@ describe("seedSourceIfUnassigned", () => {
       );
       expect(provision).not.toHaveBeenCalled();
     }
-  });
-});
-
-describe("seedOf", () => {
-  it("seeds the Acme fixture only when asked; anything else is an empty repository", () => {
-    expect(seedOf({ fixture: "acme-shop" })).toBe("acme-shop");
-    expect(seedOf({ template: "acme-shop" })).toBe("acme-shop");
-    expect(seedOf({})).toBe("blank");
-    expect(seedOf({ template: "empty" })).toBe("blank");
-    expect(seedOf(null)).toBe("blank");
-    expect(seedOf({ fixture: "other" })).toBe("blank");
   });
 });

@@ -21,8 +21,8 @@ import { StatusPill } from "./ui/status-pill";
  * Human gate and promotion for one Candidate. The buttons only send
  * a request: the API takes the approver from the session, and the integration Worker plus
  * ProjectRootDO re-check every precondition. A disabled button here is a hint, not the gate.
- * Feedback is optimistic but honest: progress while the request runs, success only
- * after the compare-and-swap returns.
+ * Feedback shows progress while the request runs and success only after the compare-and-swap
+ * returns.
  */
 export function CandidatePromotion({
   candidate,

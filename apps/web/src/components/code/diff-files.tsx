@@ -117,7 +117,7 @@ const STATUS_WORD: Record<DiffFile["status"], string | null> = {
   modified: null,
 };
 
-/** "edited by <person>" for a human ChangeSet (P16-19), else the agent role and ID. */
+/** "edited by <person>" for a human ChangeSet, else the agent role and ID. */
 export function Author({ set }: { set: ChangeSetAttribution }) {
   return set.editedBy !== null ? (
     <>
@@ -147,7 +147,7 @@ export function Attribution({ sets }: { sets: ChangeSetAttribution[] }) {
 Attribution.displayName = "Attribution";
 
 /**
- * Files changed (P16-18): one collapsible row per file with `+N −M` and, when known, the agent
+ * Files changed: one collapsible row per file with `+N −M` and, when known, the agent
  * and ChangeSet that changed it. A missing patch says so; it is never an error.
  */
 export function DiffFiles({

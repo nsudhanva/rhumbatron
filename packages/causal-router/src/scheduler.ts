@@ -1,4 +1,4 @@
-// Exact Work Graph scheduling (P5-04). Pure; unknown dependencies are never done.
+// Exact Work Graph scheduling. Pure; unknown dependencies are never done.
 import type { TaskStatus } from "@rhumbatron/protocol";
 
 export type GraphTask = { id: string; status: TaskStatus; dependsOn: readonly string[] };

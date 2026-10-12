@@ -186,10 +186,10 @@ export function composeCommand(
 }
 
 /**
- * Stale Candidate settlement. The `canonical.advanced` sweep below marks older-base Candidates stale
- * but does not compose. This command asks the integration Worker to settle each one: composed again
- * on the new canonical state, its Change blocked, or nothing for a closed Change. The command ID
- * derives from the event; the integration side is idempotent per composition key.
+ * Stale Candidate settlement. The `canonical.advanced` sweep below marks older-base Candidates
+ * stale but does not compose. This command asks the integration Worker to settle each one: composed
+ * again on the new canonical state, its Change blocked, or nothing for a closed Change. The command
+ * ID derives from the event; the integration side is idempotent per composition key.
  */
 function recomposeCommand(event: EventEnvelope): CommandEnvelope<{ generation: number }> | null {
   if (event.eventType !== "canonical.advanced") return null;
@@ -245,12 +245,12 @@ async function decideAmbiguous(
 }
 
 /**
- * P11-06. After `canonical.advanced`, every other in-flight Candidate
- * of the Project on an older base can never promote: mark it stale, so nobody verifies or approves
- * it further. The promoted Candidate itself is marked promoted, which repairs the D1 mirror if the
- * integration Worker stopped between the compare-and-swap and its own write. A Change left in
- * `awaiting_approval` with no verified Candidate returns to `verifying`. One D1 batch. This sweep
- * does not compose: `recomposeCommand` asks the integration Worker to settle each stale Candidate.
+ * After `canonical.advanced`, every other in-flight Candidate of the Project on an older base can
+ * never promote: mark it stale, so nobody verifies or approves it further. The promoted Candidate
+ * itself is marked promoted, which repairs the D1 mirror if the integration Worker stopped between
+ * the compare-and-swap and its own write. A Change left in `awaiting_approval` with no verified
+ * Candidate returns to `verifying`. One D1 batch. This sweep does not compose: `recomposeCommand`
+ * asks the integration Worker to settle each stale Candidate.
  */
 async function settleCandidates(env: Env, events: EventEnvelope[]): Promise<number> {
   const now = new Date().toISOString();

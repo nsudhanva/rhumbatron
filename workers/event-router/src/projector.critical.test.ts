@@ -155,7 +155,7 @@ describe("toViewDelta lifecycle", () => {
     expect(delta.upsert?.activeChanges).toEqual([{ id: "c1", status: "verifying" }]);
   });
 
-  it("moves a promoted Change to releasing and drops it when it completes or fails (HOM-204)", () => {
+  it("moves a promoted Change to releasing and drops it when it completes or fails", () => {
     const system = { kind: "system", id: "release" } as const;
     const delta = toViewDelta([
       event({

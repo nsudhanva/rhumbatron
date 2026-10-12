@@ -23,14 +23,14 @@ import { errorBody, fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity, projectRole } from "./identity.ts";
 
 /**
- * Live app of a Project (Phase 16, ADR 0020). Prod only: the `APPS_DOMAIN` binding exists only
+ * Live app of a Project (ADR 0020). Prod only: the `APPS_DOMAIN` binding exists only
  * where the apps routes serve traffic. Without it the read answers `enabled: false` and the
  * deploy route queues nothing.
  *
  * Cost: a read is 1 D1 query by primary key. A deploy request is 1 Queue message.
  *
- * Milestone B: Candidate previews, version links, "Remove app" (P16-20), and "Roll back to Sk"
- * (P16-13). A rollback is canonical, not app-specific, so it works without the apps Worker too.
+ * Also here: Candidate previews, version links, "Remove app", and "Roll back to Sk". A rollback is
+ * canonical, not app-specific, so it works without the apps Worker.
  */
 
 /** Internal RPC on the integration Worker (service binding `INTEGRATION`). */
@@ -165,7 +165,7 @@ export const apps = new Hono<AppEnv>()
   )
 
   /**
-   * P16-20: "Remove app" keeps the Project. Every host of the app answers 410 within the router's
+   * "Remove app" keeps the Project. Every host of the app answers 410 within the router's
    * 10-second pointer cache; the integration Worker then deletes its data stores, bundles, and
    * preview and version rows, and keeps the production row as a tombstone so the hosts go on
    * answering 410 (`app.remove`).
@@ -205,7 +205,7 @@ export const apps = new Hono<AppEnv>()
     },
   )
 
-  /** P16-10: the live preview of one Candidate (prod only), for "Open preview". */
+  /** The live preview of one Candidate (prod only), for "Open preview". */
   .get(
     "/v1/candidates/:candidateId/preview",
     requireAuth,
@@ -250,7 +250,7 @@ export const apps = new Hono<AppEnv>()
   )
 
   /**
-   * P16-13: roll back to Sk. A new canonical transition Sn -> Sn+1 whose tree equals Sk's tree,
+   * Roll back to Sk. A new canonical transition Sn -> Sn+1 whose tree equals Sk's tree,
    * through the Candidate, approval, and compare-and-swap path of every promotion. Never deletes
    * history. 202 when policy requires an approval first.
    */

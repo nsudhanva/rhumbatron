@@ -34,13 +34,11 @@ prefilled files.
   Application code checks this and asks for one repair turn when the plan breaks the rule.
 - Verification of the first Change: the contract check treats a base without `package.json` as a
   base with no contract. It passes when the Candidate prints a valid route table. A missing
-  Candidate table is a gap. For an app that is not the Acme Shop fixture, the browser check runs a
-  generic flow (home page text, `GET /api/health`).
+  Candidate table is a gap. The browser check runs a generic flow (home page text,
+  `GET /api/health`).
 - Live app: for a tree with no code file, the production row is `ready` with no bundle. The
   router answers 200 "Nothing built yet. Tell Rhumbatron what to make." The first release moves
   the pointer to a bundle.
-- The Acme Shop fixture serves internal demo and smoke scripts only:
-  `POST /v1/fixtures/projects` (404 where fixtures are off).
 - Goal suggestions (`GET /v1/projects/:id/suggestions`, `workers/agents/src/suggestions.ts`).
   Clef is a choice model and cannot write text. So `clef-flash` ranks a fixed list of short goals
   ("start" goals for a repository with no code, "extend" goals for other repositories). The inputs

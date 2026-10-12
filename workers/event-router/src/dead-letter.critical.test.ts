@@ -1,4 +1,4 @@
-// Poison command (P13-10). A command in the dead-letter Queue must be
+// Poison command. A command in the dead-letter Queue must be
 // recorded once per failure, block the Task that waits on it (never a running one), and stay
 // resolved after an operator acts, even when the dead-letter message is delivered again. Also the
 // re-admission rule: a Task deferred at the agent limit is dispatched when a slot frees.

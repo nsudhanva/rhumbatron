@@ -12,14 +12,13 @@
  * origin. Secrets and tokens are never printed.
  *
  * No model spend: every Change is created with `startPlanning: false`, and no route that starts a
- * Sandbox, a Candidate, provisioning, or a fixture publication is called on an active Change.
- * Fixture routes are checked only where FIXTURES_ENABLED answers them. Every Project the run
+ * Sandbox, a Candidate, or provisioning is called on an active Change. Every Project the run
  * creates is archived at the end, also when a check fails. Cost per run: about 120 API requests,
  * about 15 D1 row writes, 1 cleanup Queue message, and one empty Artifacts repository per Project
  * (a few Artifacts operations each; cleanup deletes them).
  *
  * Every Project starts from an empty repository (one commit with a `.gitignore`); the run waits
- * for it. Live apps (Phase 16) exist only on prod. There the run also creates a second empty
+ * for it. Live apps exist only on prod. There the run also creates a second empty
  * Project: its "Nothing built yet" host, code reads, edit and rollback requests that are all
  * refused (the unchanged-content edit creates and deletes one Artifacts fork), and "Remove app".
  * Checks that need app code (cookie isolation on a real app) would need a verified Change with
@@ -385,21 +384,6 @@ const WorkspaceView: Spec = {
     candidates: "array",
   },
 };
-const FixtureView: Spec = {
-  data: {
-    changeId: "string",
-    changeSets: [
-      {
-        design: "string",
-        taskKey: "string",
-        title: "string",
-        changeSetId: "string",
-        status: "string|null",
-        artifactRef: "string|null",
-      },
-    ],
-  },
-};
 const ArchiveView: Spec = {
   data: {
     id: "string",
@@ -467,7 +451,7 @@ async function live(path: string, auth: boolean): Promise<LiveResult> {
 }
 
 /* ------------------------------------------------------------------------------------------ */
-/* Live apps and code (Phase 16, ADR 0020)                                                     */
+/* Live apps and code (ADR 0020)                                                               */
 /* ------------------------------------------------------------------------------------------ */
 
 const APPS_DOMAIN = "rhumbatron.com";
@@ -718,8 +702,8 @@ async function emptyRepositoryChecks(projectId: string, tree: string | null) {
 }
 
 /**
- * Phase 16 checks. On every environment: code routes on the empty repository, unknown IDs, and
- * edit and rollback validation. Where apps are on (prod): the app Project's "Nothing built yet"
+ * Live app and code checks. On every environment: code routes on the empty repository, unknown
+ * IDs, and edit and rollback validation. Where apps are on (prod): the app Project's "Nothing built yet"
  * host, unknown hosts, and "Remove app". No Change plans or verifies, and no route here starts a
  * Sandbox.
  */
@@ -932,8 +916,7 @@ async function run() {
   );
   expectError("unknown route is 404", await call("GET", "/v1/e2e-no-such-route"), 404, "not_found");
 
-  // Auth required on every authenticated route. Fixture routes answer 404 before auth where
-  // fixtures are off, so they are checked further down.
+  // Auth required on every authenticated route.
   const p = unknownProject;
   const ch = unknownChange;
   const cand = unknownCandidate;
@@ -952,6 +935,7 @@ async function run() {
     ["GET", `/v1/projects/${p}/events`],
     ["GET", `/v1/projects/${p}/stats`],
     ["GET", `/v1/projects/${p}/releases`],
+    ["POST", `/v1/projects/${p}/releases/inject-failure`],
     ["GET", `/v1/projects/${p}/dead-letters`],
     ["GET", `/v1/projects/${p}/product-graph`],
     ["GET", `/v1/projects/${p}/verification`],
@@ -988,7 +972,7 @@ async function run() {
     ["POST", "/v1/notifications/read"],
     ["POST", `/v1/dead-letters/${unknownDeadLetter}/retry`],
     ["POST", `/v1/dead-letters/${unknownDeadLetter}/dismiss`],
-    // Live apps and code (Phase 16).
+    // Live apps and code.
     ["GET", `/v1/projects/${p}/app`],
     ["POST", `/v1/projects/${p}/app`],
     ["DELETE", `/v1/projects/${p}/app`],
@@ -1052,7 +1036,7 @@ async function run() {
   if (!okProject) throw new Error("Project creation failed; later checks need it");
   const projectId = created[0] as string;
 
-  // Live apps (Phase 16) exist only on prod. The app Project is created now, so its provisioning
+  // Live apps exist only on prod. The app Project is created now, so its provisioning
   // overlaps the checks below; its own checks run before the archive section.
   const appsOn = environment === "prod";
   let appProjectId: string | null = null;
@@ -1773,52 +1757,13 @@ async function run() {
     "invalid_request",
   );
 
-  // Fixture routes: detect FIXTURES_ENABLED from the read route.
-  const fixtureRead = await call("GET", `/v1/changes/${changeId}/fixture-changesets`);
-  const fixturesOn = fixtureRead.status === 200;
-  if (!fixturesOn) {
-    expectError(
-      "fixture routes are absent (404) without FIXTURES_ENABLED",
-      fixtureRead,
-      404,
-      "not_found",
-      (j) =>
-        same("message", (j as { error: { message: string } }).error.message, "Route not found"),
-    );
-    skip("fixture and release injection routes", "FIXTURES_ENABLED is off");
-  } else {
-    expect("GET /v1/changes/:id/fixture-changesets", fixtureRead, 200, FixtureView, (j) => {
-      const sets = (j as { data: { changeSets: { status: unknown }[] } }).data.changeSets;
-      return sets.length === 2 && sets.every((s) => s.status === null)
-        ? null
-        : "expected two unpublished designs";
-    });
-    expectError(
-      "fixture-changesets without a session token is 401",
-      await call("GET", `/v1/changes/${changeId}/fixture-changesets`, { auth: false }),
-      401,
-      "unauthorized",
-    );
-    expectError(
-      "GET fixture-changesets unknown Change is 404",
-      await call("GET", `/v1/changes/${unknownChange}/fixture-changesets`),
-      404,
-      "not_found",
-    );
-    expectError(
-      "POST fixture-changesets invalid design is 400",
-      await call("POST", `/v1/changes/${changeId}/fixture-changesets`, { body: { design: "c" } }),
-      400,
-      "invalid_request",
-    );
-    expectError(
-      "POST releases/inject-failure before any release is 404",
-      await call("POST", `/v1/projects/${projectId}/releases/inject-failure`),
-      404,
-      "not_found",
-      (j) => same("reason", errorDetails(j)?.reason, "no_release"),
-    );
-  }
+  expectError(
+    "POST releases/inject-failure before any release is 404",
+    await call("POST", `/v1/projects/${projectId}/releases/inject-failure`),
+    404,
+    "not_found",
+    (j) => same("reason", errorDetails(j)?.reason, "no_release"),
+  );
 
   // Cancel, then the Change is closed.
   expect(
@@ -1864,16 +1809,7 @@ async function run() {
     "conflict",
     (j) => same("reason", errorDetails(j)?.reason, "change_closed"),
   );
-  if (fixturesOn) {
-    expectError(
-      "POST fixture-changesets on a cancelled Change is 409",
-      await call("POST", `/v1/changes/${changeId}/fixture-changesets`, { body: { design: "a" } }),
-      409,
-      "conflict",
-    );
-  }
-
-  // Live apps and code (Phase 16).
+  // Live apps and code.
   await liveApps(projectId, projectTree, changeId, appsOn, appProjectId);
 
   // Archive.

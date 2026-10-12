@@ -11,7 +11,7 @@ import {
 import { extractSymbols, type ParseInput } from "./parse.ts";
 
 /**
- * Builds the exact indexes of one canonical tree (P7-02, P7-03, P7-04). Pure and deterministic:
+ * Builds the exact indexes of one canonical tree. Pure and deterministic:
  * the same files and owner rows give byte-identical JSON, so a rebuild of a tree is a no-op.
  *
  * Product areas follow documented path rules, not inference:

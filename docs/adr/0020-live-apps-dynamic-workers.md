@@ -109,9 +109,9 @@ plain fetch Workers, and only storage calls reach a Durable Object.
 
 ### Fake identity
 
-Apps have no real login (`APP_CONVENTIONS`, ADR 0022). The Acme Shop fixture shows the pattern in
-`src/identity.ts`. It reads the user from the `x-user-id` header, then from the `acme_user` cookie.
-Without either, it uses the demo user `alice`. It rejects an unknown name (401).
+Apps have no real login (`APP_CONVENTIONS`, ADR 0022). When a goal asks for accounts or users, the
+agents build a fake identity: a demo user picker stores the user in a cookie, and the server reads
+the cookie.
 
 ### Provisioning
 
@@ -152,7 +152,7 @@ These are runtime data. No Terraform runs at release time.
   transition (`deployment.completed` with status `restored`). The release is `smoke_failed`. The
   Canonical Generation stays promoted.
 - **Versions.** Each deployed generation also gets a version row `preview:v<generation, 7 digits>`
-  that points at its production bundle, for example `v0000003--acme.rhumbatron.com`. `v` is not a
+  that points at its production bundle, for example `v0000003--market.rhumbatron.com`. `v` is not a
   hex digit, so a version ID never equals a Candidate preview ID. A version host has its own data
   store and its own Dynamic Worker ID, so it never shares the isolate or the data of production.
 - **Rollback.** `POST /v1/projects/:projectId/rollback` with `{ targetGeneration,
@@ -201,8 +201,8 @@ releases. A Project without a live app ends its Change at promotion.
   back and never deletes history. Recovery is a new canonical transition: a Change and a promotion
   (a fix, or a rollback). No path releases the same generation again. The event router sweep ends
   a Change that is still `releasing` 45 minutes after promotion (`RELEASE_STUCK_AFTER_MS`).
-- **Failure injection.** `POST /v1/projects/:projectId/releases/inject-failure` (only where
-  `FIXTURES_ENABLED`) probes the live app through the router with the normal probes plus a route
+- **Failure injection.** `POST /v1/projects/:projectId/releases/inject-failure` (Project owner
+  or admin) probes the live app through the router with the normal probes plus a route
   that does not exist. Its real 404 fails the smoke check through the same path. The release
   record has `injected: true`.
 
@@ -308,7 +308,7 @@ bypass host in `local.apps.bypass_hosts`. To remove the wildcard, set `routing =
 
 ```mermaid
 flowchart LR
-  user["Browser"] -->|"acme.rhumbatron.com"| route["Route *.rhumbatron.com/*<br/>(bypass: api, www, docs)"]
+  user["Browser"] -->|"market.rhumbatron.com"| route["Route *.rhumbatron.com/*<br/>(bypass: api, www, docs)"]
   route --> router["rhumbatron-apps-prod<br/>router"]
   router -->|"label, channel (10 s cache)"| d1[("D1 app_deployments")]
   router -->|"cold load: bundle.json, assets"| r2[("R2 apps/project/commit")]

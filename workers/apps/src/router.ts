@@ -15,8 +15,8 @@ import { cachedDeployments, selectDeployment } from "./pointer.ts";
 import { loadBundle } from "./store.ts";
 
 /**
- * The apps router (P16-04, P16-05; ADR 0020). One Worker serves every app on
- * `<label>.rhumbatron.com` (prod only). Per request:
+ * The apps router (ADR 0020). One Worker serves every app on `<label>.rhumbatron.com`
+ * (prod only). Per request:
  *
  * 1. Host to app: `parseAppHost`. Reserved and malformed hosts get a plain 404.
  * 2. Pointer: D1 `app_deployments`, cached in the isolate for 10 s.
@@ -38,7 +38,7 @@ export async function routeAppRequest(
   /** `fresh`: read the pointer from D1, not the isolate cache (release smoke probes). */
   options: { fresh?: boolean } = {},
 ): Promise<Response> {
-  // Dev has no APPS_DOMAIN (and no route): nothing is served.
+  // Without APPS_DOMAIN (and its route), nothing is served.
   const domain: string | undefined = env.APPS_DOMAIN;
   if (!domain) return notFoundPage();
   const host = parseAppHost(new URL(request.url).hostname, domain);

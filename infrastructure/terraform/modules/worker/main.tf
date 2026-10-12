@@ -63,7 +63,7 @@ resource "cloudflare_worker_version" "this" {
   }
 }
 
-# Dev uses 100 percent. Add percentage splits only when canary rollout is required.
+# 100 percent of traffic. Add percentage splits only when canary rollout is required.
 resource "cloudflare_workers_deployment" "this" {
   account_id  = var.account_id
   script_name = cloudflare_worker.this.name

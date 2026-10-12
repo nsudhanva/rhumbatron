@@ -1,7 +1,0 @@
-// Live app configuration. The apps builder reads the assets directory and the compatibility date.
-{
-  "name": "acme-shop",
-  "main": "src/worker.ts",
-  "compatibility_date": "2026-10-08",
-  "assets": { "directory": "./public", "not_found_handling": "none" }
-}

@@ -1,7 +1,7 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 
 /**
- * Per-app persistent storage (P16-09, ADR 0020). An app gets one `DATA` binding: a small string
+ * Per-app persistent storage (ADR 0020). An app gets one `DATA` binding: a small string
  * key-value store. The binding is a router entrypoint whose `props.storeName` the router sets; the
  * app cannot name another store. Each store is one SQLite-backed `AppDataDO`, so data survives
  * isolate restarts, new versions, and rollbacks. Production and each preview have separate stores.
@@ -63,7 +63,7 @@ export class AppDataDO extends DurableObject<Env> {
       .toArray();
   }
 
-  /** App removal (milestone D): deletes the whole store. */
+  /** App removal: deletes the whole store. */
   async wipe(): Promise<void> {
     await this.ctx.storage.deleteAll();
   }

@@ -2,8 +2,6 @@
 // Local: workers/api/.dev.vars. Remote: Terraform secret_text or plain_text binding.
 interface Env {
   CLERK_SECRET_KEY: string;
-  /** "true" serves the Wishlist fixture routes outside dev/local (ADR 0017). */
-  FIXTURES_ENABLED?: string;
   /** Sandbox seconds per calendar month on this environment's meter (ADR 0017). Default 36000. */
   SANDBOX_MONTHLY_SECONDS?: string;
   /** This environment's Anthropic budget in USD per calendar month (ADR 0021). Default 10. */

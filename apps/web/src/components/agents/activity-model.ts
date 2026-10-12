@@ -702,7 +702,7 @@ function addRecordedFacts(
       occurredAt: event.occurredAt,
     });
   }
-  // A Claim ID identifies one owner. Recover that recorded identity for older projections
+  // A Claim ID identifies one owner. Recover that recorded identity for a projection that lacks it
   // only when a lifecycle fact for the same Claim is present; never guess from the resource.
   const holderByClaim = new Map(
     [...claims.values()].filter((f) => f.action !== "contended").map((f) => [f.claimId, f.agentId]),

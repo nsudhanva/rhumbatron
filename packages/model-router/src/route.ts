@@ -4,11 +4,10 @@ import { resolveTier } from "./models.ts";
 import { applyOpusPolicy, decisionFor, routeByRules } from "./rules.ts";
 
 /**
- * ModelRouter (P6-07). Deterministic rules decide whenever a specific rule
- * fires. Only the generic default goes to Clef-flash, and deterministic floors still apply to its
- * answer. Abstain or cap reached: the rules' answer stands. Last, policy: while Opus is off
- * (`ALLOW_OPUS` not "true", ADR 0021) an opus decision runs on Sonnet, and the receipt records
- * the requested tier and the downgrade.
+ * ModelRouter. Deterministic rules decide whenever a specific rule fires. Only the generic default
+ * goes to Clef-flash, and deterministic floors still apply to its answer. Abstain or cap reached:
+ * the rules' answer stands. Last, policy: while Opus is off (`ALLOW_OPUS` not "true", ADR 0021) an
+ * opus decision runs on Sonnet, and the receipt records the requested tier and the downgrade.
  */
 
 const TIERS: readonly ModelTier[] = ["haiku", "sonnet", "opus"];

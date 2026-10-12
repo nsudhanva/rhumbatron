@@ -44,7 +44,7 @@ module "state" {
     events   = 365
     evidence = null
     tmp      = 7
-    # Live app preview bundles (ADR 0020, P16-22). Production bundles live under apps/.
+    # Live app preview bundles (ADR 0020). Production bundles live under apps/.
     "app-previews" = 7
   }
 }
@@ -63,8 +63,8 @@ module "ai" {
   spend_limit_usd = var.anthropic_monthly_budget_usd
 }
 
-# Vectorize semantic memory. Provider 5.27 has no Vectorize index resource, so a
-# temporary adapter creates it (ADR 0003). 384 dims for Workers AI bge-small-en-v1.5. Free plan:
+# Vectorize semantic memory. Provider 5.27 has no Vectorize index resource, so
+# an API adapter creates it (ADR 0003). 384 dims for Workers AI bge-small-en-v1.5. Free plan:
 # 5M stored dimensions = 13,020 vectors; the indexer caps the account at 10,000 vectors in code.
 locals {
   vectorize_index = {
@@ -198,8 +198,6 @@ module "api_worker" {
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
     # Starts one ChangeWorkflow per Change.
     { type = "workflow", name = "CHANGE_WORKFLOW", workflow_name = cloudflare_workflow.change.workflow_name, class_name = "ChangeWorkflow", script_name = module.integration_worker.name },
-    # Wishlist design-conflict fixture routes for the Wishlist demo (ADR 0017).
-    { type = "plain_text", name = "FIXTURES_ENABLED", text = "true" },
     # The Costs page shows this environment's caps (ADR 0017).
     local.cap_bindings.sandbox,
     local.cap_bindings.anthropic,
@@ -255,7 +253,7 @@ module "web_worker" {
 }
 
 # K2 event streams: 8 shared streams, never one per Project or Agent. Provider 5.27 has no K2
-# resource, so a temporary adapter creates them (ADR 0006). Names allow only letters, digits,
+# resource, so an API adapter creates them (ADR 0006). Names allow only letters, digits,
 # and underscores.
 locals {
   k2_config = {
@@ -428,7 +426,7 @@ module "integration_worker" {
     # Tens of reads and writes per day (KV free: 100,000 reads, 1,000 writes).
     module.state.bindings.CONFIG,
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
-    # Workflow start commands (HOM-202). This Worker produces and consumes them.
+    # Workflow start commands. This Worker produces and consumes them.
     { type = "queue", name = "VERIFICATION_COMMANDS", queue_name = module.async.queues["verification"].name },
     { type = "queue", name = "RELEASE_COMMANDS", queue_name = module.async.queues["release"].name },
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
@@ -593,7 +591,7 @@ module "indexer_worker" {
   depends_on = [terraform_data.vectorize_index]
 }
 
-# Sandbox Worker (ADR 0012): hosts the Sandbox container class through the temporary adapter.
+# Sandbox Worker (ADR 0012): hosts the Sandbox container class through an API adapter.
 # Caps: 1 instance, sleeps after 2 minutes idle (in code), 20-hour (72,000 s) monthly meter in
 # this environment's D1 (local.caps.sandbox_monthly_seconds, ADR 0017).
 locals {
@@ -661,7 +659,7 @@ resource "terraform_data" "sandbox_worker_teardown" {
   }
 }
 
-# Live apps (Phase 16, ADR 0020).
+# Live apps (ADR 0020).
 # One router Worker serves every Project at <label>.rhumbatron.com through Dynamic Workers. User
 # apps never need Terraform: a deploy is an R2 bundle plus a D1 pointer (runtime data).
 locals {
@@ -710,7 +708,7 @@ locals {
   }
 }
 
-# Deploys the apps Worker on any bundle or configuration change (temporary adapter).
+# Deploys the apps Worker on any bundle or configuration change (API adapter).
 # No destroy provisioner here: a replacement must never delete the live Worker and its app data.
 resource "terraform_data" "apps_worker" {
   triggers_replace = { config = jsonencode(local.apps_worker) }
@@ -819,7 +817,7 @@ resource "cloudflare_queue_consumer" "integration" {
   }
 }
 
-# `verification.start` and `release.start` (HOM-202): the integration Worker starts the
+# `verification.start` and `release.start`: the integration Worker starts the
 # existing Workflow; the instance ID is the command's idempotency key, so a redelivery starts
 # nothing new. Batch 5 keeps one invocation at about 20 subrequests (Workers Free: 50). Queues: about
 # 3 operations per Candidate and per release.

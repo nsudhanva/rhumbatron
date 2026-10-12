@@ -22,7 +22,7 @@ export const ReleaseStatus = z.enum([
 ]);
 export type ReleaseStatus = z.infer<typeof ReleaseStatus>;
 
-/** Statuses after which nothing about the release changes, except injection (P13-12). */
+/** Statuses after which nothing about the release changes, except failure injection. */
 export const FINAL_RELEASE_STATUSES: readonly ReleaseStatus[] = [
   "deployed",
   "failed",
@@ -63,7 +63,7 @@ export const ProjectReleases = z.object({
 });
 export type ProjectReleases = z.infer<typeof ProjectReleases>;
 
-/** `POST /v1/projects/:projectId/releases/inject-failure` (P13-12, fixture routes only). */
+/** `POST /v1/projects/:projectId/releases/inject-failure` (Project owner or admin). */
 export const ReleaseInjectionOutcome = z.discriminatedUnion("status", [
   z.object({ status: z.literal("recorded"), release: ReleaseView, repeated: z.boolean() }),
   z.object({

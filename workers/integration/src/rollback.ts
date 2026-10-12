@@ -22,7 +22,7 @@ import { loadProjectPolicy } from "./policy.ts";
 import { promoteCandidate } from "./promotion.ts";
 
 /**
- * Roll back to Sk (P16-13). A rollback is never a deletion:
+ * Roll back to Sk. A rollback is never a deletion:
  * it is the new canonical transition Sn -> Sn+1 whose tree equals Sk's tree, and it takes the same
  * path as every promotion.
  *

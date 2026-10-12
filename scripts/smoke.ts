@@ -7,15 +7,138 @@
  * create a Project and a Change, read them back, and check idempotency and the snapshot.
  * Each authenticated run writes about five D1 rows.
  * `--plan` also submits a real goal and waits for the Work Graph: 1 to 4 model calls (ADR 0021).
- * `--sandbox` seeds an Acme Shop project and runs its Bun tests in the Sandbox, then verifies the
- * canonical baseline Candidate (no model calls; a few minutes of the monthly Sandbox budget, ADR 0011),
- * promotes it S0 -> S1, retries the promotion, and checks that a Candidate on S0 is then stale.
+ * `--sandbox` creates a blank Project and adds a minimal app as a person's code edit, which
+ * verifies and promotes S0 -> S1. It runs the Bun tests in the Sandbox, then verifies the canonical
+ * baseline Candidate (no model calls; a few minutes of the monthly Sandbox budget, ADR 0011),
+ * promotes it S1 -> S2, retries the promotion, and checks that a Candidate on S1 is then stale.
  * Every Project a run creates is archived at the end, which queues deletion of its Artifacts repos.
  */
 import { signIn } from "./lib/clerk-session.ts";
 
 const hosts: Record<string, { web: string; api: string }> = {
   prod: { web: "https://rhumbatron.com", api: "https://api.rhumbatron.com" },
+};
+
+/**
+ * The smallest app in the app conventions (APP_CONVENTIONS in packages/protocol): one API route,
+ * one test, the contract script, and a benchmark. `--sandbox` adds it to a blank Project as a
+ * person's code edit, so the Sandbox and the checks have code to run.
+ */
+const SMOKE_APP: Record<string, string> = {
+  "package.json": `${JSON.stringify(
+    {
+      name: "sandbox-smoke",
+      private: true,
+      type: "module",
+      scripts: {
+        dev: "bun run src/server.ts",
+        test: "bun test",
+        typecheck: "tsc --noEmit",
+        bench: "bun run bench/health.bench.ts",
+        contract: "bun run scripts/contract.ts",
+      },
+      dependencies: { hono: "4.13.13" },
+      devDependencies: { "@types/bun": "1.4.2", typescript: "7.0.2" },
+    },
+    null,
+    2,
+  )}\n`,
+  "tsconfig.json": `${JSON.stringify(
+    {
+      compilerOptions: {
+        target: "ES2022",
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        lib: ["ES2022"],
+        types: ["bun"],
+        strict: true,
+        skipLibCheck: true,
+        noEmit: true,
+      },
+      include: ["src", "test", "bench", "scripts"],
+    },
+    null,
+    2,
+  )}\n`,
+  "wrangler.jsonc": `${JSON.stringify(
+    {
+      main: "src/worker.ts",
+      compatibility_date: "2026-10-08",
+      assets: { directory: "./public", not_found_handling: "none" },
+    },
+    null,
+    2,
+  )}\n`,
+  "src/app.ts": `import { Hono } from "hono";
+
+export function createApp() {
+  const app = new Hono();
+  app.get("/api/health", (c) => c.json({ ok: true }));
+  return app;
+}
+`,
+  "src/worker.ts": `import { createApp } from "./app";
+
+const app = createApp();
+
+export default {
+  fetch: (request: Request) => app.fetch(request),
+};
+`,
+  "src/server.ts": `import { createApp } from "./app";
+
+const app = createApp();
+const port = Number(process.env.PORT ?? 8787);
+
+Bun.serve({
+  port,
+  async fetch(req) {
+    const { pathname } = new URL(req.url);
+    if (pathname.startsWith("/api/")) return app.fetch(req);
+    const file = Bun.file(pathname === "/" ? "public/index.html" : \`public\${pathname}\`);
+    return (await file.exists()) ? new Response(file) : new Response("not found", { status: 404 });
+  },
+});
+`,
+  "scripts/contract.ts": `const root = process.env.CONTRACT_ROOT ?? process.cwd();
+const { createApp } = await import(\`\${root}/src/app.ts\`);
+
+const app = createApp() as { routes: { method: string; path: string }[] };
+const routes = [
+  ...new Set(app.routes.filter((r) => r.method !== "ALL").map((r) => \`\${r.method} \${r.path}\`)),
+].sort();
+process.stdout.write(\`\${JSON.stringify({ routes })}\\n\`);
+
+export {};
+`,
+  "test/health.test.ts": `import { expect, test } from "bun:test";
+import { createApp } from "../src/app";
+
+test("GET /api/health answers ok", async () => {
+  const response = await createApp().request("/api/health");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ ok: true });
+});
+`,
+  "bench/health.bench.ts": `import { createApp } from "../src/app";
+
+const app = createApp();
+const samples: number[] = [];
+for (let i = 0; i < 2000; i++) {
+  const start = performance.now();
+  await app.request("/api/health");
+  samples.push(performance.now() - start);
+}
+samples.sort((a, b) => a - b);
+const p95Ms = samples[Math.min(samples.length - 1, Math.ceil(samples.length * 0.95) - 1)] ?? 0;
+process.stdout.write(\`\${JSON.stringify({ p95Ms })}\\n\`);
+`,
+  "public/index.html": `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Sandbox smoke</title></head>
+  <body><h1>Sandbox smoke</h1><p>The API answers at /api/health.</p></body>
+</html>
+`,
 };
 
 const env = process.argv[2] ?? "prod";
@@ -180,7 +303,7 @@ if (secretKey && smokeUserId) {
         method: "POST",
         headers,
         body: JSON.stringify({
-          goal: "Add shared wishlists. Users can create a wishlist, share it with a link, and let collaborators add or remove products. Keep existing cart behavior unchanged. Keep API p95 below 200 ms.",
+          goal: "Make a play-money prediction market. People create yes/no markets, bet coins on an outcome, and see their coin balance. Keep API p95 below 200 ms.",
           budgetUsd: 3,
         }),
       },
@@ -230,77 +353,15 @@ if (secretKey && smokeUserId) {
       const token = await session.token();
       return { authorization: `Bearer ${token}`, "content-type": "application/json" };
     };
-    // The Acme Shop fixture Project (internal route; the product creates empty repositories).
-    const demo = (await (
-      await fetch(`${target.api}/v1/fixtures/projects`, {
-        method: "POST",
+    const api = async <T>(method: string, path: string, body?: unknown) => {
+      const response = await fetch(`${target.api}${path}`, {
+        method,
         headers: await fresh(),
-        body: JSON.stringify({ name: "Sandbox Smoke", slug: `sandbox-${Date.now()}` }),
-      })
-    ).json()) as { data?: { id: string } };
-    const demoId = demo.data?.id ?? "missing";
-    createdProjects.push(demoId);
-    let source = "unassigned";
-    const until = Date.now() + 120_000;
-    while (source === "unassigned" && Date.now() < until) {
-      await Bun.sleep(5000);
-      const read = (await (
-        await fetch(`${target.api}/v1/projects/${demoId}`, { headers: await fresh() })
-      ).json()) as {
-        data?: { canonical: { artifactRef: string } };
-      };
-      source = read.data?.canonical.artifactRef ?? "unassigned";
-    }
-    report("acme source provisioned", source !== "unassigned", source);
-    const result = (await (
-      await fetch(`${target.api}/v1/projects/${demoId}/sandbox-smoke`, {
-        method: "POST",
-        headers: await fresh(),
-      })
-    ).json()) as {
-      data?: { ok: boolean; steps: { step: string; ok: boolean; ms: number; detail: string }[] };
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      return { status: response.status, json: (await response.json().catch(() => ({}))) as T };
     };
-    for (const s of result.data?.steps ?? []) {
-      console.log(
-        `      ${s.ok ? "ok  " : "FAIL"} ${s.step} (${(s.ms / 1000).toFixed(1)} s) ${s.detail.split("\n").slice(-3).join(" | ").slice(0, 160)}`,
-      );
-    }
-    report("sandbox runs bun test", result.data?.ok === true);
-
-    // Candidate verification (P10): a Change with no ChangeSets is the canonical baseline, which
-    // must pass its executable checks. No planner, no model calls; one Sandbox session.
-    const baseline = (await (
-      await fetch(`${target.api}/v1/projects/${demoId}/changes`, {
-        method: "POST",
-        headers: await fresh(),
-        body: JSON.stringify({
-          goal: "Baseline check. Keep existing cart behavior unchanged. Keep API p95 below 200 ms.",
-          budgetUsd: 1,
-          startPlanning: false,
-        }),
-      })
-    ).json()) as { data?: { id: string } };
-    const baselineChange = baseline.data?.id ?? "missing";
-    // A second Change on S0, created before promotion. Its Candidate is created after promotion,
-    // so it is stale from the start and never uses the Sandbox (its workflow stops at step 1).
-    const behind = (await (
-      await fetch(`${target.api}/v1/projects/${demoId}/changes`, {
-        method: "POST",
-        headers: await fresh(),
-        body: JSON.stringify({
-          goal: "Stale baseline check. Created on S0 and promoted after S1.",
-          budgetUsd: 1,
-          startPlanning: false,
-        }),
-      })
-    ).json()) as { data?: { id: string; baseGeneration: number } };
-    report("second change starts on S0", behind.data?.baseGeneration === 0);
-    const createdCandidate = await fetch(`${target.api}/v1/changes/${baselineChange}/candidates`, {
-      method: "POST",
-      headers: await fresh(),
-    });
-    const candidate = ((await createdCandidate.json()) as { data?: { id: string } }).data;
-    report("candidate created", createdCandidate.status === 202 && !!candidate?.id, candidate?.id);
+    type ProjectRead = { data?: { canonical: { artifactRef: string; generation: number } } };
     type CandidateRead = {
       status: string;
       statusReason: string | null;
@@ -309,26 +370,154 @@ if (secretKey && smokeUserId) {
       approvalRequired: boolean;
       promotedGeneration: number | null;
     };
-    let read: CandidateRead | undefined;
-    const verifyUntil = Date.now() + 10 * 60_000;
-    while (Date.now() < verifyUntil) {
-      await Bun.sleep(10_000);
-      const response = await fetch(`${target.api}/v1/candidates/${candidate?.id ?? "missing"}`, {
-        headers: await fresh(),
-      });
-      read = ((await response.json()) as { data?: CandidateRead }).data;
-      if (read && !["composing", "composed", "verifying"].includes(read.status)) break;
+    type PromoteBody = {
+      data?: {
+        status: string;
+        generation: number;
+        fromGeneration: number;
+        alreadyPromoted: boolean;
+        sourceSynced: boolean;
+        sourceCommit: string | null;
+      };
+      error?: { message: string; details?: { status?: string; reason?: string } };
+    };
+    /** Polls a Candidate until its checks end (verified, rejected, promoted, or stale). */
+    const settle = async (candidateId: string) => {
+      let read: CandidateRead | undefined;
+      const until = Date.now() + 10 * 60_000;
+      while (Date.now() < until) {
+        await Bun.sleep(10_000);
+        read = (await api<{ data?: CandidateRead }>("GET", `/v1/candidates/${candidateId}`)).json
+          .data;
+        if (read && !["composing", "composed", "verifying"].includes(read.status)) break;
+      }
+      return read;
+    };
+    const promote = (candidateId: string) =>
+      api<PromoteBody>("POST", `/v1/candidates/${candidateId}/promote`);
+
+    // A blank Project: one commit with a `.gitignore` (S0), the same as every product Project.
+    const demo = await api<{ data?: { id: string } }>("POST", "/v1/projects", {
+      name: "Sandbox Smoke",
+      slug: `sandbox-${Date.now()}`,
+    });
+    const demoId = demo.json.data?.id ?? "missing";
+    createdProjects.push(demoId);
+    let source = "unassigned";
+    const until = Date.now() + 120_000;
+    while (source === "unassigned" && Date.now() < until) {
+      await Bun.sleep(5000);
+      const read = await api<ProjectRead>("GET", `/v1/projects/${demoId}`);
+      source = read.json.data?.canonical.artifactRef ?? "unassigned";
     }
+    report("empty repository provisioned", source !== "unassigned", source);
+
+    // A person adds a minimal app in the app conventions through a Code page edit session. No
+    // model call: the session stores the files in D1, and submit records a human ChangeSet that
+    // composes and verifies like agent work (one Sandbox session).
+    const opened = await api<{ data?: { sessionId: string } }>(
+      "POST",
+      `/v1/projects/${demoId}/code/sessions`,
+    );
+    const sessionId = opened.json.data?.sessionId ?? "missing";
+    report("code session opened", opened.status === 201, sessionId);
+    let written = 0;
+    for (const [path, content] of Object.entries(SMOKE_APP)) {
+      const put = await api("PUT", `/v1/code/sessions/${sessionId}/file`, { path, content });
+      if (put.status === 200) written++;
+    }
+    const fileCount = Object.keys(SMOKE_APP).length;
+    report("app files written", written === fileCount, `${written}/${fileCount}`);
+    const submitted = await api<{ data?: { changeId: string; candidateIds: string[] } }>(
+      "POST",
+      `/v1/code/sessions/${sessionId}/submit`,
+      { message: "Sandbox smoke: minimal app with GET /api/health" },
+    );
+    const editChange = submitted.json.data?.changeId ?? "missing";
+    report("edit submitted as a Change", submitted.status === 201, editChange);
+    let editCandidate = submitted.json.data?.candidateIds[0];
+    const listUntil = Date.now() + 120_000;
+    while (!editCandidate && Date.now() < listUntil) {
+      await Bun.sleep(5000);
+      const listed = await api<{ data?: { id: string }[] }>(
+        "GET",
+        `/v1/changes/${editChange}/candidates`,
+      );
+      editCandidate = listed.json.data?.[0]?.id;
+    }
+    const editRead = await settle(editCandidate ?? "missing");
+    report(
+      "edit Candidate verified",
+      !!editRead && ["verified", "promoted"].includes(editRead.status),
+      `${editRead?.status ?? "missing"}${editRead?.statusReason ? `: ${editRead.statusReason.slice(0, 120)}` : ""}`,
+    );
+    // Policy can promote a verified Candidate itself; a manual promote then reports a repeat.
+    if (editRead?.status === "verified" && editRead.approvalRequired) {
+      await api("POST", `/v1/changes/${editChange}/approve`, {
+        candidateId: editCandidate,
+        decision: "approve",
+      });
+    }
+    const editPromoted = await promote(editCandidate ?? "missing");
+    report(
+      "edit promotes S0 -> S1",
+      editPromoted.status === 200 &&
+        editPromoted.json.data?.status === "promoted" &&
+        editPromoted.json.data.generation === 1,
+      editPromoted.json.error?.message ?? JSON.stringify(editPromoted.json.data),
+    );
+
+    const result = await api<{
+      data?: { ok: boolean; steps: { step: string; ok: boolean; ms: number; detail: string }[] };
+    }>("POST", `/v1/projects/${demoId}/sandbox-smoke`);
+    for (const s of result.json.data?.steps ?? []) {
+      console.log(
+        `      ${s.ok ? "ok  " : "FAIL"} ${s.step} (${(s.ms / 1000).toFixed(1)} s) ${s.detail.split("\n").slice(-3).join(" | ").slice(0, 160)}`,
+      );
+    }
+    report("sandbox runs bun test", result.json.data?.ok === true);
+
+    // Candidate verification (P10): a Change with no ChangeSets is the canonical baseline, which
+    // must pass its executable checks. No planner, no model calls; one Sandbox session.
+    const baseline = await api<{ data?: { id: string } }>(
+      "POST",
+      `/v1/projects/${demoId}/changes`,
+      {
+        goal: "Baseline check. Keep GET /api/health unchanged. Keep API p95 below 200 ms.",
+        budgetUsd: 1,
+        startPlanning: false,
+      },
+    );
+    const baselineChange = baseline.json.data?.id ?? "missing";
+    // A second Change on S1, created before promotion. Its Candidate is created after promotion,
+    // so it is stale from the start and never uses the Sandbox (its workflow stops at step 1).
+    const behind = await api<{ data?: { id: string; baseGeneration: number } }>(
+      "POST",
+      `/v1/projects/${demoId}/changes`,
+      {
+        goal: "Stale baseline check. Created on S1 and promoted after S2.",
+        budgetUsd: 1,
+        startPlanning: false,
+      },
+    );
+    report("second change starts on S1", behind.json.data?.baseGeneration === 1);
+    const createdCandidate = await api<{ data?: { id: string } }>(
+      "POST",
+      `/v1/changes/${baselineChange}/candidates`,
+    );
+    const candidateId = createdCandidate.json.data?.id ?? "missing";
+    report(
+      "candidate created",
+      createdCandidate.status === 202 && candidateId !== "missing",
+      candidateId,
+    );
+    const read = await settle(candidateId);
     const evidence =
       (
-        (await (
-          await fetch(`${target.api}/v1/candidates/${candidate?.id ?? "missing"}/evidence`, {
-            headers: await fresh(),
-          })
-        ).json()) as {
+        await api<{
           data?: { checkId: string; status: string; coverage: string; summary: string }[];
-        }
-      ).data ?? [];
+        }>("GET", `/v1/candidates/${candidateId}/evidence`)
+      ).json.data ?? [];
     for (const e of evidence) {
       console.log(
         `      ${e.checkId.padEnd(26)} ${e.status.padEnd(7)} ${e.coverage.padEnd(18)} ${e.summary.slice(0, 90)}`,
@@ -336,16 +525,10 @@ if (secretKey && smokeUserId) {
     }
     report(
       "candidate verification finished",
-      !!read && ["verified", "rejected"].includes(read.status),
+      !!read && ["verified", "rejected", "promoted"].includes(read.status),
       `${read?.status ?? "missing"}${read?.statusReason ? `: ${read.statusReason.slice(0, 120)}` : ""}`,
     );
-    for (const checkId of [
-      "build",
-      "unit",
-      "contract",
-      "protected-invariant-cart",
-      "performance",
-    ]) {
+    for (const checkId of ["build", "unit", "contract", "performance"]) {
       const e = evidence.find((x) => x.checkId === checkId);
       report(
         `baseline ${checkId} passes with evidence`,
@@ -358,103 +541,73 @@ if (secretKey && smokeUserId) {
     report("gate computed", read?.gate !== null && read?.gate !== undefined);
     report(
       "baseline Candidate is promotable",
-      read?.status === "verified" && read.gate?.promotable === true,
+      !!read && ["verified", "promoted"].includes(read.status) && read.gate?.promotable === true,
       (read?.gate?.gaps ?? []).map((g) => `${g.checkId}:${g.reason}`).join(", ") || "no gaps",
     );
 
-    // Promotion (P11). The human gate is policy: a medium-risk baseline has none, so an approval is
-    // refused; a gated Candidate would need it first (the gate itself is covered by critical tests).
-    const candidateId = candidate?.id ?? "missing";
-    type PromoteBody = {
-      data?: {
-        status: string;
-        generation: number;
-        fromGeneration: number;
-        alreadyPromoted: boolean;
-        sourceSynced: boolean;
-        sourceCommit: string | null;
-      };
-      error?: { message: string; details?: { status?: string; reason?: string } };
-    };
-    const approve = await fetch(`${target.api}/v1/changes/${baselineChange}/approve`, {
-      method: "POST",
-      headers: await fresh(),
-      body: JSON.stringify({ candidateId, decision: "approve" }),
+    // Promotion (P11). The human gate is policy: a baseline without a gate refuses an approval;
+    // a gated Candidate needs it first (the gate itself is covered by critical tests).
+    const approve = await api("POST", `/v1/changes/${baselineChange}/approve`, {
+      candidateId,
+      decision: "approve",
     });
     if (read?.approvalRequired) {
       report("gated baseline approval recorded", approve.status === 200, `got ${approve.status}`);
     } else {
       report("approval refused when policy has no gate", approve.status === 409);
     }
-    const promote = async () => {
-      const response = await fetch(`${target.api}/v1/candidates/${candidateId}/promote`, {
-        method: "POST",
-        headers: await fresh(),
-      });
-      return { status: response.status, body: (await response.json()) as PromoteBody };
-    };
-    const first = await promote();
+    const first = await promote(candidateId);
     report(
-      "baseline promotes S0 -> S1",
+      "baseline promotes S1 -> S2",
       first.status === 200 &&
-        first.body.data?.status === "promoted" &&
-        first.body.data.fromGeneration === 0 &&
-        first.body.data.generation === 1 &&
-        first.body.data.alreadyPromoted === false,
-      first.body.error?.message ?? JSON.stringify(first.body.data),
+        first.json.data?.status === "promoted" &&
+        first.json.data.fromGeneration === 1 &&
+        first.json.data.generation === 2,
+      first.json.error?.message ?? JSON.stringify(first.json.data),
     );
     report(
       "canonical source synced to the composed commit",
-      first.body.data?.sourceSynced === true &&
-        first.body.data.sourceCommit === (read?.composedCommit ?? "missing"),
-      first.body.data?.sourceCommit ?? "no commit",
+      first.json.data?.sourceSynced === true &&
+        first.json.data.sourceCommit === (read?.composedCommit ?? "missing"),
+      first.json.data?.sourceCommit ?? "no commit",
     );
-    const retry = await promote();
+    const retry = await promote(candidateId);
     report(
       "promotion retry is idempotent",
       retry.status === 200 &&
-        retry.body.data?.alreadyPromoted === true &&
-        retry.body.data.generation === 1,
-      retry.body.error?.message ?? JSON.stringify(retry.body.data),
+        retry.json.data?.alreadyPromoted === true &&
+        retry.json.data.generation === 2,
+      retry.json.error?.message ?? JSON.stringify(retry.json.data),
     );
-    const promotedRead = (await (
-      await fetch(`${target.api}/v1/candidates/${candidateId}`, { headers: await fresh() })
-    ).json()) as { data?: CandidateRead };
+    const promotedRead = await api<{ data?: CandidateRead }>(
+      "GET",
+      `/v1/candidates/${candidateId}`,
+    );
     report(
       "candidate recorded as promoted",
-      promotedRead.data?.status === "promoted" && promotedRead.data.promotedGeneration === 1,
+      promotedRead.json.data?.status === "promoted" &&
+        promotedRead.json.data.promotedGeneration === 2,
     );
 
-    // Stale promotion: a Candidate whose base is S0 cannot promote at S1.
-    const staleCreated = await fetch(
-      `${target.api}/v1/changes/${behind.data?.id ?? "missing"}/candidates`,
-      { method: "POST", headers: await fresh() },
+    // Stale promotion: a Candidate whose base is S1 cannot promote at S2.
+    const staleCreated = await api<{ data?: { id: string } }>(
+      "POST",
+      `/v1/changes/${behind.json.data?.id ?? "missing"}/candidates`,
     );
-    const staleId =
-      ((await staleCreated.json()) as { data?: { id: string } }).data?.id ?? "missing";
-    const stale = await (async () => {
-      const response = await fetch(`${target.api}/v1/candidates/${staleId}/promote`, {
-        method: "POST",
-        headers: await fresh(),
-      });
-      return { status: response.status, body: (await response.json()) as PromoteBody };
-    })();
+    const staleId = staleCreated.json.data?.id ?? "missing";
+    const stale = await promote(staleId);
     report(
       "stale promotion rejected",
-      stale.status === 409 && stale.body.error?.details?.status === "stale",
-      stale.body.error?.message ?? `got ${stale.status}`,
+      stale.status === 409 && stale.json.error?.details?.status === "stale",
+      stale.json.error?.message ?? `got ${stale.status}`,
     );
-    const staleRead = (await (
-      await fetch(`${target.api}/v1/candidates/${staleId}`, { headers: await fresh() })
-    ).json()) as { data?: CandidateRead };
-    report("stale candidate marked stale", staleRead.data?.status === "stale");
-    const project = (await (
-      await fetch(`${target.api}/v1/projects/${demoId}`, { headers: await fresh() })
-    ).json()) as { data?: { canonical: { generation: number } } };
+    const staleRead = await api<{ data?: CandidateRead }>("GET", `/v1/candidates/${staleId}`);
+    report("stale candidate marked stale", staleRead.json.data?.status === "stale");
+    const project = await api<ProjectRead>("GET", `/v1/projects/${demoId}`);
     report(
-      "canonical generation advanced exactly once",
-      project.data?.canonical.generation === 1,
-      `S${project.data?.canonical.generation ?? "?"}`,
+      "canonical generation advanced exactly twice",
+      project.json.data?.canonical.generation === 2,
+      `S${project.json.data?.canonical.generation ?? "?"}`,
     );
   }
 

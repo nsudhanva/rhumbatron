@@ -266,7 +266,7 @@ async function promoted(
       commit: sync.commit,
     });
   }
-  // P16-14: Candidates of other Changes on an older base can no longer promote. Mark them stale
+  // Candidates of other Changes on an older base cannot promote. Mark them stale
   // (or take the ones the event router already marked) and recompose them on this generation, so
   // parallel Changes ship without a person.
   await settleStaleBehind(env, row.project_id, generation);
@@ -283,7 +283,7 @@ async function promoted(
 }
 
 /**
- * A Change in `awaiting_approval` whose Candidates are no longer verified (rejected or stale) is
+ * A Change in `awaiting_approval` whose Candidates are not verified (rejected or stale) is
  * back to `verifying`: no decision is pending, and a new Candidate can still be verified.
  */
 const settleAwaitingApproval = (env: Env, changeId: string, now: string) =>

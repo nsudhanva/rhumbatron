@@ -19,7 +19,7 @@ export const ContextSource = z.enum([
   "file",
   "symbol",
   "product_graph",
-  /** Conflict review packets (P9-05): typed Intent fields, ChangeSet stats, detector signals. */
+  /** Conflict review packets: typed Intent fields, ChangeSet stats, detector signals. */
   "intent",
   "changeset",
   "conflict_signal",

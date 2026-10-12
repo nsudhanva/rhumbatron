@@ -1,5 +1,4 @@
 User-agent: *
 Allow: /
-Disallow: /design
 Disallow: /live/
 Disallow: /evidence/

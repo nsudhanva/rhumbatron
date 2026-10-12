@@ -11,11 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountRouteImport } from './routes/account'
-import { Route as DesignRouteImport } from './routes/design'
 import { Route as CandidatesCandidateIdRouteImport } from './routes/candidates.$candidateId'
 import { Route as ChangesChangeIdRouteImport } from './routes/changes.$changeId'
 import { Route as CompareChangeIdRouteImport } from './routes/compare.$changeId'
-import { Route as DesignFlightRouteImport } from './routes/design_.flight'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
@@ -43,11 +41,6 @@ const AccountRoute = AccountRouteImport.update({
   path: '/account',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DesignRoute = DesignRouteImport.update({
-  id: '/design',
-  path: '/design',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const CandidatesCandidateIdRoute = CandidatesCandidateIdRouteImport.update({
   id: '/candidates/$candidateId',
   path: '/candidates/$candidateId',
@@ -61,11 +54,6 @@ const ChangesChangeIdRoute = ChangesChangeIdRouteImport.update({
 const CompareChangeIdRoute = CompareChangeIdRouteImport.update({
   id: '/compare/$changeId',
   path: '/compare/$changeId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DesignFlightRoute = DesignFlightRouteImport.update({
-  id: '/design_/flight',
-  path: '/design/flight',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
@@ -157,11 +145,9 @@ const EvidenceCandidateIdCheckIdNRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
-  '/design': typeof DesignRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/compare/$changeId': typeof CompareChangeIdRoute
-  '/design/flight': typeof DesignFlightRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
@@ -182,11 +168,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
-  '/design': typeof DesignRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/compare/$changeId': typeof CompareChangeIdRoute
-  '/design/flight': typeof DesignFlightRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
@@ -208,11 +192,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
-  '/design': typeof DesignRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
   '/compare/$changeId': typeof CompareChangeIdRoute
-  '/design_/flight': typeof DesignFlightRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
@@ -235,11 +217,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/account'
-    | '/design'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/compare/$changeId'
-    | '/design/flight'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
@@ -260,11 +240,9 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/account'
-    | '/design'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/compare/$changeId'
-    | '/design/flight'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
@@ -285,11 +263,9 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/account'
-    | '/design'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
     | '/compare/$changeId'
-    | '/design_/flight'
     | '/projects/$projectId'
     | '/sign-in/$'
     | '/sign-up/$'
@@ -311,11 +287,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountRoute: typeof AccountRoute
-  DesignRoute: typeof DesignRoute
   CandidatesCandidateIdRoute: typeof CandidatesCandidateIdRoute
   ChangesChangeIdRoute: typeof ChangesChangeIdRoute
   CompareChangeIdRoute: typeof CompareChangeIdRoute
-  DesignFlightRoute: typeof DesignFlightRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
@@ -350,13 +324,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/design': {
-      id: '/design'
-      path: '/design'
-      fullPath: '/design'
-      preLoaderRoute: typeof DesignRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/candidates/$candidateId': {
       id: '/candidates/$candidateId'
       path: '/candidates/$candidateId'
@@ -376,13 +343,6 @@ declare module '@tanstack/react-router' {
       path: '/compare/$changeId'
       fullPath: '/compare/$changeId'
       preLoaderRoute: typeof CompareChangeIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/design_/flight': {
-      id: '/design_/flight'
-      path: '/design/flight'
-      fullPath: '/design/flight'
-      preLoaderRoute: typeof DesignFlightRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/projects/$projectId': {
@@ -503,11 +463,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
-  DesignRoute: DesignRoute,
   CandidatesCandidateIdRoute: CandidatesCandidateIdRoute,
   ChangesChangeIdRoute: ChangesChangeIdRoute,
   CompareChangeIdRoute: CompareChangeIdRoute,
-  DesignFlightRoute: DesignFlightRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,

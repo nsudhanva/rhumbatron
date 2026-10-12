@@ -1,6 +1,6 @@
-// Model conflict review rules (P9-05, P9-06). A model
-// verdict is a hypothesis: only the closed vocabulary parses, only valid citations count, a hard
-// deterministic signal is never dismissed, and only high-risk conflicts can reach Opus.
+// Model conflict review rules. A model verdict is a hypothesis: only the closed vocabulary parses,
+// only valid citations count, a hard deterministic signal is never dismissed, and only high-risk
+// conflicts can reach Opus.
 import type { ConflictReport, Intent } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
 import { detectConflicts } from "./detect.ts";

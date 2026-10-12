@@ -1,52 +1,82 @@
 # Demo runbook
 
-This runbook maps the Rhumbatron demo sequence to the prod UI (`https://rhumbatron.com`) and the API (`https://api.rhumbatron.com`).
+This runbook maps the Rhumbatron demo to the prod UI (`https://rhumbatron.com`) and the API (`https://api.rhumbatron.com`).
 
-Prod is the only remote environment. Run the sequence in the prod UI with a real Change that models plan and build. For a repeatable conflict, publish the fixture Designs A and B on an unplanned Change ([wishlist-fixture.md](wishlist-fixture.md)). [deploy.md](../operations/deploy.md) describes the deployment.
+The demo starts from a blank Project. Rhumbatron has no templates: the Project gets an empty repository, and the agents build the app. Two people use the Project at the same time. Alice owns the Project. Bob is a member. They build a play-money prediction market. The demo shows parallel requests, one real design conflict, one duplicate request, one unclear request, and one change that needs approval.
+
+Prod is the only remote environment. [deploy.md](../operations/deploy.md) describes the deployment. The design of shared Projects is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
 
 ## Before the demo
 
 1. Make sure that `locals.paused = false` in `infrastructure/terraform/envs/prod/main.tf`. If prod is paused, resume it ([pause-resume.md](../operations/pause-resume.md)).
 2. Run `bun run smoke:prod`.
-3. Create the `Acme Shop` Project. The UI creates only empty Projects. Send `POST /v1/fixtures/projects` with `{"name": "Acme Shop", "slug": "acme-shop-demo"}` and a session token. The route seeds the Acme Shop baseline at Canonical Generation `S0`. It answers 404 unless `FIXTURES_ENABLED` is `true`. Terraform sets `FIXTURES_ENABLED = "true"` on the prod API.
-4. Optional: to remove smoke Projects, run `bun run cleanup:projects --dry-run`, then `bun run cleanup:projects`. The command keeps `acme-shop-demo`.
-5. Run `bun run cost:report` ([costs.md](../operations/costs.md)). The caps are 20 Sandbox hours per month, 960 Browser Run seconds per day, and 100 USD of Anthropic spend per calendar month.
-6. After the demo, pause prod if you do not need it.
+3. Run `bun run cost:report` ([costs.md](../operations/costs.md)). The caps are 20 Sandbox hours per month, 960 Browser Run seconds per day, and 100 USD of Anthropic spend per calendar month. The demo builds about five requests. Each build uses about 15 model calls and a few Sandbox minutes.
+4. Prepare two accounts with different email addresses, and two browser profiles. Alice uses one profile. Bob uses the other profile.
+5. Optional: to remove smoke Projects, run `bun run cleanup:projects --dry-run`, then `bun run cleanup:projects`. The command keeps every Project that is not a smoke Project.
+
+## Requests
+
+| Name | Requester | Text |
+|---|---|---|
+| R1 | Alice | `Make a play-money prediction market. People create yes/no markets and bet coins on yes or no. Each person starts with 1000 coins.` |
+| R2 | Alice | `Add a leaderboard that ranks people by their coins.` |
+| R3 | Bob | `Show a chart of the yes probability of each market over time.` |
+| R4 | Alice | `Price each market with an automated market maker, so that each bet moves the price.` |
+| R5 | Bob | `Match bets with an order book. People post a price and wait for someone to take the other side.` |
+| R6 | Bob | `Show who's winning the most coins.` |
+| R7 | Bob | `Make it more fun.` |
+| R8 | Alice | `Admins can void a market and refund every bet in it.` |
+
+R2 and R3 change different parts of the app, so they build in parallel. R4 and R5 ask for two different pricing designs, so they conflict. R6 repeats R2. R7 is not clear. R8 changes who may do what, so it needs approval.
 
 ## Sequence
 
-| # | Step | Where | What to show |
-|---|---|---|---|
-| 1 | Open `rhumbatron.com` | `/` | The Projects table and the notification bell. |
-| 2 | Open `Acme Shop` | `/projects/$projectId` | The Project overview. |
-| 3 | Show the Canonical Generation | `/projects/$projectId` | The stat strip "Canonical generation" and "Canonical source". A Project starts at `S0`, and each promotion adds one. The demo shows the real Canonical Generation of the Project. |
-| 4 | Show production health | `/projects/$projectId` | "Live at" with the app URL. Open the app. |
-| 5 | Enter the shared Wishlist goal | `/projects/$projectId`, "New change" | Goal: `Add shared wishlists. Users can create a wishlist, share it with a link, and let collaborators add or remove products. Keep existing cart behavior unchanged. Keep API p95 below 200 ms.` |
-| 6 | Show generated acceptance criteria | `/changes/$changeId` | "Acceptance criteria", from the Root Planner. |
-| 7 | Show protected Cart invariant | `/changes/$changeId` | "Protected invariants". |
-| 8 | Show p95 constraint | `/changes/$changeId` | The p95 criterion: below 200 ms. |
-| 9 | Show Work Graph creation | `/changes/$changeId` or `/changes/$changeId/flight` | The Work Graph. In Flight Control, the execution DAG. |
-| 10 | Show selected Agents | `/changes/$changeId/flight` or `/projects/$projectId/agents` | The agent swimlanes show the Agents of woken Tasks. |
-| 11 | Show that the full Agent pool does not wake | `/changes/$changeId/flight` | Only ready Tasks have active lanes. Pending Tasks stay idle. |
-| 12 | Show Artifact Workspace creation | `/changes/$changeId/flight` or `/projects/$projectId/workspace` | The workspace lanes show one Artifacts fork for each active Task. |
-| 13 | Show parallel implementation progress | `/changes/$changeId/flight` | The agent swimlanes, workspace lanes, and codebase heatmap. |
-| 14 | Show the design conflict | `/changes/$changeId` | "Design conflict" on the semantic resource `wishlist:membership`. The deterministic detector finds the conflict, and Sonnet reviews it. |
-| 15 | Open conflict details | `/changes/$changeId`, or the Decisions panel of Flight Control | The conflict card: the resource, both Intents, and the Candidate fork decision. |
-| 16 | Show the two incompatible assumptions | `/changes/$changeId`, conflict card | A mutable membership table (`mutable_table`) and an append-only membership event log (`append_only`). |
-| 17 | Show two Candidate futures | `/changes/$changeId` Candidates, or the Candidate arena of Flight Control | One Candidate for Design A and one for Design B. |
-| 18 | Run Candidate verification | `/candidates/$candidateId` | The Sandbox verification status and the Evidence rows. |
-| 19 | Show Candidate A fail p95 | `/compare/$changeId` | Candidate A fails p95 (above 200 ms), so it cannot promote. |
-| 20 | Show Candidate B pass required checks | `/compare/$changeId`, then `/candidates/$candidateId` | Candidate B passes build, unit, contract, the Cart invariant, performance, security, and browser. |
-| 21 | Open Browser Run evidence | `/candidates/$candidateId` | The browser Evidence row and its screenshots. |
-| 22 to 25 | Wishlist share, collaborator add, revoke, denied write | `/candidates/$candidateId` | The browser check steps and their Evidence. |
-| 26 | Show Cart invariant pass | `/candidates/$candidateId` | The `protected-invariant-cart` row: pass. |
-| 27 | Show human approval gate | `/candidates/$candidateId` | The Candidate touches authorization, so the plan requires approval. |
-| 28 | Approve | Approval dialog | The dialog shows the Candidate, composed tree, transition, policy, approver, and required checks. Approve with a reason. |
-| 29 | Show CAS promotion | `/candidates/$candidateId` | Click "Promote S(N) → S(N+1)". `ProjectRootDO` runs the compare-and-swap. |
-| 30 | Show `canonical.advanced` Event | `/projects/$projectId/events`, or the Events panel of Flight Control | The Canonical Generation advances by one. |
-| 31 to 32 | Show build start and deployment complete | `/candidates/$candidateId` | The release panel shows the build, then `deployed` with the version and the smoke result ([release.md](../operations/release.md)). |
-| 33 to 34 | Open production app; shared Wishlist works | `<slug>.rhumbatron.com` | Click "Open app" on the Project overview. |
-| 35 | End on the convergence visualization | `/changes/$changeId` | The agent activity view shows the declared Intents (possible changes), the Candidates, and "S(N) → S(N+1). Canonical advanced. One verified future merged." |
+| # | Step | Who | Where | What to show |
+|---|---|---|---|---|
+| 1 | Open `rhumbatron.com` | Alice | `/` | The Projects table and the notification bell. |
+| 2 | Create the Project `Prediction Market` | Alice | `/`, "New project" | The Project opens at Canonical Generation `S0`. The repository has one commit with a `.gitignore`. The live app host shows "Nothing built yet". |
+| 3 | Share the Project with Bob | Alice | `/projects/$projectId`, Share | The Share dialog shows a pending invitation for Bob. |
+| 4 | Accept the invitation | Bob | `/`, "Shared with you" | The Project opens and shows Members, not Share. Bob sees no Approve, Promote, Share, or Remove button. |
+| 5 | Turn off member review | Alice | `/projects/$projectId/settings` | Turn off "Member requests need review", so the requests of Bob go to the system at once (ADR 0028). |
+| 6 | Send R1 | Alice | `/projects/$projectId`, "New change" | The goal box shows goal suggestions under it. Send R1. |
+| 7 | Show the Work Graph | Alice | `/changes/$changeId` | "Acceptance criteria" and "Protected invariants" from the Root Planner. The first Task bootstraps the app, and every other Task depends on it (ADR 0022). |
+| 8 | Show the agents | Alice | `/changes/$changeId/flight` | Only ready Tasks have active lanes. Pending Tasks stay idle. Each active Task has one Artifacts fork. |
+| 9 | Show Candidate verification | Alice | `/candidates/$candidateId` | The Evidence rows: build, unit, contract, and preview smoke. A check that did not run is a gap, never a pass. |
+| 10 | Promote R1 | Alice | `/candidates/$candidateId` | Policy promotes a low or medium risk Candidate. Otherwise click "Promote S0 → S1". `ProjectRootDO` runs the compare-and-swap. The Canonical Generation advances to `S1`. |
+| 11 | Open the live app | Alice | `<slug>.rhumbatron.com` | Click "Open app" on the Project overview. Create a market and bet coins. |
+| 12 | Send R2 and R3 at the same time | Alice sends R2. Bob sends R3. | `/projects/$projectId`, "New change" | Two Changes build in parallel. The "Requested by" column names each requester. |
+| 13 | Show the parallel work | Alice | `/projects/$projectId/board` | Both Changes move through the Board. The request comparison finds no conflict. |
+| 14 | Show both features | Alice | The live app | The leaderboard and the probability chart. Each promotion advances the Canonical Generation by one. |
+| 15 | Send R4, then R5 | Alice sends R4. Bob sends R5 while R4 builds. | `/projects/$projectId`, "New change" | The request comparison finds a conflict between the two pricing designs. |
+| 16 | Show the conflict | Bob | `/changes/$changeId` of R5 | R5 reads "Waiting for Alice to choose". It has status `awaiting_choice` and no Task. No model chooses, and no role decides (ADR 0032). |
+| 17 | Show the choice | Alice | `/changes/$changeId` of R4 | The card "Bob's request conflicts with yours" shows both goals, both requesters, and the criteria that conflict. Only Alice sees the buttons "Keep mine" and "Apply theirs after mine". |
+| 18 | Choose | Alice | Same card | "Keep mine": R5 ends as `not_selected`, and Bob gets `request_not_selected`. "Apply theirs after mine": R5 is `queued`, then it plans on the tree that has R4. |
+| 19 | Send R6 | Bob | `/projects/$projectId`, "New change" | The intake gate stops R6 before planning. R6 has status `needs_input` with kind `duplicate`. The question quotes the leaderboard criterion of R2. R6 has no Task. |
+| 20 | Send R7 | Bob | `/projects/$projectId`, "New change" | R7 has status `needs_input` with kind `unclear`. The question asks what "more fun" means. R7 has no Task and no spend. |
+| 21 | Answer the questions | Bob | `/changes/$changeId` of R6 and R7 | Withdraw R6. R6 is `cancelled` with the reason "Withdrawn by the requester". Answer R7 with a precise goal, or withdraw it. |
+| 22 | Send R8 | Alice | `/projects/$projectId`, "New change" | The plan touches authorization: only an admin may void a market. |
+| 23 | Show the approval gate | Alice | `/candidates/$candidateId` | The Candidate passes its checks, including the security check for the denied action. The plan requires human approval, so policy does not promote it. |
+| 24 | Approve | Alice | Approval dialog | The dialog shows the Candidate, composed tree, transition, policy, approver, and required checks. Approve with a reason. |
+| 25 | Promote | Alice | `/candidates/$candidateId` | Click "Promote S(N) → S(N+1)". |
+| 26 | Show `canonical.advanced` | Alice | `/projects/$projectId/events` | The Canonical Generation advances by one. |
+| 27 | Show the release | Alice | `/candidates/$candidateId` | The release panel shows the build, then `deployed` with the version and the smoke result ([release.md](../operations/release.md)). |
+| 28 | Void a market | Alice | The live app | Void a market. Every bet in it goes back to its owner. |
+| 29 | End on the convergence view | Alice | `/changes/$changeId` | The agent activity view shows the declared Intents, the Candidates, and "S(N) → S(N+1). Canonical advanced. One verified future merged." |
+
+## Expected result
+
+| Request | Result |
+|---|---|
+| R1 | Ships. The app exists. |
+| R2 | Ships. |
+| R3 | Ships. |
+| R4 | Ships. It is the earlier request, so it keeps building. |
+| R5 | `awaiting_choice` until Alice chooses. Then `not_selected`, or `queued` and later ships on top of R4. |
+| R6 | `needs_input` (`duplicate`) before planning, then `cancelled` after Bob withdraws it. |
+| R7 | `needs_input` (`unclear`) before planning. |
+| R8 | Ships after Alice approves and promotes. |
+
+If Bob calls a route for the owner and the admins, the API returns 403. Bob cannot choose for R5, approve R8, raise a budget, or cancel a Change of Alice.
 
 ## Troubleshooting
 
@@ -55,4 +85,13 @@ Prod is the only remote environment. Run the sequence in the prod UI with a real
 - Claims are advisory. A Claim shows an Intent on a semantic resource and blocks no other Agent.
 - When another Candidate advances the Canonical State first, the compare-and-swap rejects the promotion. The Candidate becomes `stale`, and Rhumbatron composes it again.
 - A check that did not run or timed out is `not_checked`. It never counts as a pass.
+- The intake gate asks at most one round for a request. A Change gets at most 3 rounds of questions in total. Rhumbatron cancels a Change that gets no answer for 7 days.
 - To find active resources and spend, run `bun run cost:report`.
+
+## Cleanup
+
+1. Sign in as Alice. Open the Share dialog. Remove Bob from the members list.
+2. Revoke each invitation that is still pending.
+3. Delete the demo Project when you do not need it. Only the owner can do this ([cleanup.md](../operations/cleanup.md)).
+4. Run `bun run cost:report`. Make sure that no compute is active.
+5. Pause prod if you do not need it.

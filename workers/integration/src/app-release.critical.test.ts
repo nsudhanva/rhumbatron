@@ -1,4 +1,4 @@
-// Production pointer compare-and-swap (P16-11, P16-12; ADR 0020) against the real migrations and
+// Production pointer compare-and-swap (ADR 0020) against the real migrations and
 // SQL on SQLite (node:sqlite): a pointer moves only from the row it read, a late release never
 // moves it back, and a smoke failure restores the version it replaced. A removed app keeps a
 // tombstone row, so its hosts answer 410 after cleanup.
@@ -103,7 +103,7 @@ describe("production pointer compare-and-swap", () => {
   });
 });
 
-describe("app removal (P16-20)", () => {
+describe("app removal", () => {
   it("deletes data, bundles, and preview rows but keeps a tombstone that answers 410", async () => {
     const h = harness();
     await movePointer(h.env, P, { kind: "release", to: to(C1, 1) });

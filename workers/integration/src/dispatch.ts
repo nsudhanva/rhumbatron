@@ -11,7 +11,7 @@ type TaskRow = {
   attempts_reset_at?: string | null;
 };
 
-/** One logical agent per Task until AgentDO pools agents by role (Phase 6). */
+/** One logical agent per Task. */
 const agentIdFor = (taskId: string) => `agt_${taskId.slice(4)}`;
 
 /**

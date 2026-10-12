@@ -22,7 +22,9 @@ vi.mock("@cloudflare/sandbox", () => ({
     },
   }),
 }));
-const { openWorkspace, publishWorkspace, closeWorkspace } = await import("./workspace.ts");
+const { openWorkspace, publishWorkspace, closeWorkspace, safePath } = await import(
+  "./workspace.ts"
+);
 
 function setup() {
   const objects = new Map<string, string>();
@@ -52,7 +54,6 @@ function setup() {
       get: async (key: string) =>
         objects.has(key) ? { json: async () => JSON.parse(objects.get(key) as string) } : null,
     },
-    AGENT_FILES_IN_WORKER: "false",
   } as unknown as Parameters<typeof openWorkspace>[0];
   const open = async () => {
     const ws = await openWorkspace(env, {
@@ -136,5 +137,28 @@ describe("Workspace manifest lifecycle", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("Path validation (safePath)", () => {
+  it("normalizes clean paths and removes leading ./", () => {
+    expect(safePath("src/index.ts")).toBe("src/index.ts");
+    expect(safePath("./src/index.ts")).toBe("src/index.ts");
+    expect(safePath("package.json")).toBe("package.json");
+  });
+
+  it("rejects path traversal attempting to escape root with ..", () => {
+    expect(() => safePath("../outside.ts")).toThrow("invalid path");
+    expect(() => safePath("src/../../outside.ts")).toThrow("invalid path");
+  });
+
+  it("rejects absolute paths", () => {
+    expect(() => safePath("/etc/passwd")).toThrow("invalid path");
+    expect(() => safePath("/src/index.ts")).toThrow("invalid path");
+  });
+
+  it("rejects writes into .git metadata directory", () => {
+    expect(() => safePath(".git/config")).toThrow("invalid path");
+    expect(() => safePath(".git/hooks/pre-commit")).toThrow("invalid path");
   });
 });

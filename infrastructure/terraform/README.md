@@ -76,7 +76,7 @@ Every Worker uses the same binding names in `wrangler.jsonc` (local) and Terrafo
 | `DB` | D1 | `rhumbatron-control-<env>` |
 | `EVIDENCE` | R2 | `rhumbatron-evidence-<env>` |
 | `CONFIG` | KV | `rhumbatron-config-<env>` (integration Worker) |
-| `MEMORY` | Vectorize (temporary adapter, ADR 0003) | `rhumbatron-memory-<env>` |
+| `MEMORY` | Vectorize (API adapter, ADR 0003) | `rhumbatron-memory-<env>` |
 | `EVENTS_00` .. `EVENTS_07` | K2 producers (coordinator) | `rhumbatron_events_NN_<env>` |
 | `ARTIFACTS` | Artifacts namespace (created on first use, ADR 0010) | `rhumbatron-projects-<env>` |
 | `SANDBOX` | Sandbox class in the Sandbox Worker (ADR 0012) | `rhumbatron-sandbox-<env>` |

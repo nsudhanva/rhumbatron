@@ -50,14 +50,6 @@ export function formatUsd(n: Maybe<number>) {
   return withSign(n, `$${formatNumber(Math.abs(n), 2)}`);
 }
 
-/** A change with an explicit sign: `+12`, `−12 ms`. */
-export function formatDelta(n: Maybe<number>, unit?: string) {
-  if (isMissing(n)) return EMPTY;
-  const body = formatNumber(Math.abs(n));
-  const sign = n > 0 ? "+" : n < 0 ? MINUS : "";
-  return unit ? `${sign}${body} ${unit}` : `${sign}${body}`;
-}
-
 /** "used / limit", for example `$1.42 / $3.00` or `3 / 7`. */
 export const formatFraction = (used: string, limit: string) => `${used} / ${limit}`;
 

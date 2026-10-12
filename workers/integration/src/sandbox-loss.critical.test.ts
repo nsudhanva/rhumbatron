@@ -1,4 +1,4 @@
-// Sandbox loss (P13-07). The Sandbox is disposable; the Candidate
+// Sandbox loss. The Sandbox is disposable; the Candidate
 // fork in Artifacts is durable. When the container restarts between steps, a check must run on a
 // checkout restored from the fork at the composed commit, never on an empty or different tree.
 import { beforeEach, describe, expect, it, vi } from "vitest";

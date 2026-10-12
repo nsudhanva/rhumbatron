@@ -1,5 +1,5 @@
 /**
- * Temporary Vectorize adapter (ADR 0003). Provider 5.27 has no Vectorize index resource.
+ * Vectorize adapter (ADR 0003). Provider 5.27 has no Vectorize index resource.
  * Invoked only by terraform_data.vectorize_index (sync) and terraform_data.vectorize_index_teardown
  * (destroy). Read-before-write; safe to run again.
  *

@@ -1,4 +1,4 @@
-// P4-12: a K2 outage must not lose or corrupt events.
+// A K2 outage must not lose or corrupt events.
 // Runs the real OutboxPublisher against SQLite (node:sqlite) behind a minimal SqlStorage adapter.
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";

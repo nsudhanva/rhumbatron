@@ -111,7 +111,7 @@ flowchart LR
 | Technology | Used for | Where |
 |---|---|---|
 | Artifacts | Source of each Project: canonical repo, Task forks, Candidate forks (namespace `rhumbatron-projects-<env>`) | `workers/agents`, `workers/integration`, `workers/indexer` |
-| `isomorphic-git` 1.43, `memfs` 4.80 | Read and write Artifacts repos inside Workers | `workers/integration`, `workers/agents`, `workers/indexer` |
+| `isomorphic-git` 1.43, `memfs` 4.80 | Read and write Artifacts repos inside Workers | `workers/integration`, `workers/indexer` |
 | D1 `rhumbatron-control-<env>` | Product metadata, receipts, counters, app pointers. SQL migrations are in `migrations/d1` | `agents`, `api`, `apps`, `event-router`, `indexer`, `integration` |
 | R2 `rhumbatron-evidence-<env>` | Evidence, context snapshots, indexes, code store, event archive, app bundles | most Workers |
 | KV `rhumbatron-config-<env>` | 5-minute cache of the Project policy (`CONFIG`). D1 is the source of truth | `workers/integration/src/policy.ts` |

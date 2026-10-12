@@ -3,7 +3,7 @@ import { codeBlobKey, codeManifestKey } from "@rhumbatron/protocol";
 import { readTreeFiles } from "./code-store.ts";
 
 /**
- * Deterministic inputs of the intake gate and the request arbiter (ADR 0025). No model runs here.
+ * Deterministic inputs of the intake gate and the request comparison (ADR 0025). No model runs.
  *
  * - `CanonicalSummary`: what the current app is made of, from the planner's file listing
  *   (`readTreeFiles`), plus the name, description, and dependency names of the root

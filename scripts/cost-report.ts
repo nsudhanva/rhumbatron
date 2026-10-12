@@ -334,7 +334,7 @@ await section("anthropic spend", async () => {
 });
 
 /**
- * Live apps (prod only, ADR 0020, P16-21). Caps: `APP_BUILDS_PER_DAY` in
+ * Live apps (prod only, ADR 0020). Caps: `APP_BUILDS_PER_DAY` in
  * workers/integration/src/app-release.ts (enforced before every build), and the Workers Paid
  * allowances for Dynamic Workers (1,000 created per month), requests, and CPU (shared).
  */

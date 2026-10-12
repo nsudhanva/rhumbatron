@@ -15,8 +15,7 @@
     "ENVIRONMENT": "local",
     "SERVICE_NAME": "rhumbatron-agents",
     "AI_ACCOUNT_ID": "",
-    "AI_GATEWAY_ID": "rhumbatron-models-prod",
-    "AGENT_FILES_IN_WORKER": "false"
+    "AI_GATEWAY_ID": "rhumbatron-models-prod"
   },
   // Workers AI: Clef-flash routing decisions only, capped per day.
   "ai": { "binding": "AI" },
@@ -62,7 +61,7 @@
     ]
   },
   "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "rhumbatron_metrics_local" }],
-  // Semantic memory, read-only: one top-k query per run after the exact indexes (P7-06).
+  // Semantic memory, read-only: one top-k query per run after the exact indexes.
   "vectorize": [{ "binding": "MEMORY", "index_name": "rhumbatron-memory-local" }],
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AgentDO"] }]
 }

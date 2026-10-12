@@ -9,8 +9,8 @@ export type AuthVariables = {
 
 /**
  * Authorized-party (azp) policy. A present azp must match an allowed origin.
- * A missing azp (tokens minted with the Backend API) passes only when allowMissing is true,
- * which Terraform sets in dev for smoke tests. Prod stays strict.
+ * A missing azp (tokens minted with the Backend API) passes only when allowMissing is true.
+ * Prod sets it false.
  */
 export function azpAllowed(azp: unknown, parties: string[], allowMissing: boolean): boolean {
   if (azp === undefined || azp === null || azp === "") return allowMissing;
@@ -38,7 +38,7 @@ function logRejection(reason: string, message: string) {
 
 /**
  * Requires a valid Clerk session token in `Authorization: Bearer <token>`.
- * The azp check runs here (not in verifyToken) so dev can accept backend-minted smoke tokens.
+ * The azp check runs here (not in verifyToken), so the azp policy can accept backend-minted tokens.
  */
 export const requireAuth = createMiddleware<{ Bindings: Env; Variables: AuthVariables }>(
   async (c, next) => {

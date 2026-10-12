@@ -177,7 +177,7 @@ flowchart LR
   INT -->|"agent.wake"| WQ
   ER -->|"agent.wake"| WQ
   ER -->|"change.dispatch, candidate.create,<br/>candidates.recompose, forks.sweep,<br/>project.cleanup, release.recover"| IQ
-  API -->|"project.provision, project.cleanup,<br/>app.provision, app.remove,<br/>fixture.publish"| IQ
+  API -->|"project.provision, project.cleanup,<br/>app.provision, app.remove"| IQ
   ER -->|"index.build, index.purge"| XQ
   INT -->|"verification.start,<br/>candidate.create after a rebase"| VQ
   INT -->|"release.start"| RQ

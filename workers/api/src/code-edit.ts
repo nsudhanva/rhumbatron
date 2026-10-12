@@ -16,7 +16,7 @@ import { errorBody, fail, respond, validate } from "./http.ts";
 import { ensureIdentity, projectRole } from "./identity.ts";
 
 /**
- * `POST /v1/projects/:projectId/code/edits` (P16-19): a person saves one file on the Code page.
+ * `POST /v1/projects/:projectId/code/edits`: a person saves one file on the Code page.
  * The integration Worker records a new Change with one human ChangeSet (an Artifacts fork with
  * the commit, the stored patch, the `changesets` row) and composes it like agent work. The edit
  * never touches canonical: only a verified Candidate can promote.

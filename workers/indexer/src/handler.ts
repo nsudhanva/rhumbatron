@@ -33,7 +33,7 @@ const EMBED_DAILY_CAP = 2_000;
 /** Workers AI text-embedding batch, and the Vectorize write batch. */
 const BATCH = 100;
 const OWNER_ROW_LIMIT = 500;
-/** Ready indexes kept per Project; older trees' objects are deleted (dev retention). */
+/** Ready indexes kept per Project; older trees' objects are deleted. */
 const KEEP_INDEXES = 3;
 
 export class RetryLater extends Error {}

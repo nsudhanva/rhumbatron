@@ -1,5 +1,5 @@
 /**
- * Cookie isolation for apps on rhumbatron.com subdomains (ADR 0020, P16-05). The router is the
+ * Cookie isolation for apps on rhumbatron.com subdomains (ADR 0020). The router is the
  * only path in and out of an app, so it can keep apps away from Rhumbatron cookies without a
  * separate zone:
  *

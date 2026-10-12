@@ -7,7 +7,7 @@ import type { CheckOutcome, CheckRun } from "./candidate-composer.ts";
  * gap (`not_checked` or `checked_no_signal`), never a pass.
  */
 
-// --- Security check (P10-10) ---------------------------------------------------------------
+// --- Security check -----------------------------------------------------------------------
 
 export type BunTestCounts = {
   passed: number;
@@ -97,7 +97,7 @@ export function classifySecurity(check: VerificationCheck, run: CheckRun): Check
   };
 }
 
-// --- Browser check (P10-11) ----------------------------------------------------------------
+// --- Browser check ------------------------------------------------------------------------
 
 /** One browser session per check, at most this long (Browser Run free timeout is 60 s). */
 export const BROWSER_SESSION_MS = 55_000;
@@ -120,18 +120,14 @@ export type BrowserStep = {
   ms: number;
 };
 
-/** Wishlist UI flow, Wishlist API flow from the page (no UI yet), or the minimal cart flow. */
-export type BrowserScenario = "wishlist" | "wishlist-api" | "cart" | "app";
-
 export type BrowserRun =
   | { kind: "refused"; reason: string }
   | { kind: "no_preview"; detail: string }
   | { kind: "launch_failed"; detail: string }
   | {
       kind: "ran";
-      scenario: BrowserScenario;
       steps: BrowserStep[];
-      /** Steps the scenario defines; steps after a failure never ran. */
+      /** Steps the flow defines; steps after a failure never ran. */
       total: number;
       deadlineHit: boolean;
       screenshots: number;
@@ -139,7 +135,7 @@ export type BrowserRun =
     };
 
 /**
- * Browser Evidence. Only a complete run with every scenario step observed passing is
+ * Browser Evidence. Only a complete run with every flow step observed passing is
  * a pass. A refused budget, a missing preview, a failed launch, the session deadline, or an
  * infrastructure failure inside the run is `not_checked`: a gap, never a pass. A step that
  * observed wrong app behavior is a `fail`.
@@ -175,11 +171,10 @@ export function classifyBrowser(run: BrowserRun): CheckOutcome {
     return {
       status: "fail",
       coverage: "checked_supported",
-      summary:
-        `${run.scenario} flow: ${ratio}; "${failed.name}" failed: ${failed.failure.detail}`.slice(
-          0,
-          500,
-        ),
+      summary: `Browser flow: ${ratio}; "${failed.name}" failed: ${failed.failure.detail}`.slice(
+        0,
+        500,
+      ),
       metrics,
     };
   }
@@ -192,14 +187,14 @@ export function classifyBrowser(run: BrowserRun): CheckOutcome {
     return {
       status: "error",
       coverage: "not_checked",
-      summary: `${run.scenario} flow: ${ratio}; ${why}. A gap, never a pass.`.slice(0, 500),
+      summary: `Browser flow: ${ratio}; ${why}. A gap, never a pass.`.slice(0, 500),
       metrics,
     };
   }
   return {
     status: "pass",
     coverage: "checked_supported",
-    summary: `${run.scenario} flow: ${ratio} pass in ${metrics.browserSeconds} s.`,
+    summary: `Browser flow: ${ratio} pass in ${metrics.browserSeconds} s.`,
     metrics,
   };
 }

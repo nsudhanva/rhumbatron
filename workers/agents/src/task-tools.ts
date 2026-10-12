@@ -2,8 +2,8 @@ import { type Static, Type } from "@earendil-works/pi-ai";
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable";
 
 /**
- * The typed outputs an agent may produce. Until Workspaces exist (Phase 8),
- * completing a Task means declaring its Intent: what it would change, where, and on what assumptions.
+ * The typed outputs an agent may produce. Completing a Task declares its Intent: what it changes,
+ * where, and on what assumptions.
  */
 
 export const IntentArgs = Type.Object({

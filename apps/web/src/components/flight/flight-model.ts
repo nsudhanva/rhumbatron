@@ -92,9 +92,9 @@ export type RunState = {
   /** Live progress for the running attempt (calls and the last tool step), live mode only. */
   lastStep: string | null;
   /**
-   * Model provider from the matching Decision Receipt (`anthropic` = Claude; older receipts:
-   * `google-vertex-ai` = Gemini, `openrouter`),
-   * null when no receipt names one. Shown as a tag so a viewer knows which model family ran.
+   * Model provider from the matching Decision Receipt (`anthropic` = Claude,
+   * `google-vertex-ai` = Gemini, `openrouter`), null when no receipt names one. Shown as a tag
+   * so a viewer knows which model family ran.
    */
   provider: string | null;
 };

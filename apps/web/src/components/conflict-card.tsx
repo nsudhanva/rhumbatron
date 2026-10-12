@@ -46,7 +46,7 @@ function nextStep(conflict: ConflictDetail): { label: string; detail: string } {
   return { label: "No fork", detail: "No fork is needed." };
 }
 
-/** One model review as the agents Worker stores it (`review_json.reviews.<tier>`, P9-05, P9-06). */
+/** One model review as the agents Worker stores it (`review_json.reviews.<tier>`). */
 type ModelReview = {
   status: "reserved" | "done" | "failed" | "refused";
   reason?: string;

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Code store and diffs (ChangeSet `patchRef`; Phase 16 P16-16, P16-17).
+ * Code store and diffs (ChangeSet `patchRef`).
  * Everything lives under the Project's `source/<project>/` R2 prefix, so archive cleanup removes it
  * and no lifecycle rule expires it:
  *
@@ -254,7 +254,7 @@ export const ChangeSetAttribution = z.object({
   files: z.array(z.string()),
   /** A patch was stored at publish. False for ChangeSets published before patches existed. */
   patchRecorded: z.boolean(),
-  /** The person who wrote a human ChangeSet (P16-19), else null: an agent wrote it. */
+  /** The person who wrote a human ChangeSet, else null: an agent wrote it. */
   editedBy: z.string().nullable(),
   createdAt: z.string(),
 });

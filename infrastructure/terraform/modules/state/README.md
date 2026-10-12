@@ -16,5 +16,5 @@ Owns the data stores of one environment:
 Outputs: `evidence_bucket_name`, `d1_database_id`, `d1_database_name`, `kv_namespace_id`, and
 `bindings` (`DB`, `CONFIG`, `EVIDENCE`, with names that match every `wrangler.jsonc`).
 
-Not in this module: the Vectorize index uses a temporary adapter in each env root (ADR 0003).
+Not in this module: the Vectorize index uses an API adapter in each env root (ADR 0003).
 Durable Object namespaces come from Worker migrations.

@@ -30,8 +30,8 @@ async function call<T>(path: string): Promise<T> {
 
 /**
  * Product Graph, derived by the API from Task resources, Intents, Task
- * dependencies, ChangeSets, conflicts, the stored Product Graph of the indexed canonical tree
- * (P7-04), and the protected resources of the Project's own stored policy.
+ * dependencies, ChangeSets, conflicts, the stored Product Graph of the indexed canonical tree,
+ * and the protected resources of the Project's own stored policy.
  */
 export type ProductGraphEdgeOrigin =
   | { kind: "source_import"; file: string; detail: string }

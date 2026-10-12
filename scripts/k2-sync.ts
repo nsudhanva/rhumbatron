@@ -1,5 +1,5 @@
 /**
- * Temporary K2 adapter (ADR 0006). Provider 5.27 has no K2 resource.
+ * K2 adapter (ADR 0006). Provider 5.27 has no K2 resource.
  * Invoked only by terraform_data.k2_streams. Idempotent: creates missing streams and
  * subscriptions and fixes retention. It never deletes streams (a replace would lose data).
  * `K2_MODE=destroy` (terraform_data.k2_streams_teardown, a real environment destroy only) deletes

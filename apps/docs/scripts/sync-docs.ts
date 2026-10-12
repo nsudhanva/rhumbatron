@@ -94,7 +94,7 @@ function landingBody(readme: string): string {
     "",
     "- [Architecture](/architecture/): how a goal becomes one verified canonical future.",
     "- [Operations](/operations/): deploy, release, costs, pause and resume, cleanup, naming.",
-    "- [Demo](/demo/): the Wishlist runbook, the Wishlist fixture, and the shared requests demo.",
+    "- [Demo](/demo/): the prediction market runbook and the shared requests demo.",
     "- [Decisions](/adr/): the architecture decision records.",
     "- [Protocols](/protocols/): the protocol schemas and the API routes.",
     "- [Build status](/build-status/): current phase and progress.",

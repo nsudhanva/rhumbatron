@@ -93,7 +93,7 @@ export const changeEndedEvent = (
 
 /**
  * Moves a `releasing` Change to `next` and reports whether the Change is in `next` afterwards.
- * Only `releasing` moves, so a later injected smoke failure (P13-12) never reopens a completed
+ * Only `releasing` moves, so a later injected smoke failure never reopens a completed
  * Change. One D1 batch.
  */
 async function endReleasingChange(env: Env, changeId: string, next: "completed" | "failed") {
@@ -336,7 +336,7 @@ export const releaseEvent = <T extends Record<string, unknown>>(
   );
 
 /* ------------------------------------------------------------------------------------------ */
-/* Stuck-release recovery (HOM-204)                                                            */
+/* Stuck-release recovery                                                                      */
 /* ------------------------------------------------------------------------------------------ */
 
 type ReleasingChangeRow = {
@@ -533,7 +533,7 @@ async function recordReleaseEvidence(
   const output = [
     `release ${release.id} · S${release.generation} · commit ${release.commit_sha}`,
     `app ${loaded.app?.label ?? "none"} (production host, through the apps router) · bundle ${release.version_id ?? "none"}`,
-    ...(input.injected ? ["injected: true (P13-12 failure injection)"] : []),
+    ...(input.injected ? ["injected: true (failure injection)"] : []),
     `attempt ${input.attempt}`,
     ...input.results.map(
       (r) =>
@@ -646,7 +646,7 @@ export async function smokeRelease(
 }
 
 /* ------------------------------------------------------------------------------------------ */
-/* Failure injection (P13-12)                                                                  */
+/* Failure injection                                                                           */
 /* ------------------------------------------------------------------------------------------ */
 
 /** A path the released app never serves. The probe expects it to exist, so it honestly fails. */
@@ -702,7 +702,7 @@ export async function injectReleaseFailure(
       detail: "Every probe passed, including the injected one; nothing was recorded as failed.",
     };
   }
-  const reason = `Injected (P13-12): ${smoke.outcome.summary}`.slice(0, 500);
+  const reason = `Injected: ${smoke.outcome.summary}`.slice(0, 500);
   await transitionRelease(
     env,
     loaded,

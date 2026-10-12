@@ -2,7 +2,7 @@ import { parse } from "@babel/parser";
 import type { DeclarationKind, FileSymbols } from "@rhumbatron/context-compiler";
 
 /**
- * Exact symbol extraction for TypeScript and JavaScript (P7-02). Top-level statements only:
+ * Exact symbol extraction for TypeScript and JavaScript. Top-level statements only:
  * imports, re-exports, exports, and declarations. @babel/parser is pure JavaScript (no WASM, about
  * 480 KB), parses a 200-line file in about a millisecond, and keeps going after syntax errors.
  * The TypeScript compiler API would add several megabytes for the same facts.

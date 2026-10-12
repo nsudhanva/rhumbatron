@@ -16,5 +16,5 @@ Not in this module:
 
 - Queue consumers (`cloudflare_queue_consumer`) are in each env root, next to their Workers.
 - Workflows (`cloudflare_workflow`) are in each env root.
-- K2 streams and subscriptions use a temporary adapter in each env root (ADR 0006). Provider 5.27
+- K2 streams and subscriptions use an API adapter in each env root (ADR 0006). Provider 5.27
   has no K2 resource.
