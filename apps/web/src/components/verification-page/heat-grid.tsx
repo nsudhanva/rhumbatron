@@ -41,7 +41,7 @@ function cellTitle(item: VerifiedCandidate, kind: string, cell: HeatCell) {
 }
 
 /**
- * Heat grid (DESIGN.md 9.5) of check kind (rows) by recent Candidate (columns, oldest left).
+ * Heat grid of check kind (rows) by recent Candidate (columns, oldest left).
  * Square cells with 2px gaps in a fixed 16-column track that scrolls sideways, a mono 9px column
  * index matching the `#` column of the table, a title on every cell and a legend underneath.
  * Each cell links to its Candidate. Fill changes animate over the heat-grid duration.

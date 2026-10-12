@@ -7,7 +7,7 @@ import { canvasHeight, ReadableFlow } from "./readable-flow";
 import { StatusPill } from "./ui/status-pill";
 
 /**
- * Work Graph (DESIGN.md 9.13): square nodes on an elevated canvas with a 2px ink rule on top.
+ * Work Graph: square nodes on an elevated canvas with a 2px ink rule on top.
  * The node border encodes the Task state (see LEGEND); the selected node carries the overlay
  * shadow and a 2px accent bar, the same bar the Task inspector beside it uses.
  */

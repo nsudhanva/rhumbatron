@@ -21,7 +21,7 @@ import {
 import { type StackSource, stackedOn } from "./stack.ts";
 
 /**
- * Task Workspace (AGENTS.md sections 29.2 and 30):
+ * Task Workspace:
  *
  * When AGENT_FILES_IN_WORKER is "true" (opt-in; off by default):
  * - Keeps the agent's working tree in the AgentDO (DO SQLite or memory storage), plus a dirty set.
@@ -93,7 +93,7 @@ const ALLOWED = [
  */
 const FIXED_SCRIPTS = new Set(["typecheck", "test", "bench", "contract", "build"]);
 const RUN_SCRIPT = /^bun run ([\w:][\w:.-]*)$/;
-/** Scripts whose output files the workspace discards: composition builds them (section 37). */
+/** Scripts whose output files the workspace discards: composition builds them. */
 const BUILD_SCRIPT = /^build(:[\w:.-]+)?$/;
 const FORBIDDEN_CHARS = /[;&|`$<>\\\n]/;
 const ALLOWED_TEXT =
@@ -183,7 +183,7 @@ export type Published = {
   /** Present when the workspace stacked dependencies: the agent's starting point and own files. */
   startCommit?: string;
   ownFiles?: string[];
-  /** R2 key of this ChangeSet's stored `git diff` (section 15.4). Absent when it was not stored. */
+  /** R2 key of this ChangeSet's stored `git diff`. Absent when it was not stored. */
   patchRef?: string;
 };
 
@@ -842,7 +842,7 @@ export async function openWorkspace(
 }
 
 /**
- * Restores the run directory after Sandbox loss (section 42.5).
+ * Restores the run directory after Sandbox loss.
  */
 async function ensureCheckout(env: WorkspaceEnv, ws: WorkspaceRef): Promise<boolean> {
   const sandbox = sandboxFor(env, ws.projectId);

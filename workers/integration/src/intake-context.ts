@@ -10,7 +10,7 @@ import { readTreeFiles } from "./code-store.ts";
  *   one blob read from R2).
  * - `RelatedItem`: another request of the same Project with its goal and criteria. Each text has a
  *   packet ID (`<changeId>:goal`, `<changeId>:c1`, ...), so a model can cite it and code can check
- *   the citation (AGENTS.md section 34.4.2).
+ *   the citation.
  */
 
 export type Criterion = { id: string; text: string };

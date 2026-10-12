@@ -1,7 +1,7 @@
 import type { ModelTier } from "@rhumbatron/protocol";
 
 /**
- * Escalation (AGENTS.md sections 23.3 and 42.8). Two intelligence failures at one tier move the
+ * Escalation. Two intelligence failures at one tier move the
  * Task up one tier; two at the top tier send it back for re-planning. The top tier is opus when
  * `ALLOW_OPUS` is "true", else sonnet (ADR 0021). Transport failures never escalate: they retry
  * once at the same tier.
@@ -63,7 +63,7 @@ export function nextStep(
   if (BUDGET_STOPS.has(last.kind)) return { action: "stop", reason: last.kind };
 
   if (TRANSPORT.has(last.kind)) {
-    // One same-tier retry per transport failure streak; a second in a row stops (section 42.8).
+    // One same-tier retry per transport failure streak; a second in a row stops.
     const streak = failures
       .slice()
       .reverse()

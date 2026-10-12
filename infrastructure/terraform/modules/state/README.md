@@ -3,7 +3,7 @@
 Owns the data stores of one environment:
 
 - D1 `rhumbatron-control-<env>` (read replication disabled).
-- R2 `rhumbatron-evidence-<env>` and its lifecycle rules (AGENTS.md section 43): abort stale
+- R2 `rhumbatron-evidence-<env>` and its lifecycle rules: abort stale
   multipart uploads after one day, and expire each prefix in `evidence_retention_days`.
 - KV `rhumbatron-config-<env>`.
 

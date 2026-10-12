@@ -34,8 +34,8 @@ import type { EntityKind, EntityRef } from "./flight-store";
  *
  * Live mode and the time machine use the same fold: live folds every fact, historical folds the
  * facts recorded at or before `at`. Nothing is interpolated or simulated. A fact the API does not
- * record is not shown; panels that need something not recorded say so (DESIGN.md 10, "Stale",
- * AGENTS.md 34.4.1 "a missing result is not a result").
+ * record is not shown; panels that need something not recorded say so: a missing result is not a
+ * result.
  *
  * Facts come from the Change page's records (activity-model.ts) plus:
  *   Workspace     Task forks and their ChangeSets with changed files (workers/api workspace.ts)
@@ -1014,7 +1014,7 @@ export function currentRef(event: ActivityEvent | null): EntityRef | null {
 }
 
 /* --------------------------------------------------------------------------------------------
- * Decisions and their causal history (AGENTS.md 23.5, 32.3, 34, 36)
+ * Decisions and their causal history
  * ------------------------------------------------------------------------------------------ */
 
 function deriveDecisions(

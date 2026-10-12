@@ -51,7 +51,7 @@ export function ProjectStatusPill({ status }: { status: string }) {
 ProjectStatusPill.displayName = "ProjectStatusPill";
 
 /**
- * Task progress for a table cell (DESIGN.md 9.1): a 4px inline bar with the mono "done / total"
+ * Task progress for a table cell: a 4px inline bar with the mono "done / total"
  * beside it. Complete turns `success`. With no Tasks yet the cell reads as an em dash.
  */
 export function TaskProgress({ done, total }: { done: number; total: number }) {

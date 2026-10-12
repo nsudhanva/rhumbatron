@@ -6,7 +6,7 @@ import { respond, validate } from "./http.ts";
 import { ensureIdentity } from "./identity.ts";
 
 /**
- * In-app inbox (AGENTS.md sections 38, 40.1, 44, 59). Notifications are derived on each read
+ * In-app inbox. Notifications are derived on each read
  * from authoritative D1 rows; there is no separate event pipeline and nothing to fall out of
  * sync. An action item exists exactly while its condition holds: an `approval_required` item
  * disappears once the approval is recorded. The only stored state is the per-user read mark
@@ -19,7 +19,7 @@ import { ensureIdentity } from "./identity.ts";
  * `ensureIdentity` batch. Each SELECT starts from a rare state (verified Candidates, open dead
  * letters, blocked Changes, confirmed conflicts, requests that need input or review) or a 7-day window through an index, so rows read
  * scale with open and recent items, not with history. Marking read writes one row per new mark.
- * Promotion still re-checks everything (section 36): a notification is a pointer, never a gate.
+ * Promotion still re-checks everything: a notification is a pointer, never a gate.
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -157,7 +157,7 @@ WHERE m.user_id = ?1 AND d.resolved_at IS NULL
 ORDER BY d.last_seen_at DESC LIMIT ${PER_KIND}`;
 
 /**
- * Changes a budget or a section 44 limit stopped. Dead-letter blocks are the dead letter's own
+ * Changes a budget or another Project limit stopped. Dead-letter blocks are the dead letter's own
  * item. The id carries the limit, so a new stop on the same Change is a new item.
  */
 const blockedPart = (where: string) => `

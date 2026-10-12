@@ -8,7 +8,7 @@ import { shortSha } from "./model";
 
 const MINUS = "−";
 
-/** name · base · short hash · +adds −dels · state text · pill (DESIGN.md 9.11). */
+/** name · base · short hash · +adds −dels · state text · pill. */
 const COLUMNS =
   "grid grid-cols-[minmax(180px,1.3fr)_64px_84px_112px_minmax(140px,1fr)_minmax(96px,auto)] items-center gap-x-3";
 
@@ -76,9 +76,9 @@ function TreeRowFrame({
 }
 
 /**
- * Tree list of the canonical Artifact and its forks (DESIGN.md 9.11): mono 12px rows with
+ * Tree list of the canonical Artifact and its forks: mono 12px rows with
  * box-drawing prefixes. Each fork row is a button; the whole row is the target, and the selected
- * row carries the faint fill and the 2px accent bar (section 10). Scrolls sideways when narrow.
+ * row carries the faint fill and the 2px accent bar. Scrolls sideways when narrow.
  */
 export function ForkTree({
   root,

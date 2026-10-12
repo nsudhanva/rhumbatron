@@ -13,7 +13,7 @@ import {
 } from "./model";
 
 /**
- * Filters for the Agents and Events graphs (DESIGN.md 8.2 Select frame, labels above): person
+ * Filters for the Agents and Events graphs (Select frame, labels above): person
  * (the requester of a Change), Change, Task or agent, event type group, and time range. A field
  * shows only when it has choices, so no control is ever disabled. "All" is the first item of each
  * list; picking it clears that field.

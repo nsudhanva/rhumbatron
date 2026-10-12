@@ -30,7 +30,7 @@ import { recomposeQuietly, settleStaleBehind } from "./recompose.ts";
 import { changeEndedEvent, startRelease } from "./release.ts";
 
 /**
- * Human approval and promotion (AGENTS.md sections 36, 40.2, 42.9, 60; ADR 0013). Called only by
+ * Human approval and promotion (ADR 0013). Called only by
  * the API over a service binding, after it authenticated the user and checked project membership.
  * Deterministic: authoritative D1 rows and Artifacts decide the preconditions, ProjectRootDO
  * decides the compare-and-swap. No model call and no cached gate score is trusted here.
@@ -120,7 +120,7 @@ const projectRoot = (env: Env, projectId: string) => {
   return ns.get(ns.idFromName(projectId));
 };
 
-/** Section 36 rule 8: the composed commit still exists in the Candidate fork with its tree. */
+/** Promotion precondition: the composed commit still exists in the Candidate fork with its tree. */
 async function artifactPresent(env: Env, row: CandidateRow): Promise<boolean> {
   if (!row.composed_commit || !row.composed_tree) return false;
   try {
@@ -170,7 +170,7 @@ function blockView(block: PromotionBlock): PromotionBlockView {
   }
 }
 
-/** Section 42.9: a stale Candidate is not retried blind. It needs a new Candidate on the new base. */
+/** A stale Candidate is not retried blind. It needs a new Candidate on the new base. */
 async function markStale(
   env: Env,
   row: CandidateRow,
@@ -222,7 +222,7 @@ async function recordPromoted(env: Env, row: CandidateRow, generation: number) {
     env.DB.prepare("SELECT status FROM changes WHERE id = ?").bind(row.change_id),
   ]);
   // Without a live app, promotion ends the Change: say so, so the live view leaves
-  // `promoting` (section 13.3). A `releasing` Change ends with its release (release.ts).
+  // `promoting`. A `releasing` Change ends with its release (release.ts).
   const status = (results.at(-1)?.results?.[0] as { status?: string } | undefined)?.status;
   if (next === "completed" && status === "completed") {
     await releaseRequestScope(env, row.project_id, row.change_id);
@@ -317,7 +317,7 @@ export type PromotionTrigger = {
 
 /**
  * Promotes a verified Candidate by compare-and-swap. Idempotency key: Candidate ID + base
- * generation (section 60). A retry after success returns `alreadyPromoted` and repairs the source
+ * generation. A retry after success returns `alreadyPromoted` and repairs the source
  * sync if it did not finish. The Change is `promoting` from the precondition check until the
  * compare-and-swap decides; then `releasing` or `completed`, or back to its prior status.
  */
@@ -389,7 +389,7 @@ export async function promoteCandidate(
     return { status: "blocked", candidateId: row.id, blocks: check.blocks.map(blockView) };
   }
 
-  // Section 36 runs on an open Change only. The guard also loses a race against a cancel cleanly.
+  // Promotion runs on an open Change only. The guard also loses a race against a cancel cleanly.
   const now = new Date().toISOString();
   const entered = await env.DB.prepare(
     `UPDATE changes SET status = 'promoting', updated_at = ?
@@ -491,7 +491,7 @@ export async function promoteCandidate(
 }
 
 /**
- * Records one human decision on a gated Candidate (section 40.2). The approver is the
+ * Records one human decision on a gated Candidate. The approver is the
  * authenticated project member the API passes in; the browser cannot name another approver.
  * A rejection also rejects the Candidate, so it can never promote.
  */

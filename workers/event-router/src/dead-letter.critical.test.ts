@@ -1,7 +1,7 @@
-// Poison command (AGENTS.md sections 20, 42.7, P13-10). A command in the dead-letter Queue must be
+// Poison command (P13-10). A command in the dead-letter Queue must be
 // recorded once per failure, block the Task that waits on it (never a running one), and stay
 // resolved after an operator acts, even when the dead-letter message is delivered again. Also the
-// section 44 re-admission rule: a Task deferred at the agent limit is dispatched when a slot frees.
+// re-admission rule: a Task deferred at the agent limit is dispatched when a slot frees.
 // Runs the real migrations and SQL against SQLite (node:sqlite).
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -211,7 +211,7 @@ describe("dead-letter consumer", () => {
   });
 });
 
-describe("section 44 re-admission", () => {
+describe("agent-limit re-admission", () => {
   const row = (status: string, wake_sent_at: string | null, blocked_limit: string | null) =>
     ({
       id: "task_x",

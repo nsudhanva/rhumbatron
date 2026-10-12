@@ -29,7 +29,7 @@ import {
 } from "../lib/render-time";
 import appCss from "../styles.css?url";
 
-// Build and environment are shown on every page (AGENTS.md Phase 2 acceptance), in the status bar.
+// Build and environment are shown on every page, in the status bar.
 const getBuildInfo = createServerFn().handler(() => ({
   service: env.SERVICE_NAME,
   environment: env.ENVIRONMENT,
@@ -50,7 +50,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         content:
           "Rhumbatron lets many agents propose many futures of one codebase. Only verified evidence advances the canonical state.",
       },
-      // Light is the default mode (DESIGN.md 3.1; the boot script applies a stored dark choice).
+      // Light is the default mode (the boot script applies a stored dark choice).
       // The ground color: meta tags cannot read CSS tokens.
       { name: "color-scheme", content: "light" },
       { name: "theme-color", content: "#f3f2f2" },

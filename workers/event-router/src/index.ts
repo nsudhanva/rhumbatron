@@ -30,8 +30,8 @@ import { batchKey, countBatchFailure, deadLetterBatch, shouldSkipBatch } from ".
 import { decodeEnvelope, groupByProject, planProjects, toViewDelta } from "./projector.ts";
 
 /**
- * K2 pull consumer (AGENTS.md sections 12.5, 19, 31.1). Two subscriptions per stream:
- * `project-view-projector` updates ProjectViewDO; `causal-router` wakes affected agents (section 31).
+ * K2 pull consumer. Two subscriptions per stream:
+ * `project-view-projector` updates ProjectViewDO; `causal-router` wakes affected agents.
  * Subrequest budget per invocation, worst case, both subscriptions on one stream:
  *   per subscription: 1 resolve + 2 consume + 2 ack/nack + 2 D1 claim batches + 2 D1 release batches
  *     + 2 D1 batches for one failed delivery (count, dead-letter); a failure ends the subscription
@@ -440,7 +440,7 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
   }
 
   /**
-   * Dead-letter Queue consumer (AGENTS.md section 42.7): records each poison command, blocks its
+   * Dead-letter Queue consumer: records each poison command, blocks its
    * Task, and leaves the operator a retry or dismiss action. This is the only Queue it consumes.
    */
   override async queue(batch: MessageBatch): Promise<void> {

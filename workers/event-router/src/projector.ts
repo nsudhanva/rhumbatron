@@ -2,7 +2,7 @@ import type { ProjectViewDO } from "@rhumbatron/coordinator";
 import { AnyEventEnvelope, type EventEnvelope } from "@rhumbatron/protocol";
 
 /**
- * Pure event -> ProjectView mapping (AGENTS.md sections 13.3 and 17). No I/O.
+ * Pure event -> ProjectView mapping. No I/O.
  * Summaries never include payload content, only the event type, resource, and actor.
  */
 
@@ -103,7 +103,7 @@ function changeStatusOf(event: EventEnvelope): string | null | undefined {
   }
 }
 
-/** An Agent sleeps when its Task ends (AGENTS.md section 13.4). */
+/** An Agent sleeps when its Task ends. */
 const AGENT_STATUS: StatusMap = {
   "agent.woken": "awake",
   "task.started": "working",
@@ -192,7 +192,7 @@ export function toViewDelta(events: EventEnvelope[]): ProjectViewDelta {
 
 /**
  * Subrequest cap: take at most `remaining` project groups. The rest are deferred, which the
- * caller must release and nack so K2 redelivers them (section 42.1 and rule 50).
+ * caller must release and nack so K2 redelivers them.
  */
 export function planProjects<T>(
   groups: readonly T[],

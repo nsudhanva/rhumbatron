@@ -18,7 +18,7 @@ import { EntityHover } from "../../hover-preview";
 import { ROVING_CONTAINER, ROVING_ITEM, useRovingFocus } from "../../use-roving-focus";
 
 /**
- * Shared time axis of the agent swimlanes and the workspace lanes (DESIGN.md 9.8, 11.1). Both
+ * Shared time axis of the agent swimlanes and the workspace lanes. Both
  * panels use the same scale function and the same zoom, so a fact sits at the same x in both.
  *
  *   const scroller = useMeasuredScroller();      // <div ref={scroller.ref}>

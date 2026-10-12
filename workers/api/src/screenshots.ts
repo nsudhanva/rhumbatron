@@ -5,7 +5,7 @@ import { fail, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Browser check screenshots (AGENTS.md sections 34.4, 35). Read-only. The R2 key is derived from
+ * Browser check screenshots. Read-only. The R2 key is derived from
  * the authoritative Evidence row (its `r2_key` directory plus `screenshot-<n>.png`), never from the
  * request, and `n` must be within the screenshot count the Evidence recorded.
  */

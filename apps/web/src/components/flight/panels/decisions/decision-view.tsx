@@ -8,9 +8,9 @@ import { type EntityRef, useFlightStore, useIsHighlighted } from "../../flight-s
 import { EntityHover } from "../../hover-preview";
 
 /**
- * Shared pieces of the Decisions panel and the Decision inspector (AGENTS.md 23.5, 32.3, 34, 36):
+ * Shared pieces of the Decisions panel and the Decision inspector:
  * the kind tag, the "decided by" tag, and the causal trace of one decision drawn as a 1px rule
- * with one square node per recorded cause and the decision itself last, in ink (DESIGN.md 9.8).
+ * with one square node per recorded cause and the decision itself last, in ink.
  */
 
 export const DECISION_KINDS: DecisionKind[] = ["route", "fork", "gate", "approval", "promotion"];

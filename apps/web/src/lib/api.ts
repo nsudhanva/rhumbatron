@@ -13,7 +13,7 @@ import type { BudgetScope, ChangeBudget, ProjectBudget } from "./api-budget";
 
 /**
  * Server functions over the API Worker (service binding `API`). The browser never calls the API
- * directly: each call runs on the web Worker with the user's Clerk session token (AGENTS.md 12.1).
+ * directly: each call runs on the web Worker with the user's Clerk session token.
  */
 
 export type ProjectSummary = {
@@ -164,7 +164,7 @@ export type ForkDecision =
   | { kind: "no_fork"; reason: "benign_overlap" | "needs_review" | "already_resolved" }
   | { kind: "blocked"; reason: "candidate_limit"; maxCandidates: number };
 
-/** A semantic conflict between two Intents of one Change (AGENTS.md section 32). */
+/** A semantic conflict between two Intents of one Change. */
 export type ConflictDetail = {
   id: string;
   changeId: string;
@@ -358,14 +358,14 @@ type ChangeCommandResult = {
   dispatchedTaskIds: string[];
 };
 
-/** Cancels a Change before promotion starts (AGENTS.md section 16.1). Safe to repeat. */
+/** Cancels a Change before promotion starts. Safe to repeat. */
 export const cancelChange = createServerFn({ method: "POST" })
   .inputValidator((changeId: string) => changeId)
   .handler(({ data }) =>
     call<ChangeCommandResult>(`/v1/changes/${data}/cancel`, { method: "POST", body: {} }),
   );
 
-/** Raises a Change budget; a budget-blocked Change resumes (section 44 rule 5). */
+/** Raises a Change budget; a budget-blocked Change resumes. */
 export const raiseChangeBudget = createServerFn({ method: "POST" })
   .inputValidator((input: { changeId: string; budgetUsd: number }) => input)
   .handler(({ data }) =>
@@ -423,7 +423,7 @@ export type CandidateDetail = {
     humanApprovalRequired?: boolean;
     p95Ms?: number;
   } | null;
-  /** The plan gates promotion on a human decision (AGENTS.md section 36, rule 4). */
+  /** The plan gates promotion on a human decision. */
   approvalRequired: boolean;
   approval: Approval | null;
   baseTree: string | null;
@@ -773,7 +773,7 @@ export const getChangeProgress = createServerFn()
   .inputValidator((changeId: string) => changeId)
   .handler(({ data }) => call<RunProgress[]>(`/v1/changes/${data}/progress`));
 
-/* Workspace page (AGENTS.md 38.5): canonical Artifact, Task and Candidate forks, file index. */
+/* Workspace page: canonical Artifact, Task and Candidate forks, file index. */
 
 export type WorkspaceFileStat = {
   path: string;
@@ -907,7 +907,7 @@ export type AgentClaim = {
   updatedAt: string;
 };
 
-/** One logical agent (one per Task) of a Project, for the Agents page (AGENTS.md 38.6). */
+/** One logical agent (one per Task) of a Project, for the Agents page. */
 export type AgentView = {
   agentId: string;
   role: string;
@@ -962,8 +962,8 @@ export const getProjectAgents = createServerFn()
   .handler(({ data }) => call<ProjectAgents>(`/v1/projects/${data}/agents`));
 
 /**
- * Operator actions (AGENTS.md sections 42.7 and 44): commands that failed after their Queue
- * retries, and Tasks or Changes a section 44 limit stopped or delays (workers/api dead-letters.ts).
+ * Operator actions: commands that failed after their Queue
+ * retries, and Tasks or Changes a cost or safety limit stopped or delays (workers/api dead-letters.ts).
  */
 export type DeadLetter = {
   id: string;
@@ -1030,7 +1030,7 @@ export const dismissDeadLetter = createServerFn({ method: "POST" })
 /* Flight Control (apps/web/src/components/flight): Decision Receipts of one Change. */
 
 /**
- * One Decision Receipt (D1 decision_receipts, AGENTS.md 23.5): routing inputs and outputs only,
+ * One Decision Receipt (D1 decision_receipts): routing inputs and outputs only,
  * never reasoning. Served by workers/api decisions.ts, capped and read through the task index.
  */
 export type JsonValue =

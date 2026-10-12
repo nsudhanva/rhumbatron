@@ -21,8 +21,8 @@ import { appendChangeEvents, type ChangeContext, changeEvent, qualify } from "./
 import wishlistFixture from "./fixtures/wishlist.fixture.gen.ts";
 
 /**
- * Dev-only fixture publisher for the Wishlist design conflict (AGENTS.md sections 32.4, 54;
- * P9-08). It records what two agents would record, without a model call: a Work Graph Task per
+ * Dev-only fixture publisher for the Wishlist design conflict (P9-08).
+ * It records what two agents would record, without a model call: a Work Graph Task per
  * design, a completed run with zero model calls, an Artifacts workspace fork with the design
  * committed on the canonical commit, a `proposed` ChangeSet, and the declared Intent. The same
  * deterministic detector the agents use then flags the conflict on `wishlist:membership`.

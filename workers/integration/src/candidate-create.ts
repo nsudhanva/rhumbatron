@@ -18,7 +18,7 @@ import {
 } from "./workflow-commands.ts";
 
 /**
- * Candidate creation (AGENTS.md sections 21.1 step 7, 32.4, 33, 44, 60). The one implementation
+ * Candidate creation. The one implementation
  * behind both the API route (`createCandidate` RPC) and the automatic composition after a Work
  * Graph completes (`candidate.create` command). Deterministic: no model calls.
  *
@@ -29,14 +29,14 @@ import {
  */
 
 /**
- * Policy `maxCandidates` (section 53). Counts every Candidate of the Change, in any state, except
+ * Policy `maxCandidates`. Counts every Candidate of the Change, in any state, except
  * recompositions of a stale Candidate (P16-14): they replace their root, bounded per lineage.
  */
 export const MAX_CANDIDATES = 3;
 
 const ACTOR = { kind: "system", id: "candidate-composer" } as const;
 
-/** Composition key (section 60) and the Candidate ID derived from it. */
+/** Composition key and the Candidate ID derived from it. */
 export async function compositionKeyFor(
   changeId: string,
   baseGeneration: number,
@@ -129,7 +129,7 @@ function lineages(
 }
 
 /**
- * Candidate fork rule (section 32.4). Selection, in order:
+ * Candidate fork rule. Selection, in order:
  * 1. A fork conflict counts only when both sides have at least one proposed ChangeSet; otherwise
  *    nothing competes and its ChangeSets compose normally.
  * 2. No counting fork conflict: one Candidate from every proposed ChangeSet.
@@ -360,7 +360,7 @@ async function loadTaskDependencies(env: Env, changeId: string): Promise<TaskEdg
 }
 
 /**
- * Starts CandidateVerificationWorkflow (section 21.2). The instance ID is the Candidate ID, so a
+ * Starts CandidateVerificationWorkflow. The instance ID is the Candidate ID, so a
  * repeat finds the existing instance; the workflow itself ignores a Candidate in a final state.
  */
 export async function startCandidateVerification(env: Env, candidateId: string) {
@@ -451,7 +451,7 @@ async function insertCandidate(
       { key: candidateId, actor: ACTOR },
     ),
   ]);
-  // Section 20: the start travels on the verification Queue (same instance ID; direct on failure).
+  // The start travels on the verification Queue (same instance ID; direct on failure).
   await requestWorkflowStart(
     env,
     verificationCommand(candidateId, { projectId: change.project_id, changeId: change.id }),
@@ -513,7 +513,7 @@ export async function createCandidate(
 }
 
 /**
- * Automatic composition when the Work Graph completed (section 21.1 step 7; `candidate.create`).
+ * Automatic composition when the Work Graph completed (`candidate.create`).
  * Applies the fork rule (`planCandidateSets`). Safe to repeat: every Candidate ID is its
  * composition key. A Change with no proposed ChangeSet is skipped: there is nothing to compose.
  */
@@ -527,7 +527,7 @@ export async function composeChangeCandidates(
   if (change.status !== "verifying") {
     return { status: "skipped", reason: `change is ${change.status}` };
   }
-  // A model review can turn a suspected conflict into a fork (section 32.4). Wait for reviews
+  // A model review can turn a suspected conflict into a fork. Wait for reviews
   // reserved in the last 10 minutes; an older reservation is a lost review and does not block.
   if (!options.force) {
     const pending = await env.DB.prepare(

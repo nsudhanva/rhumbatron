@@ -6,7 +6,7 @@ import {
 import { AnyCommandEnvelope, type CommandEnvelope } from "@rhumbatron/protocol";
 
 /**
- * Dead-letter consumer (AGENTS.md sections 20 and 42.7, P13-10). A command reaches
+ * Dead-letter consumer (P13-10). A command reaches
  * `rhumbatron-dead-letter-<env>` after its consumer's bounded retries. For each one this records
  * the command in D1 (`dead_letters`, migration 0011), marks the related Task `blocked` (or names
  * the failure on the Change when there is no Task), and records `task.failed` through the Change's
@@ -25,7 +25,7 @@ export type OriginQueue = "agent-wakeups" | "integration" | "verification" | "re
 /** The Queue a command type travels on. Retry sends the command back to it. */
 export const originQueue = (commandType: string): OriginQueue => {
   if (commandType === "agent.wake") return "agent-wakeups";
-  // Workflow start commands (AGENTS.md section 20, HOM-202).
+  // Workflow start commands (HOM-202).
   if (commandType === "verification.start") return "verification";
   if (commandType === "release.start") return "release";
   return "integration";

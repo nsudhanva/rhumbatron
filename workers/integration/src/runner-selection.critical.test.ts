@@ -130,7 +130,7 @@ describe("app check outcome evaluation and fallback", () => {
     }
   });
 
-  it("ensures a not_checked result NEVER becomes a pass (AGENTS.md 34.4.1)", () => {
+  it("ensures a not_checked result NEVER becomes a pass", () => {
     const malformed: AppCheckResult = {
       ...baseResult,
       status: "pass",

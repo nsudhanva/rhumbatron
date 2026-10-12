@@ -9,7 +9,7 @@ import {
 } from "./index-store.ts";
 
 /**
- * Retrieval order (AGENTS.md section 27.3): exact first, Vectorize last.
+ * Retrieval order: exact first, Vectorize last.
  *
  *   1. Task-declared files: paths the Task text names, upstream Intents' expected files, and
  *      files of inherited ChangeSets. Only paths that exist in the indexed tree count.

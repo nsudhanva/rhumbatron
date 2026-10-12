@@ -18,8 +18,8 @@ const event = (eventType: string, payload: unknown = {}): EventEnvelope =>
     payload,
   }) as EventEnvelope;
 
-describe("analytics projector mapping (section 41.1)", () => {
-  it("maps lifecycle Events to section 41.1 metric names", () => {
+describe("analytics projector mapping", () => {
+  it("maps lifecycle Events to Analytics Engine metric names", () => {
     expect(metricFor(event("change.created"))?.name).toBe("change_created");
     expect(metricFor(event("task.failed", { kind: "dead_letter" }))).toEqual({
       name: "task_failed",

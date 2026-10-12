@@ -43,7 +43,7 @@ import {
 import { AgentsReplayStrip } from "./agents-replay-strip";
 
 /**
- * Agents graph (AGENTS.md 38.6; DESIGN.md 9.13): Changes, their Tasks with the Work Graph
+ * Agents graph: Changes, their Tasks with the Work Graph
  * dependency edges, the agent of each Task with its model tiers and status, and the semantic
  * conflicts between Tasks as dashed edges coloured by state. Left to right by dependency depth.
  * Data: the agents list, one Task list and one conflict list per Change in scope (at most

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Code store and diffs (AGENTS.md sections 15.4 `patchRef`, 29, 38.5; Phase 16 P16-16, P16-17).
+ * Code store and diffs (ChangeSet `patchRef`; Phase 16 P16-16, P16-17).
  * Everything lives under the Project's `source/<project>/` R2 prefix, so archive cleanup removes it
  * and no lifecycle rule expires it:
  *

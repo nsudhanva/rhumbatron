@@ -1,4 +1,4 @@
-// Inbox derivation (AGENTS.md sections 36, 40.1, 59). An action item must exist exactly while its
+// Inbox derivation. An action item must exist exactly while its
 // condition holds: `approval_required` disappears once an approval is recorded; `promotion_ready`
 // appears only when approved or when no approval is required. A read mark must never hide an
 // action item. A user must never see, count, or mark another tenant's items. Runs the real

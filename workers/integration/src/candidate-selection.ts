@@ -13,7 +13,7 @@ import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
 
 /**
- * Sibling Candidate selection (ADR 0026; AGENTS.md sections 22.5, 32.4, 36). The Candidates of one
+ * Sibling Candidate selection (ADR 0026). The Candidates of one
  * Change on one base generation are siblings. None of them promotes while a sibling still composes
  * or verifies. When the last one settles, exactly one workflow claims the selection with one
  * conditional UPDATE of the group's anchor row (the earliest Candidate) and picks the winner:
@@ -426,7 +426,7 @@ export type JudgeRun = {
 };
 
 /**
- * One Sonnet call (section 22.5). It reads only the Evidence snapshot of the tied Candidates and
+ * One Sonnet call. It reads only the Evidence snapshot of the tied Candidates and
  * fetches nothing. Admitted while the Change has budget left and under the daily call cap; a
  * refusal or a failed call escalates to a person.
  */

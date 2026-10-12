@@ -13,7 +13,7 @@ import { requesterName } from "./change-status";
 import { ClarificationCard } from "./clarification-card";
 
 /**
- * "Needs attention" (DESIGN.md 1.2, 12 "Explain gates"): only what waits on a person. Questions
+ * "Needs attention" (explain gates): only what waits on a person. Questions
  * to answer, an approval, a budget or merge block, a failed plan, a conflict the review sent to
  * a person, or commands that failed after retries. Renders nothing when nothing waits.
  */

@@ -1,4 +1,4 @@
-// Feed cursor invariant (AGENTS.md section 39): a reader that follows `after = nextAfter` while
+// Feed cursor invariant: a reader that follows `after = nextAfter` while
 // `hasMore` sees every recorded event exactly once, in any burst size, and `before` pages back
 // through older events without gaps. The SQL in the API is `WHERE seq <op> ? ORDER BY seq <order>
 // LIMIT <take>`; `read` below is the same selection over an array.

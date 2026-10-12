@@ -2,7 +2,7 @@
  * CodeMirror 6 setup for the code editor. `code-editor.tsx` imports this module dynamically on
  * the client, so CodeMirror is a separate chunk and the server render never loads it.
  * The theme reads the app's CSS variables (theme.css), so one theme serves light and dark mode
- * and matches the mono file view (DESIGN.md 9.10, TOKEN_CLASS in highlight.ts).
+ * and matches the mono file view (TOKEN_CLASS in highlight.ts).
  */
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLiveStatusReporter } from "./live-status";
 
 /**
- * Client for the Project live socket (AGENTS.md section 39): snapshot plus sequence deltas from
+ * Client for the Project live socket: snapshot plus sequence deltas from
  * ProjectViewDO through the same-origin route `/live/projects/:projectId`. The socket carries
  * change signals only. Pages still read their data from the API, so a lost message costs at most
  * one refetch and never shows wrong data.
@@ -124,7 +124,7 @@ export function useProjectLive(
       const order = sequenceGap(lastSequence, message.sequence);
       if (order === "duplicate") return;
       if (order === "gap") {
-        // Section 39: never patch over a gap. The next snapshot resets the sequence.
+        // Never patch over a gap. The next snapshot resets the sequence.
         awaitingSnapshot = true;
         ws.send(JSON.stringify({ type: "snapshot.request" }));
         return;

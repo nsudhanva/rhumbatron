@@ -11,7 +11,7 @@ import type {
 import type { EntityRef, FlightFilters } from "../../flight-store";
 
 /**
- * Pure read helpers for the codebase heatmap (DESIGN.md 9.5). Rows are recorded files or semantic
+ * Pure read helpers for the codebase heatmap. Rows are recorded files or semantic
  * resources; columns are equal time buckets from the first recorded fact to the fold instant.
  * A cell counts recorded touches (Intent expected files, ChangeSet changed files, Claim facts)
  * inside its bucket. Nothing is interpolated: an empty bucket is an empty cell.
@@ -63,7 +63,7 @@ const keysOf = (state: FlightState, taskIds: string[]) =>
 /**
  * Returns a lookup from a changed touch to the id of the newly played fact that recorded it (the
  * ChangeSet proposal, its composition, or the run end that published it). Only those cells fill
- * with motion; settled cells render still (DESIGN.md 11.1).
+ * with motion; settled cells render still.
  */
 export function animationOf(state: FlightState, animated: ReadonlySet<string>) {
   const byChangeSet = new Map<string, string>();

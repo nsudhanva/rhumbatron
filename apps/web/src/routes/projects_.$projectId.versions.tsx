@@ -25,7 +25,7 @@ import { can } from "../lib/permissions";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
- * Versions (P16-13; AGENTS.md sections 21.3, 42.10): every Canonical Generation, an "Open" link to
+ * Versions (P16-13): every Canonical Generation, an "Open" link to
  * its live bundle where the Project has an app (prod), and "Roll back to Sk". A rollback is a new
  * version whose code equals Sk's; nothing in the history is deleted. It needs an approval when the
  * Project policy gates the riskiest Change it undoes.

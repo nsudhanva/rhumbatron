@@ -12,7 +12,7 @@ export const Slug = z
   .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "slug must be lowercase kebab-case");
 export type Slug = z.infer<typeof Slug>;
 
-/** Pointer to the accepted source state (AGENTS.md section 29.1). */
+/** Pointer to the accepted source state. */
 export const CanonicalRef = z.object({
   provider: z.literal("cloudflare-artifacts"),
   artifactRef: z.string(),
@@ -32,7 +32,7 @@ export type ProjectPolicies = z.infer<typeof ProjectPolicies>;
 export const ProjectStatus = z.enum(["active", "archived"]);
 export type ProjectStatus = z.infer<typeof ProjectStatus>;
 
-/** AGENTS.md section 15.1. */
+/** One software product managed by Rhumbatron. */
 export const Project = z.object({
   id: Id,
   orgId: Id,
@@ -215,13 +215,13 @@ export const ClarifyChangeOutcome = z.discriminatedUnion("status", [
 ]);
 export type ClarifyChangeOutcome = z.infer<typeof ClarifyChangeOutcome>;
 
-/** Release target after promotion. Canary rollout is deferred (AGENTS.md section 11.5). */
+/** Release target after promotion. Canary rollout is deferred. */
 export const RolloutPolicy = z.object({
   target: z.enum(["preview", "production"]),
 });
 export type RolloutPolicy = z.infer<typeof RolloutPolicy>;
 
-/** AGENTS.md section 15.2. */
+/** One user goal that must change the software. */
 export const Change = z.object({
   id: Id,
   projectId: Id,
@@ -258,7 +258,7 @@ export const ChangeDetail = Change.extend({
 export type ChangeDetail = z.infer<typeof ChangeDetail>;
 
 /**
- * `POST /v1/changes/:changeId/budget` request (section 44 rule 5: a person raises the budget).
+ * `POST /v1/changes/:changeId/budget` request (a person raises the budget).
  * The new budget can only be equal or higher; the same cap as Change creation applies.
  */
 export const RaiseBudgetRequest = z.object({

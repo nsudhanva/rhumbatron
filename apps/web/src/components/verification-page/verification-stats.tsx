@@ -8,7 +8,7 @@ import type { stats as computeStats } from "./model";
 type Stats = ReturnType<typeof computeStats>;
 
 /**
- * Stat strip for the Verification page (DESIGN.md 6.2.2, 9.2). Required-check counts include
+ * Stat strip for the Verification page. Required-check counts include
  * only `checked_supported` passes; gaps and failures are counted separately and never as met.
  */
 export function VerificationStats({ stats }: { stats: Stats }) {

@@ -9,7 +9,7 @@ import { StatusPill } from "./ui/status-pill";
 import { Tag } from "./ui/tag";
 
 /**
- * Task inspector beside the Work Graph (DESIGN.md 9.13, 10): repeats the selected node as text.
+ * Task inspector beside the Work Graph: repeats the selected node as text.
  * First what a person needs (objective, status, agent and model, files changed, result), then
  * the machine record (route, tokens, claims, IDs) behind "Details".
  */

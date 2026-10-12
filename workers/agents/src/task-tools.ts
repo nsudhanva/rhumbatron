@@ -2,7 +2,7 @@ import { type Static, Type } from "@earendil-works/pi-ai";
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable";
 
 /**
- * The typed outputs an agent may produce (AGENTS.md section 26). Until Workspaces exist (Phase 8),
+ * The typed outputs an agent may produce. Until Workspaces exist (Phase 8),
  * completing a Task means declaring its Intent: what it would change, where, and on what assumptions.
  */
 

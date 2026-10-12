@@ -2,7 +2,7 @@ import { CheckExpectation, EvidenceRecord } from "@rhumbatron/protocol";
 import { z } from "zod";
 
 /**
- * Tolerant readers for stored Candidate and Evidence rows (AGENTS.md sections 34.4.1, 38). One
+ * Tolerant readers for stored Candidate and Evidence rows. One
  * unexpected row must not fail a whole read model:
  *
  * - `score_json` holds the verification gate, or other integration state (for example a `rebase`

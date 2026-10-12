@@ -1,8 +1,8 @@
 import { formatNumber } from "../../lib/format";
 
 /**
- * What this page cannot show because nothing records it yet (AGENTS.md section 56: "do not
- * estimate all costs from arbitrary constants"). Those values read `—` or are absent; this
+ * What this page cannot show because nothing records it yet: costs come from
+ * recorded metrics, never from arbitrary constants. Those values read `—` or are absent; this
  * footnote names them so a gap never passes for a zero.
  */
 const NOT_RECORDED = [

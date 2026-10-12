@@ -65,7 +65,7 @@ export const Route = createFileRoute("/changes/$changeId")({
   component: ChangePage,
 });
 
-/** Safety net while the live socket is down (AGENTS.md section 39). */
+/** Safety net while the live socket is down. */
 const FALLBACK_POLL_MS = 30_000;
 /**
  * Model calls emit no event, so live run progress is polled, and only while a run is running and
@@ -351,7 +351,7 @@ function ChangeView() {
     (c) => selectedTask?.assignedAgentId && c.agentId === selectedTask.assignedAgentId,
   );
 
-  // One primary action at most (DESIGN.md 8.1). Answering happens in the form below the title.
+  // One primary action at most. Answering happens in the form below the title.
   const primary =
     data.status === "needs_input" || data.status === "proposed" ? null : !operate ? (
       data.status === "completed" && liveApp ? (

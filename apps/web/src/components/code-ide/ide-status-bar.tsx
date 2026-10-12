@@ -6,7 +6,7 @@ import { EXPIRY_WARNING_MS, formatCountdown } from "./model";
 const MESSAGE_MAX = 200;
 
 /**
- * Status bar of an edit session (DESIGN.md 9.17 dress: mono 11px, `subtle`, on `elevated`): the
+ * Status bar of an edit session (status bar dress: mono 11px, `subtle`, on `elevated`): the
  * session, its base, the idle countdown, and the changed file count, then "Submit as change" (the
  * one primary action) and "Discard session". One minute before the session ends the countdown
  * turns to attention with "Keep alive". Submit opens an inline message field and Discard an

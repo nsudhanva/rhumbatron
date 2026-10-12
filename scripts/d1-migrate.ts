@@ -1,6 +1,6 @@
 /**
  * Applies unapplied D1 migrations to a remote database through the D1 HTTP API.
- * Invoked only by Terraform (terraform_data in the env root, AGENTS.md section 11.6).
+ * Invoked only by Terraform (terraform_data in the env root).
  * Each migration and its bookkeeping row run in one batch request.
  */
 import { createHash } from "node:crypto";
@@ -14,7 +14,9 @@ import {
 } from "./lib/d1-migrations.ts";
 
 if (process.env.RHUMBATRON_INVOKED_BY !== "terraform") {
-  console.error("d1-migrate runs only from terraform apply. See AGENTS.md section 11.6.");
+  console.error(
+    "d1-migrate runs only from terraform apply. See infrastructure/terraform/README.md.",
+  );
   process.exit(2);
 }
 

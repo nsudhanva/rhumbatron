@@ -7,7 +7,7 @@ import { entityLabel, type FlightState, relatedRefs } from "./flight-model";
 import { type EntityKind, type EntityRef, useFlightStore, useSelection } from "./flight-store";
 
 /**
- * Inspector for the one selected entity (DESIGN.md 10: one selection per context; the inspector
+ * Inspector for the one selected entity (one selection per context; the inspector
  * and the selected item share the accent bar). A right-hand column on wide screens, below the
  * panels on narrow ones. The related chips walk the causal neighbourhood of the selection.
  * Inspector modules load on first selection, so they cost nothing on first paint.

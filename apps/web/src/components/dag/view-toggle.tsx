@@ -3,7 +3,7 @@ import { cn } from "@cloudflare/kumo";
 export type DagMode = "list" | "graph";
 
 /**
- * "List | Graph" segmented control (DESIGN.md 8.2): 1px divider frame, selected in ink with
+ * "List | Graph" segmented control: 1px divider frame, selected in ink with
  * inverse text. Both options are always available.
  */
 export function ViewToggle({

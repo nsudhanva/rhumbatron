@@ -6,7 +6,7 @@ import type { TaskDetail } from "./api";
 /**
  * Server functions for the Project execution timeline (components/timeline). They read the same
  * API Worker routes as lib/api.ts through the `API` service binding, with the user's Clerk
- * session token (AGENTS.md 12.1). Read-only.
+ * session token. Read-only.
  */
 
 /** Changes read per call: one service-binding subrequest each, well under the Worker limit. */

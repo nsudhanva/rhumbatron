@@ -20,7 +20,7 @@ import { can } from "../lib/permissions";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
- * Costs (AGENTS.md sections 24, 44, 56): recorded model usage and spend per Change against its
+ * Costs: recorded model usage and spend per Change against its
  * budget, usage by tier and by Task, routing outcomes from Decision Receipts, and the free-tier
  * meters. Every figure is a recorded row; anything not recorded reads `—` and is named in the
  * footnote.

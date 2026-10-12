@@ -2,7 +2,7 @@ import type { CommandEnvelope } from "@rhumbatron/protocol";
 import { z } from "zod";
 
 /**
- * Workflow start commands (AGENTS.md sections 20, 21, 60; HOM-202). "Start verification" travels on
+ * Workflow start commands (HOM-202). "Start verification" travels on
  * `rhumbatron-verification-<env>` and "start release" on `rhumbatron-release-<env>`. The integration
  * Worker consumes both and starts the existing Workflow. The command carries the idempotency key,
  * and the Workflow instance ID is that key (Candidate ID, release ID), as before: a redelivery, a

@@ -1,7 +1,7 @@
 import type { EventEnvelope } from "@rhumbatron/protocol";
 
 /**
- * Bounded delivery for a K2 batch that keeps failing (AGENTS.md sections 20 and 42.7). K2 has no
+ * Bounded delivery for a K2 batch that keeps failing. K2 has no
  * delivery limit of its own: a nacked batch redelivers on every sweep and nudge, forever. The
  * router counts failed deliveries per (consumer, batch key) in D1 (migration 0016). At
  * MAX_BATCH_FAILURES it records the batch on the dead-letter path the Queues already use

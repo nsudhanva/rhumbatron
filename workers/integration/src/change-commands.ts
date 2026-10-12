@@ -23,8 +23,8 @@ import { recoverStaleCandidates } from "./recompose.ts";
 import { startWorkflowOnce } from "./workflow-commands.ts";
 
 /**
- * A person's cancel, budget raise, and clarification answer on one Change (AGENTS.md sections
- * 16.1, 44, 60; ADR 0025). Called only
+ * A person's cancel, budget raise, and clarification answer on one Change (ADR 0025).
+ * Called only
  * by the API over the `INTEGRATION` service binding, after it authenticated the user and checked
  * project membership. Deterministic and idempotent: every write is guarded by the from-states in
  * change-status.ts, and a repeat returns the stored result.
@@ -89,7 +89,7 @@ const recorded = (
  * Cancels a Change before promotion starts. Open Tasks become `cancelled`, so no new dispatch or
  * wake starts them (dispatch.ts reads only `running` Changes; a wake for a cancelled Task is stale),
  * and a running agent run stops at its next run check. Open Candidates become `rejected`, so none
- * can pass the section 36 preconditions. History stays: nothing is deleted.
+ * can pass the promotion preconditions. History stays: nothing is deleted.
  */
 export async function cancelChange(
   env: Env,
@@ -210,7 +210,7 @@ export async function cancelChange(
 }
 
 /**
- * Statements that move a `budget_blocked` Change back to work (section 44 rule 5, ADR 0030): its
+ * Statements that move a `budget_blocked` Change back to work (ADR 0030): its
  * budget-stopped Tasks return to `ready` or `pending` and the Change to `running`. A Change that
  * a budget stopped while planning has no Tasks: it returns to `compiling`, and `replan` asks the
  * caller to start planning again after the batch (`restartPlanning`). Every statement is guarded
@@ -336,7 +336,7 @@ export async function resumeBudgetBlocked(
 }
 
 /**
- * Raises a Change budget (section 44 rule 5). A `budget_blocked` Change returns to `running`, the
+ * Raises a Change budget. A `budget_blocked` Change returns to `running`, the
  * status that every budget stop leaves (agents limits.ts), and its ready Tasks are dispatched the
  * normal way. The admission checks run again on each start. A repeat of the same amount changes
  * nothing and re-dispatches only Tasks that are still ready and not woken.

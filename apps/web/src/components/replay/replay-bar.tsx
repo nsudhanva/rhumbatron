@@ -8,8 +8,8 @@ import { REPLAY_SPEEDS, relativeClock } from "./replay-model";
 import type { Replay } from "./use-replay";
 
 /**
- * Replay control bar (DESIGN.md 8.2 segmented control, 11.1 "A replay control re-runs the
- * sequence from recorded events"), in the look of the Flight Control time machine: play or
+ * Replay control bar (segmented control; a replay control re-runs the
+ * sequence from recorded events), in the look of the Flight Control time machine: play or
  * pause, speed, the replay clock, a range over the recorded time with a tick per notable fact,
  * and Live. The keys work anywhere in the bar: Space, Left and Right, Home, L.
  */

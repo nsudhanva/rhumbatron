@@ -19,9 +19,9 @@ const POLL_MS = 60_000;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
- * Operator banners (DESIGN.md 8.5; AGENTS.md sections 42.7 and 44). Danger: commands that failed
- * after their Queue retries, each with Retry and Dismiss. Attention: Tasks and Changes a section 44
- * limit stopped or delays, with the exact limit. Renders nothing when there is nothing to act on.
+ * Operator banners. Danger: commands that failed
+ * after their Queue retries, each with Retry and Dismiss. Attention: Tasks and Changes a cost or
+ * safety limit stopped or delays, with the exact limit. Renders nothing when there is nothing to act on.
  * On a Change page, pass `changeId` to show only that Change.
  */
 export function DeadLetters({

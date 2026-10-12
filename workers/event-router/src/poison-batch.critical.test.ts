@@ -1,4 +1,4 @@
-// Bounded K2 delivery (AGENTS.md sections 20 and 42.7). A batch that keeps failing must stop
+// Bounded K2 delivery. A batch that keeps failing must stop
 // redelivering after MAX_BATCH_FAILURES: it is recorded once on the dead-letter path, and its events
 // become duplicates so a redelivery after a lost ack is a no-op. Real migrations on node:sqlite.
 import { readdirSync, readFileSync } from "node:fs";

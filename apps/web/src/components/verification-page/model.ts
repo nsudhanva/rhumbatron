@@ -12,7 +12,7 @@ import {
 } from "../candidate/model";
 
 /**
- * Project-wide verification read model (AGENTS.md sections 34.4.1, 38). Every verdict comes from
+ * Project-wide verification read model. Every verdict comes from
  * `checkRows` in the Candidate model, so a gap here is the same gap as on the Candidate page: a
  * missing, skipped, timed-out or no-signal check is never counted as a pass.
  */
@@ -36,7 +36,7 @@ export type VerifiedCandidate = {
 
 export type Stage = "composing" | "verifying" | "verified" | "rejected" | "promoted";
 
-/** Heat grid width (DESIGN.md 9.5: fixed 8-16 columns). */
+/** Heat grid width (fixed 8-16 columns). */
 export const GRID_COLUMNS = 16;
 
 /** Newest first, with the per-Change labels and check rows the Candidate pages use. */
@@ -82,7 +82,7 @@ const reachedVerifying = (c: CandidateDetail) =>
 
 /**
  * Which pipeline stages a Candidate counts toward. Stages are cumulative ("reached"), so each bar
- * is a share of all Candidates (DESIGN.md 9.4). A stale Candidate counts only up to verifying:
+ * is a share of all Candidates. A stale Candidate counts only up to verifying:
  * its base generation moved, so it cannot be promoted as is.
  */
 export function stagesOf(c: CandidateDetail): Set<Stage> {

@@ -16,7 +16,7 @@ import { candidateFork } from "./repo-names.ts";
 export { candidateFork };
 
 /**
- * Candidate source in the Project Sandbox (AGENTS.md sections 29.3, 30, 33). The Sandbox is the
+ * Candidate source in the Project Sandbox. The Sandbox is the
  * same one Task workspaces use (one per Project, ADR 0011), with a directory per Candidate. Repo
  * tokens are short-lived, passed as environment variables, and never written to git config.
  */
@@ -232,7 +232,7 @@ async function changedFiles(sandbox: Sandbox, dir: string, from: string, to: str
 }
 
 /**
- * The composition build (AGENTS.md section 37): when package.json has a `build` script, runs
+ * The composition build: when package.json has a `build` script, runs
  * `bun run build` in the merged checkout and commits the files it changed on top of the merges.
  * Returns null when there is no build script. A failed build commits nothing; its result becomes
  * the `build` Evidence. A retried step reuses the build commit it pushed before, so the push
@@ -531,7 +531,7 @@ export async function runCandidateCheck(
 }
 
 /**
- * Prints the route table of the composed commit and of its base (section 34.1 contract check).
+ * Prints the route table of the composed commit and of its base (contract check).
  * The base is a detached worktree beside the checkout, read with the checkout's dependencies, so
  * one install serves both. The worktree is removed afterwards.
  */
@@ -613,8 +613,8 @@ export type CandidatePreview = {
 };
 
 /**
- * Starts the composed app (`bun run dev`, fixed in code) on its preview port for the browser check
- * (AGENTS.md section 35). The preview is reached only through the Sandbox Durable Object
+ * Starts the composed app (`bun run dev`, fixed in code) on its preview port for the browser check.
+ * The preview is reached only through the Sandbox Durable Object
  * (`containerFetch`), never through an exposed preview URL, so it needs no wildcard route and no
  * public hostname. Throws when the server does not answer within `readyMs`.
  */

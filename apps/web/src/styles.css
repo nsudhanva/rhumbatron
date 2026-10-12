@@ -1,5 +1,5 @@
 /*
- * Import order (DESIGN.md section 15.3): Kumo styles, then Tailwind, then the Modernist theme
+ * Import order: Kumo styles, then Tailwind, then the Modernist theme
  * layer. All raw colors and Kumo overrides live in theme.css. XYFlow's base styles come last, in
  * the same order as their own stylesheet had, so every page loads one render-blocking stylesheet.
  */

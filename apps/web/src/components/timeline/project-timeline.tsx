@@ -52,7 +52,7 @@ import { attentionAt, REPLAY_LEGEND, replayTicks, replayTimes } from "./timeline
 import { useTimelineEvents, useTimelineTasks } from "./use-timeline-data";
 
 /**
- * Project execution timeline (AGENTS.md 38.1, 39; DESIGN.md 9.8 trace waterfall, 11.1 agents
+ * Project execution timeline (trace waterfall, agents
  * working simultaneously). Who asked for what, which agent works on which Task, and when:
  *
  *   person (requester)            one header row per person
@@ -373,7 +373,7 @@ function layoutRows(model: TimelineModel, collapsed: ReadonlySet<string>) {
 
 type Tip = { left: number; top: number; below: boolean; lines: ReactNode[] };
 
-/** One floating tooltip for the whole plot (DESIGN.md 8.4): ink fill, inverse text, 12px. */
+/** One floating tooltip for the whole plot: ink fill, inverse text, 12px. */
 function useTooltip(frame: HTMLElement | null) {
   const [tip, setTip] = useState<Tip | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);

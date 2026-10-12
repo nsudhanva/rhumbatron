@@ -24,7 +24,7 @@ import {
 import { RefButton } from "../panels/arena/ref-button";
 
 /**
- * Inspectors for Candidates, conflicts and ChangeSets (DESIGN.md 10: the inspector repeats the
+ * Inspectors for Candidates, conflicts and ChangeSets (the inspector repeats the
  * selection's facts as text). Each reads the folded `state` at the time-machine instant; facts
  * not yet recorded at that instant are absent, and the inspector says so.
  */

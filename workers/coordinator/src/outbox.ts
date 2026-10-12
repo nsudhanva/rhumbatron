@@ -1,5 +1,5 @@
 /**
- * Transactional outbox shared by the coordinator Durable Objects (AGENTS.md sections 18 and 42.6).
+ * Transactional outbox shared by the coordinator Durable Objects.
  * State changes insert outbox rows in the same transaction; an alarm publishes due rows to K2.
  * Retries are bounded: exponential backoff up to 5 minutes, then the row is marked failed. A row
  * whose stream has no producer binding is marked failed at once: no retry can bind it.
@@ -30,7 +30,7 @@ export function retryDelayMs(attempt: number): number {
   return Math.min(1000 * 2 ** Math.max(0, attempt - 1), MAX_BACKOFF_MS);
 }
 
-/** Stable stream index for a project. Every producer must use this rule (section 19). */
+/** Stable stream index for a project. Every producer must use this rule. */
 export function streamIndex(projectId: string, count = K2_STREAM_COUNT): number {
   return fnv1a32(projectId) % count;
 }

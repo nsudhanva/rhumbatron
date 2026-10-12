@@ -120,7 +120,7 @@ async function handleCommand(
 ): Promise<"continue" | "wait" | undefined> {
   const command = AnyCommandEnvelope.safeParse(body);
   if (!command.success) return;
-  // Section 20: `verification.start` and `release.start` from their own Queues (HOM-202). The
+  // Workflow start commands: `verification.start` and `release.start` from their own Queues (HOM-202). The
   // instance ID is the command's idempotency key, so a redelivery finds the running instance.
   const start = workflowStartFor(command.data);
   if (start) {
@@ -211,7 +211,7 @@ async function handleCommand(
     if (parsed.success) await startCandidateVerification(env, parsed.data.candidateId);
     return;
   }
-  // Section 42.9: the event router marked older-base Candidates stale after `canonical.advanced`
+  // Stale Candidates: the event router marked older-base Candidates stale after `canonical.advanced`
   // and does not compose. Each one ends recomposed, its Change blocked, or its Change closed.
   if (command.data.commandType === "candidates.recompose") {
     const parsed = CandidatesRecomposePayload.safeParse(command.data.payload);
@@ -227,7 +227,7 @@ async function handleCommand(
     );
     return;
   }
-  // Section 21.1 step 7: the Work Graph completed; compose its Candidates (Causal Router).
+  // The Work Graph completed; compose its Candidates (Causal Router).
   if (command.data.commandType === "candidate.create") {
     if (!command.data.changeId) return;
     await recoverSourceConflicts(env, command.data.changeId);
@@ -301,7 +301,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
   }
 
   /**
-   * Creates (or finds) one Candidate of a Change and starts its verification (sections 33, 60).
+   * Creates (or finds) one Candidate of a Change and starts its verification.
    * The API authenticated the user and checked Project membership. `changeSetIds` narrows the
    * composition to a subset of the proposed ChangeSets (competing designs, P9-08).
    */
@@ -312,7 +312,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
     return createCandidate(this.env, input);
   }
 
-  /** P11-03/P11-04: preconditions, then ProjectRootDO compare-and-swap (section 36). */
+  /** P11-03/P11-04: preconditions, then ProjectRootDO compare-and-swap. */
   async promoteCandidate(input: {
     candidateId: string;
     actorUserId: string;
@@ -324,7 +324,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
     });
   }
 
-  /** Cancels a Change before promotion starts (section 16.1). Safe to repeat. */
+  /** Cancels a Change before promotion starts. Safe to repeat. */
   async cancelChange(input: {
     changeId: string;
     actorUserId: string;
@@ -332,7 +332,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
     return cancelChange(this.env, input);
   }
 
-  /** A person raises a Change budget; a budget-blocked Change resumes (section 44). */
+  /** A person raises a Change budget; a budget-blocked Change resumes. */
   async raiseChangeBudget(input: {
     changeId: string;
     budgetUsd: number;
@@ -497,7 +497,7 @@ export default class Integration extends WorkerEntrypoint<Env> {
     return requestRollback(this.env, input);
   }
 
-  /** P11-01: one human decision on a gated Candidate (section 40.2). */
+  /** P11-01: one human decision on a gated Candidate. */
   async decideApproval(input: {
     candidateId: string;
     approverUserId: string;

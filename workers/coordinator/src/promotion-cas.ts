@@ -1,5 +1,5 @@
 /**
- * Canonical promotion compare-and-swap (AGENTS.md sections 13.1 and 36).
+ * Canonical promotion compare-and-swap.
  * Pure decision logic. ProjectRootDO applies the decision inside one SQLite transaction.
  */
 
@@ -9,14 +9,14 @@ export type CanonicalState = {
   treeSha: string;
   /** Candidate that produced the current generation, for idempotent retries. */
   lastPromotedCandidateId: string | null;
-  /** Active project policy version (section 36, rule 5). */
+  /** Active project policy version. */
   policyVersion: string;
 };
 
 export type PromotionAttempt = {
   candidateId: string;
   expectedGeneration: number;
-  /** Optional tree check (section 36, rule 7). */
+  /** Optional tree check. */
   expectedTreeSha?: string;
   candidateArtifactRef: string;
   candidateTreeSha: string;

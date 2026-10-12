@@ -7,7 +7,7 @@ import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Wishlist design-conflict fixture (AGENTS.md sections 32.4, 54; P9-08). Publishing is a
+ * Wishlist design-conflict fixture (P9-08). Publishing is a
  * command: the API checks the caller and the Change, then queues `fixture.publish`; the
  * integration Worker commits each design to an Artifacts fork and records fixture-sourced
  * ChangeSets and Intents. No model call. The routes answer only where the `FIXTURES_ENABLED`
@@ -103,7 +103,7 @@ export const fixtures = new Hono<AppEnv>()
         return fail(c, 409, "conflict", `Change is ${change.status}`);
       }
       const designs = designsOf(c.req.valid("json").design);
-      // Stable command ID: a retried request is one logical publication (section 60).
+      // Stable command ID: a retried request is one logical publication.
       await c.env.INTEGRATION_COMMANDS.send(
         {
           commandId: `cmd_${changeId.slice(4)}_fixture_${designs.join("")}`,

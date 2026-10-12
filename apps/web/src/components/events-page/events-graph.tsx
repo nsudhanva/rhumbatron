@@ -15,7 +15,7 @@ import { EventDetail } from "./event-stream";
 import { type FeedEvent, ingestLagMs, TONE_TEXT, typeTone } from "./feed-model";
 
 /**
- * Events graph (AGENTS.md 17, 38.7; DESIGN.md 9.13): the loaded events as a DAG. An event links
+ * Events graph: the loaded events as a DAG. An event links
  * to the event that caused it when the feed carries `causedBy`; the feed projection does not
  * keep it today, so each event sits in the lane of its Task under its Change, in sequence order.
  * Events with no Task sit in their Change's own lane, and events with no Change in the Project

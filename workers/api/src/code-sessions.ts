@@ -274,7 +274,7 @@ export const codeSessions = new Hono<AppEnv>()
       );
       if (outcome.status === "refused") return refused(c, outcome);
       if (outcome.data.status === "created") {
-        // The dashboard projection is eventually consistent (AGENTS.md section 59).
+        // The dashboard projection is eventually consistent.
         await projectView(c.env, caller.projectId)
           .applyDelta({
             upsert: {

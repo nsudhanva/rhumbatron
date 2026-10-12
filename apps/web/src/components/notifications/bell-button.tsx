@@ -12,7 +12,7 @@ type BellButtonProps = ComponentPropsWithRef<"button"> & {
 };
 
 /**
- * The square header bell (DESIGN.md 6.1, 8.2 segmented-control frame). Rendered before the
+ * The square header bell (segmented-control frame). Rendered before the
  * popover code loads and, unchanged, as the popover trigger afterwards. The badge is absolutely
  * placed inside the fixed 28px (44px coarse) box, so a count never moves the header.
  */

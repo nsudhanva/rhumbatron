@@ -2,7 +2,7 @@ import type { CandidateDetail, EvidenceRecord, VerificationCheck } from "../../l
 import { formatMs, generation } from "../../lib/format";
 
 /**
- * Deterministic read model for Candidate pages (AGENTS.md sections 34.4.1, 36, 38.4). Everything
+ * Deterministic read model for Candidate pages. Everything
  * here is derived from the plan, the Evidence rows and the gate; nothing uses model confidence.
  * The gate rules mirror `packages/evidence/src/gate.ts`: only a `checked_supported` pass within
  * the timeout (and under the threshold for a metric check) satisfies a check.
@@ -184,7 +184,7 @@ export function requiredTally(rows: CheckRow[]) {
   };
 }
 
-/** The p95 budget from the plan's performance check (section 54 default: 200 ms). */
+/** The p95 budget from the plan's performance check (default: 200 ms). */
 export function p95Budget(candidate: CandidateDetail): number | null {
   const check = candidate.plan?.checks.find((c) => c.expected.kind === "metric_below");
   return check?.expected.kind === "metric_below" ? check.expected.threshold : null;
@@ -345,7 +345,7 @@ export function recommend(
   return { id: best.candidate.id, kind: "closest" };
 }
 
-/** Names the policy rule that requires a human, in one line (DESIGN.md section 12). */
+/** Names the policy rule that requires a human, in one line. */
 export function gateRule(candidate: CandidateDetail, riskTier: string | null | undefined) {
   const policy = candidate.plan?.policyVersion ?? candidate.approval?.policyVersion;
   const named = policy ? `Policy ${policy}` : "Project policy";

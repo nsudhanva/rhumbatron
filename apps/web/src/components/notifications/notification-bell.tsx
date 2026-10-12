@@ -5,7 +5,7 @@ import { BellButton } from "./bell-button";
 import { formatBadge, NOTIFICATION_KEYS, plural } from "./notification-keys";
 
 /**
- * Inbox entry point in the shell header (DESIGN.md 6.1, 8.4, 10). A square bell with a square
+ * Inbox entry point in the shell header. A square bell with a square
  * count badge: accent while an item needs a decision, ink while there are only unread updates
  * (principle 2: the accent marks what needs a decision).
  *

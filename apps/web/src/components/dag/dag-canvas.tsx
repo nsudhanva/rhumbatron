@@ -13,7 +13,7 @@ import {
 } from "./model";
 
 /**
- * DAG canvas for the Agents and Events graphs (DESIGN.md 9.13): square nodes on an elevated
+ * DAG canvas for the Agents and Events graphs: square nodes on an elevated
  * canvas with a 2px ink rule on top, edges left to right. Selecting a node keeps it, its
  * ancestors and its descendants at full strength and dims the rest. The node is a button; the
  * page shows the detail of the selected node in its inspector.
@@ -207,7 +207,7 @@ export function DagCanvas({
   selectedId: string | null;
   onSelect: (id: string) => void;
   legend: LegendItem[];
-  /** What the graph is derived from and what it hides (DESIGN.md 9.13). */
+  /** What the graph is derived from and what it hides. */
   caption: ReactNode;
 }) {
   const { nodes, edges, height } = useMemo(() => {

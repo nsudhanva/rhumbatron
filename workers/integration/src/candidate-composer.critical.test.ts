@@ -1,5 +1,5 @@
-// Release safety: a Sandbox result that is not executable evidence must never become a pass
-// (AGENTS.md section 34.4.1), and ChangeSets merge after the ChangeSets they depend on (section 33).
+// Release safety: a Sandbox result that is not executable evidence must never become a pass,
+// and ChangeSets merge after the ChangeSets they depend on.
 import { buildVerificationPlan } from "@rhumbatron/evidence";
 import { describe, expect, it } from "vitest";
 import {

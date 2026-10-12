@@ -12,11 +12,11 @@ import {
 } from "./flight-store";
 
 /**
- * Filters for every panel (DESIGN.md 8.3 filter chips, 8.2 switch): free text, model tier, active
+ * Filters for every panel (filter chips, switch): free text, model tier, active
  * lanes only, and event families. Everything writes the shared store; panels apply what fits.
  */
 
-/** Families in protocol order (AGENTS.md 17.2); unknown families follow alphabetically. */
+/** Families in protocol order; unknown families follow alphabetically. */
 const FAMILY_ORDER = [
   "change",
   "task",

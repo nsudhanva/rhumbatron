@@ -18,7 +18,7 @@ import { changeLabel, formatNumber, generation } from "../lib/format";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
- * Product Graph (AGENTS.md 28, 38.3; DESIGN.md 9.13). Semantic areas of the Project and how
+ * Product Graph. Semantic areas of the Project and how
  * they depend on each other. By default it shows only the subgraph one Change affects; the
  * zoom switches between Project and Change. Areas that hold a protected resource of the Project's
  * own stored policy always show; a Project without a stored policy has none.
@@ -241,7 +241,7 @@ const ZOOMS: { value: Zoom; label: string; title: string }[] = [
 ];
 
 /**
- * Semantic zoom (AGENTS.md 38.3): segmented control, selected in ink (DESIGN.md 8.2). Shown only
+ * Semantic zoom: segmented control, selected in ink. Shown only
  * when the Project has a Change, so no option is ever disabled.
  */
 function ZoomControl({ zoom, onChange }: { zoom: Zoom; onChange: (zoom: Zoom) => void }) {
@@ -309,7 +309,7 @@ function GraphStats({ view, graph }: { view: GraphView; graph: ProductGraph }) {
   );
 }
 
-/** What the graph is derived from and what it hides (DESIGN.md 9.13). */
+/** What the graph is derived from and what it hides. */
 function Footnote({
   graph,
   view,

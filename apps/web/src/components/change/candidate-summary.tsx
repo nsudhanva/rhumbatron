@@ -23,7 +23,7 @@ import { CriteriaList } from "./change-overview";
 import { Disclosure } from "./disclosure";
 
 /**
- * The result of a Change in one block (AGENTS.md sections 34, 38.2): the leading Candidate, why
+ * The result of a Change in one block: the leading Candidate, why
  * it leads, and each acceptance criterion as met or not met. Other Candidates get one line with
  * the reason they were not selected. The full table and check details are one click away.
  */

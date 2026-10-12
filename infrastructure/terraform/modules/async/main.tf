@@ -1,5 +1,5 @@
 locals {
-  # AGENTS.md section 20. One Queue per purpose, never per Agent or Project.
+  # One Queue per purpose, never per Agent or Project.
   queues = toset([
     "agent-wakeups",
     "integration",
@@ -21,4 +21,4 @@ resource "cloudflare_queue" "this" {
   }
 }
 
-# Consumers, retries, and dead-letter routing are configured with the consumer Workers (Phase 4).
+# Consumers, retries, and dead-letter routing are configured with the consumer Workers.

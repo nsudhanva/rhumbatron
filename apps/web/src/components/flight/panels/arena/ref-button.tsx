@@ -5,8 +5,8 @@ import { EntityHover } from "../../hover-preview";
 
 /**
  * A button that stands for one entity: click selects it (panels toggle, inspectors navigate),
- * hover previews it, and the selection shows as faint ink with a 2px accent left bar
- * (DESIGN.md 10). 24px minimum target, 44px on coarse pointers.
+ * hover previews it, and the selection shows as faint ink with a 2px accent left bar.
+ * 24px minimum target, 44px on coarse pointers.
  *
  * The accessible name is the visible text, then `context` for screen readers only, so the name
  * always starts with what is on screen (WCAG 2.5.3 label in name). `title` is the tooltip.

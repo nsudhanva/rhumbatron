@@ -15,7 +15,7 @@ import { type FeedEvent, ingestLagMs, TONE_TEXT, typeTone } from "./feed-model";
 const TOP_SLACK = 8;
 
 /**
- * Event stream (DESIGN.md 9.9): sequence, time, type, actor, detail and version, newest on top.
+ * Event stream: sequence, time, type, actor, detail and version, newest on top.
  * New rows never move what the reader is looking at: below the top, the scroll position holds
  * and an "N new" control appears instead. Pause freezes the rows at the current sequence; new
  * events then only add to a "N new" count, and the announcements stop. The page filters the
@@ -63,7 +63,7 @@ export function EventStream({
   );
   const heldBack = matching.length - visible.length;
 
-  // Keep the reader's place when rows insert above it (DESIGN.md 9.9).
+  // Keep the reader's place when rows insert above it.
   const scrollRef = useRef<HTMLDivElement>(null);
   const anchor = useRef<{ seq: number; top: number } | null>(null);
   const lastFilterKey = useRef(filterKey);
@@ -170,7 +170,7 @@ export function EventStream({
         </div>
       </div>
 
-      {/* Silent while paused (DESIGN.md 9.9, 14). */}
+      {/* Silent while paused. */}
       <p className="sr-only" aria-live={paused ? "off" : "polite"} aria-atomic="true">
         {paused ? "" : announcement}
       </p>
@@ -300,7 +300,7 @@ function EventRows({
     <Fragment>
       <TRow selected={open} className="cursor-pointer">
         <Td numeric>
-          {/* The whole row is the target: this button stretches over it (DESIGN.md 10). */}
+          {/* The whole row is the target: this button stretches over it. */}
           <button
             type="button"
             aria-expanded={open}

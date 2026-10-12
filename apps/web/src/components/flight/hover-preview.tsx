@@ -27,7 +27,7 @@ import {
 import { type EntityRef, useFlightStore } from "./flight-store";
 
 /**
- * Contextual hover preview (DESIGN.md 8.4 tooltip timing, 10 hover). Wraps any element that
+ * Contextual hover preview (tooltip timing on hover). Wraps any element that
  * stands for an entity. After a 400ms hover, or at once on keyboard focus, a small non-modal
  * card shows that entity's state at the fold instant and `hover` is set in the store so every
  * panel highlights the same entity. The card is a summary of facts every panel and inspector

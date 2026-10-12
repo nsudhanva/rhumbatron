@@ -1,4 +1,4 @@
-// Critical tests for the Worker-side workspace (AGENTS.md sections 25, 26, 29, 30).
+// Critical tests for the Worker-side workspace.
 // Files are kept in the AgentDO working tree with zero Sandbox calls.
 // Sandbox containers start lazily ONLY when run_command is invoked.
 // On publish, dirty files are committed to Artifacts fork using isomorphic-git.

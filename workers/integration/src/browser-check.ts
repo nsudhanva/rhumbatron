@@ -16,7 +16,7 @@ import {
 } from "./check-semantics.ts";
 
 /**
- * Candidate browser check in Browser Run (AGENTS.md sections 35, 44, 7.3). The composed app runs
+ * Candidate browser check in Browser Run. The composed app runs
  * in the Project Sandbox; the browser reaches it only through request interception: every request
  * to the preview host is answered by `containerFetch` into the Sandbox, every other request is
  * blocked. So the preview has no public URL and the browser has no other network access.
@@ -92,7 +92,7 @@ async function reserveBrowserRun(
     .first<{ count: number }>();
   if (!runs) {
     await settleBrowserSeconds(db, 0);
-    return `${MAX_BROWSER_RUNS_PER_CANDIDATE} browser runs per Candidate already used (section 44)`;
+    return `${MAX_BROWSER_RUNS_PER_CANDIDATE} browser runs per Candidate already used`;
   }
   return null;
 }
@@ -336,7 +336,7 @@ async function cartScenario(s: Session) {
 }
 
 /**
- * Section 35 Wishlist flow. Runs when the shop renders `[data-testid="wishlist"]`. UI hooks:
+ * Wishlist browser flow. Runs when the shop renders `[data-testid="wishlist"]`. UI hooks:
  * `wishlist-create`, `wishlist-share`, `wishlist-share-url` (input value, link href, or text),
  * `wishlist-add` (one per product), `wishlist-item`, `wishlist-remove` (one per item), and
  * `wishlist-revoke`. A write after revoke must be answered 401, 403, 404, or 410.
@@ -483,7 +483,7 @@ type WishlistJson = {
 };
 
 /**
- * Section 35 flow through the Wishlist API when the shop has no Wishlist UI yet. Every call goes
+ * The Wishlist browser flow through the Wishlist API when the shop has no Wishlist UI yet. Every call goes
  * from the browser page through the proxy as the current fixture user; JSON views are captured.
  */
 const WISHLIST_API_STEPS = 8;
@@ -661,7 +661,7 @@ export async function runBrowserCheck(
         total = 1 + WISHLIST_STEPS;
         await wishlistScenario(session);
       } else {
-        // No Wishlist UI: run the section 35 flow through the API when the shop has it.
+        // No Wishlist UI: run the Wishlist flow through the API when the shop has it.
         const created = await api(session, "POST", "/api/wishlists", { name: "Browser check" });
         if (knowsRoute(created)) {
           scenario = "wishlist-api";

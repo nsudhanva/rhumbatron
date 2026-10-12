@@ -74,7 +74,7 @@ function lines(text: string): string[] {
 /**
  * Terminal of an edit session: a resizable panel under the editor (a drag handle on its top
  * edge, arrow keys on the handle), a prompt with history (Up / Down), and a scrollback in the log
- * well dress (DESIGN.md 9.7). stderr lines carry an `err` gutter as well as the attention color;
+ * well dress. stderr lines carry an `err` gutter as well as the attention color;
  * each command ends with its exit code (`exit 0` in ok, others in danger) and its duration. One
  * command runs at a time; Ctrl+L clears the view only.
  */

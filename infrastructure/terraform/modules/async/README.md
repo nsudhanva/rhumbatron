@@ -1,7 +1,8 @@
 # Module: async
 
-Owns the six Queues `rhumbatron-<purpose>-<env>` (AGENTS.md section 20): `agent-wakeups`,
-`integration`, `verification`, `indexing`, `release`, `dead-letter`.
+Owns the six Queues `rhumbatron-<purpose>-<env>`: `agent-wakeups`, `integration`,
+`verification`, `indexing`, `release`, `dead-letter`. One Queue per purpose, never per Agent or
+Project.
 
 | Input | Default | Meaning |
 |---|---|---|

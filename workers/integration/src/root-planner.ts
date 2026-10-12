@@ -17,7 +17,7 @@ import { z } from "zod";
 import { normalizeToolArgs } from "./plan-normalize.ts";
 
 /**
- * Root Planner contract (AGENTS.md sections 22.1 and 47 P5-02). The model must answer with one
+ * Root Planner contract (P5-02). The model must answer with one
  * `submit_work_graph` tool call. Application code validates it; the model never decides its scope.
  */
 

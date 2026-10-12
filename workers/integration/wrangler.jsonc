@@ -26,12 +26,12 @@
     }
   ],
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
-  // Read-through Project policy snapshot (AGENTS.md section 53); D1 project_policies is the truth.
+  // Read-through Project policy snapshot; D1 project_policies is the truth.
   "kv_namespaces": [{ "binding": "CONFIG", "id": "local" }],
   "queues": {
     "producers": [
       { "binding": "AGENT_WAKEUPS", "queue": "rhumbatron-agent-wakeups-local" },
-      // AGENTS.md section 20: Workflow start commands. This Worker produces and consumes them.
+      // Workflow start commands. This Worker produces and consumes them.
       { "binding": "VERIFICATION_COMMANDS", "queue": "rhumbatron-verification-local" },
       { "binding": "RELEASE_COMMANDS", "queue": "rhumbatron-release-local" }
     ],
@@ -70,7 +70,7 @@
         "class_name": "ProjectRootDO",
         "script_name": "rhumbatron-coordinator"
       },
-      // Project cleanup purges the live view and the Project's AgentDO instances (section 43).
+      // Project cleanup purges the live view and the Project's AgentDO instances.
       {
         "name": "PROJECT_VIEW",
         "class_name": "ProjectViewDO",
@@ -81,29 +81,29 @@
       { "name": "SANDBOX", "class_name": "Sandbox", "script_name": "rhumbatron-sandbox" }
     ]
   },
-  // AGENTS.md section 21.1. The API starts one instance per Change (instance ID = Change ID).
+  // ChangeWorkflow: the API starts one instance per Change (instance ID = Change ID).
   "workflows": [
     {
       "name": "rhumbatron-change-workflow-local",
       "binding": "CHANGE_WORKFLOW",
       "class_name": "ChangeWorkflow"
     },
-    // AGENTS.md section 21.2. One instance per Candidate (instance ID = Candidate ID).
+    // CandidateVerificationWorkflow: one instance per Candidate (instance ID = Candidate ID).
     {
       "name": "rhumbatron-candidate-verification-local",
       "binding": "CANDIDATE_WORKFLOW",
       "class_name": "CandidateVerificationWorkflow"
     },
-    // AGENTS.md section 21.3. One instance per promoted generation (ID = release ID, ADR 0020).
+    // ReleaseWorkflow: one instance per promoted generation (ID = release ID, ADR 0020).
     {
       "name": "rhumbatron-release-local",
       "binding": "RELEASE_WORKFLOW",
       "class_name": "ReleaseWorkflow"
     }
   ],
-  // Canonical source for managed Projects (AGENTS.md section 29). One repo per Project.
+  // Canonical source for managed Projects. One repo per Project.
   "artifacts": [{ "binding": "ARTIFACTS", "namespace": "rhumbatron-projects-local" }],
-  // Browser Run for the Candidate browser check (AGENTS.md section 35). Capped in code:
+  // Browser Run for the Candidate browser check. Capped in code:
   // one session per check, at most 2 per Candidate, 500 browser-seconds per UTC day.
   "browser": { "binding": "BROWSER" },
   // Intake gate (ADR 0025): embeddings, rerank, and Clef-flash. Clef-flash shares the 200 per day

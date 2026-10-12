@@ -1,4 +1,4 @@
-// Policy `autoPromoteRiskTiers` (AGENTS.md sections 36, 53): automatic promotion is a trigger only.
+// Policy `autoPromoteRiskTiers`: automatic promotion is a trigger only.
 // It must never apply when a human gate applies, when evidence does not pass, or when risk is unknown.
 import type { ProjectPolicy } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";

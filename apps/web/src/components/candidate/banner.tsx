@@ -21,7 +21,7 @@ function Icon({ family }: { family: BannerFamily }) {
 }
 
 /**
- * Banner (DESIGN.md 8.5): 10 x 14px, 13px weight 600 title, 16px leading icon, optional detail
+ * Banner: 10 x 14px, 13px weight 600 title, 16px leading icon, optional detail
  * line, optional action on the right (a secondary button that inherits the banner color).
  * `progress` is the elevated family: a Loader replaces the icon and an optional ink bar or
  * step text sits under the title. Errors that block work announce assertively.

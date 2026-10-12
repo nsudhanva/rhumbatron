@@ -6,7 +6,7 @@
  *
  * A panel renders inside a fixed-height frame the page provides (no layout shift while data
  * loads); when `focused` it fills the page and may grow. Wide content scrolls inside the panel,
- * never the page (DESIGN.md 6.3).
+ * never the page.
  */
 export type PanelProps = {
   focused: boolean;

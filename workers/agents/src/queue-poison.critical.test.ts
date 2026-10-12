@@ -1,4 +1,4 @@
-// Poison command (AGENTS.md sections 20, 42.7, P13-10). A wake that keeps failing must be retried a
+// Poison command (P13-10). A wake that keeps failing must be retried a
 // bounded number of times and then reach the dead-letter Queue, so the consumer must never ack a
 // failure. A wake that cannot succeed (malformed or stale) must be acked, not retried forever.
 // The bound itself is Queue consumer configuration: scripts/inject/dead-letter.critical.test.ts.

@@ -44,7 +44,7 @@ import {
 } from "./shell-context";
 
 /**
- * Application shell (DESIGN.md 6.1): elevated 228px sidebar, header with breadcrumb and mode
+ * Application shell: elevated 228px sidebar, header with breadcrumb and mode
  * toggle, a main column that scrolls on its own, and a 28px mono status bar. Under 720px the
  * sidebar becomes a top bar whose navigation opens as a disclosure.
  *
@@ -158,7 +158,7 @@ function changeScopedItem(
   };
 }
 
-/** Navigation order follows AGENTS.md 38. Every item is a link. */
+/** Navigation order: Overview first, the Project pages in a fixed order, Settings last. Every item is a link. */
 function navItems(context: ShellContext, projectId: string): NavItem[] {
   const { candidateId } = context;
   return [
@@ -507,7 +507,7 @@ const MODES: { value: ColorMode; label: string; icon: Icon }[] = [
   { value: "system", label: "Follow the system mode", icon: Desktop },
 ];
 
-/** Segmented control (section 8.2): 1px divider frame, selected option in ink. */
+/** Segmented control: 1px divider frame, selected option in ink. */
 function ModeToggle() {
   const { mode, setMode } = useColorMode();
   return (

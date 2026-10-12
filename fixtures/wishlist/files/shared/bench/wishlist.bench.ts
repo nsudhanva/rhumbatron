@@ -1,5 +1,5 @@
 /**
- * Wishlist API benchmark (AGENTS.md section 54: "Wishlist API p95 < 200 ms in the demo benchmark").
+ * Wishlist API benchmark. Budget: Wishlist API p95 < 200 ms in the demo benchmark.
  * Loads one deterministic shop dataset, then replays the requests a busy shared wishlist sees:
  * 80% reads, 20% item adds and removes, all as a collaborator. Prints {"p95Ms": n, ...}.
  * The dataset and request mix are the same for every wishlist data model.

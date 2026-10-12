@@ -91,7 +91,7 @@ import {
 } from "./workspace.ts";
 
 /**
- * AgentDO (AGENTS.md sections 13.4 and 25): one durable logical agent. Pi runs the model and tool
+ * AgentDO: one durable logical agent. Pi runs the model and tool
  * loop; this class owns routing, budgets, escalation, and the Task state transitions. It sleeps
  * when no run is active: no timers except one run check per minute while a run is in flight.
  */
@@ -244,7 +244,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
             onFailure: (status, body) => this.onModelFailure(status, body),
           }),
           registry: this.registry,
-          // One retry for transient errors; escalation is ours, not Pi's (section 23.3).
+          // One retry for transient errors; escalation is ours, not Pi's.
           settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 2000 } },
         },
         context,
@@ -551,7 +551,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     }
 
     const allRuns = await this.taskRuns(input.taskId);
-    // Escalation over the Task's whole failure history (sections 23.3, 42.8, 44). A person's
+    // Escalation over the Task's whole failure history. A person's
     // budget raise after a repeated-failure stop opens a new attempt window (0021).
     const allowOpus = opusAllowed(this.env.ALLOW_OPUS);
     const { failures, step: next } = nextAttempt(allRuns, task.attempts_reset_at, { allowOpus });
@@ -583,7 +583,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     let tier: ModelTier;
     let receipt: Record<string, unknown>;
     if (next) {
-      // Section 44: at most 2 attempts per tier before escalation or re-plan (limits.ts).
+      // At most 2 attempts per tier before escalation or re-plan (limits.ts).
       const step = next;
       if (step.action !== "retry" && step.action !== "escalate") {
         await this.failTask(input, task, step.reason);
@@ -681,7 +681,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const source = await this.canonicalSource(input.projectId);
 
     // Stacked workspace: the dependencies' published ChangeSets this Task builds on, fixed for the
-    // whole run so a Sandbox restore repeats the same merges (section 42.5).
+    // whole run so a Sandbox restore repeats the same merges.
     let stack: StackSource[] = [];
     let stackTasks = new Map<string, { key: string; title: string }>();
     if (source) {
@@ -873,7 +873,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     );
     this.countContention(input, claimed.contended);
 
-    // Fresh context for every attempt (section 23.3), then the run itself.
+    // Fresh context for every attempt, then the run itself.
     this.lastStep = null;
     const session = this.harness.session();
     await session.reset();
@@ -947,7 +947,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     await stop();
     if (stillRunning) await this.harness.session().abort();
     // A recorded stop wins; a stuck run is a timeout; a provider failure ends the run as itself
-    // (section 42.8: rate limits and outages retry once at the same tier).
+    // (rate limits and outages retry once at the same tier).
     const recorded = run.outcome;
     const kind: FailureKind =
       recorded && STOP_OUTCOMES.has(recorded)
@@ -1059,7 +1059,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         this.env.DB.prepare(
           "UPDATE tasks SET status = 'completed', updated_at = ? WHERE id = ? AND status = 'running'",
         ).bind(now, input.taskId),
-        // The last Task to finish moves the Change on to verification (section 21.1 steps 5-8).
+        // The last Task to finish moves the Change on to verification.
         this.env.DB.prepare(
           `UPDATE changes SET status = 'verifying', updated_at = ? WHERE id = ? AND status = 'running'
            AND NOT EXISTS (SELECT 1 FROM tasks WHERE change_id = ? AND status != 'completed')`,
@@ -1168,8 +1168,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       await this.failTask(input, null, result.reason);
       return "Recorded. Stop now.";
     }
-    // The decision reads the Task's whole failure history, this run included (section 23.3): one
-    // failure retries, two at a tier escalate, a transport failure never escalates (section 42.8).
+    // The decision reads the Task's whole failure history, this run included: one
+    // failure retries, two at a tier escalate, a transport failure never escalates.
     // The next start re-reads the same rows and routes to the same tier.
     const resetRow = await this.env.DB.prepare("SELECT attempts_reset_at FROM tasks WHERE id = ?")
       .bind(input.taskId)
@@ -1237,7 +1237,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     this.countContention(input, renewed.contended);
   }
 
-  /** `claim_contention` data points (section 41.1). The event itself is on the shard outbox. */
+  /** `claim_contention` data points. The event itself is on the shard outbox. */
   private countContention(input: AgentRunInput, contended: readonly RunClaim[]) {
     for (const row of contended) {
       this.env.METRICS.writeDataPoint({
@@ -1342,7 +1342,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   }
 
   /**
-   * Deletes all storage and alarms of this agent for an archived Project (AGENTS.md section 43):
+   * Deletes all storage and alarms of this agent for an archived Project:
    * runs, tool logs, workspace copies, Pi session state, and Agents SDK schedules. Throws when a
    * stored run belongs to another Project, so a wrong name cannot erase another Project's agent.
    * Safe to repeat. Tables are created again so a late stale wake fails cleanly, not on SQL.
@@ -1378,7 +1378,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   private async failTask(input: AgentRunInput, _task: TaskRow | null, reason: string) {
     const ctx = this.changeContext(input);
     const now = new Date().toISOString();
-    // Section 44 budget stop: the Task and Change name the exact limit that was reached.
+    // Budget stop: the Task and Change name the exact limit that was reached.
     const stop = limitStop(reason, this.env.ANTHROPIC_MONTHLY_BUDGET_USD, {
       meters: await this.meters(input.changeId).catch(() => []),
       month: spendMonth(),
@@ -1486,7 +1486,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
 
   /**
    * Completed Intents this Task should see: its exact dependencies first, then other completed
-   * Tasks in the Change that share a semantic resource (AGENTS.md section 27.3).
+   * Tasks in the Change that share a semantic resource.
    */
   private async intentsFor(
     changeId: string,
@@ -1700,7 +1700,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         await this.finishRun({ ok: false, kind: "dependency_merge_conflict", reason: ws.message });
         return `${ws.message} The Task has failed. Stop now.`;
       }
-      // Monthly Sandbox meter or the per-Change Sandbox limit (section 44): no Sandbox opened.
+      // Monthly Sandbox meter or the per-Change Sandbox limit: no Sandbox opened.
       return ws.message;
     }
     this.ctx.storage.sql.exec(

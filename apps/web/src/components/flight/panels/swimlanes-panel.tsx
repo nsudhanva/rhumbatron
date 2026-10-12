@@ -46,7 +46,7 @@ import {
 } from "./lanes/timeline";
 
 /**
- * Agent swimlanes (DESIGN.md 11.1 "working simultaneously", 9.8 trace waterfall): one lane per
+ * Agent swimlanes (agents working simultaneously, trace waterfall): one lane per
  * Task with an agent, on a time axis shared with the workspace lanes. Each attempt is a bar
  * filled by model tier (letter inside: H, S, O); a failed attempt is hatched with its failure
  * kind; an escalation is a step-up glyph. Typed facts of the lane (Ready, Claim, Intent,
@@ -59,7 +59,7 @@ import {
  * Each lane plot is ONE tab stop (use-roving-focus.ts): a listbox whose options are the attempt
  * bars and fact markers in time order. Arrows walk them, Up/Down move to the lane above or below,
  * Enter selects. A pointer anywhere on the lane picks the nearest item (ringed in ink), so the
- * 8px markers are never the pointer target on their own (DESIGN.md 5.2).
+ * 8px markers are never the pointer target on their own.
  *
  * Every mark is a recorded fact at its recorded time (flight-model.ts). The progress line on a
  * running bar is real model calls over the per-run call budget, not a timer.
@@ -1008,7 +1008,7 @@ function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number>
               type="button"
               onClick={() => useFlightStore.getState().toggle(ref)}
               title={`Conflict on ${c.resource}\n“${c.statements[0]}”\nvs “${c.statements[1]}”`}
-              // 24px tall target around the 16px chip (DESIGN.md 5.2).
+              // 24px tall target around the 16px chip.
               className="pointer-events-auto absolute flex h-6 items-center font-mono text-[10px] leading-[14px] whitespace-nowrap focus-visible:outline-2 focus-visible:outline-accent-500"
               style={{ left, top }}
             >
@@ -1036,7 +1036,7 @@ function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number>
 }
 Connectors.displayName = "Connectors";
 
-/** Text equivalent of the lanes (DESIGN.md 14). */
+/** Text equivalent of the lanes. */
 function LanesTable({ ids, start }: { ids: string[]; start: number }) {
   const { state } = useFlight();
   const clockOf = useClock();

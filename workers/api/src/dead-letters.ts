@@ -6,11 +6,10 @@ import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity, projectRole } from "./identity.ts";
 
 /**
- * Operator actions for poison commands and section 44 limit stops (AGENTS.md sections 20, 42.7,
- * 44). The event-router dead-letter consumer records each dead-lettered command in D1
+ * Operator actions for poison commands and Project budget limit stops. The event-router dead-letter consumer records each dead-lettered command in D1
  * (`dead_letters`, migration 0011) and blocks its Task. Here a member reads them, retries one (the
  * same command, same `command_id`, back to its original Queue; consumers are idempotent), or
- * dismisses it. The read also lists Tasks and Changes that a section 44 limit stopped or delays,
+ * dismisses it. The read also lists Tasks and Changes that a Project budget limit stopped or delays,
  * with the exact limit, so the UI can show it.
  *
  * Cost: a read is 3 D1 queries; a retry is at most 3 D1 writes and 1 Queue message.
@@ -46,7 +45,7 @@ const DeadLetterView = z.object({
 });
 export type DeadLetterView = z.infer<typeof DeadLetterView>;
 
-/** A Task or Change that a section 44 limit stopped (or, for concurrency limits, delays). */
+/** A Task or Change that a Project budget limit stopped (or, for concurrency limits, delays). */
 const LimitBlockView = z.object({
   scope: z.enum(["task", "change"]),
   id: z.string(),

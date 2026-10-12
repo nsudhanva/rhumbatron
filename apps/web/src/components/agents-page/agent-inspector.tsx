@@ -22,7 +22,7 @@ import { StatusPill } from "../ui/status-pill";
 import { Tag } from "../ui/tag";
 
 /**
- * Detail of the selected agent (DESIGN.md 6.3, 8.3 layer card, AGENTS.md 38.6): role, Task and
+ * Detail of the selected agent (layer card): role, Task and
  * Change, model, cost, live progress of the running attempt, current Intent, Claims, the last
  * important event, and every attempt with its Decision Receipt. Receipts and failures are
  * recorded outputs; model reasoning is never stored, so it is never shown.

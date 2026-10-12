@@ -7,7 +7,7 @@ import { isClarifyEvent, LIVE_CHANGE_STATUSES, MARKER_EVENT_TYPES } from "./time
 
 /**
  * Data for the Project execution timeline, read through existing API routes and kept current
- * with as few D1 reads as possible (AGENTS.md 7.3, 58):
+ * with as few D1 reads as possible:
  *
  * - Tasks: `GET /v1/changes/:id/tasks` per Change, batched in one browser request. A finished
  *   Change is read once more after its status changes, then never again. Changes in flight are

@@ -8,7 +8,7 @@ import { fail, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Product Graph read model (AGENTS.md sections 28 and 38.3). Deterministic, no model call:
+ * Product Graph read model. Deterministic, no model call:
  *
  * - Source areas and imports: the stored Product Graph of the canonical tree (P7-04), written by
  *   rhumbatron-indexer to R2 `index/<project>/<tree>/product-graph.json` and pointed at by D1
@@ -20,7 +20,7 @@ import { canAccessProject, ensureIdentity } from "./identity.ts";
  * - Exact Task dependency edges between Tasks of different areas, and areas that one Task touches
  *   together (its first resource depends on the others).
  * - ChangeSet resources and semantic conflicts of each Change.
- * - The Project's own stored policy (D1 `project_policies`, section 53). Its `protectedResources`
+ * - The Project's own stored policy (D1 `project_policies`). Its `protectedResources`
  *   mark only areas the graph already has; a protected resource never adds an area. A Project
  *   without a stored policy has no protected areas here: the integration Worker's default policy
  *   is a fallback for promotion, not a fact about this Project's product.

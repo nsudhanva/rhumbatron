@@ -17,7 +17,7 @@ export const Route = createFileRoute("/sign-in/$")({
 /**
  * Clerk renders the form and, once its script has loaded, the page's h1. Until then a placeholder
  * card of the same size supplies the h1 and the first paint; if Clerk fails to load, the page
- * supplies the h1. There is always exactly one (DESIGN.md 14).
+ * supplies the h1. There is always exactly one.
  */
 function Page() {
   // A client-side visit from a page that held Clerk back starts the load here.

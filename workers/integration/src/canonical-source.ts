@@ -5,7 +5,7 @@ import { candidateFork } from "./candidate-sandbox.ts";
 import { ensureSourceIndex } from "./provision.ts";
 
 /**
- * Moves the canonical repo to a promoted Candidate (AGENTS.md sections 29, 36; ADR 0013).
+ * Moves the canonical repo to a promoted Candidate (ADR 0013).
  * ProjectRootDO is the authority: this runs only after its compare-and-swap succeeded, and a retry
  * of the promotion runs it again. The push is fast-forward only: the composed commit descends from
  * the base commit, so `main` moves from base to composed or not at all. No force push, ever.

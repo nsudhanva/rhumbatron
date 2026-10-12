@@ -1,7 +1,7 @@
 import type { CommandEnvelope, EventEnvelope } from "@rhumbatron/protocol";
 
 /**
- * Index builds (AGENTS.md section 12.7). A new canonical tree, from provisioning
+ * Index builds. A new canonical tree, from provisioning
  * (`artifact.promoted`) or promotion (`canonical.advanced`), queues one `index.build` for
  * rhumbatron-indexer. The command ID derives from the event, so a redelivery queues the same
  * command, and the indexer builds each tree once. Deterministic: no model call.

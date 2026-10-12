@@ -1,7 +1,7 @@
 import { ChangeSetIntent } from "@rhumbatron/protocol";
 
 /**
- * Stacked workspaces (AGENTS.md sections 26 `dependOn`, 29.2, 33). A Task with dependencies starts
+ * Stacked workspaces (`workspace.dependOn`). A Task with dependencies starts
  * from canonical plus its dependencies' published ChangeSets, not from bare canonical, so it
  * extends their source instead of re-creating it. Pure: callers load the rows.
  */
@@ -36,7 +36,7 @@ const REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/;
 /**
  * The ChangeSets a Task's workspace stacks on: every Task it depends on, transitively, that
  * published source, in topological order (dependencies first). Ties break on ChangeSet creation
- * time, then Task ID, so a restore after Sandbox loss repeats the same merges (section 42.5).
+ * time, then Task ID, so a restore after Sandbox loss repeats the same merges.
  * Intent-only dependencies (no committed source) are walked through but merge nothing. When a Task
  * has several ChangeSets, the latest one counts. Throws on a stored fork or commit that is not
  * safe to pass to git.

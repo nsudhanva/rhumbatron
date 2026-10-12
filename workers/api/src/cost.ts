@@ -12,7 +12,7 @@ import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Cost read model of one Project (AGENTS.md sections 16.1, 24, 44, 56). Every figure comes from
+ * Cost read model of one Project. Every figure comes from
  * recorded rows: `task_runs` (calls, tokens, cost per attempt), `decision_receipts` (routes),
  * `changes.budget_usd`, and the account-wide `usage_counters` meters. Nothing is estimated from
  * constants. Reads are bounded: the newest 20 Changes, one selected Change, and 16 days of meters.

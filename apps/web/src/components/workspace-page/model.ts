@@ -7,7 +7,7 @@ import type {
 } from "../../lib/api";
 import { candidateLabels } from "../candidate/model";
 
-/** Short commit or tree hash for dense rows (DESIGN.md 9.11). */
+/** Short commit or tree hash for dense rows. */
 export const shortSha = (value: string | null | undefined, length = 8) =>
   value ? value.slice(0, length) : null;
 

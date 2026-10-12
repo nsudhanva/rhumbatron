@@ -5,7 +5,7 @@ import { SemanticResource } from "@rhumbatron/protocol";
 import type { RecordedContention } from "./conflicts.ts";
 
 /**
- * Advisory Claims for one agent run (ADR 0015, AGENTS.md sections 13.2, 42.3, and 59).
+ * Advisory Claims for one agent run (ADR 0015).
  *
  * A run asks for a Claim on each semantic resource of its Task when it starts, renews each lease
  * at half-life on its existing timers (the one-minute run check and model-call boundaries), and
@@ -27,7 +27,7 @@ export const RENEW_AFTER_MS = CLAIM_TTL_MS / 2;
 export const TICK_SLACK_MS = 10_000;
 /** Retry delay after a shard call failed, so a lease is not lost to one transient error. */
 const RETRY_AFTER_MS = 15_000;
-/** Resources claimed per run. Bounds Durable Object requests per tick (section 7.3). */
+/** Resources claimed per run. Bounds Durable Object requests per tick. */
 const MAX_CLAIMS_PER_RUN = 8;
 
 export type RunClaim = {
@@ -291,7 +291,7 @@ export async function renewRunClaims(
 /**
  * Releases every Claim of the run and forgets the run's rows. Idempotent: a second call finds no
  * rows and makes no request, and the shard treats a repeated release as a no-op. A failed release
- * is only logged: the lease then expires on its own (section 42.3). Never throws.
+ * is only logged: the lease then expires on its own. Never throws.
  */
 export async function releaseRunClaims(
   store: RunClaimStore,

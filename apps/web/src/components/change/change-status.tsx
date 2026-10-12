@@ -5,7 +5,7 @@ import { type StatusFamily, StatusPill } from "../ui/status-pill";
 import { budgetStopText } from "./change-budget";
 
 /**
- * Change status in plain words (DESIGN.md 8.3, 12). The pill maps every Change status, including
+ * Change status in plain words. The pill maps every Change status, including
  * the ones the shared vocabulary does not know. The sentence says where the Change stands and
  * what happens next, in one line.
  */

@@ -1,5 +1,5 @@
 /**
- * Citation validation (AGENTS.md section 34.4.2). Every model finding must cite Evidence IDs or
+ * Citation validation. Every model finding must cite Evidence IDs or
  * Context Packet item IDs that the model actually received, for the same Project and Candidate.
  * A finding that fails is kept visible as `unsupported` and can never change Candidate state.
  */
@@ -12,7 +12,7 @@ export type Finding = {
   citations: readonly string[];
 };
 
-/** The Evidence Snapshot the model received (section 27.5). */
+/** The Evidence Snapshot the model received. */
 export type EvidenceSnapshot = {
   projectId: string;
   candidateId: string;

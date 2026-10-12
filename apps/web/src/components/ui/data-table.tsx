@@ -3,7 +3,7 @@ import { Link, type LinkOptions } from "@tanstack/react-router";
 import type { ReactNode, TdHTMLAttributes, ThHTMLAttributes } from "react";
 
 /**
- * Data table (DESIGN.md 8.3). Headers 11px uppercase in `subtle` over a 2px divider; cells 8px
+ * Data table. Headers 11px uppercase in `subtle` over a 2px divider; cells 8px
  * padding over a 1px rule; no vertical lines; numbers right-aligned mono; pills left-aligned.
  * The wrapper scrolls sideways and the table keeps `minWidth`, so columns never squeeze.
  *

@@ -44,7 +44,7 @@ export function resolveTier(requested: ModelTier, allowOpus: boolean): TierResol
 }
 
 /**
- * USD per million tokens (AGENTS.md section 7.5; Anthropic pricing 2026-10). Cache writes: 1.25x
+ * USD per million tokens (Anthropic pricing 2026-10). Cache writes: 1.25x
  * input for the 5-minute TTL, 2x for the 1-hour TTL. Haiku 5.5 bills a higher rate on every token
  * of a request whose prompt (input + cache read + cache write) is above 100K tokens.
  */

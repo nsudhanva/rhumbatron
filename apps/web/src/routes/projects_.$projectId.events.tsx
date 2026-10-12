@@ -52,7 +52,7 @@ import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 import { SystemsOnly, useViewMode } from "../lib/view-mode";
 
 /**
- * Project events (AGENTS.md 16.1, 17, 38, 39; DESIGN.md 9.9): the causal facts of one Project,
+ * Project events: the causal facts of one Project,
  * newest first, live. The rows come from the feed projection; the live socket only says that
  * something changed, and each signal pulls the events after the newest sequence shown.
  * `?change=<id>` narrows the stream to one Change. `?view=graph` shows the loaded events as a DAG;

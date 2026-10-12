@@ -42,7 +42,7 @@ type Ended = "expired" | "gone";
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
- * Code page edit session (AGENTS.md 38.5): an IDE in the Flight panel dress. The file tree of
+ * Code page edit session: an IDE in the Flight panel dress. The file tree of
  * the session fork on the left, open-file tabs and the CodeMirror editor in the center, a
  * resizable terminal at the bottom, and a status bar with the idle countdown, Submit as change
  * and Discard session. Keys: Cmd/Ctrl+S saves the active tab, Cmd/Ctrl+P opens a file by path,

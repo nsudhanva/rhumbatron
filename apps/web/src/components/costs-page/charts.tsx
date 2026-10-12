@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { formatNumber } from "../../lib/format";
 
 /**
- * Sparkline (DESIGN.md 9.3): 16-20 square bars, `flex: 1`, 2px gaps, 20px tall, neutral-400, the
+ * Sparkline: 16-20 square bars, `flex: 1`, 2px gaps, 20px tall, neutral-400, the
  * latest bar in ink. No axes: it shows shape only, so the exact figure sits next to it. Each bar
  * has a `title` with its own value.
  *
@@ -55,7 +55,7 @@ Sparkline.displayName = "Sparkline";
 export type BarItem = { label: ReactNode; value: number; text?: ReactNode; title?: string };
 
 /**
- * Horizontal bar list (DESIGN.md 9.1): `label 90px · bar 1fr · value`, 8px bars, values
+ * Horizontal bar list: `label 90px · bar 1fr · value`, 8px bars, values
  * right-aligned mono. Bars scale to `max` (default: the largest value). Every bar shows its
  * value as text.
  */
@@ -96,7 +96,7 @@ export function BarList({
 BarList.displayName = "BarList";
 
 /**
- * Cap meter (DESIGN.md 9.1, linear progress): 4px track, ink fill, `danger` once the cap is
+ * Cap meter (linear progress): 4px track, ink fill, `danger` once the cap is
  * reached, because a reached cap stops work. The value sits beside the label as text.
  */
 export function CapMeter({

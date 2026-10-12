@@ -15,8 +15,8 @@ import {
 import { supersededBy } from "./release-model.ts";
 
 /**
- * ReleaseWorkflow (AGENTS.md sections 21.3, 42.10; ADR 0020). One instance per Project and
- * promoted generation (instance ID = release ID, section 60). The release of a Project with a
+ * ReleaseWorkflow (ADR 0020). One instance per Project and
+ * promoted generation (instance ID = release ID). The release of a Project with a
  * live app:
  *
  *   1. Confirm the generation is still canonical (else superseded); `build.started`.
@@ -27,8 +27,8 @@ import { supersededBy } from "./release-model.ts";
  *   5. Pass: `deployed`. Fail: the pointer moves back to the version it replaced, as a new
  *      recorded transition, and the release is `smoke_failed` (`release.smoke_failed`).
  *
- * Recovery from a failed release is a new canonical transition (section 42.10). No model call
- * decides anything here (section 22.7). About 8 steps per release; no Sandbox.
+ * Recovery from a failed release is a new canonical transition. No model call
+ * decides anything here. About 8 steps per release; no Sandbox.
  */
 
 export class ReleaseWorkflow extends WorkflowEntrypoint<Env, ReleaseParams> {
@@ -74,7 +74,7 @@ export class ReleaseWorkflow extends WorkflowEntrypoint<Env, ReleaseParams> {
     return this.runApp(releaseId, step, { required, fail, supersede });
   }
 
-  /** Section 21.3 steps 1 to 6 on the app pointer. */
+  /** ReleaseWorkflow steps 1 to 6 on the app pointer. */
   private async runApp(
     releaseId: string,
     step: WorkflowStep,
@@ -124,7 +124,7 @@ export class ReleaseWorkflow extends WorkflowEntrypoint<Env, ReleaseParams> {
       return { status: "failed", reason: confirmed.why };
     }
 
-    // Step 2: the production bundle of the promoted commit (section 21.3 steps 2-3).
+    // Step 2: the production bundle of the promoted commit.
     const bundle = await step.do(
       "app bundle",
       { retries: { limit: 2, delay: "20 seconds", backoff: "exponential" }, timeout: "5 minutes" },
@@ -160,7 +160,7 @@ export class ReleaseWorkflow extends WorkflowEntrypoint<Env, ReleaseParams> {
       return { status: "failed", reason: "build_failed" };
     }
 
-    // Step 3: move the production pointer (section 21.3 step 4). The previous version is kept in
+    // Step 3: move the production pointer. The previous version is kept in
     // this step's result, so a smoke failure can restore it.
     const moved = await step.do(
       "move pointer",
@@ -244,7 +244,7 @@ export class ReleaseWorkflow extends WorkflowEntrypoint<Env, ReleaseParams> {
     }
 
     // P16-12: the old version goes live again, as a new recorded transition. Canonical keeps the
-    // promoted generation (section 42.10); recovery is the next promotion or a rollback.
+    // promoted generation; recovery is the next promotion or a rollback.
     const restored = await step.do(
       "restore previous version",
       { retries: { limit: 3, delay: "5 seconds", backoff: "exponential" } },

@@ -1,4 +1,4 @@
-// Model conflict review rules (AGENTS.md sections 22.4, 22.5, 32.3, 34.4.2; P9-05, P9-06). A model
+// Model conflict review rules (P9-05, P9-06). A model
 // verdict is a hypothesis: only the closed vocabulary parses, only valid citations count, a hard
 // deterministic signal is never dismissed, and only high-risk conflicts can reach Opus.
 import type { ConflictReport, Intent } from "@rhumbatron/protocol";

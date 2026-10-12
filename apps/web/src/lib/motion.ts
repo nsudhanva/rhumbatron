@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 /**
- * Motion tokens for code that times things in JavaScript (DESIGN.md section 11 and 11.1).
+ * Motion tokens for code that times things in JavaScript.
  * The same values live as CSS variables in theme.css (`--rh-dur-*`, `--rh-agent-cadence`);
  * keep both in sync. Prefer the CSS classes (`rh-fork`, `rh-packet`, `rh-arrive`, ...) for the
  * animation itself and use these numbers only to pace or sequence real events.

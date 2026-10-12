@@ -1,5 +1,5 @@
 /**
- * Intents and Challenges owned by a ResourceShardDO (AGENTS.md sections 13.2, 26, and 18).
+ * Intents and Challenges owned by a ResourceShardDO.
  * Every write is idempotent on its ID and inserts its event into the outbox in the caller's
  * transaction, so state and event commit together. The store takes SqlStorage, so it runs on
  * node:sqlite in critical tests.

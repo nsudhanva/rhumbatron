@@ -12,7 +12,7 @@ import {
 } from "./agents-replay";
 
 /**
- * The strip under the Agents graph (DESIGN.md 9.8 trace rows, 11.1 lanes): one lane per agent
+ * The strip under the Agents graph (trace rows as lanes): one lane per agent
  * with a bar per attempt over the replayed time, the playhead across every lane, and the latest
  * steps as words beside it. The playhead and the bar reveal follow every animation frame
  * through the `--rh-ph` variable (0 to 1 of the time span); bars change colour when the

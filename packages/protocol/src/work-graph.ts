@@ -22,7 +22,7 @@ export const TaskStatus = z.enum([
 ]);
 export type TaskStatus = z.infer<typeof TaskStatus>;
 
-/** Upper bound on Tasks per Change (AGENTS.md section 44: small active sets). */
+/** Upper bound on Tasks per Change (small active sets). */
 export const MAX_TASKS_PER_CHANGE = 12;
 
 /** One Task as the Root Planner proposes it. `key` is local to the plan, for example `t1`. */
@@ -42,7 +42,7 @@ export const PlannedTask = z.object({
 });
 export type PlannedTask = z.infer<typeof PlannedTask>;
 
-/** Root Planner output contract (AGENTS.md section 22.1, P5-02). */
+/** Root Planner output contract (P5-02). */
 export const WorkGraphPlan = z.object({
   /** Cut to MAX_TITLE_CHARS at a word boundary after parsing (`clampTitle`). */
   title: z
@@ -94,7 +94,7 @@ export function checkWorkGraph(
   return { ok: true, order };
 }
 
-/** Persisted Task (AGENTS.md section 15.3). */
+/** Persisted Task. */
 export const Task = z.object({
   id: Id,
   changeId: Id,
@@ -112,7 +112,7 @@ export const Task = z.object({
 });
 export type Task = z.infer<typeof Task>;
 
-/** Wake command payload for `rhumbatron-agent-wakeups` (AGENTS.md section 31.3). */
+/** Wake command payload for `rhumbatron-agent-wakeups`. */
 export const AgentWakePayload = z.object({
   eventId: Id,
   agentId: Id,

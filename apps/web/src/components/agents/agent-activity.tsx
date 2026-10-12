@@ -26,7 +26,7 @@ import {
 import { type ActivityPlayer, useActivityPlayer } from "./use-activity-player";
 
 /**
- * Agent activity (DESIGN.md 11.1): the one place motion leads.
+ * Agent activity: the one place motion leads.
  *
  * A git-style graph. The canonical trunk runs down the left gutter from the base generation.
  * Each Task's agent is a lane that forks from the trunk when it wakes. Typed messages travel
@@ -204,7 +204,7 @@ export function AgentActivity({
       <Disputes model={model} conflicts={view.conflicts.filter((c) => c.open)} />
       <Convergence model={model} view={view} />
 
-      {/* One polite announcement per played fact. Silent while paused (DESIGN.md 9.9, 14). */}
+      {/* One polite announcement per played fact. Silent while paused. */}
       <p className="sr-only" aria-live={player.paused ? "off" : "polite"} aria-atomic>
         {player.paused ? "" : (player.latest?.detail ?? "")}
       </p>

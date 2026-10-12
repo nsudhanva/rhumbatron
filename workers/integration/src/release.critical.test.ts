@@ -1,4 +1,4 @@
-// Release path invariants (AGENTS.md sections 21.3, 42.10, 60; ADR 0020):
+// Release path invariants (ADR 0020):
 // - one release per Project and generation, however often promotion retries;
 // - a newer promotion supersedes an older in-flight release, which can then never deploy;
 // - a smoke failure (or a probe with no answer) never marks a release deployed;
@@ -117,7 +117,7 @@ const promote = (env: Env, generation: number, commit: string) =>
     commit,
   });
 
-describe("release idempotency per generation (section 60)", () => {
+describe("release idempotency per generation", () => {
   it("a retried promotion starts one release and one workflow", async () => {
     const h = harness();
     const first = await promote(h.env, 1, C1);
@@ -182,7 +182,7 @@ describe("supersession when a newer generation is promoted mid-build", () => {
   });
 });
 
-describe("a smoke failure never marks a release deployed (sections 34.4.1, 42.10)", () => {
+describe("a smoke failure never marks a release deployed", () => {
   const routes = [
     "GET /api/health",
     "GET /api/wishlists",

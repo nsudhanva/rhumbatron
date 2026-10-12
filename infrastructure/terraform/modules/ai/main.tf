@@ -1,4 +1,4 @@
-# AGENTS.md section 5.4: AI Gateway is the model proxy. ADR 0021: the provider is Anthropic.
+# AI Gateway is the model proxy. ADR 0021: the provider is Anthropic.
 # Cloudflare free-tier settings only: no Logpush, no guardrails (billed as Workers AI), no DLP, no Unified Billing.
 resource "cloudflare_ai_gateway" "this" {
   account_id = var.account_id

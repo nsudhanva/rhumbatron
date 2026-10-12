@@ -76,7 +76,7 @@ export type CompletionResult = {
 };
 
 /**
- * Failure classes for section 42.8: retry `rate_limited` and `transient` once at the same tier.
+ * Failure classes for model timeouts and errors: retry `rate_limited` and `transient` once at the same tier.
  * `spend_limited` (gateway spend limit, billing error, monthly budget) is a budget stop, never
  * retried and never sent to another provider.
  */

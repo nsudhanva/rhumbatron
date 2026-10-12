@@ -6,7 +6,7 @@ import { fail, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Live endpoint `WS /v1/projects/:projectId/live?afterSequence=<n>` (AGENTS.md sections 16.2, 39).
+ * Live endpoint `WS /v1/projects/:projectId/live?afterSequence=<n>`.
  * The caller authenticates with `Authorization: Bearer` like every other route. The web Worker sets
  * that header server-side, so no token is in a URL. After the access check, the upgrade goes to
  * ProjectViewDO, which owns the hibernating socket and sends snapshot plus sequence deltas.

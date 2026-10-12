@@ -12,7 +12,7 @@ import {
 } from "react";
 
 /**
- * One-tab-stop composite widgets for dense plots (DESIGN.md 5.2 targets, 14 keyboard): a lane, a
+ * One-tab-stop composite widgets for dense plots (pointer targets, keyboard access): a lane, a
  * heat grid or a detail list is ONE focusable element (a listbox or grid at least 24px tall) and
  * its markers or cells are items reached with the arrow keys through `aria-activedescendant`.
  * Items carry no tabindex, so they are neither tab stops nor separate pointer targets: a pointer
@@ -353,7 +353,7 @@ export function useRovingFocus({
   const itemProps = (key: string) => ({
     id: itemId(key),
     [ITEM_ATTR]: key,
-    // The active ring is a focus indicator: keyboard only (DESIGN.md 10).
+    // The active ring is a focus indicator: keyboard only.
     "data-active": focus === "keyboard" && active === key ? "" : undefined,
     "data-hot": hot === key ? "" : undefined,
   });
@@ -369,7 +369,7 @@ export type Roving = ReturnType<typeof useRovingFocus>;
 
 /**
  * Item classes for the two states: the pointer-near item (ink ring) and the keyboard-active item
- * (accent focus ring, DESIGN.md 10), both outside the item so 8px markers stay legible.
+ * (accent focus ring), both outside the item so 8px markers stay legible.
  */
 export const ROVING_ITEM =
   "data-[hot]:outline-1 data-[hot]:outline-offset-2 data-[hot]:outline-kumo-ink data-[active]:outline-2 data-[active]:outline-offset-2 data-[active]:outline-accent-500 data-[active]:z-[7]";

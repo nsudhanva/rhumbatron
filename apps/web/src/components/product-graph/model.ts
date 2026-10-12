@@ -1,7 +1,7 @@
 import type { ProductGraph, ProductGraphEdge, ProductGraphNode } from "../../lib/api-graph";
 
 /**
- * Product Graph view model (AGENTS.md 28, 38.3; DESIGN.md 9.13). Pure functions: the graph the
+ * Product Graph view model. Pure functions: the graph the
  * API derived, a zoom level and a Change in, the visible subgraph with node states and a
  * deterministic layered layout out.
  *

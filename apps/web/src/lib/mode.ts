@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 /**
- * Light/dark mode (DESIGN.md section 3.1). Light is the default. Dark sets `data-mode="dark"`
+ * Light/dark mode. Light is the default. Dark sets `data-mode="dark"`
  * on <html>, and theme.css turns that into `color-scheme: dark`, which every token follows
  * through `light-dark()`. Components never read the mode; only the toggle does.
  */

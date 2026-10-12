@@ -12,7 +12,7 @@ const VIEWS: { value: ViewMode; label: string; description: string }[] = [
 ];
 
 /**
- * Display: the Events page default view, Product or Systems (AGENTS.md 38.7), stored in this
+ * Display: the Events page default view, Product or Systems, stored in this
  * browser. The Product | Systems toggle on the Events page writes the same value.
  */
 export function DisplaySection() {

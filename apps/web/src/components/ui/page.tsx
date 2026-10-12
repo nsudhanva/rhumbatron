@@ -2,7 +2,7 @@ import { cn } from "@cloudflare/kumo";
 import { type ReactNode, useId } from "react";
 
 /**
- * Page anatomy (DESIGN.md 6.2). A page is:
+ * Page anatomy. A page is:
  *
  *   <Page>
  *     <PageTitle kicker="Project" title={project.name} actions={<Button variant="primary">…</Button>} />
@@ -87,7 +87,7 @@ export function PageTitle({
 PageTitle.displayName = "PageTitle";
 
 /**
- * Section label row (DESIGN.md 6.2.3): the `h6` style label on the left, an optional count,
+ * Section label row: the `h6` style label on the left, an optional count,
  * meta or ghost link on the right, above a 2px divider. Renders an <h2> by default so the
  * document outline stays correct; pass `as="h3"` inside a sub-section.
  */
@@ -157,7 +157,7 @@ export function Section({
 }
 Section.displayName = "Section";
 
-/** Two-up row (6.2.4): columns of at least 420px that wrap, 28px gap. */
+/** Two-up row: columns of at least 420px that wrap, 28px gap. */
 export function TwoUp({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div

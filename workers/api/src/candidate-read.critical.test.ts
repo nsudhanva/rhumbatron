@@ -1,4 +1,4 @@
-// Verification read model rows (AGENTS.md sections 34.4.1, 38). One unexpected stored row must
+// Verification read model rows. One unexpected stored row must
 // degrade that row only: `score_json` also holds non-gate integration state (a `rebase` marker on
 // a rejected Candidate), plans can carry check kinds this API does not list, and an unreadable
 // Evidence row must read as a gap, never as a pass.

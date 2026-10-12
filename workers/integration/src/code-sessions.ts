@@ -44,7 +44,7 @@ import {
 } from "./human-edit.ts";
 
 /**
- * Code page edit sessions (ADR 0029; AGENTS.md sections 29.2, 30, 40). The owner or an admin opens
+ * Code page edit sessions (ADR 0029). The owner or an admin opens
  * one session per Project. The API checked `can(role, "code.edit")` and that the caller owns the
  * session; every function here checks the owner again, and the session state, from D1.
  *

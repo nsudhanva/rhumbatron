@@ -1,11 +1,11 @@
 import type { EvidenceCoverage, EvidenceStatus, ReleaseStatus } from "@rhumbatron/protocol";
 
 /**
- * Release decisions (AGENTS.md sections 21.3, 42.10, 60; ADR 0020). Pure: the ReleaseWorkflow
- * feeds these functions what the apps router and ProjectRootDO returned. Deterministic. No model call decides whether a release is deployed (section 22.7).
+ * Release decisions (ADR 0020). Pure: the ReleaseWorkflow
+ * feeds these functions what the apps router and ProjectRootDO returned. Deterministic. No model call decides whether a release is deployed.
  */
 
-/** Section 60: one release per Project and Canonical Generation. Also the Workflow instance ID. */
+/** One release per Project and Canonical Generation. Also the Workflow instance ID. */
 export const releaseIdFor = (projectId: string, generation: number) =>
   `rel_${projectId}_${generation}`;
 
@@ -38,7 +38,7 @@ export function fromStatuses(to: ReleaseStatus): ReleaseStatus[] {
 }
 
 /**
- * Section 13.1 and 42.10 for releases: a release is for exactly one generation. When canonical has
+ * A release is for exactly one generation. When canonical has
  * moved past it before the release finished, the newer generation's release owns the app.
  */
 export function supersededBy(releaseGeneration: number, canonicalGeneration: number) {
@@ -160,7 +160,7 @@ export type SmokeOutcome = {
 };
 
 /**
- * Section 34.4.1 for releases: a probe with no response is a gap, never a pass. Only a smoke
+ * A release probe with no response is a gap, never a pass. Only a smoke
  * check where every probe answered as expected passes. Any wrong answer fails.
  */
 export function classifySmoke(results: readonly ProbeResult[]): SmokeOutcome {

@@ -11,7 +11,7 @@ import { type ChangeSummary, getConflicts, getProjectAgents, listTasks } from ".
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
- * Agents of one Project (AGENTS.md 38.6). The trailing underscore keeps this page out of the
+ * Agents of one Project. The trailing underscore keeps this page out of the
  * Project page's layout; the shell adds "Agents" to the breadcrumb and marks the sidebar item.
  * `?view=list` shows the tables; the graph is the default.
  */

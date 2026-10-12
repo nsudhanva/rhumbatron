@@ -6,7 +6,7 @@ import {
 } from "@rhumbatron/protocol";
 
 /**
- * Change status transitions after the Work Graph (AGENTS.md sections 21.1, 36, 37, 44). Pure and
+ * Change status transitions after the Work Graph. Pure and
  * deterministic: the writers in promotion.ts, release.ts, verification-workflow.ts, and
  * change-commands.ts guard each D1 update with these from-states, so a retry or a race applies a
  * transition at most once and never moves a Change out of a terminal state.
@@ -35,7 +35,7 @@ export const PROMOTABLE_FROM: readonly ChangeStatus[] = [
 
 /**
  * A person can cancel a Change until promotion starts. From `promoting` on, the canonical
- * transition may already have happened, and a canonical transition is never undone (section 42.10).
+ * transition may already have happened, and a canonical transition is never undone.
  */
 export const CANCELLABLE_FROM: readonly ChangeStatus[] = [
   "created",
@@ -76,7 +76,7 @@ export function changeAfterRelease(status: ReleaseStatus): "completed" | "failed
   }
 }
 
-/** What the stuck-release sweep does with one `releasing` Change (section 42.10). */
+/** What the stuck-release sweep does with one `releasing` Change. */
 export type ReleaseRecovery =
   /** Not stuck yet. */
   | { kind: "wait" }
@@ -93,7 +93,7 @@ const minutes = (ms: number) => Math.round(ms / 60_000);
 
 /**
  * Deterministic recovery of a Change stuck in `releasing`. Never reopens a canonical transition:
- * the generation stays promoted, and recovery is a later promotion (section 42.10). A timestamp
+ * the generation stays promoted, and recovery is a later promotion. A timestamp
  * that does not parse counts as old, so a bad row cannot hold a Change forever.
  */
 export function releaseRecovery(input: {
@@ -135,8 +135,8 @@ export function releaseRecovery(input: {
 export const CHANGE_CANCELLED_REASON = "change cancelled";
 
 /**
- * Whether an in-flight CandidateVerificationWorkflow stops before its next step (section 44:
- * stop new expensive work). A cancelled Change stops it first; then a Candidate that is already
+ * Whether an in-flight CandidateVerificationWorkflow stops before its next step (stop new
+ * expensive work). A cancelled Change stops it first; then a Candidate that is already
  * final (stale after `canonical.advanced`, rejected, promoted) or gone has nothing left to verify.
  */
 export function verificationHalt(
@@ -217,8 +217,8 @@ export type RestorableTask = {
 };
 
 /**
- * Tasks to restore when a person raises the budget of a `budget_blocked` Change (section 44
- * rule 5). A budget-stopped Task returns to `ready` when its dependencies are complete, else to
+ * Tasks to restore when a person raises the budget of a `budget_blocked` Change.
+ * A budget-stopped Task returns to `ready` when its dependencies are complete, else to
  * `pending`. A Task blocked without a limit was blocked by a stopped dependency (`blockedByFailure`)
  * and returns to `pending` only when every blocked ancestor is restored here; a Task below a
  * failed, cancelled, or dead-lettered Task stays blocked. The admission checks run again on the

@@ -1,7 +1,7 @@
 import type { EvidenceRecord, VerificationPlan } from "@rhumbatron/protocol";
 
 /**
- * Required-check gate (AGENTS.md section 34.4.1). A missing result is not a negative result, and a
+ * Required-check gate. A missing result is not a negative result, and a
  * timeout is not a pass: only `checked_supported` Evidence with status `pass` satisfies a check.
  */
 

@@ -24,11 +24,11 @@ import { ROVING_CONTAINER, ROVING_ITEM, type Roving, useRovingFocus } from "../.
 import { DETAIL_ROW, type DetailRow, NODE_H, shownRun } from "./layout";
 
 /**
- * Execution DAG node and edge renderers (DESIGN.md 9.13 in Flight Control dress): square nodes
+ * Execution DAG node and edge renderers (DAG in Flight Control dress): square nodes
  * on `base`, the border encodes the Task state, the selected node carries the overlay shadow and
- * the 2px accent bar the inspector repeats. Motion only replays recorded facts (11.1).
+ * the 2px accent bar the inspector repeats. Motion only replays recorded facts.
  *
- * The whole node header is ONE target (DESIGN.md 5.2): it selects the Task and discloses its
+ * The whole node header is ONE target: it selects the Task and discloses its
  * detail rows, so no 24px expander shrinks below 24px when the canvas zooms out (the panel's
  * minimum zoom keeps the 88px header at least 24px tall). The detail chips are one tab stop,
  * a grid walked with the arrow keys (use-roving-focus.ts).

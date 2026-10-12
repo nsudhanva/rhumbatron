@@ -1,4 +1,4 @@
-// Retrieval order is a scope boundary (AGENTS.md sections 27.3, 27.5, 40.1): exact indexes decide
+// Retrieval order is a scope boundary: exact indexes decide
 // first, Vectorize only adds, and a Vectorize match can never bring in another Project's data or a
 // path the canonical tree does not have.
 import { describe, expect, it } from "vitest";

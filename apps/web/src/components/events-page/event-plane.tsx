@@ -16,7 +16,7 @@ const SOCKET: Record<LiveStatus, string> = {
 };
 
 /**
- * Systems View detail of the event plane (AGENTS.md 8.2, 19, 38.7): where this Project's events
+ * Systems View detail of the event plane: where this Project's events
  * flow and how far the feed trails the facts. Ingest lag is recorded time minus occurred time:
  * outbox publish delay, K2 delivery and the projector write together. The loaded rows are the
  * sample; nothing here is a release signal.
@@ -66,8 +66,8 @@ export function EventPlane({
       </div>
       <p className="max-w-[760px] text-[12px] text-kumo-subtle">
         Ingest lag is the recorded time minus the occurred time: the outbox publish delay, K2
-        delivery and the projector write together. The stream shard follows the section 19 hash
-        rule.
+        delivery and the projector write together. The stream shard is a stable hash of the Project
+        ID.
       </p>
     </Section>
   );

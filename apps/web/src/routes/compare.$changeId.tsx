@@ -18,7 +18,7 @@ import { changeLabel, formatNumber, generation, timeAgo } from "../lib/format";
 import { loadChange, loadOnServer, prefetch } from "../lib/ssr-data";
 
 /**
- * Candidate comparison for one Change (AGENTS.md section 38.4, DESIGN.md 9.12). Shows every
+ * Candidate comparison for one Change. Shows every
  * Candidate against the same criteria so a reader sees in under a minute which future the
  * Evidence selects and why.
  */

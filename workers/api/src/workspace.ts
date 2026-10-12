@@ -7,7 +7,7 @@ import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Workspace read model (AGENTS.md sections 29, 38.5): the canonical Artifact, the Task Workspace
+ * Workspace read model: the canonical Artifact, the Task Workspace
  * forks (`ws-*`) and Candidate forks (`cand-*`) of the Project's recent Changes, and the file index
  * of a canonical tree. Reads only: D1 rows, ProjectRootDO, and the R2 file index the integration
  * Worker writes (`source/<project>/<tree>/index.json`). This Worker has no Artifacts binding, so
@@ -24,7 +24,7 @@ const FilesQuery = z.object({
     .optional(),
 });
 
-/** Newest Changes shown. Each query below is capped as well (AGENTS.md section 14.2). */
+/** Newest Changes shown. Each query below is capped as well. */
 const CHANGE_LIMIT = 10;
 const RUN_LIMIT = 200;
 const CHANGESET_LIMIT = 200;

@@ -21,7 +21,7 @@ export const COLUMN_LABEL: Record<BoardColumn, string> = {
   not_built: "Not built",
 };
 
-/** One sentence on what would appear in an empty column (DESIGN.md 8.5). */
+/** One sentence on what would appear in an empty column. */
 export const COLUMN_EMPTY: Record<BoardColumn, string> = {
   proposed: "No request waits for review.",
   needs_answer: "No request waits for an answer.",

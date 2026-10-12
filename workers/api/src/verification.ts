@@ -15,7 +15,7 @@ import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Project-wide verification read model (AGENTS.md sections 34, 38): the most recent Candidates of
+ * Project-wide verification read model: the most recent Candidates of
  * one Project with their Evidence rows, so the Verification page can apply the same gate rules as
  * the Candidate pages. Reads come from D1 only, over indexed columns, with fixed caps:
  *

@@ -1,5 +1,5 @@
 // Release safety: a gap must never look green, an unsupported finding must never move a Candidate,
-// and composition must reject what it can prove incompatible (AGENTS.md sections 33, 34).
+// and composition must reject what it can prove incompatible.
 import type { EvidenceRecord, ProjectPolicy } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
 import { parseBenchOutput } from "./bench.ts";
@@ -178,7 +178,7 @@ describe("buildVerificationPlan", () => {
   });
 
   it("Browser Run is planned only for a high-risk UI change, within one capped session", () => {
-    // Browser minutes are metered (section 7.3): no browser check without UI or below high risk.
+    // Browser minutes are metered: no browser check without UI or below high risk.
     expect(ids(plan("high", { ui: false }))).not.toContain("browser");
     expect(ids(plan("low", { ui: true, authorization: true }))).not.toContain("browser");
     const browser = plan("critical", { ui: true }).checks.find((c) => c.kind === "browser");

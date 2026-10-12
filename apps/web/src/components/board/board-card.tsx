@@ -24,7 +24,7 @@ const AGENT_STATE: Record<BoardAgent["state"], string> = {
 };
 
 /**
- * One request on the Board (DESIGN.md 8.3 layer card, 10 "the whole row is the target"): the
+ * One request on the Board (layer card; the whole row is the target): the
  * title links to the Change and stretches over the card; Include and Decline sit above the link.
  * An owner or admin drags a Proposed card to Building to include it; the buttons do the same
  * from the keyboard.

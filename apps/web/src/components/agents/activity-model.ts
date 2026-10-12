@@ -20,7 +20,7 @@ type ClaimFact = Omit<LifecycleClaimFact, "action"> & {
 };
 
 /**
- * Agent activity as a sequence of facts (DESIGN.md 11.1, AGENTS.md sections 17 and 31-36).
+ * Agent activity as a sequence of facts.
  *
  * The sequence comes from records the page reads, and from nothing else:
  *
@@ -74,7 +74,7 @@ type Base = {
   id: string;
   /** Epoch milliseconds recorded by the API. */
   at: number;
-  /** Dotted event type in the AGENTS.md section 17 vocabulary. */
+  /** Dotted event type from the protocol Event vocabulary, such as `task.started`. */
   type: string;
   /** Lane key or Candidate letter: who the fact is about. */
   actor: string;

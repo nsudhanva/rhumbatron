@@ -1,7 +1,7 @@
 import type { ChangeSetIntent } from "@rhumbatron/protocol";
 
 /**
- * Deterministic ChangeSet compatibility (AGENTS.md section 33). Runs before a Candidate is composed.
+ * Deterministic ChangeSet compatibility. Runs before a Candidate is composed.
  * A rejection here is cheap; a missed conflict is still caught by verification, so the rules only
  * reject what they can prove from declared Intent fields and changed files.
  */
@@ -37,11 +37,11 @@ export type CompatibilityResult =
   | { ok: false; kind: CompatibilityKind; detail: string };
 
 export type CompatibilityOptions = {
-  /** Policy `protectedResources` (section 53), for example `cart` or `identity.auth`. */
+  /** Policy `protectedResources`, for example `cart` or `identity.auth`. */
   protectedResources?: readonly string[];
   /**
    * Contract keys (from `contractKey`) whose overlap conflict review already dismissed as benign,
-   * for example two additive columns on one table (section 32.3). Each dismissal has a receipt.
+   * for example two additive columns on one table. Each dismissal has a receipt.
    */
   dismissedContractKeys?: readonly string[];
 };
@@ -174,9 +174,9 @@ function migrationNumbers(cs: ComposableChangeSet): number[] {
 }
 
 /**
- * Version of the composition rules in this file. It is part of the Candidate composition key
- * (AGENTS.md section 60), so a rules change gives the same ChangeSets a fresh Candidate and the
- * Candidate rejected under the old rules stays on record with its Evidence (section 42.9).
+ * Version of the composition rules in this file. It is part of the Candidate composition key,
+ * so a rules change gives the same ChangeSets a fresh Candidate and the
+ * Candidate rejected under the old rules stays on record with its Evidence.
  * Bump it whenever `checkCompatibility` accepts or rejects a different set of compositions.
  * 2: two declarations of one contract conflict only on removal vs not, disjoint status codes, or
  * append-only vs mutable data model, not on wording.

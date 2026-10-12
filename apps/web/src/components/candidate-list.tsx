@@ -11,7 +11,7 @@ import { Section } from "./ui/page";
 import { StatusPill } from "./ui/status-pill";
 
 /**
- * Candidate futures of one Change (AGENTS.md section 38.2). Evidence lives on the Candidate page.
+ * Candidate futures of one Change. Evidence lives on the Candidate page.
  * "Verify a Candidate" is the Change page's one primary action.
  */
 export function CandidateList({

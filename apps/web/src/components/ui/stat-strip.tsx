@@ -2,7 +2,7 @@ import { cn } from "@cloudflare/kumo";
 import { createContext, type ReactNode, useContext } from "react";
 
 /**
- * Stat strip (DESIGN.md 6.2.2, 9.2): 3-5 equal cells with 1px rule-colored gaps and a 2px
+ * Stat strip: 3-5 equal cells with 1px rule-colored gaps and a 2px
  * divider above and below. Cells wrap on narrow widths and every row stays full, so the gap
  * always draws a clean grid line.
  *

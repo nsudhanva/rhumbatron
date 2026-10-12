@@ -1,5 +1,6 @@
-// Binding drift check (AGENTS.md sections 2.2 and 9). Compares the binding NAMES in every Worker's
-// local wrangler.jsonc with the bindings Terraform uploads for that Worker in envs/prod.
+// Binding drift check. Terraform and each wrangler.jsonc must use the same binding names. It
+// compares the binding NAMES in every Worker's local wrangler.jsonc with the bindings Terraform
+// uploads for that Worker in envs/prod.
 // Read-only: it never talks to Cloudflare. A name only in wrangler is a local-only binding that
 // the remote Worker will not have; a name only in Terraform is a remote-only binding that local
 // development does not emulate. Intentional differences live in scripts/binding-drift-allow.json,

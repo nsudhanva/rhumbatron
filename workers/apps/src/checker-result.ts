@@ -47,7 +47,7 @@ export function checkGap(kind: AppCheckKind, summary: string, timedOut = false):
   };
 }
 
-/** Only a completed positive result can satisfy a required check (AGENTS.md 34.4.1). */
+/** Only a completed positive result can satisfy a required check. */
 export function mapCheckResult(kind: AppCheckKind, reports: unknown[]): AppCheckResult {
   const result = checkGap(kind, "No completed check result.");
   if (!reports.length) return result;

@@ -11,7 +11,7 @@ import { Section } from "../ui/page";
 
 const NAME_MAX = 80;
 
-/** Copyable machine value (DESIGN.md 8.1 clipboard text). */
+/** Copyable machine value (clipboard text). */
 function Copy({ value }: { value: string }) {
   return (
     <InlineCopyText value={value} variant="mono" className="max-w-full break-all text-[12px]">

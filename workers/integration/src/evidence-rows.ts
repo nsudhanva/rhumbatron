@@ -18,7 +18,7 @@ export type EvidenceRow = {
   source_refs_json: string;
 };
 
-/** Maps a row to its section 34.3 record. Rows from before 0007 fall back to their kind and time. */
+/** Maps a row to its Evidence record. Rows from before 0007 fall back to their kind and time. */
 export function toRecord(row: EvidenceRow): EvidenceRecord {
   return {
     evidenceId: row.id,

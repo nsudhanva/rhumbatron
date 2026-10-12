@@ -138,7 +138,7 @@ function BudgetForm({ projectId, settings }: { projectId: string; settings: Proj
 }
 
 /**
- * "Member requests need review: On / Off" (segmented control, DESIGN.md 8.2). On: a member's
+ * "Member requests need review: On / Off" (segmented control). On: a member's
  * request waits as Proposed until an owner or admin includes it. Owner and admin requests never
  * wait. Saves at once.
  */

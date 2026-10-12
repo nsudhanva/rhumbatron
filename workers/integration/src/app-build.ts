@@ -2,7 +2,7 @@ import { referencedAssets } from "./acceptance-check.ts";
 import type { CheckOutcome } from "./candidate-composer.ts";
 
 /**
- * The app's own build at Candidate composition (AGENTS.md sections 33, 34, 37). An app whose
+ * The app's own build at Candidate composition. An app whose
  * package.json has a `build` script (for example a React client bundled to public/app.js) gets
  * `bun run build` in the Candidate checkout after the ChangeSets merge. The files the build
  * changes go into the Candidate commit, so checks, the preview, and the release serve fresh
@@ -85,7 +85,7 @@ export type AppBuildRun = {
 
 /**
  * Evidence of the composition build for the `build` check. Exit 0 passes. Another exit code is
- * a supported failure. A timeout or a Sandbox error is a gap (section 34.4.1).
+ * a supported failure. A timeout or a Sandbox error is a gap.
  */
 export function appBuildOutcome(run: AppBuildRun): CheckOutcome {
   const tail = run.output.trim().split("\n").slice(-4).join(" | ").slice(-400);

@@ -18,10 +18,10 @@ import { Mono } from "./ui/mono";
 import { StatusPill } from "./ui/status-pill";
 
 /**
- * Human gate and promotion for one Candidate (AGENTS.md sections 36, 38.4). The buttons only send
+ * Human gate and promotion for one Candidate. The buttons only send
  * a request: the API takes the approver from the session, and the integration Worker plus
  * ProjectRootDO re-check every precondition. A disabled button here is a hint, not the gate.
- * Feedback is optimistic but honest (DESIGN.md 10): progress while the request runs, success only
+ * Feedback is optimistic but honest: progress while the request runs, success only
  * after the compare-and-swap returns.
  */
 export function CandidatePromotion({
@@ -236,7 +236,7 @@ function ApproverName({ approval, me }: { approval: ApprovalWithName; me: string
 ApproverName.displayName = "ApproverName";
 
 /**
- * Release of the promoted generation (AGENTS.md sections 21.3, 42.10; ADR 0020). The integration
+ * Release of the promoted generation (ADR 0020). The integration
  * Worker moves the live app's production pointer to the promoted commit and runs the smoke check. A failed release never moves the generation back: recovery is a new promotion.
  */
 function ReleaseStatus({ release }: { release: Release }) {

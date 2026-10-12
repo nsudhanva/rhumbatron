@@ -10,7 +10,7 @@ import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts
 import { requestWorkflowStart, verificationCommand } from "./workflow-commands.ts";
 
 /**
- * Stale Candidate recomposition (P16-14; AGENTS.md sections 13.1, 42.9, 60). A Candidate whose
+ * Stale Candidate recomposition (P16-14). A Candidate whose
  * base fell behind canonical is not retried blind: the same ChangeSets are composed again on the
  * new canonical state as a new Candidate, which runs the full verification again. At most
  * MAX_RECOMPOSES times per lineage; then the stale Candidate is marked blocked for a person.
@@ -199,7 +199,7 @@ const STALE_BLOCKED_REASONS = [STALE_BLOCKED_REASON, STALE_BOUND_REASON];
 /**
  * A stale Candidate that was not composed again leaves its Change with nothing to verify. Unless
  * another Candidate of the Change is still active or promoted, or a Task still runs, the Change
- * leaves `verifying` for `blocked` with a plain reason (section 44: a visible stop, never a
+ * leaves `verifying` for `blocked` with a plain reason (a visible stop, never a
  * silent wait). One guarded statement; safe to repeat.
  */
 async function blockStaleChange(
@@ -292,7 +292,7 @@ export async function recomposeQuietly(env: Env, candidateId: string): Promise<R
 }
 
 /**
- * Section 42.9 for one Candidate that cannot promote because canonical moved to
+ * Stale Candidate handling for one Candidate that cannot promote because canonical moved to
  * `canonicalGeneration`: stale (unless already stale, promoted, or rejected), its Change out of
  * `awaiting_approval`, then composed again on the new canonical state, or its Change blocked
  * (`recomposeQuietly`). A Candidate that the event router already marked stale is still composed

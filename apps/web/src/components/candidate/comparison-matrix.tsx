@@ -23,7 +23,7 @@ import {
 } from "./model";
 
 /**
- * Candidate comparison matrix (AGENTS.md section 38.4, DESIGN.md 9.12). Criteria run down the
+ * Candidate comparison matrix. Criteria run down the
  * first column, Candidates across. The recommended column has an elevated fill all the way down.
  * Every value comes from executable Evidence; model confidence is not shown or used.
  */
@@ -99,7 +99,7 @@ function ValuePill({ value, pill, note }: { value: ReactNode; pill: ReactNode; n
   );
 }
 
-/** Ratio squares (DESIGN.md 9.1): one 8px square per required check, ink met, accent unmet. */
+/** Ratio squares: one 8px square per required check, ink met, accent unmet. */
 function RatioSquares({ met, total }: { met: number; total: number }) {
   if (total === 0 || total > 10) return null;
   return (

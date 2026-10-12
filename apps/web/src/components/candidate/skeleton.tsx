@@ -5,7 +5,7 @@ function Line({ className }: { className?: string }) {
 }
 
 /**
- * First-load skeleton for Candidate pages (DESIGN.md 8.5): recessed lines at the heights of the
+ * First-load skeleton for Candidate pages: recessed lines at the heights of the
  * text they replace, under real rules, so the layout does not jump when data arrives.
  */
 export function CandidateSkeleton({ rows = 5, label }: { rows?: number; label: string }) {

@@ -17,7 +17,7 @@ const time = (iso: string | null) =>
   ) : null;
 
 /**
- * Detail of the selected fork, beside the tree (DESIGN.md 10: one selection per context, and the
+ * Detail of the selected fork, beside the tree (one selection per context, and the
  * inspector repeats it as text). A Task fork shows its ChangeSet diff summary; a Candidate fork
  * shows the ChangeSets it composes and links to the Candidate page.
  */

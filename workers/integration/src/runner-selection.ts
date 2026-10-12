@@ -40,7 +40,7 @@ export type AppCheckDisposition =
 /**
  * Evaluates the outcome of an AppChecker run for build or unit checks.
  *
- * Rules (AGENTS.md 34.4.1, ADR 0020):
+ * Rules (ADR 0020):
  * 1. supported: false -> Unsupported (missing runner, API, bundler error, timeout). Falls back to Sandbox.
  * 2. supported: true, status: "pass" -> Positive pass with checked_supported coverage.
  * 3. supported: true, status: "fail" -> Completed assertion failure. Retained as fail (not_checked),
@@ -59,7 +59,7 @@ export function evaluateAppCheckOutcome(
     };
   }
 
-  // AGENTS.md 34.4.1 invariant: not_checked can never be a pass.
+  // Invariant: not_checked can never be a pass.
   let status = result.status;
   let coverage = result.coverage;
 

@@ -34,11 +34,11 @@ import { InboxSkeleton } from "./inbox-skeleton";
 import { NOTIFICATION_KEYS } from "./notification-keys";
 
 /**
- * Inbox popover content (DESIGN.md 8.4, 8.5, 10, 12). Loaded as its own chunk the first time the
+ * Inbox popover content. Loaded as its own chunk the first time the
  * bell is hovered, focused, or opened. Two groups: "Needs you" (action items, which stay until
  * their condition clears) and "Updates". Each row is one link to the page where the item is
  * handled; opening it marks it read. Approvals are never decided here: "Review" opens the
- * Candidate page, where the approval dialog shows the evidence first (DESIGN.md 10).
+ * Candidate page, where the approval dialog shows the evidence first.
  */
 
 const ICONS: Record<NotificationKind, Icon> = {
@@ -70,7 +70,7 @@ const ACTIONS: Partial<Record<NotificationKind, string[]>> = {
   request_proposed: ["Include", "Decline"],
 };
 
-/** The icon is the status here (DESIGN.md 7), paired with the title's words. */
+/** The icon is the status here, paired with the title's words. */
 const ICON_TONE = {
   action: "text-accent-500",
   attention: "text-kumo-warning",
@@ -231,7 +231,7 @@ function Row({ item, onOpen }: { item: AppNotification; onOpen: (item: AppNotifi
           <span className="line-clamp-2 text-[12px] text-kumo-subtle">{item.body}</span>
           <span className="truncate text-[11px] text-kumo-subtle">{item.projectName}</span>
         </span>
-        {/* New / unread: 6px square accent dot (DESIGN.md 10). The slot is always reserved. */}
+        {/* New / unread: 6px square accent dot. The slot is always reserved. */}
         <span
           aria-hidden
           className={cn("mt-1.5 size-1.5 shrink-0", !item.read && "bg-accent-500")}

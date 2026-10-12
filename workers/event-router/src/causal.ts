@@ -9,7 +9,7 @@ import type {
 import { indexCommands } from "./indexing.ts";
 
 /**
- * Causal Router (AGENTS.md section 31). Deterministic rules first; Clef-flash only for ambiguous
+ * Causal Router. Deterministic rules first; Clef-flash only for ambiguous
  * resource overlaps, under a daily cap. Never wakes an agent without a causal dependency.
  */
 
@@ -30,17 +30,17 @@ type TaskRow = {
 };
 
 /**
- * Hard bound on amplification (AGENTS.md sections 44, 61): commands (wakes, dispatches, composes)
+ * Hard bound on amplification: commands (wakes, dispatches, composes)
  * one Change can produce per UTC day. A Change of 8 agents uses far less than 100. An event to
  * wake to event cycle, whatever its shape, stops here; the dropped commands are logged as errors.
  */
 const CHANGE_DAILY_COMMAND_CAP = 1_000;
 
-/** Events after which a Task of the Change no longer holds a reasoning agent slot (section 44). */
+/** Events after which a Task of the Change no longer holds a reasoning agent slot. */
 const SLOT_FREEING = new Set(["task.completed", "task.failed"]);
 
 /**
- * Section 44 and 61: a ready Task the wake consumer deferred at the active-agent limit has no wake
+ * Backpressure: a ready Task the wake consumer deferred at the active-agent limit has no wake
  * in flight. When a slot frees, the Change is dispatched again so the integration Worker wakes it.
  */
 export const hasDeferredReady = (rows: readonly TaskRow[], changeId: string | undefined) =>
@@ -162,9 +162,9 @@ function dispatchCommand(
 }
 
 /**
- * AGENTS.md section 21.1 step 7. When the last Task completes, the agents Worker moves the Change
+ * Candidate composition request. When the last Task completes, the agents Worker moves the Change
  * to `verifying` and records `verification.started` with reason `work_graph_completed`. The
- * integration Worker then composes the Change's Candidates (fork rule, section 32.4). The command
+ * integration Worker then composes the Change's Candidates (fork rule). The command
  * ID derives from the event, and the Candidate IDs from the composition key, so a redelivery
  * creates nothing new. Deterministic: no model call.
  */
@@ -186,7 +186,7 @@ export function composeCommand(
 }
 
 /**
- * AGENTS.md section 42.9. The `canonical.advanced` sweep below marks older-base Candidates stale
+ * Stale Candidate settlement. The `canonical.advanced` sweep below marks older-base Candidates stale
  * but does not compose. This command asks the integration Worker to settle each one: composed again
  * on the new canonical state, its Change blocked, or nothing for a closed Change. The command ID
  * derives from the event; the integration side is idempotent per composition key.
@@ -229,7 +229,7 @@ async function decideAmbiguous(
   candidates.forEach((w, i) => {
     const answer = answers[i];
     const wake = !answer || answer.abstained || answer.choice === "wake";
-    // Decision Receipt without private reasoning (AGENTS.md section 23.5).
+    // Decision Receipt without private reasoning.
     log({
       event: "router.clef_decision",
       eventId: event.eventId,
@@ -245,7 +245,7 @@ async function decideAmbiguous(
 }
 
 /**
- * P11-06 (AGENTS.md sections 42.9, 59). After `canonical.advanced`, every other in-flight Candidate
+ * P11-06. After `canonical.advanced`, every other in-flight Candidate
  * of the Project on an older base can never promote: mark it stale, so nobody verifies or approves
  * it further. The promoted Candidate itself is marked promoted, which repairs the D1 mirror if the
  * integration Worker stopped between the compare-and-swap and its own write. A Change left in

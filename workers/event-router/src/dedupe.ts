@@ -1,5 +1,5 @@
 /**
- * Consumer-side dedupe in D1 (AGENTS.md sections 17.4 and 42.1). K2 delivers at least once.
+ * Consumer-side dedupe in D1. K2 delivers at least once.
  * One D1 batch is one subrequest, however many events it holds.
  */
 

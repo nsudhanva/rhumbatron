@@ -21,9 +21,9 @@ import { errorBody, fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity, projectRole } from "./identity.ts";
 
 /**
- * Candidates and their Evidence (AGENTS.md sections 15.5, 16.1, 33, 34). Creating a Candidate is
+ * Candidates and their Evidence. Creating a Candidate is
  * an RPC to the integration Worker, which owns the one Candidate-creation implementation (also
- * used when a Work Graph completes) and starts CandidateVerificationWorkflow. Reads come from D1. Approval and promotion (section 36) are
+ * used when a Work Graph completes) and starts CandidateVerificationWorkflow. Reads come from D1. Approval and promotion are
  * RPCs to the integration Worker after this Worker authenticated the user and checked membership.
  */
 
@@ -89,7 +89,7 @@ const CandidateView = z.object({
       p95Ms: z.number().optional(),
     })
     .nullable(),
-  /** The plan gates this Candidate on a human decision (section 36 rule 4). */
+  /** The plan gates this Candidate on a human decision. */
   approvalRequired: z.boolean(),
   approval: ApprovalView.nullable(),
   baseTree: z.string().nullable(),
@@ -297,7 +297,7 @@ export const candidates = new Hono<AppEnv>()
    * Creates the Candidate of a Change from all its `proposed` ChangeSets (or the `changeSetIds`
    * subset) on the Change base and starts verification, through the integration Worker. A Change
    * with no ChangeSets yields the canonical baseline Candidate. The Candidate ID is the composition
-   * key (section 60, includes the composition rules version), so a retry returns the same one.
+   * key (it includes the composition rules version), so a retry returns the same one.
    */
   .post(
     "/v1/changes/:changeId/candidates",
@@ -374,7 +374,7 @@ export const candidates = new Hono<AppEnv>()
   )
 
   /**
-   * P11-02: one human decision on a gated Candidate of this Change (section 16.1). The approver is
+   * P11-02: one human decision on a gated Candidate of this Change. The approver is
    * the authenticated member; the body cannot name anyone else. The first decision is final.
    */
   .post(
@@ -421,7 +421,7 @@ export const candidates = new Hono<AppEnv>()
   )
 
   /**
-   * P11-03/P11-04: promote a verified Candidate (section 36). The integration Worker re-checks
+   * P11-03/P11-04: promote a verified Candidate. The integration Worker re-checks
    * every precondition from authoritative rows; ProjectRootDO runs the compare-and-swap. Safe to
    * retry: a repeat returns `alreadyPromoted`. Stale and blocked outcomes return 409 with details.
    */
@@ -453,7 +453,7 @@ export const candidates = new Hono<AppEnv>()
     },
   )
 
-  // Evidence records (section 34.3). Full output stays in R2 under `r2Key`.
+  // Evidence records. Full output stays in R2 under `r2Key`.
   .get(
     "/v1/candidates/:candidateId/evidence",
     requireAuth,

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { DEFAULT_POLICY } from "./candidate-composer.ts";
 
 /**
- * Project policy snapshot (AGENTS.md sections 5.3 and 53, HOM-202). D1 `project_policies` is the
+ * Project policy snapshot (HOM-202). D1 `project_policies` is the
  * source of truth; Workers KV (binding CONFIG) holds a read-through copy for at most
  * POLICY_CACHE_TTL_SECONDS. A Project without a row gets DEFAULT_POLICY, which protects no
  * resource (protected resources are Project-specific), and that answer is cached too, so a read never needs D1 while the copy is fresh. No write path exists yet: a policy row

@@ -16,7 +16,7 @@ import { resolveTier } from "./models.ts";
 import { anthropicPrice, USAGE_COUNTER } from "./provider.ts";
 
 /**
- * Monthly Anthropic spend meter (ADR 0021, AGENTS.md rule 50). One `usage_counters` row per
+ * Monthly Anthropic spend meter (ADR 0021). One `usage_counters` row per
  * calendar month (`day` = YYYY-MM, counter `anthropic-usd-micro`) holds micro-USD. Every model call
  * reserves an estimate first with one conditional statement (full output cap, prompt uncached), so
  * concurrent calls cannot both take the last dollars; the call then settles the difference to its

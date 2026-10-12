@@ -7,7 +7,7 @@ import type {
 import { type CheckGap, gateRequiredChecks, latestEvidence, requiredChecks } from "./gate.ts";
 
 /**
- * Human approval gate and promotion preconditions (AGENTS.md sections 34.4.1, 36, 40.2, 53).
+ * Human approval gate and promotion preconditions.
  * Deterministic policy only: no model decides who may approve or whether a Candidate may advance
  * the Canonical State. The integration Worker reads the authoritative rows; ProjectRootDO then runs
  * the compare-and-swap on its own state (ADR 0013).
@@ -50,10 +50,10 @@ export type AutoPromoteDecision =
     };
 
 /**
- * Policy `autoPromoteRiskTiers` (AGENTS.md section 53). A verified Candidate whose required checks
+ * Policy `autoPromoteRiskTiers`. A verified Candidate whose required checks
  * pass promotes without a person only when the Change risk tier is listed and no human gate applies.
  * An unknown risk tier is never automatic. The decision only selects the trigger: promotion still
- * re-checks every section 36 precondition from authoritative rows (`checkPromotion`).
+ * re-checks every promotion precondition from authoritative rows (`checkPromotion`).
  */
 export function autoPromoteDecision(input: {
   candidateStatus: string;
@@ -96,7 +96,7 @@ export function approvalState(
 
 export type ApprovalCheck =
   | { kind: "record" }
-  /** The same approver repeats the same decision: return the stored one (section 60). */
+  /** The same approver repeats the same decision: return the stored one. */
   | { kind: "repeat" }
   | { kind: "refuse"; reason: "not_verified" | "not_required" | "already_decided" };
 
@@ -168,7 +168,8 @@ export type PromotionCheck =
   | { ok: false; blocks: PromotionBlock[] };
 
 /**
- * Section 36 preconditions 1 to 5 and 8, re-computed from authoritative rows. Returns every block,
+ * Promotion preconditions 1 to 5 and 8 (status, Evidence, pass state, approval, policy
+ * version, Candidate artifact), re-computed from authoritative rows. Returns every block,
  * so the UI can show all gaps at once. Preconditions 6 and 7 (generation and tree) are decided by
  * ProjectRootDO; a base behind the snapshot is reported here early as `stale`.
  */

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 /**
- * Flight Control client state (AGENTS.md 38, DESIGN.md 10): one selection per page, one hover
+ * Flight Control client state: one selection per page, one hover
  * preview, the time machine, filters and the command palette. Every panel reads and writes this
  * store, so a click in the DAG selects the same entity in the swimlanes, the heatmap, the arena
  * and the inspector (synchronized cross-panel selection).

@@ -6,5 +6,4 @@ resource "cloudflare_zone_setting" "this" {
   value      = each.value
 }
 
-# WAF, rate limits, Access, and Turnstile are added only after the protected endpoint exists
-# (AGENTS.md section 40.4).
+# WAF, rate limits, Access, and Turnstile are added only after the protected endpoint exists.

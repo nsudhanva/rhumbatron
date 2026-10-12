@@ -36,10 +36,10 @@ import {
 import { RefButton } from "./arena/ref-button";
 
 /**
- * Candidate arena (DESIGN.md 9.12 comparison matrix, 11.1 "converging"). Candidates run across,
+ * Candidate arena (comparison matrix, shown converging). Candidates run across,
  * criteria down: summary rows, then one row per check (union over Candidates), then the conflicts
  * whose two sides became these Candidates. Every cell is a recorded fact at the fold instant:
- * status word plus coverage, never model confidence (AGENTS.md 34.4.1, 38.4). The winner carries
+ * status word plus coverage, never model confidence. The winner carries
  * the accent bar; a rejected column greys out with its reason in words. A check fact that newly
  * played fills its square over `--rh-dur-heat`; nothing else moves.
  */
@@ -506,7 +506,7 @@ function SummaryCell({
 }
 SummaryCell.displayName = "SummaryCell";
 
-/** Ratio squares (DESIGN.md 9.1): ink = met, accent = unmet, N ≤ 10. */
+/** Ratio squares: ink = met, accent = unmet, N ≤ 10. */
 function RatioSquares({ met, total }: { met: number; total: number }) {
   if (total === 0 || total > 10) return null;
   return (

@@ -23,7 +23,7 @@
       "migrations_dir": "../../migrations/d1"
     }
   ],
-  // Reads source/<project>/<tree>/index.json; writes index/<project>/... (AGENTS.md section 12.7).
+  // Reads source/<project>/<tree>/index.json; writes under index/<project>/.
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
   "durable_objects": {
     "bindings": [

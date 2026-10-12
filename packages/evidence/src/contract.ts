@@ -1,7 +1,7 @@
 import { contractKey, contractKeys } from "./compatibility.ts";
 
 /**
- * Contract check (AGENTS.md section 34.1): every route the Candidate adds or removes against its
+ * Contract check: every route the Candidate adds or removes against its
  * base must be declared by one of its ChangeSets. Declared changes match by `contractKey`; one declaration can name several routes.
  */
 export type ContractDiff = {

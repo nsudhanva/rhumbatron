@@ -12,7 +12,7 @@ const MATCH_LIMIT = 200;
 /**
  * Read-only browser of one canonical tree from its R2 file index (paths only). Directories open
  * and close in place; a filter switches to a flat list of matching paths. Rows use the tree-list
- * dress (DESIGN.md 9.11): mono 12px with box-drawing prefixes in `subtle`.
+ * dress: mono 12px with box-drawing prefixes in `subtle`.
  */
 export function FileBrowser({
   index,

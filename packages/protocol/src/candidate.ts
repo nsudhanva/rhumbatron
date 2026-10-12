@@ -2,13 +2,13 @@ import { z } from "zod";
 import { CanonicalGeneration, Id, RiskTier, Timestamp } from "./common.ts";
 
 /**
- * Candidates, verification, and promotion (AGENTS.md sections 15.5, 34, 36, 53).
+ * Candidates, verification, and promotion.
  * Only executable Evidence can advance the Canonical State; these schemas carry it.
  */
 
 /**
- * The Intent an agent declared when it published a ChangeSet, as stored in `changesets.intent_json`
- * (section 26.1). `changeSet` is present when the Workspace committed source changes.
+ * The Intent an agent declared when it published a ChangeSet, as stored in `changesets.intent_json`.
+ * `changeSet` is present when the Workspace committed source changes.
  */
 export const ChangeSetIntent = z.object({
   summary: z.string(),
@@ -44,7 +44,7 @@ export const ChangeSetIntent = z.object({
       /** Files this Task itself changed (diff from `startCommit`). Absent when nothing stacked. */
       ownFiles: z.array(z.string()).optional(),
       /**
-       * R2 key of the stored `git diff` (section 15.4), from `startCommit` when stacked, else from
+       * R2 key of the stored `git diff`, from `startCommit` when stacked, else from
        * `baseCommit`. Absent on ChangeSets published before patches were stored.
        */
       patchRef: z.string().optional(),
@@ -82,7 +82,7 @@ export const CheckExpectation = z.discriminatedUnion("kind", [
 ]);
 export type CheckExpectation = z.infer<typeof CheckExpectation>;
 
-/** One check in a Verification Plan (section 34.2). Exactly one of `command` or `procedure`. */
+/** One check in a Verification Plan. Exactly one of `command` or `procedure`. */
 export const VerificationCheck = z
   .object({
     checkId: Id,
@@ -113,11 +113,11 @@ export type VerificationPlan = z.infer<typeof VerificationPlan>;
 export const EvidenceStatus = z.enum(["pass", "fail", "error", "skipped"]);
 export type EvidenceStatus = z.infer<typeof EvidenceStatus>;
 
-/** Section 34.4.1: only `checked_supported` can satisfy a required check. */
+/** Only `checked_supported` can satisfy a required check. */
 export const EvidenceCoverage = z.enum(["not_checked", "checked_no_signal", "checked_supported"]);
 export type EvidenceCoverage = z.infer<typeof EvidenceCoverage>;
 
-/** Section 34.3. */
+/** Machine-verifiable result of one verification check. */
 export const EvidenceRecord = z.object({
   evidenceId: Id,
   candidateId: Id,
@@ -172,7 +172,7 @@ export const CandidateSelectionView = z.object({
 });
 export type CandidateSelectionView = z.infer<typeof CandidateSelectionView>;
 
-/** Closed verdict vocabulary of the Integration Judge (AGENTS.md section 22.5). */
+/** Closed verdict vocabulary of the Integration Judge. */
 export const JudgeVerdict = z.enum([
   "prefer_candidate",
   "reject_candidate",
@@ -181,7 +181,7 @@ export const JudgeVerdict = z.enum([
 ]);
 export type JudgeVerdict = z.infer<typeof JudgeVerdict>;
 
-/** Section 15.5. */
+/** A possible integrated future of the Project, composed from ChangeSets. */
 export const Candidate = z.object({
   id: Id,
   changeId: Id,
@@ -195,11 +195,11 @@ export const Candidate = z.object({
 });
 export type Candidate = z.infer<typeof Candidate>;
 
-/** Check names a Project policy can require per risk tier (section 53). */
+/** Check names a Project policy can require per risk tier. */
 export const PolicyCheck = z.enum(["build", "targeted", "contract", "security", "browser"]);
 export type PolicyCheck = z.infer<typeof PolicyCheck>;
 
-/** Machine-readable, versioned Project policy (section 53). */
+/** Machine-readable, versioned Project policy. */
 export const ProjectPolicy = z.object({
   version: z.string().min(1),
   maxCostUsdPerChange: z.number().nonnegative(),
@@ -215,9 +215,9 @@ export const ProjectPolicy = z.object({
 export type ProjectPolicy = z.infer<typeof ProjectPolicy>;
 
 /**
- * Section 36. Built by the integration Worker from authoritative rows, never from the browser.
+ * Promotion request for one verified Candidate. Built by the integration Worker from authoritative rows, never from the browser.
  * `expectedCanonicalTree` is absent only for Candidates verified before the base tree was recorded,
- * which turns the optional tree check (rule 7) off for them.
+ * which turns the optional tree check off for them.
  */
 export const PromotionRequest = z.object({
   projectId: Id,
@@ -278,7 +278,7 @@ export const PromotionOutcome = z.discriminatedUnion("status", [
 ]);
 export type PromotionOutcome = z.infer<typeof PromotionOutcome>;
 
-/** `POST /v1/changes/:changeId/approve` request (section 16.1). */
+/** `POST /v1/changes/:changeId/approve` request. */
 export const ApprovalRequest = z.object({
   candidateId: z.string().regex(/^cand_[a-z0-9]+$/),
   decision: z.enum(["approve", "reject"]),

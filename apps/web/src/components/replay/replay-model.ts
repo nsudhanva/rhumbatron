@@ -1,7 +1,7 @@
 import { MOTION } from "../../lib/motion";
 
 /**
- * Replay pacing (DESIGN.md 11.1, "Pacing"): recorded facts replay at a readable pace. At 1x the
+ * Replay pacing: recorded facts replay at a readable pace. At 1x the
  * playhead moves through one minute of recorded time per second, and each pause between two
  * facts is held to `MIN_GAP_MS`–`MAX_GAP_MS` of replay time: a burst of facts plays at the agent
  * cadence, an idle hour passes in about a second. Inside a pause the playhead moves linearly, so

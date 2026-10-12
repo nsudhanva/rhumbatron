@@ -4,7 +4,7 @@ import type { CriterionAcceptance } from "../../lib/api-change";
 import { formatNumber } from "../../lib/format";
 
 /**
- * Per-criterion acceptance as a checklist (DESIGN.md 9.14): a success check for met, a danger
+ * Per-criterion acceptance as a checklist: a success check for met, a danger
  * cross for not met, an empty square for unclear. Every row says its result in a word as well.
  * With `citations`, each row lists the source lines that support the judgement.
  */

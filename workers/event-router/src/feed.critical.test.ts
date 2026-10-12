@@ -1,4 +1,4 @@
-// Event feed projection invariants (AGENTS.md sections 17.4, 39, 42.1): a redelivered event is one
+// Event feed projection invariants: a redelivered event is one
 // row, `seq` only grows, retention keeps exactly the newest rows, and no payload field outside the
 // allow-list is stored. Runs the real migrations and SQL against SQLite (node:sqlite).
 import { readdirSync, readFileSync } from "node:fs";

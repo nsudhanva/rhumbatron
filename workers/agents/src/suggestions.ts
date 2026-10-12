@@ -9,7 +9,7 @@ import { takeQuota } from "./limits.ts";
  * its canonical file list, and its recent Change goals. Never logged.
  *
  * Cost: a cache hit is one D1 read. A miss is at most one Clef call per Project and Canonical
- * Generation, under a daily cap in `usage_counters` (rule 50). A failed or refused call caches an
+ * Generation, under a daily cap in `usage_counters`. A failed or refused call caches an
  * empty list, retried after one hour.
  */
 

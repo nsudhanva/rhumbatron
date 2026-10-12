@@ -308,7 +308,7 @@ function CanonicalFacts({
             </time>
           ) : null,
         },
-        // No build record is stored yet (AGENTS.md 38.5 lists build state); shown as unknown.
+        // No build record is stored yet (the Workspace page lists build state); shown as unknown.
         { label: "Build", value: null },
       ]}
     />
@@ -403,7 +403,7 @@ function Forks({ view, commit }: { view: WorkspaceView | undefined; commit: stri
   );
 }
 
-/** Filter chips (DESIGN.md 8.3): one per Change with forks, plus All; selected in ink. */
+/** Filter chips: one per Change with forks, plus All; selected in ink. */
 function ChangeChips({
   changes,
   scope,

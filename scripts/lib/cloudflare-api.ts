@@ -1,4 +1,4 @@
-/** Minimal Cloudflare API client for the Terraform-invoked adapters (AGENTS.md section 11.4). */
+/** Minimal Cloudflare API client for the adapters. Only terraform apply runs an adapter. */
 
 export function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -12,7 +12,9 @@ export function requiredEnv(name: string): string {
 /** Adapters may only run from terraform apply. */
 export function assertInvokedByTerraform(script: string) {
   if (process.env.RHUMBATRON_INVOKED_BY !== "terraform") {
-    console.error(`${script} runs only from terraform apply. See AGENTS.md section 11.4.`);
+    console.error(
+      `${script} runs only from terraform apply. See infrastructure/terraform/README.md.`,
+    );
     process.exit(2);
   }
 }

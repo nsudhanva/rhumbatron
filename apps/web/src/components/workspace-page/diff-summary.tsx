@@ -31,7 +31,7 @@ function statsOf(changeSet: WorkspaceChangeSet): WorkspaceFileStat[] {
 }
 
 /**
- * ChangeSet diff summary in the diff viewer dress (DESIGN.md 9.10): an elevated mono well whose
+ * ChangeSet diff summary in the diff viewer dress: an elevated mono well whose
  * header shows the fork and commit, then `+N −M`. One row per changed file: index gutter, sign
  * column, path, and the file's green/red counts with a proportional bar. Line-level hunks are not
  * stored, so the raw `git diff --stat` is one click away instead.

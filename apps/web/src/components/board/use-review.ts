@@ -12,7 +12,7 @@ type Snapshot = { board: ProjectBoard | undefined };
 
 /**
  * Include and Decline for a proposed request (owner and admin; the API checks the role). The
- * Board moves the card at once and moves it back when the API refuses (DESIGN.md 10, optimistic
+ * Board moves the card at once and moves it back when the API refuses (optimistic
  * but honest); every read of the Change refreshes after the answer.
  */
 export function useReviewRequest(projectId: string | undefined) {

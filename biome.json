@@ -13,8 +13,7 @@
       "!**/routeTree.gen.ts",
       "!**/*.fixture.gen.ts",
       "!**/worker-configuration.d.ts",
-      "!**/.terraform",
-      "!AGENTS.md"
+      "!**/.terraform"
     ]
   },
   "formatter": {

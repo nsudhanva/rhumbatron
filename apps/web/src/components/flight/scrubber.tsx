@@ -9,7 +9,7 @@ import { useFlight } from "./flight-context";
 import { type FlightTime, PLAYBACK_SPEEDS, useFlightStore, useFlightTime } from "./flight-store";
 
 /**
- * Time machine (DESIGN.md 9.8, 11): a range over the recorded time of the Change. Live folds every
+ * Time machine: a range over the recorded time of the Change. Live folds every
  * fact; any other position folds only the facts recorded at or before it. Tick marks are recorded
  * notable facts (Candidate forks, conflicts, failures, promotion), placed by their time. Play
  * advances through recorded time at 1x, 4x, 8x or 16x and stops at the end. Nothing is interpolated.
@@ -194,7 +194,7 @@ export function Scrubber() {
             onClick={play}
           />
         )}
-        {/* Segmented control (DESIGN.md 8.2): speed applies to playback, so it shows off live. */}
+        {/* Segmented control: speed applies to playback, so it shows off live. */}
         {historical && (
           <fieldset className="flex border border-kumo-divider">
             <legend className="sr-only">Playback speed</legend>

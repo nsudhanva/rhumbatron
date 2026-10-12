@@ -151,7 +151,7 @@ if (secretKey && smokeUserId) {
       (snapshot?.data?.sequence ?? 0) >= 1,
   );
 
-  // Section 16.1 cancel: the unplanned smoke Change cancels, and a repeat is a no-op.
+  // Cancel: the unplanned smoke Change cancels, and a repeat is a no-op.
   const cancelUrl = `${target.api}/v1/changes/${change?.data?.id ?? "missing"}/cancel`;
   type Outcome = { data?: { changeStatus?: string; repeated?: boolean } } | undefined;
   const cancelled = (await expectStatus("cancel change", cancelUrl, 200, {
@@ -425,7 +425,7 @@ if (secretKey && smokeUserId) {
       promotedRead.data?.status === "promoted" && promotedRead.data.promotedGeneration === 1,
     );
 
-    // Stale promotion (sections 36, 42.9): a Candidate whose base is S0 cannot promote at S1.
+    // Stale promotion: a Candidate whose base is S0 cannot promote at S1.
     const staleCreated = await fetch(
       `${target.api}/v1/changes/${behind.data?.id ?? "missing"}/candidates`,
       { method: "POST", headers: await fresh() },
@@ -458,7 +458,7 @@ if (secretKey && smokeUserId) {
     );
   }
 
-  // Cleanup (AGENTS.md section 43): archive every Project this run created. The integration Worker
+  // Cleanup: archive every Project this run created. The integration Worker
   // then deletes their Artifacts repos and R2 source objects; Evidence expires by lifecycle rule.
   const freshHeaders = async () => {
     const token = await session.token();

@@ -7,7 +7,7 @@ import { Disclosure } from "./disclosure";
 import { RequestConflictCard } from "./request-conflict-card";
 
 /**
- * Conflicts of one Change as a short list (AGENTS.md section 32): one line per conflict, the full
+ * Conflicts of one Change as a short list: one line per conflict, the full
  * card on expand. Design conflicts are between the agents' Intents inside this Change; request
  * conflicts are between this Change and another person's request.
  */

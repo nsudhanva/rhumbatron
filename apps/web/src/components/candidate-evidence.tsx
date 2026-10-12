@@ -18,7 +18,7 @@ import { StatusPill } from "./ui/status-pill";
 import { Tag } from "./ui/tag";
 
 /**
- * Verification Evidence for one Candidate (AGENTS.md sections 34.3, 34.4, 34.4.1). Each check is a
+ * Verification Evidence for one Candidate. Each check is a
  * row that expands to its Evidence. Only a `checked_supported` pass is green; a check that did not
  * run, timed out, errored or found no signal is an attention "Gap" and never counts as a pass.
  */

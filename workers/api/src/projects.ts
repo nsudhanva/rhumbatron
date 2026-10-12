@@ -36,7 +36,7 @@ import { changeBudgetUsd } from "./project-settings.ts";
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
-/** Default policy until project policies are stored (AGENTS.md section 53). */
+/** Default policy until project policies are stored. */
 const DEFAULT_POLICIES: ProjectPolicies = {
   maxCostUsdPerChange: 3,
   humanGateRiskTiers: ["high", "critical"],
@@ -171,8 +171,8 @@ const ListProjectsQuery = z.object({
 });
 
 /**
- * Queues Artifacts and R2 cleanup of an archived Project (integration Worker, AGENTS.md section
- * 43). The command ID is stable per Project; the handler is idempotent, so a repeat is harmless.
+ * Queues Artifacts and R2 cleanup of an archived Project (integration Worker).
+ * The command ID is stable per Project; the handler is idempotent, so a repeat is harmless.
  */
 async function sendCleanup(env: Env, projectId: string) {
   await env.INTEGRATION_COMMANDS.send(
@@ -275,8 +275,8 @@ export const projects = new Hono<AppEnv>()
     createProject(c, c.req.valid("json")),
   )
 
-  // Internal demo and smoke scripts: a Project seeded with the Acme Shop fixture (AGENTS.md
-  // section 54). Not part of the product; 404 where fixtures are off.
+  // Internal demo and smoke scripts: a Project seeded with the Acme Shop fixture.
+  // Not part of the product; 404 where fixtures are off.
   .post("/v1/fixtures/projects", requireAuth, validate("json", CreateProjectRequest), async (c) => {
     if (!fixturesEnabled(c.env)) return fail(c, 404, "not_found", "Not found");
     return createProject(c, c.req.valid("json"), "acme-shop");
@@ -379,7 +379,7 @@ export const projects = new Hono<AppEnv>()
     return c.json({ data: { queued: true } }, 202);
   })
 
-  // Integration smoke check: the Project Sandbox runs the fixture's Bun tests (section 49.3).
+  // Integration smoke check: the Project Sandbox runs the fixture's Bun tests.
   .post("/v1/projects/:projectId/sandbox-smoke", validate("param", ProjectIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { projectId } = c.req.valid("param");
@@ -555,7 +555,7 @@ export const projects = new Hono<AppEnv>()
 
       if (proposed) {
         // Records `change.proposed`. The D1 row is the truth, so a failed event only delays the
-        // dashboard (section 59).
+        // dashboard.
         try {
           await integrationRpc(c.env).recordProposal({ changeId, actorUserId: userId });
         } catch (error) {
@@ -568,7 +568,7 @@ export const projects = new Hono<AppEnv>()
           );
         }
       } else if (body.startPlanning) {
-        // ChangeWorkflow compiles the Work Graph asynchronously (AGENTS.md section 58). The
+        // ChangeWorkflow compiles the Work Graph asynchronously. The
         // instance ID is the Change ID, so a retried request cannot start a second planner.
         try {
           await c.env.CHANGE_WORKFLOW.create({ id: changeId, params: { changeId } });
@@ -584,7 +584,7 @@ export const projects = new Hono<AppEnv>()
         }
       }
 
-      // The dashboard projection is eventually consistent (AGENTS.md section 59).
+      // The dashboard projection is eventually consistent.
       await projectView(c.env, projectId).applyDelta({
         upsert: { activeChanges: [{ id: changeId, status, label: fallbackTitle(body.goal) }] },
       });
@@ -597,7 +597,7 @@ export const projects = new Hono<AppEnv>()
     },
   )
 
-  // The Work Graph of one Change, in plan order (AGENTS.md section 16.1).
+  // The Work Graph of one Change, in plan order.
   .get("/v1/changes/:changeId/tasks", validate("param", ChangeIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
     const { changeId } = c.req.valid("param");

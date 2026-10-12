@@ -9,7 +9,7 @@ import { dirOf, parentDirs, pathProblem } from "./model";
 type Mode = { kind: "new" | "rename" | "delete"; value: string } | null;
 
 /**
- * File tree of an edit session (DESIGN.md 9.11 tree-list dress): mono 12px rows with box-drawing
+ * File tree of an edit session (tree-list dress): mono 12px rows with box-drawing
  * prefixes, a changed marker (square accent dot and the word in the row's name) on each file
  * that differs from the base, and New file / Rename / Delete in a toolbar that acts on the
  * selected file. Forms open inline under the toolbar; errors show next to the field.

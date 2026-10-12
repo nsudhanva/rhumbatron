@@ -1,5 +1,5 @@
 /**
- * Claim lease decisions (AGENTS.md sections 13.2 and 42.3).
+ * Claim lease decisions.
  * Pure logic with no I/O. Every function takes `now` (epoch milliseconds) as a parameter.
  * ResourceShardDO reads rows, calls these functions, and applies the decision in one transaction.
  *

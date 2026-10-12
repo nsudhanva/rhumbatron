@@ -1,7 +1,7 @@
 import { cn } from "@cloudflare/kumo";
 
 /**
- * Loader (DESIGN.md 8.5): a square that fills with ink in a loop, never a spinning circle.
+ * Loader: a square that fills with ink in a loop, never a spinning circle.
  * Under reduced motion it shows a static half fill. Use a progress bar instead when the work
  * has a known length. Kumo's own Loader (inside `<Button loading>`) is restyled to match in
  * theme.css, so either is fine; use this one outside Kumo components.

@@ -3,7 +3,7 @@ import { MOTION } from "../../lib/motion";
 import type { ActivityEvent } from "./activity-model";
 
 /**
- * Paces real activity facts for a viewer (DESIGN.md 11.1). Facts present when the page first
+ * Paces real activity facts for a viewer. Facts present when the page first
  * settles are shown as they are, without motion. Facts that arrive later (live push or a
  * refetch) queue and play one by one at `--rh-agent-cadence`. Replay re-plays every recorded
  * fact from the start. Pause holds the queue and counts what is waiting.

@@ -15,7 +15,7 @@ export const VIEW_MODE_HINT =
   "Product shows outcomes; Systems adds queues, Durable Objects, model routes.";
 
 /**
- * "Product | Systems" segmented control of the Events page (AGENTS.md 38.7; DESIGN.md 8.2): 1px
+ * "Product | Systems" segmented control of the Events page: 1px
  * divider frame, selected in ink. It writes the per-browser choice that Settings > Display sets
  * as the Events page default view.
  */

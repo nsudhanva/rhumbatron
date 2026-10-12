@@ -1,4 +1,4 @@
-// Section 44 limits at their admission points (AGENTS.md sections 44, 61, 23.3). Each limit must
+// Change cost and concurrency limits at their admission points. Each limit must
 // refuse exactly at the boundary, start no expensive work when it refuses, keep state durable, and
 // name the exact limit. Runs the real migrations and admission SQL against SQLite (node:sqlite).
 import { readdirSync, readFileSync } from "node:fs";
@@ -303,7 +303,7 @@ describe("max model attempts per Task at one tier", () => {
   });
 });
 
-// Run end and next start decide from the Task's whole failure history (sections 23.3, 42.8).
+// Run end and next start decide from the Task's whole failure history.
 describe("escalation over the Task's failure history", () => {
   const at = (tier: "haiku" | "sonnet" | "opus", failure_kind: string | null, minute: number) => ({
     tier,
@@ -351,7 +351,7 @@ describe("escalation over the Task's failure history", () => {
   });
 });
 
-// Monthly Anthropic budget (ADR 0021, rule 50): the only hard money stop. It must refuse exactly
+// Monthly Anthropic budget (ADR 0021): the only hard money stop. It must refuse exactly
 // at the budget, refuse atomically, settle to the exact cost, and stop without another provider.
 describe("monthly Anthropic budget", () => {
   const MONTH = "2026-10";

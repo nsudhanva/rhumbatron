@@ -3,8 +3,8 @@ import type { FeedEvent, FeedPage } from "../../lib/api";
 /**
  * Client model of the event feed (`GET /v1/projects/:projectId/events`,
  * `GET /v1/changes/:changeId/events`; types in lib/api.ts, mirroring `FeedEvent` and `FeedPage`
- * in packages/protocol/src/activity.ts). The feed is an eventually consistent projection
- * (AGENTS.md section 59): never base a release decision on it.
+ * in packages/protocol/src/activity.ts). The feed is an eventually consistent projection:
+ * never base a release decision on it.
  */
 
 export type { FeedEvent, FeedPage };
@@ -15,7 +15,7 @@ export const FEED_PAGE_LIMIT = 100;
 export const FEED_FIRST_LIMIT = 50;
 
 /**
- * Type color role (DESIGN.md 9.9): failure in danger, completion in success, state-changing
+ * Type color role: failure in danger, completion in success, state-changing
  * commits in brand, everything else default. Status words in the kept payload refine the two
  * generic completion types, so a failed check never reads as a success.
  */
@@ -65,7 +65,7 @@ export function ingestLagMs(event: Pick<FeedEvent, "occurredAt" | "recordedAt">)
 }
 
 /*
- * K2 stream shard of a Project (AGENTS.md section 19). Same rule as `streamIndex` in
+ * K2 stream shard of a Project. Same rule as `streamIndex` in
  * workers/coordinator/src/outbox.ts (FNV-1a 32 over UTF-8, modulo 8): keep them in step.
  */
 const K2_STREAM_COUNT = 8;

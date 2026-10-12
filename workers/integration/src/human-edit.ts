@@ -18,7 +18,7 @@ import { appendChangeEvents, type ChangeContext, changeEvent, qualify } from "./
 import { loadProjectPolicy } from "./policy.ts";
 
 /**
- * Human edits (Phase 16 P16-19; AGENTS.md sections 26, 29.2, 33, 36). A person saves one file on
+ * Human edits (Phase 16 P16-19). A person saves one file on
  * the Code page. This records what an agent run records, with a person as the actor: a new Change
  * ("Edit <path>"), one completed Task and run, an Artifacts workspace fork of canonical with the
  * file committed, the stored patch, and a `proposed` ChangeSet. The Change then follows the agent
@@ -624,7 +624,7 @@ export async function recordHumanChange(
       { runId: ids.runId, tier: "human", attempt: 1, source: "human" },
       { taskId: ids.taskId, resource, actor },
     ),
-    // The agent path from here (section 21.1 step 7): the event router queues `candidate.create`.
+    // The agent path from here: the event router queues `candidate.create`.
     await changeEvent(ctx, "verification.started", {
       reason: "work_graph_completed",
       source: "human",

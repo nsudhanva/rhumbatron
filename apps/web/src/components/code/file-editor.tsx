@@ -13,8 +13,8 @@ import { formatBytes } from "./file-view";
 const MAX_EDIT_BYTES = 256 * 1024;
 
 /**
- * Edit one file of the live tree (P16-19). A CodeMirror editor in the file view's dress
- * (DESIGN.md 9.10), then a message and Save. Save creates a new Change with one human ChangeSet;
+ * Edit one file of the live tree (P16-19). A CodeMirror editor in the file view's dress,
+ * then a message and Save. Save creates a new Change with one human ChangeSet;
  * it ships only after the same checks as agent work, so this never changes canonical directly.
  */
 export function FileEditor({

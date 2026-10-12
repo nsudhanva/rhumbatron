@@ -18,7 +18,7 @@ import { z } from "zod";
 import type { CheckOutcome } from "./candidate-composer.ts";
 
 /**
- * Acceptance check (ADR 0026; AGENTS.md sections 34, 34.4.2). One Haiku call judges each Change
+ * Acceptance check (ADR 0026). One Haiku call judges each Change
  * acceptance criterion against the Candidate patch and the full text of the relevant files of the
  * composed tree; one Sonnet call follows only when the Haiku output is invalid. A criterion that
  * code already in the base satisfies is `met` with a quote of the composed file. The model output
@@ -33,7 +33,7 @@ export const ACCEPTANCE_SOURCE_CAP = 60_000;
 /** A quote shorter than this proves nothing ("div", "id"). */
 const MIN_QUOTE_CHARS = 8;
 const MAX_OUTPUT_TOKENS = 6_000;
-/** Composed files read for one check: bounds Artifacts reads (section 7.4). */
+/** Composed files read for one check: bounds Artifacts reads. */
 const MAX_COMPOSED_FILES = 24;
 
 /**
@@ -377,7 +377,7 @@ type Db = Pick<D1Database, "prepare">;
 /**
  * Recorded model spend of one Change in USD: agent runs, conflict reviews, acceptance checks, and
  * Integration Judge calls. Acceptance and judge calls are admitted only while this is below the
- * Change budget (section 44).
+ * Change budget.
  */
 export async function changeModelSpend(
   db: Db,

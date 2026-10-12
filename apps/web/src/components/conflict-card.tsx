@@ -5,7 +5,7 @@ import { StatusPill } from "./ui/status-pill";
 import { Tag, type TagVariant } from "./ui/tag";
 
 /**
- * One semantic conflict between two Intents (AGENTS.md sections 32 and 38.2): the shared
+ * One semantic conflict between two Intents: the shared
  * resource, both designs side by side, the incompatible signals (hard first), and what happens
  * next. Git would merge both designs; this block shows why Rhumbatron does not. An open conflict
  * carries the accent bar because it needs a decision; a resolved one does not.

@@ -20,7 +20,7 @@ import { SleepingPool } from "./sleeping-pool";
 const ACTIVE_POLL_MS = 15_000;
 
 /**
- * Agents page body (AGENTS.md 38.6, 57): active and recently active agents one by one, the rest
+ * Agents page body: active and recently active agents one by one, the rest
  * of the pool aggregated by role. Selecting a row fills the inspector beside the tables. The
  * Graph view shows the same agents as a DAG of Changes, Tasks, agents and conflicts.
  */
@@ -271,7 +271,7 @@ function AgentStats({ data, pending }: { data: ProjectAgents | undefined; pendin
 AgentStats.displayName = "AgentStats";
 
 /**
- * Daily cap as a 4px linear bar (DESIGN.md 9.1): ink fill on a recessed track, `danger` once the
+ * Daily cap as a 4px linear bar: ink fill on a recessed track, `danger` once the
  * cap is reached, because reaching it stops new agent work. The value is in the cell above.
  */
 function CapBar({ used, cap }: { used: number; cap: number }) {

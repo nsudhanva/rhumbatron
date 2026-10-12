@@ -10,7 +10,7 @@ import {
 } from "./view-model.ts";
 
 /**
- * Owner of one Project's dashboard read model and live sockets (AGENTS.md sections 13.3, 39).
+ * Owner of one Project's dashboard read model and live sockets.
  * One instance per active Project: `env.PROJECT_VIEW.idFromName(projectId)`.
  * Eventually consistent: never use this state for a release safety decision.
  */

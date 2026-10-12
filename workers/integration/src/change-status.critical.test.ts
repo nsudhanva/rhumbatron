@@ -1,4 +1,4 @@
-// Change status transitions after the Work Graph (AGENTS.md sections 36, 37, 42.10, 44): no path
+// Change status transitions after the Work Graph: no path
 // leaves a terminal state, cancel stops before promotion, and a budget raise restores only Tasks a
 // budget stop blocked.
 import { describe, expect, it } from "vitest";

@@ -2,7 +2,7 @@ import { type RefObject, useLayoutEffect, useRef } from "react";
 import { MOTION } from "../../lib/motion";
 
 /**
- * Layout animation for cards that move between columns (DESIGN.md 11): after a render that
+ * Layout animation for cards that move between columns: after a render that
  * changes `layoutKey`, each `[data-flip-id]` element that moved slides from its old place to the
  * new one (ease-out, the fork duration). Positions are measured inside the scrolling `container`,
  * so a page or board scroll between renders never reads as a move. A card that appears for the

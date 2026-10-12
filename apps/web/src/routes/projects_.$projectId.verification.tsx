@@ -27,7 +27,7 @@ import { formatNumber, timeAgo } from "../lib/format";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
- * Project-wide verification (AGENTS.md sections 34, 35, 38): how recent Candidates fared against
+ * Project-wide verification: how recent Candidates fared against
  * their required checks. Every verdict uses the Candidate model's gate rules, so a check without
  * `checked_supported` pass Evidence is a gap and never counts as met.
  */

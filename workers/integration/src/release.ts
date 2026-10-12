@@ -24,7 +24,7 @@ import {
 import { releaseCommand, requestWorkflowStart } from "./workflow-commands.ts";
 
 /**
- * Release registry and its side effects (AGENTS.md sections 21.3, 42.10, 60; ADR 0020).
+ * Release registry and its side effects (ADR 0020).
  * Promotion starts a release after canonical `main` moved; ReleaseWorkflow moves the Project's
  * production app pointer to the promoted generation and runs the smoke check. Every write is idempotent: the release ID is the Project plus generation, events have stable
  * IDs, and status changes are guarded by the allowed transitions. Nothing here deletes history.
@@ -78,7 +78,7 @@ function toReleaseView(row: ReleaseRow): ReleaseView {
 
 /**
  * The fact that a Change ended after promotion (`change.completed` or `change.failed`), so the
- * live view leaves its `promoting` or `releasing` status (section 13.3). One stable ID per Change:
+ * live view leaves its `promoting` or `releasing` status. One stable ID per Change:
  * a repeat after a lost reply dedupes in the shard outbox.
  */
 export const changeEndedEvent = (
@@ -180,7 +180,7 @@ export async function startRelease(
          RETURNING id, base_generation`,
       ).bind(now, input.projectId, input.generation),
     ]);
-    // Section 20: the start travels on the release Queue; the instance ID stays the release ID, so
+    // The start travels on the release Queue; the instance ID stays the release ID, so
     // an earlier promotion attempt's instance is found, not duplicated. Direct start on send failure.
     await requestWorkflowStart(
       env,
@@ -355,7 +355,7 @@ type ReleasingChangeRow = {
  * Deterministic: `releaseRecovery` decides from D1 rows. A release still in flight is marked
  * failed through the normal guarded transition, so a late ReleaseWorkflow step cannot reopen it.
  * A release that never started is recorded as a failed release row, so its reason shows with
- * the Project's releases. The generation stays promoted (section 42.10): recovery is the next
+ * the Project's releases. The generation stays promoted: recovery is the next
  * promotion, whose release supersedes or follows this one as usual. Safe to repeat.
  */
 export async function recoverStuckRelease(
@@ -511,7 +511,7 @@ async function sha256(text: string) {
 }
 
 /**
- * Stores release smoke Evidence in the Candidate Evidence model (section 34.3/34.4 layout): full
+ * Stores release smoke Evidence in the Candidate Evidence model and R2 layout: full
  * output in R2, the summary in D1 `evidence_index`. Its check ID starts with `release-`, so it is
  * never a Candidate verification check and never feeds a promotion gate. Stable ID and keys.
  */
@@ -656,7 +656,7 @@ const INJECTED_PATH = "/__rhumbatron/injected-missing-route";
  * Records a real smoke failure on the Project's latest deployed release: the normal smoke probes
  * plus one probe of a route that does not exist, against the live app through the apps router. Same failure path
  * as a real smoke failure (`smoke_failed`, `release.smoke_failed`, Evidence), marked injected.
- * The Canonical Generation does not change; recovery is the next promotion (section 42.10).
+ * The Canonical Generation does not change; recovery is the next promotion.
  */
 export async function injectReleaseFailure(
   env: Env,

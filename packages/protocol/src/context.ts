@@ -2,8 +2,8 @@ import { z } from "zod";
 import { CanonicalGeneration, Id, Timestamp } from "./common.ts";
 
 /**
- * Context Packet (AGENTS.md section 27). Built by deterministic code before the first model call;
- * a model never chooses its own scope. Every item carries provenance (section 27.5), so two
+ * Context Packet. Built by deterministic code before the first model call;
+ * a model never chooses its own scope. Every item carries provenance, so two
  * agents with the same snapshot hash had the same inputs.
  */
 

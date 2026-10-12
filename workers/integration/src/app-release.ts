@@ -27,7 +27,7 @@ import { candidateFork } from "./repo-names.ts";
  * (P16-20), and preview expiry (P16-22). Prod only: every entry point is a no-op without the `APPS`
  * binding, so dev builds, checks, and promotes Projects without hosting them.
  *
- * Writes are runtime data (D1 `app_deployments`, R2 bundles), never Terraform (section 37).
+ * Writes are runtime data (D1 `app_deployments`, R2 bundles), never Terraform.
  * Every write is guarded and safe to repeat: rows are keyed by Project and channel, bundles by
  * commit, and the pointer moves only by compare-and-swap on the row it read.
  *

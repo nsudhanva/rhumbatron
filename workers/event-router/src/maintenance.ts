@@ -1,7 +1,7 @@
 import { type CommandEnvelope, RELEASE_STUCK_AFTER_MS } from "@rhumbatron/protocol";
 
 /**
- * Daily maintenance on the existing safety-net cron (AGENTS.md section 43, HOM-195). Once a day it
+ * Daily maintenance on the existing safety-net cron (HOM-195). Once a day it
  * queues one `forks.sweep` and re-queues `project.cleanup` for archived Projects that still have
  * leftovers. The integration Worker does the work, bounded per message. The same Projects get an
  * `index.purge` for rhumbatron-indexer (stored indexes and vectors), and up to 10 active Projects
@@ -107,12 +107,12 @@ export async function queueMaintenance(
   return { cleanups: commands.length - 1 };
 }
 
-/** Twice the K2 retention (AGENTS.md section 19): a redelivered event is still recognised. */
+/** Twice the K2 retention: a redelivered event is still recognised. */
 const DEDUPE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_DEDUPE_PRUNE = 5000;
 
 /**
- * Stuck-release sweep (HOM-204, AGENTS.md section 42.10). Every 5 minutes (minute 4, 9, ... of the
+ * Stuck-release sweep (HOM-204). Every 5 minutes (minute 4, 9, ... of the
  * hour, never the daily maintenance tick) one indexed read (`idx_changes_status_updated`) finds
  * Changes still `releasing` after RELEASE_STUCK_AFTER_MS, oldest first, and queues one
  * `release.recover` per Change for the integration Worker, which re-checks and decides.

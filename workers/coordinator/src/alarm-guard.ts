@@ -1,5 +1,5 @@
 /**
- * Runaway-alarm guard for every Durable Object that sets its own alarm (AGENTS.md sections 7, 44).
+ * Runaway-alarm guard for every Durable Object that sets its own alarm.
  * Cloudflare has no hard spend cap, and an alarm that reschedules itself with no stop condition
  * bills requests, duration, and storage rows without limit. Three hard bounds apply:
  *   1. No pending work: no alarm. The caller passes `dueAt = null` and the alarm is deleted.

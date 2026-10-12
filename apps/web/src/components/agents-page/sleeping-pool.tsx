@@ -1,8 +1,8 @@
 import { formatNumber } from "../../lib/format";
 
 /**
- * Sleeping agents that are not listed one by one, aggregated by role (AGENTS.md 38.6, 57), as a
- * horizontal bar list (DESIGN.md 9.1): label, bar, right-aligned mono value. Every bar has its
+ * Sleeping agents that are not listed one by one, aggregated by role, as a
+ * horizontal bar list: label, bar, right-aligned mono value. Every bar has its
  * value beside it. Bars use the neutral series: asleep is idle, not a state that needs attention.
  */
 export function SleepingPool({

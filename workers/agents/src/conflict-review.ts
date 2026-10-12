@@ -66,14 +66,14 @@ import {
 } from "./conflicts.ts";
 
 /**
- * Model review of recorded semantic conflicts (AGENTS.md sections 22.4, 32.3, 34.4.2; P9-05 and
+ * Model review of recorded semantic conflicts (P9-05 and
  * P9-06). Runs off the agent's run path: AgentDO schedules it after `declareIntentAndDetect`
  * records a conflict, so a slow or failed review never blocks a run.
  *
  * Per conflict: Sonnet first; Opus only when `shouldEscalate` says so and Opus is on (ALLOW_OPUS,
  * ADR 0021); while Opus is off, Sonnet's verdict is final. At most one review per tier per
  * conflict: the tier's slot in `review_json.reviews` is reserved with one conditional D1 update
- * before the call. Each call is admitted like an agent call: the Change budget (section 44), the
+ * before the call. Each call is admitted like an agent call: the Change budget, the
  * daily call cap, and the monthly Anthropic budget (meteredComplete). Code applies a verdict through
  * `applyVerdict`; the model output is a hypothesis with citations, never authority.
  */
@@ -105,7 +105,7 @@ export type ReviewDeps = {
   allowOpus: boolean;
   /** Protected resources of the Project's stored policy; read once per review run. */
   protectedResources: () => Promise<readonly string[]>;
-  /** Stores the Context Packet as an Evidence Snapshot (section 27.5). Best effort. */
+  /** Stores the Context Packet as an Evidence Snapshot. Best effort. */
   storePacket: (key: string, packet: ContextPacket) => Promise<void>;
   metric: (point: AnalyticsEngineDataPoint) => void;
 };
@@ -419,7 +419,7 @@ export async function reviewConflict(
       return { kind: "refused" };
     };
 
-    // Admission (section 44): Change budget, then the tier slot and the day cap. The monthly
+    // Admission: Change budget, then the tier slot and the day cap. The monthly
     // Anthropic budget admits the call itself (meteredComplete).
     const spend = await changeSpend(deps.db, ctx.changeId);
     const budget = checkReviewBudget({

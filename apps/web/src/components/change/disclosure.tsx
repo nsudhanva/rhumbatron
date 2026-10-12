@@ -3,7 +3,7 @@ import { CaretRight } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 
 /**
- * Progressive disclosure (DESIGN.md 9.15, 16 "raw evidence one click from any summary"): a
+ * Progressive disclosure (raw evidence one click from any summary): a
  * closed row with a caret, a label and an optional mono meta on the right. The panel holds the
  * detail a reader needs only on purpose: IDs, hashes, receipts, full tables.
  */

@@ -10,7 +10,7 @@ const VARIANTS = {
 export type TagVariant = keyof typeof VARIANTS;
 
 /**
- * Descriptive tag, not a status (DESIGN.md 8.3): 11px, +0.02em, 3 x 10px, square.
+ * Descriptive tag, not a status: 11px, +0.02em, 3 x 10px, square.
  * Use `outline` for qualifiers such as "Risk high" or a variant label on a card.
  *
  *   <Tag variant="outline">Risk high</Tag>

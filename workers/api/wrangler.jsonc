@@ -39,7 +39,7 @@
       }
     ]
   },
-  // ChangeWorkflow runs in the integration Worker (AGENTS.md section 21.1).
+  // ChangeWorkflow runs in the integration Worker.
   "workflows": [
     {
       "name": "rhumbatron-change-workflow-local",
@@ -49,7 +49,7 @@
     }
   ],
   // Project source provisioning commands for the integration Worker (ADR 0010). Dead-letter retry
-  // sends a command back to its original Queue: integration or agent wakeups (section 42.7).
+  // sends a command back to its original Queue: integration or agent wakeups.
   "queues": {
     "producers": [
       { "binding": "INTEGRATION_COMMANDS", "queue": "rhumbatron-integration-local" },
@@ -57,9 +57,9 @@
     ]
   },
   "services": [
-    // Sandbox smoke check RPC (AGENTS.md section 49.3).
+    // Sandbox smoke check RPC.
     { "binding": "AGENTS", "service": "rhumbatron-agents" },
-    // Approval and promotion RPC (AGENTS.md section 36, ADR 0013).
+    // Approval and promotion RPC (ADR 0013).
     { "binding": "INTEGRATION", "service": "rhumbatron-integration" }
   ]
 }

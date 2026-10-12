@@ -6,7 +6,7 @@ import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 
 /**
- * Integrate path for complementary Tasks (AGENTS.md sections 32.4 and 33). A fork conflict between
+ * Integrate path for complementary Tasks. A fork conflict between
  * two Tasks of one Change on different semantic resources (`todos:api` and `todos:ui`) is not a
  * choice between designs: each side alone is incomplete. The conflict's fork decision is then
  * `integrate` (packages/conflict integrate.ts), and composition applies it here before any

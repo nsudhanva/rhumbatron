@@ -1,7 +1,7 @@
 import { cn } from "@cloudflare/kumo";
 
 /**
- * Status families (DESIGN.md 2.6) and the shared status vocabulary (8.3).
+ * Status families and the shared status vocabulary.
  *
  *   ok        finished and correct                      Done, Pass, Verified, Promoted
  *   attention waiting on a person, slow, stale, gap     Waiting, Stale, Gap
@@ -136,7 +136,7 @@ export type StatusPillProps = {
 };
 
 /**
- * Square status pill, 11px weight 600 (DESIGN.md 8.3). Place it at the end of a row or right
+ * Square status pill, 11px weight 600. Place it at the end of a row or right
  * after the ID in a title line.
  *
  *   <StatusPill status={candidate.status} />

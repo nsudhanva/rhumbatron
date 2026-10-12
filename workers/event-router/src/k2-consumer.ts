@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * K2 HTTP pull client (data plane). Section 19 and ADR 0006.
+ * K2 HTTP pull client (data plane). ADR 0006.
  * Delivery is at-least-once with no ordering guarantee across workers.
  * Never logs the token or record content.
  */

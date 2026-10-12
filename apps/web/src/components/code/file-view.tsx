@@ -19,7 +19,7 @@ export function formatBytes(n: number | null) {
 }
 
 /**
- * One file of a canonical tree in the diff viewer dress (DESIGN.md 9.10): an elevated mono well
+ * One file of a canonical tree in the diff viewer dress: an elevated mono well
  * with the path and blob in the header, then a 40px line-number gutter and the highlighted code.
  */
 export function FileView({ file }: { file: CodeFile }) {

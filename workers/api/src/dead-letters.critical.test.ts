@@ -1,4 +1,4 @@
-// Dead-letter retry (AGENTS.md sections 42.7, 60). A retry must send the same command (same
+// Dead-letter retry. A retry must send the same command (same
 // command_id; consumers are idempotent on it) to the Queue it came from, exactly once under
 // concurrent clicks, with its Task unblocked first so the command is relevant when it arrives.
 // A failed send must leave the dead letter open and the Task blocked. Runs the real migrations and

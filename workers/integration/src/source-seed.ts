@@ -1,5 +1,5 @@
 /**
- * The one rule for seeding a Project's source (AGENTS.md section 29.1): seed only a Project whose
+ * The one rule for seeding a Project's source: seed only a Project whose
  * canonical source is unassigned at Generation 0. A Project with source, a purged Project, or one
  * whose ProjectRootDO is missing is never seeded, so a repeat or a late command cannot overwrite a
  * real repository. ProjectRootDO.assignSource enforces the same rule again at the write.

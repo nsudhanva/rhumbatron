@@ -1,4 +1,4 @@
-// P4-11: a duplicate Event must not be applied twice (AGENTS.md section 42.1).
+// P4-11: a duplicate Event must not be applied twice.
 // Runs the real dedupe SQL against SQLite (node:sqlite) behind a minimal D1 adapter.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

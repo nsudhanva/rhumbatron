@@ -5,7 +5,7 @@ import { policyKey } from "./policy.ts";
 import { type ForkRow, forksOwnedBy, isProjectId, type OwnedFork } from "./repo-names.ts";
 
 /**
- * Project deletion cleanup and the fork sweep (AGENTS.md sections 13, 29, 34.4, 43, HOM-195).
+ * Project deletion cleanup and the fork sweep (HOM-195).
  *
  * `project.cleanup`: after `DELETE /v1/projects/:id` archives a Project, everything the Project
  * created is deleted. Every delivery purges the ProjectRootDO and ProjectViewDO again (the API
@@ -69,7 +69,7 @@ const R2_PAGE = 1000;
 
 const DAY_MS = 86_400_000;
 
-/** Fork retention after a run or Candidate finishes: 30 days (section 43). */
+/** Fork retention after a run or Candidate finishes: 30 days. */
 export const FORK_RETENTION_DAYS = 30;
 
 const sqlList = (values: readonly string[]) => values.map((v) => `'${v}'`).join(", ");

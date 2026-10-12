@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Pure read-model logic for ProjectViewDO (AGENTS.md sections 13.3, 16.2, 39).
+ * Pure read-model logic for ProjectViewDO.
  * No I/O. The web app can import `detectGap` and the message schemas later.
  */
 

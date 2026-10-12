@@ -3,9 +3,9 @@ import { WarningCircle } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 
 /**
- * Section error (DESIGN.md 8.5, 10): a danger banner inside the section, 13px 600 text with a
+ * Section error: a danger banner inside the section, 13px 600 text with a
  * 16px leading icon and an optional retry as a secondary button that takes the text color.
- * Blocking errors are announced assertively (section 14).
+ * Blocking errors are announced assertively.
  *
  *   <SectionError message={query.error.message} onRetry={() => query.refetch()} />
  */
@@ -63,7 +63,7 @@ export function SkeletonBar({
 SkeletonBar.displayName = "SkeletonBar";
 
 /**
- * Skeleton table rows for a first load (DESIGN.md 8.5): the real cells, rules and padding with
+ * Skeleton table rows for a first load: the real cells, rules and padding with
  * recessed bars in place of text. `cells` lists one entry per column: `title` draws the
  * two-line first column, `numeric` right-aligns a short bar, a number sets the bar width in px.
  */

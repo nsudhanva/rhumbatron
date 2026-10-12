@@ -1,5 +1,5 @@
-// Candidate creation is a retry boundary (AGENTS.md section 60) and enforces the fork rule
-// (section 32.4) and the Candidate limit (section 44). Invariants: a repeated trigger yields the
+// Candidate creation is a retry boundary and enforces the fork rule
+// and the Candidate limit. Invariants: a repeated trigger yields the
 // same Candidate IDs and no new rows; a fork conflict yields one Candidate per side, each with the
 // shared non-conflicting ChangeSets; a ChangeSet stacked on or dependent on one side joins only that
 // side's Candidate, and one requiring both sides joins neither (deferred, with a reason); a Change

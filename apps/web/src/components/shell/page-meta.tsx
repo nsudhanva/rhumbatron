@@ -2,7 +2,7 @@ import type { LinkOptions } from "@tanstack/react-router";
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
 
 /**
- * Breadcrumb trail for the shell header (DESIGN.md 6.1, 8.3).
+ * Breadcrumb trail for the shell header.
  *
  * The shell derives the base trail from the route on its own:
  *   Projects / <project name> / <change goal> / <candidate id>

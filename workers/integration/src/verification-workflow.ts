@@ -91,7 +91,7 @@ import {
 } from "./runner-selection.ts";
 
 /**
- * CandidateVerificationWorkflow (AGENTS.md sections 21.2, 33, 34). One instance per Candidate
+ * CandidateVerificationWorkflow. One instance per Candidate
  * (instance ID = Candidate ID). It composes the Candidate's ChangeSets on its base commit in an
  * Artifacts fork, runs the Verification Plan in the Project Sandbox, stores Evidence in D1 and R2,
  * and gates the required checks. Every step is idempotent: IDs, R2 keys, and commits are stable.
@@ -108,7 +108,7 @@ export type CandidateVerificationParams = { candidateId: string };
 type PolicyOf = ReturnType<typeof policyForRun>;
 
 const ACTOR = { kind: "system", id: "candidate-verification" } as const;
-/** Policy `autoPromoteRiskTiers` promotes as the system, never as a person (section 53). */
+/** Policy `autoPromoteRiskTiers` promotes as the system, never as a person. */
 const AUTO_PROMOTION_ACTOR = { kind: "system", id: "auto-promotion" } as const;
 /** States after which this workflow has nothing to do. */
 const FINAL = new Set(["verified", "rejected", "stale", "promoted"]);
@@ -236,7 +236,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     step: WorkflowStep,
   ) {
     const { candidateId } = event.payload;
-    // The Project's stored policy (section 53), read once in this run.
+    // The Project's stored policy, read once in this run.
     const policyOf = policyForRun(this.env, step);
     const result = await this.verify(candidateId, step, policyOf);
     // Only a settled Candidate (verified or rejected by its own checks) takes part in selection.
@@ -307,7 +307,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   }
 
   private async verify(candidateId: string, step: WorkflowStep, policyOf: PolicyOf) {
-    // Step 1: confirm the Candidate and its base generation (section 21.2). Retries cover a
+    // Step 1: confirm the Candidate and its base generation. Retries cover a
     // promotion whose source sync has not landed yet (see below).
     const loaded = await step.do(
       "load candidate",
@@ -429,7 +429,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         return status;
       });
 
-    // Section 44: a cancelled Change starts no Sandbox or Browser Run time. Each later step checks
+    // Stop new expensive work: a cancelled Change starts no Sandbox or Browser Run time. Each later step checks
     // again before its work (`guard`), so an in-flight run stops at its next step boundary.
     const stop = async (halt: Halt) => {
       if (halt.halted === "candidate_final") {
@@ -455,7 +455,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       await finish("rejected", "Project has no canonical source to compose on.");
       return { status: "rejected" };
     }
-    // Section 13.1: a Candidate is valid only on the current Canonical Generation.
+    // A Candidate is valid only on the current Canonical Generation.
     if (loaded.canonical.generation !== ctx.baseGeneration) {
       await finish(
         "stale",
@@ -469,7 +469,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     }
     const baseCommit = loaded.canonical.commit;
 
-    // Deterministic compatibility before any Sandbox time (section 33). A shared file is left to
+    // Deterministic compatibility before any Sandbox time. A shared file is left to
     // the real merge below, which reports an actual source conflict instead of a guess.
     const found = new Set(loaded.changeSets.map((c) => c.id));
     const missing = loaded.changeSetIds.filter((id) => !found.has(id));
@@ -622,7 +622,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       const { commit, tree } = composed;
       composedRef = { commit, tree };
 
-      // Step 3: the risk-based Verification Plan (sections 34.1, 34.2, 53).
+      // Step 3: the risk-based Verification Plan.
       const planned = await step.do("record composition and plan", () =>
         this.guard(candidateId, async () => {
           const files = sources.flatMap((s) => s.files);
@@ -758,7 +758,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
           }
           if (at) lastSandboxAt = at;
         } catch (error) {
-          // The check produced no result: record the gap. Never a pass (section 34.4.1).
+          // The check produced no result: record the gap. Never a pass.
           await step.do(`${name} gap`, async () => {
             await this.recordEvidence(ctx, candidateId, {
               checkId: check.checkId,
@@ -912,7 +912,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
             { key: candidateId, actor: ACTOR },
           ),
         ];
-        // Section 36 rule 4: a gated Candidate waits for a human decision before promotion. With
+        // A gated Candidate waits for a human decision before promotion. With
         // siblings, selection requests the approval for the winner only (ADR 0026).
         if (
           gate.promotable &&
@@ -943,7 +943,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   /**
    * The promotion path of one Candidate: the selection winner, or a Candidate without siblings.
    * Unchanged by selection: policy `autoPromoteRiskTiers`, the approval gate, and the
-   * compare-and-swap decide (section 21.1 steps 9-11).
+   * compare-and-swap decide.
    */
   private async promoteWinner(step: WorkflowStep, candidateId: string, policyOf: PolicyOf) {
     const winner = await step.do(`load winner ${candidateId}`, async () => {
@@ -971,7 +971,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     const ctx = winner;
     const plan = { humanApprovalRequired: winner.humanApprovalRequired };
 
-    // After the gate (section 21.1 steps 9-11): a gated Candidate waits for a person; a Candidate
+    // After the gate: a gated Candidate waits for a person; a Candidate
     // that policy `autoPromoteRiskTiers` allows promotes through the same path as a manual promote.
     // Canonical moved while the checks ran: this Candidate can no longer promote. Mark it stale and
     // recompose it on the new canonical state (P16-14) instead of waiting for a person.
@@ -1023,7 +1023,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     });
     if (decision.kind !== "auto_promote") return { promotion: decision.reason };
     try {
-      // Every section 36 precondition is re-checked from authoritative rows inside; a CAS failure
+      // Every promotion precondition is re-checked from authoritative rows inside; a CAS failure
       // marks the Candidate stale. A retried step returns `alreadyPromoted`, never a second advance.
       const outcome = await step.do(
         "auto promote",
@@ -1403,7 +1403,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     return buildAcceptanceSource(patch, composed);
   }
 
-  /** Diffs the route table against the base and records contract Evidence (section 34.1). */
+  /** Diffs the route table against the base and records contract Evidence. */
   private async runContract(
     ctx: ChangeContext,
     candidateId: string,
@@ -1439,7 +1439,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   }
 
   /**
-   * Browser check (section 35, P10-11): the composed app in the Sandbox, one capped Browser Run
+   * Browser check (P10-11): the composed app in the Sandbox, one capped Browser Run
    * session, screenshots in R2 beside the report. A refused budget, a missing preview, or a
    * session deadline is recorded as a gap, never a pass.
    */
@@ -1534,7 +1534,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   }
 
   /**
-   * Stores one Evidence record: full output and report in R2 under the section 34.4 layout, the
+   * Stores one Evidence record: full output and report in R2 under the Evidence key layout, the
    * summary in D1, and `verification.check.completed`. Stable IDs and keys make a retry overwrite.
    */
   private async recordEvidence(

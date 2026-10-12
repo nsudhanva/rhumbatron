@@ -143,7 +143,7 @@ function Overview() {
     queryFn: () => getProjectStats({ data: projectId }),
   });
   const feed = useEventFeed({ kind: "project", projectId }, { initial: FEED_INITIAL });
-  // Live push (AGENTS.md section 39): each delta means new events were projected. The feed reads
+  // Live push: each delta means new events were projected. The feed reads
   // only rows after its cursor; the stats aggregate refetches at most every 10 seconds.
   const statsAt = useRef(0);
   // Each live signal also refreshes the execution timeline (it reads only what changed).

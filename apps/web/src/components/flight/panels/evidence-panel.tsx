@@ -24,7 +24,7 @@ import { RefButton } from "./arena/ref-button";
 import { CheckDetail, parseCheckRef } from "./evidence/check-detail";
 
 /**
- * Evidence explorer (AGENTS.md 34.3, 34.4.1; DESIGN.md 9.11 tree list, 9.7 log viewer). Left: each
+ * Evidence explorer (tree list, log viewer). Left: each
  * Candidate's checks in plan order, required first, with status and coverage in words. Right: the
  * selected check's Evidence record, plan and stored stdout (fetched for that one check only).
  * A check without a supported pass is a gap, never green; a check fact that newly played flashes

@@ -185,7 +185,7 @@ export type AppCheckResult = {
 /* Milestone B: previews, releases, versions, rollback (P16-10..P16-13)                        */
 /* ------------------------------------------------------------------------------------------ */
 
-/** Previews per Change: the Candidate limit (policy `maxCandidates`, AGENTS.md section 44). */
+/** Previews per Change: the Candidate limit (policy `maxCandidates`). */
 export const MAX_PREVIEWS_PER_CHANGE = 3;
 
 /** Largest generation a version host can name (`v` plus 7 digits). */
@@ -281,7 +281,7 @@ export const RollbackOutcome = z.discriminatedUnion("status", [
     generation: z.number().int().nonnegative(),
     alreadyPromoted: z.boolean(),
   }),
-  /** Policy gates this rollback: approve the Candidate, then promote it (section 36 rule 4). */
+  /** Policy gates this rollback: approve the Candidate, then promote it. */
   z.object({
     status: z.literal("awaiting_approval"),
     changeId: z.string(),

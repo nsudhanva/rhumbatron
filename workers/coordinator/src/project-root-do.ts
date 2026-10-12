@@ -16,7 +16,7 @@ import {
 } from "./request-scopes.ts";
 
 /**
- * Authoritative owner of one Project's cold, project-wide truth (AGENTS.md section 13.1).
+ * Authoritative owner of one Project's cold, project-wide truth.
  * One instance per Project: `env.PROJECT_ROOT.idFromName(projectId)`.
  * Cold Project truth: canonical state, promotion, and request admission go through here.
  */
@@ -48,9 +48,9 @@ export type PromoteInput = PromotionAttempt & {
   changeId: string;
   actor: { kind: "user" | "system"; id: string };
   correlationId: string;
-  /** Evidence the caller gated on (section 36, rules 2 and 3). Recorded in the event for audit. */
+  /** Evidence the caller gated on. Recorded in the event for audit. */
   requiredEvidenceIds: string[];
-  /** The recorded human approval when the gate applied (rule 4), else null. */
+  /** The recorded human approval when the gate applied, else null. */
   approvalId: string | null;
 };
 
@@ -175,7 +175,7 @@ export class ProjectRootDO extends DurableObject<Env> {
     };
     AnyEventEnvelope.parse(event);
 
-    // The root row and its project.created event commit together (AGENTS.md section 18).
+    // The root row and its project.created event commit together.
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
         `INSERT INTO project_root (id, project_id, org_id, canonical_generation, canonical_artifact_ref,
@@ -257,9 +257,9 @@ export class ProjectRootDO extends DurableObject<Env> {
   }
 
   /**
-   * Compare-and-swap promotion (section 36). The state update and the `canonical.advanced` outbox
+   * Compare-and-swap promotion. The state update and the `canonical.advanced` outbox
    * row commit in one transaction, so the event exists if and only if the generation advanced.
-   * This object decides rules 5 to 7 on its own state: policy version, generation, and tree. The
+   * This object checks the policy version, generation, and tree on its own state. The
    * caller (integration Worker, internal bindings only) has already checked status, Evidence,
    * approval, and the Candidate artifact against D1 and Artifacts (ADR 0013).
    */

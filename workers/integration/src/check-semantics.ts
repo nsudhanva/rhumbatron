@@ -2,7 +2,7 @@ import type { VerificationCheck } from "@rhumbatron/protocol";
 import type { CheckOutcome, CheckRun } from "./candidate-composer.ts";
 
 /**
- * Result semantics of the security and browser checks (AGENTS.md sections 34.4.1, 35). Pure: no
+ * Result semantics of the security and browser checks. Pure: no
  * I/O, so the rules have critical tests. A check that did not observe the behavior it guards is a
  * gap (`not_checked` or `checked_no_signal`), never a pass.
  */
@@ -101,7 +101,7 @@ export function classifySecurity(check: VerificationCheck, run: CheckRun): Check
 
 /** One browser session per check, at most this long (Browser Run free timeout is 60 s). */
 export const BROWSER_SESSION_MS = 55_000;
-/** Section 44: max full browser verification runs per Candidate. */
+/** Max full browser verification runs per Candidate. */
 export const MAX_BROWSER_RUNS_PER_CANDIDATE = 2;
 /**
  * Daily Browser Run guard when the `BROWSER_DAILY_SECONDS` binding is absent or invalid: a safe
@@ -139,7 +139,7 @@ export type BrowserRun =
     };
 
 /**
- * Browser Evidence (section 35). Only a complete run with every scenario step observed passing is
+ * Browser Evidence. Only a complete run with every scenario step observed passing is
  * a pass. A refused budget, a missing preview, a failed launch, the session deadline, or an
  * infrastructure failure inside the run is `not_checked`: a gap, never a pass. A step that
  * observed wrong app behavior is a `fail`.

@@ -6,7 +6,7 @@ import { createFileRoute } from "@tanstack/react-router";
  * Same-origin Browser Run screenshot: `GET /evidence/:candidateId/:checkId/:n` returns the PNG.
  * The browser sends only its Clerk session cookie. This Worker turns it into a session token and
  * calls the API (`/v1/candidates/:candidateId/evidence/:checkId/screenshots/:n`) with
- * `Authorization: Bearer`, so no token is ever in a URL (AGENTS.md 12.1, 35). The API checks
+ * `Authorization: Bearer`, so no token is ever in a URL. The API checks
  * project access and derives the R2 key from the Evidence row, never from the request.
  */
 

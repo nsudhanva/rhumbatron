@@ -4,7 +4,7 @@ import { createServerFn } from "@tanstack/react-start";
 
 /**
  * Graph reads over the API Worker (service binding `API`), on the web Worker with the user's Clerk
- * session token (AGENTS.md 12.1). The Agents and Events DAGs read the endpoints in lib/api.ts; this
+ * session token. The Agents and Events DAGs read the endpoints in lib/api.ts; this
  * file holds the Product Graph read (workers/api product-graph.ts).
  */
 
@@ -29,7 +29,7 @@ async function call<T>(path: string): Promise<T> {
 }
 
 /**
- * Product Graph (AGENTS.md 28, 38.3), derived by the API from Task resources, Intents, Task
+ * Product Graph, derived by the API from Task resources, Intents, Task
  * dependencies, ChangeSets, conflicts, the stored Product Graph of the indexed canonical tree
  * (P7-04), and the protected resources of the Project's own stored policy.
  */

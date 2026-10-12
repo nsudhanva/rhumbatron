@@ -1,5 +1,5 @@
 /**
- * Artifacts repo names in the `rhumbatron-projects-<env>` namespace (AGENTS.md sections 29.1-29.3).
+ * Artifacts repo names in the `rhumbatron-projects-<env>` namespace.
  * - Canonical repo: the Project ID (`proj_<uuid>`).
  * - Task Workspace fork: `ws-<run>` for Task run `run_<run>` (workers/agents/src/workspace.ts).
  * - Candidate fork: `cand-<candidate>` for Candidate `cand_<candidate>`.

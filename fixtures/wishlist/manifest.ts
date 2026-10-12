@@ -1,6 +1,6 @@
 /**
- * Wishlist design-conflict fixture (AGENTS.md sections 32.4, 54; Linear P9-08). Two complete,
- * independently verifiable implementations of shared wishlists on top of `fixtures/acme-shop`:
+ * Wishlist design-conflict fixture. Two complete, independently verifiable implementations of
+ * shared wishlists on top of `fixtures/acme-shop`:
  *
  * - Design A: normalized mutable collaborator membership table. Access is derived from the table on
  *   every request, so a read costs O(membership rows) per check and the item list does one check
@@ -42,12 +42,12 @@ export type DesignFixture = {
   commitMessage: string;
 };
 
-/** The demo user goal, verbatim from AGENTS.md section 4. */
+/** The demo user goal, word for word. */
 export const WISHLIST_GOAL =
   "Add shared wishlists. Users can create a wishlist, share it with a link, and let collaborators " +
   "add or remove products. Keep existing cart behavior unchanged. Keep API p95 below 200 ms.";
 
-/** The Work Graph facts a planner would record for the Wishlist Change (section 4). */
+/** The Work Graph facts a planner would record for the Wishlist Change. */
 export const CHANGE_PLAN = {
   riskTier: "high",
   acceptanceCriteria: [

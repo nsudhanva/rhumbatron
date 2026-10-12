@@ -7,7 +7,7 @@ import { Mono } from "../ui/mono";
 import { StatusPill } from "../ui/status-pill";
 
 /**
- * Agents as table rows (DESIGN.md 8.3). The whole row selects the agent for the inspector beside
+ * Agents as table rows. The whole row selects the agent for the inspector beside
  * the table; the row carries no other link, so the Change link lives in the inspector.
  *
  * `active` rows show the current attempt: tier, calls against the per-run cap with a 4px ink bar

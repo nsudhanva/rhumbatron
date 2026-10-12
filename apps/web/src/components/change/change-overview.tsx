@@ -15,7 +15,7 @@ export function changeSpend(tasks: TaskDetail[]) {
   };
 }
 
-/** Stat strip for one Change (DESIGN.md 6.2.2, 9.2). Real data only; a cell without data is omitted. */
+/** Stat strip for one Change. Real data only; a cell without data is omitted. */
 export function ChangeStats({
   tasks,
   conflicts,
@@ -87,7 +87,7 @@ export function ChangeStats({
 }
 
 /**
- * Acceptance criteria as a checklist (DESIGN.md 9.14) before a Candidate is judged: every item
+ * Acceptance criteria as a checklist before a Candidate is judged: every item
  * shows the pending square. A judged Candidate shows met or not met (candidate/acceptance-list).
  */
 export function CriteriaList({ items }: { items: string[] }) {

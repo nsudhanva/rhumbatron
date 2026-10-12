@@ -1,4 +1,4 @@
-// Budget stop (AGENTS.md sections 24 and 44, P13-04). A wrong check lets an autonomous agent keep
+// Budget stop (P13-04). A wrong check lets an autonomous agent keep
 // calling models after its run or Change budget is gone, which is the one failure that bills.
 import { describe, expect, it } from "vitest";
 import { checkRunBudget, MAX_CALLS_PER_RUN, taskBudgetUsd } from "./budget.ts";

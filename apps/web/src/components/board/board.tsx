@@ -24,7 +24,7 @@ import { boardKey, reviewKey, useReviewRequest } from "./use-review";
 /** Safety net while the live socket is not open. */
 const FALLBACK_POLL_MS = 10_000;
 const EVERYONE = "everyone";
-/** Columns keep their width and the board scrolls sideways inside its frame (DESIGN.md 6.3). */
+/** Columns keep their width and the board scrolls sideways inside its frame. */
 const GRID = "grid grid-cols-[repeat(6,minmax(232px,1fr))] gap-px";
 
 /**

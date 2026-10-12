@@ -3,9 +3,9 @@ import { Id, ModelTier, Timestamp } from "./common.ts";
 import { Actor } from "./event.ts";
 
 /**
- * Activity read models (AGENTS.md sections 16.1, 39, 41): the per-Project and per-Change event
+ * Activity read models: the per-Project and per-Change event
  * feed, the Claims feed, live run progress, and Project stats. All are eventually consistent read
- * projections; never use them for a release safety decision (section 59).
+ * projections; never use them for a release safety decision.
  */
 
 /** Scalar payload fields the feed keeps. Never a full payload, never reasoning or secrets. */
@@ -16,7 +16,7 @@ export type FeedData = z.infer<typeof FeedData>;
 export const FeedEvent = z.object({
   seq: z.number().int().positive(),
   eventId: Id,
-  /** A section 17.2 type. Kept as a string so an older reader tolerates a newer type. */
+  /** An Event type. Kept as a string so an older reader tolerates a newer type. */
   eventType: z.string().min(1),
   eventVersion: z.number().int().positive(),
   occurredAt: Timestamp,

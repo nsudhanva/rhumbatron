@@ -1,4 +1,4 @@
-// Poison command bound (AGENTS.md sections 20, 42.7, P13-10). Consumers retry every failure
+// Poison command bound: bounded retries, then the dead-letter Queue. Consumers retry every failure
 // (workers/agents/src/queue-poison.critical.test.ts); the Queue consumer settings decide when a
 // poison command stops and moves to the dead-letter Queue. A consumer without a dead-letter Queue
 // or with unbounded retries would retry poison work forever.

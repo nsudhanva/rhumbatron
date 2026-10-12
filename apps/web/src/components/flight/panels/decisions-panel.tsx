@@ -28,10 +28,10 @@ import {
 } from "./decisions/decision-view";
 
 /**
- * Decisions (AGENTS.md 23.5 Decision Receipts, 32.3 fork, 34 gate, 36 promotion): every decision
+ * Decisions (Decision Receipts, fork, gate, promotion): every decision
  * recorded for the Change up to the fold instant, oldest first. Selecting a decision expands its
  * causal history in place: the recorded inputs that fed it, oldest first, on a 1px rule that ends
- * at the decision itself (DESIGN.md 9.8 trace waterfall). Facts only: `state.decisions` is
+ * at the decision itself (trace waterfall). Facts only: `state.decisions` is
  * derived in flight-model.ts from Task runs, Decision Receipts, conflict, Candidate, Evidence and
  * approval records.
  */

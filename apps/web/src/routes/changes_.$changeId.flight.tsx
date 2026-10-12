@@ -11,7 +11,7 @@ import { getChangeDecisions, getWorkspace } from "../lib/api";
 import { loadChange, loadOnServer, prefetch } from "../lib/ssr-data";
 
 /**
- * Flight Control for one Change (AGENTS.md 38, 39): every recorded fact of the Change in
+ * Flight Control for one Change: every recorded fact of the Change in
  * synchronized panels with a time machine. The trailing underscore keeps this page out of the
  * Change page's layout; the shell marks the "Flight Control" sidebar item.
  */

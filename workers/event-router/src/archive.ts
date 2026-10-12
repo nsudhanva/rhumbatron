@@ -1,5 +1,5 @@
 /**
- * R2 audit archive of K2 events (AGENTS.md section 19.1). The audit-archiver subscription is drained
+ * R2 audit archive of K2 events. The audit-archiver subscription is drained
  * on the cron sweep only; the archive may lag. Objects are gzipped NDJSON, one per batch.
  */
 import type { EventEnvelope } from "@rhumbatron/protocol";

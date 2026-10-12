@@ -1,4 +1,4 @@
-// Causal Router deterministic first pass (AGENTS.md section 31.1). Pure; no model calls.
+// Causal Router deterministic first pass. Pure; no model calls.
 import type { TaskStatus } from "@rhumbatron/protocol";
 import { type GraphTask, newlyReadyAfter } from "./scheduler.ts";
 
@@ -110,7 +110,7 @@ export function routeEvent(
   return { ...none, wake, ambiguous };
 }
 
-/** A stale wake must terminate quickly (AGENTS.md section 31.3). */
+/** A stale wake must terminate quickly. */
 export function isWakeStillRelevant(
   wake: { taskId: string; reason: WakeReason },
   task: { status: TaskStatus } | null,

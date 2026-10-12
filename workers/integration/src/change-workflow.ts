@@ -35,7 +35,7 @@ import { nothingSelected, requestsOverlap, selectedCriteria } from "./request-po
 import { type PlannerResult, type PlannerStepResult, planChangeResult } from "./root-planner.ts";
 
 /**
- * ChangeWorkflow (AGENTS.md section 21.1): load the Change, run the intake gate (ADR 0025),
+ * ChangeWorkflow: load the Change, run the intake gate (ADR 0025),
  * compile the Work Graph, compare it with the other open requests, persist Tasks, and dispatch the
  * ready ones. When the intake gate or the request comparison asks a question, the Change is
  * `needs_input` and the workflow waits for the answer (`clarification` event, re-checked daily,

@@ -1,4 +1,4 @@
-// The agent command allowlist (AGENTS.md sections 25.2, 30.3, 40.2). `bun run build` and the
+// The agent command allowlist. `bun run build` and the
 // scripts of the workspace package.json are allowed; shell metacharacters and other commands are
 // not. A build in a workspace never leaves its output in the ChangeSet: composition builds it.
 import { beforeEach, describe, expect, it, vi } from "vitest";

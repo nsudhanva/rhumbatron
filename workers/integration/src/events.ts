@@ -52,8 +52,8 @@ export async function changeEvent<T>(
 }
 
 /**
- * Change events go to the ResourceShardDO that owns `change:<id>`, which keeps ProjectRootDO cold
- * (AGENTS.md section 13.1). The shard outbox publishes to K2 and dedupes on event ID.
+ * Change events go to the ResourceShardDO that owns `change:<id>`, which keeps ProjectRootDO cold.
+ * The shard outbox publishes to K2 and dedupes on event ID.
  */
 export async function appendChangeEvents(
   shards: DurableObjectNamespace,

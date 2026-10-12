@@ -5,7 +5,7 @@ import { ThresholdMeter } from "../ui/meter";
 import { formatCost } from "./cost-format";
 
 /**
- * Project budget meter (DESIGN.md 9.1; docs/operations/costs.md, "Budget scopes"): this
+ * Project budget meter (docs/operations/costs.md, "Budget scopes"): this
  * month's model spend of the Project against its monthly budget, the limit as a 2px ink marker.
  * At the limit, model work of the Project stops until an owner or admin raises it in Settings.
  */

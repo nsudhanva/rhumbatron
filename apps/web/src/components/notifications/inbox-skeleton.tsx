@@ -1,5 +1,5 @@
 /**
- * Inbox loading state (DESIGN.md 8.5 skeleton): the real header and rows under real rules, with
+ * Inbox loading state (skeleton): the real header and rows under real rules, with
  * recessed lines at the text heights they replace. Shown while the inbox chunk or list loads.
  */
 export function InboxSkeleton({ rows = 3 }: { rows?: number }) {

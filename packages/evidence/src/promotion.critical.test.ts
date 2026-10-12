@@ -1,5 +1,5 @@
 // Release safety at the promotion boundary: only verified Evidence and a recorded human decision can
-// let a Candidate reach ProjectRootDO (AGENTS.md sections 34.4.1, 36, 40.2).
+// let a Candidate reach ProjectRootDO.
 import type { EvidenceRecord, ProjectPolicy, VerificationPlan } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
 import { buildVerificationPlan } from "./plan.ts";

@@ -2,7 +2,7 @@ import { cn } from "@cloudflare/kumo";
 import type { ReactNode } from "react";
 
 /**
- * Empty state (DESIGN.md 8.5): flush left inside its section, one sentence on what would
+ * Empty state: flush left inside its section, one sentence on what would
  * appear, one on how to make it appear, and an optional secondary action. No illustration.
  *
  *   <EmptyState

@@ -30,7 +30,7 @@ import {
 import { migrateOutbox, OutboxPublisher } from "./outbox.ts";
 
 /**
- * Owner of hot claim and lease state for one shard of semantic resources (AGENTS.md section 13.2).
+ * Owner of hot claim and lease state for one shard of semantic resources.
  * One instance per shard key: `env.RESOURCE_SHARD.idFromName(shardKey(projectId, resource))`.
  * Leases are renewable and always expire. There is no permanent lock.
  */
@@ -314,7 +314,7 @@ export class ResourceShardDO extends DurableObject<Env> {
   }
 
   /**
-   * Records a typed Intent (section 26.1) and writes `intent.declared` in the same transaction.
+   * Records a typed Intent and writes `intent.declared` in the same transaction.
    * Idempotent on `intentId`: a retry returns `duplicate`; a reused ID with other content is
    * rejected. Throws when the input is invalid.
    */
@@ -362,7 +362,7 @@ export class ResourceShardDO extends DurableObject<Env> {
     return this.intents.list(resource);
   }
 
-  /** Records a typed Challenge (section 26.2) and writes `challenge.created`. Idempotent on ID. */
+  /** Records a typed Challenge and writes `challenge.created`. Idempotent on ID. */
   async createChallenge(input: CreateChallengeInput): Promise<CreateChallengeResult> {
     const now = Date.now();
     const result = this.ctx.storage.transactionSync(() => this.intents.createChallenge(input, now));
@@ -389,7 +389,7 @@ export class ResourceShardDO extends DurableObject<Env> {
   }
 
   /**
-   * Deletes all storage and the alarm of one shard of an archived Project (AGENTS.md section 43).
+   * Deletes all storage and the alarm of one shard of an archived Project.
    * Claims, Intents, Challenges, and the outbox go. Unpublished events are dropped: the Project
    * is gone, so nobody can read them. Throws when the shard holds a Claim of another Project. Safe to repeat. Empty tables
    * keep later calls on this instance working until it is evicted.

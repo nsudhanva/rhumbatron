@@ -1,11 +1,11 @@
 import { renderNow } from "../../lib/render-time";
 /**
- * Shared DAG view model for the Agents and Events graphs (AGENTS.md 38.6, 38.7; DESIGN.md 9.13).
+ * Shared DAG view model for the Agents and Events graphs.
  * Pure functions: node and edge specs in, highlight sets and filter matches out. Layout lives with
  * each graph, because each knows its own lanes.
  */
 
-/** Node border (DESIGN.md 9.13): accent = new or needs attention, ink = in scope, dashed, quiet. */
+/** Node border: accent = new or needs attention, ink = in scope, dashed, quiet. */
 export type DagBorder = "accent" | "ink" | "dashed" | "divider";
 
 export type DagNodeSpec = {
@@ -16,7 +16,7 @@ export type DagNodeSpec = {
   title: string;
   /** Mono meta line under the title. */
   meta?: string;
-  /** Domain status for a status pill (status is a word, DESIGN.md 1.8). */
+  /** Domain status for a status pill (status is a word, not only a color). */
   status?: string | undefined;
   border: DagBorder;
   /** Title in mono, for machine-written titles such as event types. */
@@ -114,7 +114,7 @@ export function inTimeRange(iso: string | null | undefined, range: TimeRange, no
   return Number.isFinite(at) && now - at <= ms;
 }
 
-/** Event type groups for the filter, by the head of the event type (AGENTS.md 17.2). */
+/** Event type groups for the filter, by the head of the event type. */
 export const EVENT_GROUPS = {
   planning: { label: "Planning", heads: ["project", "change", "task"] },
   agents: { label: "Agents", heads: ["agent", "model", "claim", "intent", "changeset"] },

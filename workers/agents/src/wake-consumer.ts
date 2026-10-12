@@ -10,7 +10,7 @@ import type { AgentDO } from "./agent-do.ts";
 import { admitAgent } from "./limits.ts";
 
 /**
- * Consumer for `rhumbatron-agent-wakeups` (AGENTS.md sections 20 and 31.3). It checks that the
+ * Consumer for `rhumbatron-agent-wakeups`. It checks that the
  * wake is still relevant, assigns the Task, and records `task.assigned` and `agent.woken`.
  * A ready Task then starts a run on its AgentDO (Pi, Phase 6). Other wake reasons are recorded only
  * until conflict handling (Phase 9) gives agents a resume path.
@@ -68,7 +68,7 @@ export async function handleWake(env: Env, body: unknown): Promise<Outcome> {
   }
 
   if (wake.reason === "task_ready") {
-    // Section 44: at most 8 reasoning agents per Change. Count and assignment are one statement.
+    // At most 8 reasoning agents per Change. Count and assignment are one statement.
     const admission = await admitAgent(env.DB, {
       taskId,
       changeId: task.change_id,
@@ -78,7 +78,7 @@ export async function handleWake(env: Env, body: unknown): Promise<Outcome> {
     // A concurrent delivery of the same command won the race.
     if (admission.kind === "not_ready") return "duplicate";
     if (admission.kind === "deferred") {
-      // The Task stays ready and names the limit; a later dispatch wakes it (section 61).
+      // The Task stays ready and names the limit; a later dispatch wakes it.
       env.METRICS.writeDataPoint({
         blobs: ["limit_reached", "max_active_agents_per_change", taskId],
         doubles: [admission.active],

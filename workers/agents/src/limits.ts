@@ -13,7 +13,7 @@ import {
 import type { BudgetLimit, ModelTier } from "@rhumbatron/protocol";
 
 /**
- * Section 44 limits enforced where work is admitted (AGENTS.md sections 44 and 61). Each check is
+ * Change cost and concurrency limits, enforced where work is admitted. Each check is
  * deterministic and atomic in D1: the count and the admission are one conditional statement, so
  * two concurrent admissions cannot both take the last slot. A refused admission starts no new
  * expensive work, keeps all state, and records the exact limit on the Task or Change
@@ -25,11 +25,11 @@ import type { BudgetLimit, ModelTier } from "@rhumbatron/protocol";
  */
 
 export const CHANGE_LIMITS = {
-  /** Section 44: max active reasoning agents per Change. Tasks `assigned` or `running`. */
+  /** Max active reasoning agents per Change. Tasks `assigned` or `running`. */
   maxActiveAgentsPerChange: 8,
-  /** Section 44: max active coding Sandboxes per Change. Open run workspaces. */
+  /** Max active coding Sandboxes per Change. Open run workspaces. */
   maxActiveSandboxesPerChange: 4,
-  /** Section 44: max model attempts per Task at one tier before re-plan. */
+  /** Max model attempts per Task at one tier. At the limit the Task stops. */
   maxAttemptsPerTier: 2,
 } as const;
 
@@ -67,10 +67,10 @@ export async function takeQuota(
 const TRANSPORT = new Set<FailureKind>(["rate_limited", "timeout", "transient"]);
 
 const agentLimitReason = (active: number) =>
-  `Waiting: ${active} reasoning agents are active in this Change (limit ${CHANGE_LIMITS.maxActiveAgentsPerChange} per Change, AGENTS.md section 44). The Task starts when one finishes.`;
+  `Waiting: ${active} reasoning agents are active in this Change (limit ${CHANGE_LIMITS.maxActiveAgentsPerChange} per Change). The Task starts when one finishes.`;
 
 export const sandboxLimitReason = () =>
-  `Limit reached: ${CHANGE_LIMITS.maxActiveSandboxesPerChange} coding Sandboxes are already open in this Change (limit ${CHANGE_LIMITS.maxActiveSandboxesPerChange} per Change, AGENTS.md section 44). No Sandbox was opened.`;
+  `Limit reached: ${CHANGE_LIMITS.maxActiveSandboxesPerChange} coding Sandboxes are already open in this Change (limit ${CHANGE_LIMITS.maxActiveSandboxesPerChange} per Change). No Sandbox was opened.`;
 
 export type AgentAdmission =
   | { kind: "admitted" }
@@ -177,11 +177,11 @@ export async function noteSandboxRefused(db: Db, taskId: string, now: string) {
 }
 
 /**
- * Applies the section 44 attempt limit to the escalation decision (section 23.3). The next attempt
+ * Applies the per-tier attempt limit to the escalation decision. The next attempt
  * at a tier that already had `maxAttemptsPerTier` attempts is refused: it escalates when an
  * intelligence failure happened at that tier, the latest failure is not a transport failure, and a
  * stronger tier exists; otherwise it stops for re-plan. A network timeout or other transport
- * failure never escalates (section 42.8). Sonnet is the top tier while Opus is off (ADR 0021).
+ * failure never escalates. Sonnet is the top tier while Opus is off (ADR 0021).
  */
 export function limitAttempts(
   step: NextStep,
@@ -211,7 +211,7 @@ export type TaskRunHistory = {
 };
 
 /**
- * The next attempt of a Task from its whole run history (sections 23.3, 42.8, 44): the escalation
+ * The next attempt of a Task from its whole run history: the escalation
  * rules of the model router over every failure in the current attempt window, then the attempt
  * limit. A person's budget raise after a repeated-failure stop opens a new window (`resetAt`, ADR
  * 0021). Null before the first run. Both the run end (which emits `agent.escalated`) and the next
@@ -252,7 +252,7 @@ const SCOPED_STOPS: Readonly<Record<string, BudgetLimit>> = {
 };
 
 /**
- * A terminal step reason that is a section 44 budget stop: the Task is `blocked` and the Change
+ * A terminal step reason that is a budget stop: the Task is `blocked` and the Change
  * `budget_blocked`, both naming the exact limit. Null for an ordinary failure.
  */
 export function limitStop(

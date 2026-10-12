@@ -1,4 +1,4 @@
-// Semantic conflict first pass (AGENTS.md section 32): a wrong answer either lets two incompatible
+// Semantic conflict first pass: a wrong answer either lets two incompatible
 // designs merge silently or forks Candidates for overlaps that only add.
 import type { Intent } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";

@@ -1,4 +1,4 @@
-// Stacked workspaces (AGENTS.md sections 29.2, 33, 42.5). A Task starts from its dependencies'
+// Stacked workspaces. A Task starts from its dependencies'
 // published work in a fixed order; conflicting dependencies fail the open with nothing left behind
 // (no fork, no Sandbox reservation, no slot); a restore after Sandbox loss repeats the same merges.
 import { readdirSync, readFileSync } from "node:fs";

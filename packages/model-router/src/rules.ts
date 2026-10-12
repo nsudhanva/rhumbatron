@@ -1,6 +1,6 @@
 import type { ModelTier, RiskTier, RouteDecision, RouteRequest } from "@rhumbatron/protocol";
 
-/** Deterministic routing (AGENTS.md section 23.2). Runs before any Clef decision. */
+/** Deterministic routing. Runs before any Clef decision. */
 
 const TIER_ORDER: readonly ModelTier[] = ["haiku", "sonnet", "opus"];
 const RISK_ORDER: readonly RiskTier[] = ["low", "medium", "high", "critical"];
@@ -9,10 +9,10 @@ const RISK_ORDER: readonly RiskTier[] = ["low", "medium", "high", "critical"];
 const MECHANICAL_KINDS = new Set(["summarize", "classify", "compact", "transform"]);
 const PLANNING_KINDS = new Set(["plan", "architecture", "arbitration"]);
 
-/** Section 24.2 output caps. */
+/** Per-call output token caps by tier. */
 const MAX_OUTPUT_TOKENS: Record<ModelTier, number> = { haiku: 4000, sonnet: 8000, opus: 8000 };
 
-/** Section 23.3 escalation triggers, by tier. */
+/** Escalation triggers, by tier. */
 const ESCALATE_ON: Record<ModelTier, string[]> = {
   haiku: [
     "two_failures",

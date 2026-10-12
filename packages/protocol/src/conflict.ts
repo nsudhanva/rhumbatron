@@ -4,7 +4,7 @@ import { Actor } from "./event.ts";
 import { RelativeResource } from "./work-graph.ts";
 
 /**
- * Typed coordination state (AGENTS.md sections 26 and 32). Agents coordinate through these
+ * Typed coordination state. Agents coordinate through these
  * records, never through free-form chat. Semantic resources are plan-relative
  * (`wishlist:membership`) or absolute (`project:acme:wishlist:membership`).
  */
@@ -43,7 +43,7 @@ export const DataChange = z.object({
 });
 export type DataChange = z.infer<typeof DataChange>;
 
-/** What an agent plans to change (section 26.1). */
+/** What an agent plans to change. */
 export const Intent = z.object({
   intentId: Id,
   taskId: Id,
@@ -76,7 +76,7 @@ export const ChallengeKind = z.enum([
 ]);
 export type ChallengeKind = z.infer<typeof ChallengeKind>;
 
-/** A typed objection to an Intent or ChangeSet (section 26.2). */
+/** A typed objection to an Intent or ChangeSet. */
 export const Challenge = z.object({
   challengeId: Id,
   sourceAgentId: Id,
@@ -98,7 +98,7 @@ export const ChallengeResolution = z.object({
 });
 export type ChallengeResolution = z.infer<typeof ChallengeResolution>;
 
-/** Conflict lifecycle (section 32.2). */
+/** Conflict lifecycle. */
 export const ConflictState = z.enum([
   "none",
   "suspected",
@@ -136,7 +136,7 @@ export type ConflictSignal = z.infer<typeof ConflictSignal>;
 export const ConflictAction = z.enum(["dismiss", "review", "fork_candidates"]);
 export type ConflictAction = z.infer<typeof ConflictAction>;
 
-/** Deterministic first-pass result for one pair of Intents (section 32.3). */
+/** Deterministic first-pass result for one pair of Intents. */
 export const ConflictReport = z.object({
   /** Sorted pair: `intentIds[0] < intentIds[1]`. */
   intentIds: z.tuple([Id, Id]),
@@ -149,9 +149,9 @@ export const ConflictReport = z.object({
 export type ConflictReport = z.infer<typeof ConflictReport>;
 
 /**
- * Closed verdict vocabulary of a model conflict review (AGENTS.md sections 22.4, 22.5, 32.3,
- * P9-05, P9-06). Application code rejects any other value. A verdict is a hypothesis: code applies
- * it only when its citations are valid (section 34.4.2) and the deterministic rules allow it.
+ * Closed verdict vocabulary of a model conflict review (P9-05,
+ * P9-06). Application code rejects any other value. A verdict is a hypothesis: code applies
+ * it only when its citations are valid and the deterministic rules allow it.
  */
 export const ConflictReviewVerdict = z.enum([
   "benign_overlap",
@@ -171,12 +171,12 @@ export const ConflictReviewOutput = z.object({
 });
 export type ConflictReviewOutput = z.infer<typeof ConflictReviewOutput>;
 
-/** Decision Receipt of one model conflict review (section 23.5). No private reasoning. */
+/** Decision Receipt of one model conflict review. No private reasoning. */
 export const ConflictReviewReceipt = z.object({
   decisionType: z.literal("CONFLICT_REVIEW"),
   conflictId: Id,
   changeId: Id,
-  /** The tier was chosen by deterministic rules: Sonnet first, Opus on escalation (section 22.4). */
+  /** The tier was chosen by deterministic rules: Sonnet first, Opus on escalation. */
   decidedBy: z.literal("rules"),
   selectedTier: z.enum(["sonnet", "opus"]),
   provider: z.string(),

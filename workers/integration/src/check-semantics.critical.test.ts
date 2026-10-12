@@ -1,6 +1,6 @@
 // Release safety: security and browser Evidence pass only when the guarded behavior was observed.
 // A run that matched no authorization test, or a browser run that could not reach the app, is a
-// gap, never a pass (AGENTS.md sections 34.4.1, 35).
+// gap, never a pass.
 import { buildVerificationPlan, gateRequiredChecks } from "@rhumbatron/evidence";
 import type { EvidenceRecord } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";

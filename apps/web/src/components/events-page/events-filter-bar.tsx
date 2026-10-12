@@ -11,7 +11,7 @@ import { EventGroupChips } from "./event-filters";
 const TYPING_MS = 250;
 
 /**
- * Filter bar of the Events page, shared by the List and Graph views (DESIGN.md 8.2): search text
+ * Filter bar of the Events page, shared by the List and Graph views: search text
  * over event type, summary and ids; person; Change by short title; Task or agent; time range; and
  * the event type group as chips. The filter lives in the URL. The bar shows how many fields are
  * set and clears them all at once.

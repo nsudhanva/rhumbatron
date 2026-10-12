@@ -9,7 +9,7 @@ import { Tag } from "../ui/tag";
 import { type AreaView, describeOrigin, type GraphView, STATE_LABEL, type Zoom } from "./model";
 
 /**
- * Area inspector beside the Product Graph (DESIGN.md 9.13, 10): repeats the selected area as
+ * Area inspector beside the Product Graph: repeats the selected area as
  * text. Rows under 1px rules; machine values in mono; status as a word.
  */
 

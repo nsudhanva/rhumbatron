@@ -1,4 +1,4 @@
-// Section 21.1 step 7: only a completed Work Graph triggers Candidate composition, and the command
+// Only a completed Work Graph triggers Candidate composition, and the command
 // ID is stable per event, so a redelivered event cannot queue a second logical composition.
 import type { EventEnvelope } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";

@@ -75,7 +75,7 @@ export const Route = createFileRoute("/candidates/$candidateId")({
   component: CandidatePage,
 });
 
-/** Verification runs for minutes; poll while it is active, then stop (AGENTS.md section 39). */
+/** Verification runs for minutes; poll while it is active, then stop. */
 const POLL_MS = 10_000;
 
 function CandidatePage() {
@@ -322,7 +322,7 @@ function CandidateView() {
   );
 }
 
-/** Verdict banner (DESIGN.md 8.5): the gate result in words, one banner per page. */
+/** Verdict banner: the gate result in words, one banner per page. */
 function Verdict({
   candidate,
   label,

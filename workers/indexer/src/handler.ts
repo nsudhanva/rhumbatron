@@ -10,7 +10,7 @@ import type { SourceTree } from "./source.ts";
 import { planVectors, vectorMetadata } from "./vectors.ts";
 
 /**
- * Index build and purge (AGENTS.md section 12.7). Commands arrive on `rhumbatron-indexing`:
+ * Index build and purge. Commands arrive on `rhumbatron-indexing`:
  *
  * - `index.build` {treeSha}: from the Causal Router on `artifact.promoted` (provisioned source)
  *   and `canonical.advanced` (promotion). Builds only the current canonical tree, once.
@@ -21,7 +21,7 @@ import { planVectors, vectorMetadata } from "./vectors.ts";
  * the index `ready` with `vector_status = 'error'`; the next tree retries the vectors, because the
  * manifest only moves after a successful write.
  *
- * Free-limit guards (rule 50): at most 500 files per build, at most VECTOR_ACCOUNT_CAP vectors in
+ * Free-limit guards: at most 500 files per build, at most VECTOR_ACCOUNT_CAP vectors in
  * the account (Vectorize free: 5M stored dimensions = 13,020 vectors of 384), and at most
  * EMBED_DAILY_CAP embedded texts per UTC day (Workers AI free: 10,000 Neurons per day).
  */
@@ -33,7 +33,7 @@ const EMBED_DAILY_CAP = 2_000;
 /** Workers AI text-embedding batch, and the Vectorize write batch. */
 const BATCH = 100;
 const OWNER_ROW_LIMIT = 500;
-/** Ready indexes kept per Project; older trees' objects are deleted (dev retention, section 43). */
+/** Ready indexes kept per Project; older trees' objects are deleted (dev retention). */
 const KEEP_INDEXES = 3;
 
 export class RetryLater extends Error {}
@@ -374,7 +374,7 @@ export async function purgeIndex(
   if (keys.length > 0) await deps.bucket.delete(keys);
   // The manifest goes last, so a failed purge still knows which vectors to delete.
   await deps.bucket.delete([manifestKey]);
-  // The rows go too (AGENTS.md section 43): an archived Project keeps no index record. Their
+  // The rows go too: an archived Project keeps no index record. Their
   // absence also tells the daily maintenance that this purge is finished.
   await deps.db.batch([
     deps.db.prepare("DELETE FROM project_indexes WHERE project_id = ?").bind(projectId),

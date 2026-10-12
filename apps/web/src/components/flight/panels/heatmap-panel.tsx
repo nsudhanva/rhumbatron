@@ -38,7 +38,7 @@ import {
 } from "./heatmap/heat-model";
 
 /**
- * Codebase heatmap (DESIGN.md 9.5 heat grid). Two layers over one time axis, from the first
+ * Codebase heatmap (heat grid). Two layers over one time axis, from the first
  * recorded fact to the fold instant:
  *
  *   Files      rows = files the Change's Intents expected or its ChangeSets changed, grouped by
@@ -51,14 +51,14 @@ import {
  *
  * Each layer is ONE tab stop: a grid (use-roving-focus.ts) whose row headers and touched cells are
  * reached with the arrow keys; Enter selects. A pointer picks the nearest cell, so the 10px
- * squares are never a pointer target on their own (DESIGN.md 5.2, 9.5).
+ * squares are never a pointer target on their own.
  */
 
 type Layer = "files" | "resources";
 
 const MIN_BUCKETS = 24;
 const MAX_BUCKETS = 48;
-/** Fill per intensity step (1..5 touches in a bucket): neutral-500 up the ramp to ink (9.5). */
+/** Fill per intensity step (1..5 touches in a bucket): neutral-500 up the ramp to ink. */
 const FILL = ["", "bg-tone-500", "bg-tone-600", "bg-tone-700", "bg-tone-800", "bg-kumo-ink"];
 const OUTLINE = [
   "",
@@ -133,7 +133,7 @@ function LeftTruncated({ text, className }: { text: string; className?: string }
 }
 LeftTruncated.displayName = "LeftTruncated";
 
-/** Faint empty squares behind the cells (DESIGN.md 9.5 "faint = none"). Static per size. */
+/** Faint empty squares behind the cells (faint = none). Static per size. */
 const Track = memo(function Track({ count, pitch }: { count: number; pitch: number }) {
   return (
     <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center">
@@ -235,7 +235,7 @@ function HeatCell({
 }
 HeatCell.displayName = "HeatCell";
 
-/** Row header of the grid: the file or resource. Selected and hovered as RefButton (DESIGN 10). */
+/** Row header of the grid: the file or resource. Selected and hovered as RefButton. */
 function HeatHeader({
   item,
   roving,

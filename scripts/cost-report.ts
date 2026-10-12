@@ -1,5 +1,6 @@
 /**
- * Read-only cost and leftover-resource report for Rhumbatron (AGENTS.md sections 7 and 44, rule 50).
+ * Read-only cost and leftover-resource report for Rhumbatron. It checks usage against the
+ * Cloudflare free limits and the budget caps.
  * Usage: bun run cost:report [--alerts-only]
  * Uses the read-only monitor token (Keychain `rhumbatron-cloudflare-monitor-token`). Never writes.
  * Exit code 1 when any line is ALERT, so a loop can watch it.

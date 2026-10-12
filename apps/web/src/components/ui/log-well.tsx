@@ -1,7 +1,7 @@
 import { cn } from "@cloudflare/kumo";
 import type { ReactNode } from "react";
 
-/** Line roles (DESIGN.md 9.7). Color is on the text only, never a line fill. */
+/** Line roles. Color is on the text only, never a line fill. */
 export type LogLineRole = "cmd" | "info" | "pass" | "warn" | "fail";
 export type LogLine = { text: string; role?: LogLineRole };
 
@@ -14,7 +14,7 @@ const ROLE_TEXT: Record<LogLineRole, string> = {
 };
 
 /**
- * Log viewer (DESIGN.md 9.7): elevated well with a 2px ink rule on top, a toolbar row
+ * Log viewer: elevated well with a 2px ink rule on top, a toolbar row
  * (filename left, actions right), zero-padded line numbers in a 34px gutter, mono 11.5px/1.7,
  * horizontal scroll, about 300px max height. Pass/fail summaries start with a word (`PASS`,
  * `FAIL`, `SKIPPED`) as well as the color.
@@ -72,7 +72,7 @@ export function LogWell({
 LogWell.displayName = "LogWell";
 
 /**
- * Raw payload or receipt (DESIGN.md 9.15): pretty-printed JSON on `base` (inside an elevated
+ * Raw payload or receipt: pretty-printed JSON on `base` (inside an elevated
  * panel), mono 11px/1.5, about 260px max height, and one subtle caption line saying what the
  * payload is and what it deliberately leaves out.
  *

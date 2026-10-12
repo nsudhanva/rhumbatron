@@ -1,16 +1,16 @@
 import type { EventEnvelope } from "@rhumbatron/protocol";
 
 /**
- * Analytics projector (AGENTS.md sections 19 and 41.1, HOM-202). The `analytics-projector` K2
+ * Analytics projector (HOM-202). The `analytics-projector` K2
  * subscription turns lifecycle Events into Workers Analytics Engine data points. Deterministic: a
- * fixed table maps Event types to section 41.1 metric names; every other Event writes nothing.
+ * fixed table maps Event types to Analytics Engine metric names; every other Event writes nothing.
  *
  * Points go to their own dataset (binding EVENT_METRICS, `rhumbatron_event_metrics_<env>`), so they
  * never double-count the points the agents and indexer Workers write at the source (METRICS).
  *
  * Schema of one point:
  *   index1  project ID
- *   blob1   metric name (section 41.1), blob2 result, blob3 model tier or "", blob4 Change ID or "",
+ *   blob1   metric name, blob2 result, blob3 model tier or "", blob4 Change ID or "",
  *   blob5   Task ID or "", blob6 Event type, blob7 actor kind
  *   double1 1 (count), double2 Canonical Generation
  *
@@ -29,7 +29,7 @@ const text = (payload: unknown, key: string): string | undefined => {
   return typeof value === "string" ? value : undefined;
 };
 
-/** Section 41.1 metric for one Event, or null when the Event is not a measured fact. */
+/** Analytics Engine metric for one Event, or null when the Event is not a measured fact. */
 export function metricFor(event: EventEnvelope): Mapped | null {
   const p = event.payload;
   switch (event.eventType) {

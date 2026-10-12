@@ -34,7 +34,7 @@ for (const mode of ["light", "dark"] as const) {
         const text = (await page.locator("#content").innerText()).trim();
         expect(text.length, "page has content").toBeGreaterThan(80);
 
-        // The ground follows the mode (DESIGN.md 3): light #f3f2f2, dark #141312.
+        // The ground follows the mode : light #f3f2f2, dark #141312.
         const ground = await page.evaluate(() => {
           const el = document.getElementById("content") ?? document.body;
           let node: HTMLElement | null = el;

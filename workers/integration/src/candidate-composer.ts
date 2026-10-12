@@ -14,12 +14,12 @@ import {
 import { nothingSelected } from "./request-policy.ts";
 
 /**
- * Deterministic Candidate composition inputs (AGENTS.md sections 33, 34, 53). No I/O here: the
+ * Deterministic Candidate composition inputs. No I/O here: the
  * workflow loads rows, these functions decide order, verification scope, and check outcomes.
  */
 
 /**
- * The policy of a Project without a stored `project_policies` row (section 53). It protects no
+ * The policy of a Project without a stored `project_policies` row. It protects no
  * resource: protected resources are Project-specific and come only from the stored row.
  */
 export const DEFAULT_POLICY: ProjectPolicy = {
@@ -165,7 +165,7 @@ export function acceptanceCriteriaToJudge(criteria: readonly string[]): string[]
   ];
 }
 
-/** Verification scope from the Change and its ChangeSets (section 34.1: risk-based, not all). */
+/** Verification scope from the Change and its ChangeSets (risk-based, not all). */
 export function verificationTouches(facts: ChangeFacts) {
   const sentences = facts.goal
     .split(/(?<=[.!?])\s+/)
@@ -223,7 +223,7 @@ function tail(output: string, lines = 4, chars = 400) {
 }
 
 /**
- * Turns one Sandbox command result into an Evidence outcome (section 34.4.1). A timeout, a
+ * Turns one Sandbox command result into an Evidence outcome. A timeout, a
  * Sandbox error, or a run with no matching test is never a pass.
  */
 export function classifyCheck(check: VerificationCheck, run: CheckRun): CheckOutcome {

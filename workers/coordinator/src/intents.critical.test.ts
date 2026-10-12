@@ -1,5 +1,5 @@
 // Intents and Challenges must be idempotent on their IDs, and each state change must write exactly
-// one outbox event in the same transaction (AGENTS.md sections 17.4, 18, and 60).
+// one outbox event in the same transaction.
 // Runs the real IntentStore against SQLite (node:sqlite) behind a minimal SqlStorage adapter.
 import { DatabaseSync } from "node:sqlite";
 import type { Intent } from "@rhumbatron/protocol";

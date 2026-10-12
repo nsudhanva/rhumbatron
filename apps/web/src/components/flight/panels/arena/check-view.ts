@@ -13,8 +13,8 @@ import {
 /**
  * Pure read helpers shared by the arena, the preview wall and the Candidate inspectors. Every
  * value comes from the folded FlightState (or the recorded Workspace for ChangeSet file stats);
- * nothing is estimated. A check without a supported pass is a gap, never green (AGENTS.md
- * 34.4.1), and model confidence is never shown (38.4).
+ * nothing is estimated. A check without a supported pass is a gap, never green,
+ * and model confidence is never shown.
  */
 
 const SETTLED = new Set(["verified", "rejected", "stale", "promoted"]);

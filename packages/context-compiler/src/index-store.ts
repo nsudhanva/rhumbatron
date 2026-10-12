@@ -1,5 +1,5 @@
 /**
- * Stored indexes of one canonical tree (AGENTS.md sections 12.7, 27.1, 28; P7-02 to P7-05).
+ * Stored indexes of one canonical tree (P7-02 to P7-05).
  * The indexer Worker writes them; the Context Compiler and the Product Graph API read them.
  *
  * R2 layout, one prefix per tree (content-addressed by the Git tree SHA, so a tree is built once):
@@ -100,7 +100,7 @@ export type ProductGraphStore = {
   edges: { from: string; to: string; imports: { file: string; detail: string }[] }[];
   /**
    * Semantic resource -> files of the promoted ChangeSets that declared it and still exist in
-   * this tree. Exact ownership for the Context Compiler (section 27.3 step 3).
+   * this tree. Exact ownership for the Context Compiler.
    */
   resourceOwners: Record<string, string[]>;
   /** Source files that are runtime wiring, not a product area. */

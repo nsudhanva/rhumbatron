@@ -32,7 +32,7 @@ function harness(policyJson: string | null, kvBroken = false) {
   return { env, kv, d1Reads: () => d1Reads };
 }
 
-describe("Project policy snapshot (section 53)", () => {
+describe("Project policy snapshot", () => {
   it("uses the default policy without a row and serves the cached copy without D1", async () => {
     const h = harness(null);
     expect(await loadProjectPolicy(h.env, "proj_a")).toEqual(DEFAULT_POLICY);

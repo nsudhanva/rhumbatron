@@ -12,7 +12,7 @@ import {
 import { readCanonicalTree } from "./source.ts";
 
 /**
- * rhumbatron-indexer (AGENTS.md section 12.7): consumes `rhumbatron-indexing`. Exact symbol and
+ * rhumbatron-indexer: consumes `rhumbatron-indexing`. Exact symbol and
  * dependency indexes, the Product Graph store, and Vectorize file summaries per canonical tree.
  * Queue consumer settings live in Terraform (`cloudflare_queue_consumer.indexing`): max_retries 3,
  * no dead-letter Queue. The last failed delivery is recorded in D1 `project_indexes` instead.

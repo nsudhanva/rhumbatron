@@ -7,10 +7,10 @@ import { EmptyState } from "../ui/empty-state";
 import { SectionError, SkeletonBar } from "./feedback";
 
 /**
- * Event stream (DESIGN.md 9.9): sequence · time · type · actor · detail · version, newest on top.
+ * Event stream: sequence · time · type · actor · detail · version, newest on top.
  * New rows never move what the user is reading: while paused, or while the list is scrolled
  * away from the top, the shown rows stay fixed and a "N new" count waits. The region is
- * `aria-live="polite"` and goes silent while paused (section 14).
+ * `aria-live="polite"` and goes silent while paused.
  */
 
 /** Failure in danger · completion in success · state-changing commits in brand (accent). */

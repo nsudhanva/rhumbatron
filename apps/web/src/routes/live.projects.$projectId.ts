@@ -5,7 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 /**
  * Same-origin live socket: `GET /live/projects/:projectId` with `Upgrade: websocket`.
  * The browser sends only its Clerk session cookie. This Worker turns it into a session token and
- * calls the API with `Authorization: Bearer`, so no token is ever in a URL (AGENTS.md 12.1, 39).
+ * calls the API with `Authorization: Bearer`, so no token is ever in a URL.
  * The API checks access and hands the upgrade to ProjectViewDO; the socket is passed through.
  */
 

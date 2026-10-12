@@ -7,7 +7,7 @@ import type {
 } from "@rhumbatron/protocol";
 
 /**
- * Risk-based Verification Plan (AGENTS.md sections 34.1, 34.2, 53). Commands target the Acme Shop
+ * Risk-based Verification Plan. Commands target the Acme Shop
  * toolchain (`fixtures/acme-shop`): they run inside the Candidate Sandbox at the repository root.
  */
 
@@ -27,7 +27,7 @@ export type BuildVerificationPlanInput = {
   riskTier: RiskTier;
   policy: Pick<ProjectPolicy, "version" | "humanGateRiskTiers" | "requiredChecksByRisk">;
   touches: VerificationTouches;
-  /** Wishlist API p95 budget in the demo benchmark (section 54). */
+  /** Wishlist API p95 budget in the demo benchmark. */
   p95BudgetMs?: number;
   /** APPS is available and the Project has an app, including its pending first deployment. */
   liveAppEnabled?: boolean;
@@ -121,7 +121,7 @@ function protectsAppBehavior(invariant: string): boolean {
 
 /**
  * Invariants a unit test cannot prove: delivery outside the app, wall-clock timing, uptime. These
- * stay visible required gaps (AGENTS.md section 34.4.1). Latency maps to the performance check.
+ * stay visible required gaps. Latency maps to the performance check.
  */
 const OUTSIDE_TESTS =
   /\b(e-?mails?|sms|text messages?|push notifications?|notifications? (are|is) (sent|delivered)|within \d+\s*(ms|milliseconds?|seconds?|minutes?|hours?)|uptime|availability|sla)\b/i;
@@ -292,7 +292,7 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
     });
   }
 
-  // Browser Run is metered (section 7.3): only a high-risk Change that touches pages gets it.
+  // Browser Run is metered: only a high-risk Change that touches pages gets it.
   if (touches.ui && atLeast(riskTier, "high")) {
     checks.push({
       checkId: "browser",
@@ -300,7 +300,7 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
       reason: "High-risk user-facing change: run the end-to-end flow in Browser Run.",
       procedure:
         "Start the composed app in the Sandbox (bun run dev) and open it in one Browser Run " +
-        "session. With Wishlist UI, run the section 35 flow: owner creates and shares, " +
+        "session. With Wishlist UI, run this flow: owner creates and shares, " +
         "collaborator adds and removes, owner revokes, a later collaborator write is denied. " +
         "Otherwise open the shop, add to cart, and verify the total. Every step must pass.",
       // One session of at most 55 s plus screenshot upload; Sandbox restore is not counted.

@@ -2,7 +2,7 @@ import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { closeWorkspace, openWorkspace, runCommand, type WorkspaceRef } from "./workspace.ts";
 
 /**
- * Integration smoke check "Sandbox executes Bun" (AGENTS.md section 49.3), with no model calls:
+ * Integration smoke check "Sandbox executes Bun", with no model calls:
  * fork the canonical repo, check it out in the Project Sandbox, run the fixture tests, then close
  * the workspace and delete the fork so nothing is left behind.
  */

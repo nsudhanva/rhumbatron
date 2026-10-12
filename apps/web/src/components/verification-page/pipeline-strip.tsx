@@ -12,7 +12,7 @@ export type StageCount = {
 };
 
 /**
- * Pipeline / stage strip (DESIGN.md 9.4): equal columns under a 2px ink rule with 1px rules
+ * Pipeline / stage strip: equal columns under a 2px ink rule with 1px rules
  * between them. Each column shows `01 · Name`, a display number, one line of description and a
  * 6px bar whose width is the share of the first stage. The whole column is a toggle that filters
  * the Candidate table to that stage. No column uses accent: on this page red means a failure.

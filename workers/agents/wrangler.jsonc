@@ -18,9 +18,9 @@
     "AI_GATEWAY_ID": "rhumbatron-models-prod",
     "AGENT_FILES_IN_WORKER": "false"
   },
-  // Workers AI: Clef-flash routing decisions only, capped per day (rule 50).
+  // Workers AI: Clef-flash routing decisions only, capped per day.
   "ai": { "binding": "AI" },
-  // Context Packet snapshots: context/<project>/<change>/<task>/<hash>.json (AGENTS.md 27.5).
+  // Context Packet snapshots: context/<project>/<change>/<task>/<hash>.json.
   // Read-only canonical source for agents (ADR 0010).
   "artifacts": [{ "binding": "ARTIFACTS", "namespace": "rhumbatron-projects-local" }],
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
@@ -34,7 +34,7 @@
   ],
   "durable_objects": {
     "bindings": [
-      // One AgentDO per logical agent identity (AGENTS.md section 13.4).
+      // One AgentDO per logical agent identity.
       { "name": "AGENT", "class_name": "AgentDO" },
       // One Sandbox container per Project, hosted by the Sandbox Worker (ADR 0012).
       { "name": "SANDBOX", "class_name": "Sandbox", "script_name": "rhumbatron-sandbox" },
@@ -50,7 +50,7 @@
       }
     ]
   },
-  // AGENTS.md section 20: one consumer for all agent wakeups, never one Queue per Agent.
+  // One consumer for all agent wakeups, never one Queue per Agent.
   "queues": {
     "consumers": [
       {

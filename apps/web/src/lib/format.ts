@@ -3,7 +3,7 @@ import type { ChangeDetail, TaskDetail, TaskRun } from "./api";
 import { displayTimeZone, renderNow } from "./render-time";
 
 /*
- * Number and time formats (DESIGN.md section 12): thousands separators, a space before units,
+ * Number and time formats: thousands separators, a space before units,
  * money as $0.00, durations as 48s / 3m 12s / 2 h, relative ages as 7m / 2d / just now, the
  * minus sign (U+2212) for negatives, and an em dash for empty or unknown values.
  *

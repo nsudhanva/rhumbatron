@@ -1,5 +1,5 @@
 /**
- * End-to-end check of every public API endpoint (AGENTS.md section 16) against a deployed
+ * End-to-end check of every public API endpoint against a deployed
  * environment, with real requests: status codes, error codes, and response shapes (the Zod
  * schemas of packages/protocol where they exist; a small structural check otherwise).
  * Usage: bun run e2e <prod>

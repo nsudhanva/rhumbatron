@@ -42,7 +42,7 @@ export default class Agents extends WorkerEntrypoint<Env> {
         console.error(
           JSON.stringify({ event: "wake.failed", message: String(error).slice(0, 200) }),
         );
-        // Bounded retries, then the dead-letter Queue (AGENTS.md section 42.7).
+        // Bounded retries, then the dead-letter Queue.
         message.retry({ delaySeconds: 30 });
       }
     }

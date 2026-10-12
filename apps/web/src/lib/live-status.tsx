@@ -2,7 +2,7 @@ import { createContext, type ReactNode, useContext, useState } from "react";
 import type { LiveStatus } from "./live";
 
 /**
- * Shares the state of the page's live socket with the shell status bar (DESIGN.md 9.17).
+ * Shares the state of the page's live socket with the shell status bar.
  * `useProjectLive` reports into this automatically; pages do not call it.
  *
  * `idle` means the current page has no live socket (nothing to show as live or offline).

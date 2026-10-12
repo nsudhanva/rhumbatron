@@ -15,7 +15,7 @@
     // JSON array of K2 stream IDs in index order (EVENTS_00..07). Terraform sets the real IDs.
     "K2_STREAM_IDS": "[]"
   },
-  // Safety-net sweep: one stream per minute (AGENTS.md section 19). Nudges handle the fast path.
+  // Safety-net sweep: one stream per minute. Nudges handle the fast path.
   "triggers": { "crons": ["* * * * *"] },
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "rhumbatron-evidence-local" }],
   "d1_databases": [
@@ -33,7 +33,7 @@
         "class_name": "ProjectViewDO",
         "script_name": "rhumbatron-coordinator"
       },
-      // Dead-letter consumer records `task.failed` through the Change's shard outbox (section 42.7).
+      // Dead-letter consumer records `task.failed` through the Change's shard outbox.
       {
         "name": "RESOURCE_SHARD",
         "class_name": "ResourceShardDO",
@@ -49,7 +49,7 @@
       // `index.build` on a new canonical tree, `index.purge` for archived Projects (indexer).
       { "binding": "INDEXING", "queue": "rhumbatron-indexing-local" }
     ],
-    // Poison commands (AGENTS.md section 42.7). This consumer has no dead-letter Queue of its own:
+    // Poison commands. This consumer has no dead-letter Queue of its own:
     // a storage failure retries a bounded number of times, then the message is dropped and logged.
     "consumers": [
       {
@@ -59,9 +59,9 @@
       }
     ]
   },
-  // Clef-flash for ambiguous wakeups only (AGENTS.md section 31.2), capped per day.
+  // Clef-flash for ambiguous wakeups only, capped per day.
   "ai": { "binding": "AI" },
-  // analytics-projector (AGENTS.md section 41.1): lifecycle Events as data points, own dataset.
+  // analytics-projector: lifecycle Events as data points, own dataset.
   "analytics_engine_datasets": [
     { "binding": "EVENT_METRICS", "dataset": "rhumbatron_event_metrics_local" }
   ]

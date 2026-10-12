@@ -1,4 +1,4 @@
-// Acceptance check citations (ADR 0026, AGENTS.md 34.4.2). Invariants: a `met` counts only with a
+// Acceptance check citations (ADR 0026). Invariants: a `met` counts only with a
 // quote that code finds in a patch or composed file the model received; removed patch lines and
 // short quotes prove nothing; code already in the base can be cited from the composed file;
 // malformed output (wrong criterion count) is invalid; only all-met passes.

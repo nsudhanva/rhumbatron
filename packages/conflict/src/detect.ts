@@ -1,4 +1,4 @@
-// Deterministic semantic-conflict first pass (AGENTS.md sections 32.1 to 32.4). Pure; no model calls.
+// Deterministic semantic-conflict first pass. Pure; no model calls.
 // The detector compares typed Intent fields only. A model never confirms a conflict here: `review`
 // hands an unclear pair to Clef-flash or Sonnet, `fork_candidates` lets executable evidence decide.
 import type {
@@ -23,7 +23,7 @@ import {
 } from "./normalize.ts";
 
 export type DetectOptions = {
-  /** Protected resources from the Project policy (section 53), relative or absolute. */
+  /** Protected resources from the Project policy, relative or absolute. */
   protectedResources?: readonly string[];
   /**
    * Exact Work Graph edges: Task ID to the Task IDs it depends on. A dependent Task builds on its
@@ -394,9 +394,9 @@ export type ForkDecision =
   | { kind: "blocked"; reason: "candidate_limit"; maxCandidates: number };
 
 /**
- * Section 32.4: fork only when both approaches are plausible and executable evidence can pick a
+ * Fork only when both approaches are plausible and executable evidence can pick a
  * winner, which the detector expresses as `fork_candidates` on a confirmed conflict. Forking adds
- * two Candidates, so it is blocked when that would pass `maxCandidates` (section 44 default: 3).
+ * two Candidates, so it is blocked when that would pass `maxCandidates` (default: 3).
  * A forkable conflict between complementary Tasks (`integration`, from `integrationFor`) is
  * `integrate` instead: the two sides are parts of one plan, and no Candidate is added.
  */

@@ -1,5 +1,5 @@
 /**
- * Stable shard key for ResourceShardDO (AGENTS.md section 13.2).
+ * Stable shard key for ResourceShardDO.
  * Pure function. The same inputs always map to the same shard, in every producer.
  */
 

@@ -12,7 +12,7 @@ import { RefButton } from "../panels/arena/ref-button";
 import { CheckDetail, DetailBlock, parseCheckRef } from "../panels/evidence/check-detail";
 
 /**
- * Inspectors for a file, a semantic resource and a verification check (DESIGN.md 10: the
+ * Inspectors for a file, a semantic resource and a verification check (the
  * inspector repeats the selection's facts as text). Each reads the folded `state` at the
  * time-machine instant; facts not recorded at that instant are absent and the text says so.
  */

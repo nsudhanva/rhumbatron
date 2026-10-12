@@ -31,7 +31,7 @@ import type { PanelProps } from "./panel-types";
 import { Scrubber, stepFact } from "./scrubber";
 
 /**
- * Flight Control (AGENTS.md 38, DESIGN.md 9, 11.1): every recorded fact of one Change, folded at
+ * Flight Control: every recorded fact of one Change, folded at
  * one instant and shown in synchronized panels. The page owns the fold, the pacing of newly
  * arriving facts, the time machine, filters, the panel grid and the inspector. Panels read the
  * folded state from context and never fetch.
@@ -146,7 +146,7 @@ const IN_FLIGHT_MS = MOTION.packetMs + MOTION.arriveMs;
 
 /**
  * Facts that enter the fold while the time machine plays: they animate like live arrivals
- * (DESIGN.md 11.1, replay from recorded events). Scrubbing by hand or pausing settles them.
+ * (replay from recorded events). Scrubbing by hand or pausing settles them.
  */
 function usePlaybackFacts(events: ActivityEvent[], time: FlightTime) {
   const at = time.mode === "historical" ? time.at : null;
@@ -473,7 +473,7 @@ export function FlightPage({
           )}
         </div>
 
-        {/* One polite line per newly arrived fact, live only (DESIGN.md 9.9, 14). */}
+        {/* One polite line per newly arrived fact, live only. */}
         <p className="sr-only" aria-live="polite" aria-atomic>
           {live ? (player.latest?.detail ?? "") : ""}
         </p>

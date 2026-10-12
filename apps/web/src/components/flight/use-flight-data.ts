@@ -25,12 +25,12 @@ import { deriveFlight, type FlightModel } from "./flight-model";
 /**
  * Every record Flight Control folds, read with the same React Query keys as the Change page
  * (routes/changes.$changeId.tsx), so the two pages share one cache. Live push invalidates; the
- * slow fallback poll runs only while the Change is live and the socket is not open (AGENTS.md 39).
+ * slow fallback poll runs only while the Change is live and the socket is not open.
  * Two more reads than the Change page: the project Workspace (forks, ChangeSets, changed files)
  * and the Change's Decision Receipts.
  */
 
-/** Safety net while the live socket is down (AGENTS.md section 39). */
+/** Safety net while the live socket is down. */
 const FALLBACK_POLL_MS = 30_000;
 /** Model calls emit no event: live run progress is polled only while a run is running. */
 const PROGRESS_POLL_MS = 5_000;

@@ -2,8 +2,8 @@ import { APP_CONVENTIONS, type ContextItem, type ContextPacket } from "@rhumbatr
 import type { Retrieval, RetrievedFile } from "./retrieval.ts";
 
 /**
- * Context Compiler (AGENTS.md section 27): deterministic, no model calls, no I/O. Callers load the
- * inputs; this module orders them by retrieval priority (section 27.3), trims to the token budget,
+ * Context Compiler: deterministic, no model calls, no I/O. Callers load the
+ * inputs; this module orders them by retrieval priority, trims to the token budget,
  * and renders the packet the agent sees.
  */
 
@@ -86,7 +86,7 @@ export type CompileInput = {
     files: string[];
   }[];
   /**
-   * Indexed retrieval for the canonical tree (section 27.3): declared files, dependency neighbors,
+   * Indexed retrieval for the canonical tree: declared files, dependency neighbors,
    * resource owners, and Vectorize matches. Absent when the tree has no index yet.
    */
   retrieval?: Retrieval | null;
@@ -222,7 +222,7 @@ export function compilePacket(input: CompileInput): ContextPacket {
       body: f.summary,
     });
   const tier = (t: RetrievedFile["tier"]) => (retrieval?.files ?? []).filter((f) => f.tier === t);
-  // Section 27.3 order: declared files, dependency neighbors, resource owners, recent events
+  // Retrieval order: declared files, dependency neighbors, resource owners, recent events
   // (Intents and failures), then Vectorize matches last, so they are trimmed first.
   const optional: ContextItem[] = [
     ...tier("declared").map(fileItem("file", "Declared file")),
@@ -293,12 +293,12 @@ export function compilePacket(input: CompileInput): ContextPacket {
   };
 }
 
-/** The packet as prompt text. Item IDs are shown so findings can cite them (section 34.4.2). */
+/** The packet as prompt text. Item IDs are shown so findings can cite them. */
 export function renderPacket(packet: ContextPacket): string {
   return packet.items.map((item) => `## ${item.title} [${item.itemId}]\n${item.body}`).join("\n\n");
 }
 
-/** SHA-256 of the packet JSON: the Evidence Snapshot key (section 27.5). */
+/** SHA-256 of the packet JSON: the Evidence Snapshot key. */
 export async function packetHash(packet: ContextPacket): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(packet));
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));

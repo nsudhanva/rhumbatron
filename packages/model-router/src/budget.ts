@@ -1,7 +1,7 @@
 import type { ModelTier } from "@rhumbatron/protocol";
 
 /**
- * Budgets (AGENTS.md section 24, ADR 0019, ADR 0021). Hard limits: calls per Task run, agent calls
+ * Budgets (ADR 0019, ADR 0021). Hard limits: calls per Task run, agent calls
  * per UTC day, the Change budget, and the monthly Anthropic USD budget of this environment, which
  * code enforces on the D1 meter (spend-meter.ts). Past any of them the work stops; there is no
  * fallback to another paid provider.

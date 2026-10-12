@@ -13,11 +13,11 @@ import { useFlightStore } from "../../flight-store";
 import { checkView, isSettled, p95OfCheck } from "../arena/check-view";
 
 /**
- * One check's recorded Evidence (AGENTS.md 34.3, 34.4): the EvidenceRecord fields, the plan's
+ * One check's recorded Evidence: the EvidenceRecord fields, the plan's
  * reason and command, the recorded metrics and the stored stdout. Shared by the evidence explorer
  * and the check inspector. Stdout is fetched only for the check on screen, once (staleTime
  * Infinity). A field the record does not carry says "not recorded"; a check without a supported
- * pass is a gap, never green (34.4.1).
+ * pass is a gap, never green.
  */
 
 /** Splits `${candidateId}:${checkId}` at the first colon. */

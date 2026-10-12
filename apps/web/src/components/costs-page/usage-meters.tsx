@@ -8,7 +8,7 @@ const hours = (seconds: number) => seconds / 3600;
 const formatHours = (h: number) => formatUnit(h, "h", 1);
 
 /**
- * Free-tier meters (AGENTS.md sections 7.3, 44) from `usage_counters`, plus the Project's
+ * Free-tier meters from `usage_counters`, plus the Project's
  * recorded spend over the Changes on this page. The call and Sandbox counters are account-wide.
  * Anthropic spend is metered per environment and calendar month; at the budget, model work stops
  * (`meters.anthropicMonthlyBudgetUsd`; ADR 0021).

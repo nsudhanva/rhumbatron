@@ -87,13 +87,7 @@ function DesignReference() {
       <PageTitle
         kicker="Kumo x Modernist"
         title="Design reference"
-        meta={
-          <>
-            <Mono>DESIGN.md</Mono>
-            <span>·</span>
-            <span>tokens, primitives and Kumo components in the current mode</span>
-          </>
-        }
+        meta={<span>tokens, primitives and Kumo components in the current mode</span>}
         actions={
           <>
             <Button>Secondary</Button>
@@ -104,7 +98,7 @@ function DesignReference() {
         }
       />
 
-      <Section label="Agent activity" meta="fixture replay of the Wishlist story (DESIGN §11.1)">
+      <Section label="Agent activity" meta="fixture replay of the Wishlist story">
         <AgentActivityPreview />
       </Section>
 

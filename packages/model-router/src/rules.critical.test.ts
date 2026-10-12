@@ -1,4 +1,4 @@
-// Deterministic routing floors (AGENTS.md section 23.2). A wrong floor sends risky work to a weak model.
+// Deterministic routing floors. A wrong floor sends risky work to a weak model.
 import type { RouteRequest } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
 import { routeByRules } from "./rules.ts";

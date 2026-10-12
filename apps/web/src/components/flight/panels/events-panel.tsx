@@ -14,7 +14,7 @@ import { RefButton } from "./arena/ref-button";
 import { clockOf } from "./decisions/decision-view";
 
 /**
- * Event stream (DESIGN.md 9.9): every recorded fact of the Change up to the fold instant, newest
+ * Event stream: every recorded fact of the Change up to the fold instant, newest
  * on top. Facts come from `state.events` (flight-model.ts over activity-model.ts: Task runs,
  * conflicts, Candidates, Evidence, claim facts and the Change's event feed). The global event
  * family filter and the text filter apply. A newly played fact flashes once. Each row selects the
@@ -26,7 +26,7 @@ const PAGE = 300;
 
 const familyOf = (type: string) => type.split(".")[0] ?? type;
 
-/** Type color (DESIGN.md 9.9): failure danger, completion success, canonical commits brand. */
+/** Type color: failure danger, completion success, canonical commits brand. */
 function typeTone(event: ActivityEvent): string {
   const t = event.type;
   if (event.kind === "check") {

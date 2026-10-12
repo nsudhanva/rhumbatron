@@ -1,8 +1,8 @@
 /* biome-ignore-all lint/complexity/noImportantStyles: this layer must beat Kumo inline variables and !important utilities (see "How the override works") */
 /*
- * Modernist theme layer for Kumo (DESIGN.md "Kumo x Modernist").
+ * Modernist theme layer for Kumo.
  *
- * This is the ONLY file that holds raw color values (DESIGN.md section 15.1 and 15.9).
+ * This is the ONLY file that holds raw color values.
  * Components use semantic tokens only: Kumo's own (`bg-kumo-base`, `text-kumo-subtle`, ...)
  * plus the Modernist roles registered below (`border-kumo-divider`, `bg-accent-100`,
  * `bg-tone-200`, `bg-kumo-ink`, ...). Never write `dark:` in a component: every token
@@ -23,7 +23,7 @@
  *   4. Base elements (body, focus, selection, caret, scrollbars)
  *   5. Type and structure utilities (`type-*`, `rule-*`)
  *   6. Feedback: Loader, skeleton
- *   7. Motion tokens and the agent-activity motion patterns (DESIGN.md section 11, 11.1)
+ *   7. Motion tokens and the agent-activity motion patterns
  */
 
 /* --------------------------------------------------------------------------------------------
@@ -49,7 +49,7 @@
   --font-weight-extrabold: 800;
   --font-weight-black: 800;
 
-  /* Radius is zero everywhere (section 5.3). `rounded`, `rounded-full` and arbitrary radii are
+  /* Radius is zero everywhere. `rounded`, `rounded-full` and arbitrary radii are
      hard-coded by Tailwind, so section 3 also carries a global rule. */
   --radius-xs: 0;
   --radius-sm: 0;
@@ -70,7 +70,7 @@
   --shadow-xl: var(--rh-shadow-overlay);
   --shadow-2xl: var(--rh-shadow-overlay);
 
-  /* Modernist line roles (section 2.3). `border-kumo-divider` is the 2px section rule color,
+  /* Modernist line roles. `border-kumo-divider` is the 2px section rule color,
      `border-kumo-rule` the 1px row separator, `bg-kumo-faint` the hover fill, `kumo-ink` the
      solid ink used for ink rules, active fills and primary chart series. */
   --color-kumo-divider: var(--rh-divider);
@@ -80,7 +80,7 @@
   --color-kumo-ink: var(--rh-ink);
   --color-kumo-press: var(--rh-press);
 
-  /* Accent ramp (section 2.4). Steps flip in dark mode. Body-size accent text uses
+  /* Accent ramp. Steps flip in dark mode. Body-size accent text uses
      `text-kumo-accent` (accent-700 light, accent-500 dark), never `text-accent-500`. */
   --color-accent-100: var(--rh-accent-100);
   --color-accent-200: var(--rh-accent-200);
@@ -95,7 +95,7 @@
   --color-accent-wash-strong: var(--rh-accent-wash-strong);
   --text-color-kumo-accent: var(--rh-accent-text);
 
-  /* Neutral ramp (section 2.5) as `tone-*`: DESIGN.md "neutral-200" is `bg-tone-200` here.
+  /* Neutral ramp as `tone-*`: design step "neutral-200" is `bg-tone-200` here.
      Tailwind's own `neutral-*` stays as-is because Kumo internals pair it with `dark:`. */
   --color-tone-100: var(--rh-tone-100);
   --color-tone-200: var(--rh-tone-200);
@@ -132,7 +132,7 @@
   --rh-accent-900: light-dark(#4d170e, #fff2ef);
   /* Accent as readable text: #ec3013 is 3.7:1 on the light ground, #ff563c is 5.9:1 on dark. */
   --rh-accent-text: light-dark(#ae1800, #ff563c);
-  /* Primary pressed: accent-700 in light, accent-400 in dark (section 8.1). */
+  /* Primary pressed: accent-700 in light, accent-400 in dark. */
   --rh-accent-press: light-dark(#ae1800, #dd2b0f);
   --rh-accent-wash: color-mix(in srgb, var(--rh-accent-500) 10%, transparent);
   --rh-accent-wash-strong: color-mix(in srgb, var(--rh-accent-500) 18%, transparent);
@@ -153,8 +153,8 @@
   --rh-row-hover: color-mix(in srgb, var(--rh-ink) 4%, transparent);
   --rh-hover: color-mix(in srgb, var(--rh-ink) 7%, transparent);
   --rh-press: color-mix(in srgb, var(--rh-ink) 14%, transparent);
-  /* DESIGN.md 2.2 sets 62% as the floor. 62% measures 4.49:1 on the light ground and 4.37:1
-     on elevated, under the 4.5:1 text rule (section 14); 66% holds >= 4.65:1 on ground,
+  /* Readable text has a 62% floor. 62% measures 4.49:1 on the light ground and 4.37:1
+     on elevated, under the 4.5:1 text rule; 66% holds >= 4.65:1 on ground,
      elevated, recessed and the hover/selection fills in both modes. */
   --rh-subtle: color-mix(in srgb, var(--rh-ink) 66%, transparent);
 
@@ -163,7 +163,7 @@
   --rh-attention: light-dark(oklch(0.5 0.1 65), oklch(0.82 0.11 80));
   --rh-attention-fill: light-dark(oklch(0.94 0.05 85), oklch(0.32 0.05 75));
 
-  /* Overlay shadow (section 2.7). Light: a soft drop. Dark: a hairline edge plus a deep drop,
+  /* Overlay shadow. Light: a soft drop. Dark: a hairline edge plus a deep drop,
      because shadows vanish on a dark ground. Lengths cannot use light-dark(), so the dark
      lengths are set under [data-mode="dark"] below. */
   --rh-overlay-edge: light-dark(transparent, rgb(236 235 234 / 0.13));
@@ -180,13 +180,13 @@
   --color-white: var(--rh-ground);
   --color-black: var(--rh-ground);
 
-  /* Kumo surfaces (section 2.1). */
+  /* Kumo surfaces. */
   --color-kumo-canvas: var(--rh-ground);
   --color-kumo-base: var(--rh-ground);
   --color-kumo-elevated: var(--rh-raised);
   --color-kumo-recessed: var(--rh-sunk);
   --color-kumo-overlay: var(--rh-raised);
-  /* Input fill: elevated on the ground; rebound to the ground inside elevated surfaces (3). */
+  /* Input fill: elevated on the ground; rebound to the ground inside elevated surfaces. */
   --color-kumo-control: var(--rh-raised);
   --color-kumo-tint: var(--rh-hover);
   --color-kumo-contrast: var(--rh-ink);
@@ -207,7 +207,7 @@
   --color-kumo-brand: var(--rh-accent-500);
   --color-kumo-brand-hover: var(--rh-accent-600);
 
-  /* Status families (section 2.6). Kumo `info` is the Modernist "active" family: solid ink. */
+  /* Status families. Kumo `info` is the Modernist "active" family: solid ink. */
   --color-kumo-success: var(--rh-ok);
   --color-kumo-success-tint: var(--rh-ok-fill);
   --color-kumo-warning: var(--rh-attention);
@@ -230,7 +230,7 @@
   --color-kumo-badge-neutral: var(--rh-tone-600);
   --color-kumo-badge-inverted: var(--rh-ink);
 
-  /* Text roles (section 2.2). "Strong" is weight, not a darker color. */
+  /* Text roles. "Strong" is weight, not a darker color. */
   --text-color-kumo-default: var(--rh-ink);
   --text-color-kumo-strong: var(--rh-ink);
   --text-color-kumo-subtle: var(--rh-subtle);
@@ -269,13 +269,13 @@
  * `data-kumo-component` / `data-kumo-part` attributes or its stable `kumo-*` class names.
  * ------------------------------------------------------------------------------------------ */
 
-/* Inputs sit on `base` inside an elevated panel (section 8.2), and never elevated-on-elevated. */
+/* Inputs sit on `base` inside an elevated panel, and never elevated-on-elevated. */
 .bg-kumo-elevated,
 [data-surface="elevated"] {
   --color-kumo-control: var(--rh-ground);
 }
 
-/* Button: flat accent primary, no gradient; Archivo 800 label (section 8.1).
+/* Button: flat accent primary, no gradient; Archivo 800 label.
    Kumo writes these variables inline; `!important` custom properties beat inline values.
    Note: Kumo's `destructive` variant shares these variables and renders as primary. Do not use
    it: a destructive action is a secondary button labelled "Reject" or "Discard". */
@@ -297,30 +297,30 @@
   --kumo-button-emphasis-gradient-end: var(--rh-accent-press) !important;
   --color-kumo-tint: var(--rh-press);
 }
-/* Disabled is 45% opacity (section 10); Kumo uses 50%. */
+/* Disabled is 45% opacity; Kumo uses 50%. */
 [data-kumo-component="Button"]:disabled {
   opacity: 0.45;
 }
-/* Kumo also disables a loading button. Loading is not disabled: keep full strength (8.1). */
+/* Kumo also disables a loading button. Loading is not disabled: keep full strength. */
 [data-kumo-component="Button"]:disabled:has(svg[role="status"]) {
   opacity: 1;
   cursor: progress;
 }
 
 /* Kumo shows a 1px focus-color ring after a mouse click. The focus ring is for the keyboard
-   only (section 10), so a mouse-focused control keeps its rest frame. Emphasis buttons keep
+   only, so a mouse-focused control keeps its rest frame. Emphasis buttons keep
    their own ring color. */
 [data-kumo-component]:focus:not(:focus-visible):not([style*="--kumo-button-emphasis"]) {
   --tw-ring-color: var(--rh-divider);
 }
 
-/* Checkbox and radio: accent fill when on (section 8.2). Kumo fills with `contrast`. */
+/* Checkbox and radio: accent fill when on. Kumo fills with `contrast`. */
 [data-kumo-component="Checkbox"],
 [data-kumo-component="Radio"] {
   --color-kumo-contrast: var(--rh-accent-500);
 }
 
-/* Switch: square track, ink when on, ground-colored thumb (section 8.2). Kumo hard-codes a
+/* Switch: square track, ink when on, ground-colored thumb. Kumo hard-codes a
    blue palette for the on state; rebind those steps inside the Switch only. */
 [data-kumo-component="Switch"] {
   --color-blue-300: var(--rh-ground);
@@ -328,12 +328,12 @@
   --color-blue-600: var(--rh-ink);
 }
 
-/* Meter (Base UI renders role="meter"): ink fill on a recessed track (section 9.1). */
+/* Meter (Base UI renders role="meter"): ink fill on a recessed track. */
 [role="meter"] {
   --color-kumo-brand: var(--rh-ink);
 }
 
-/* Tooltip: ink fill, inverse text, no frame, no arrow (section 8.4). */
+/* Tooltip: ink fill, inverse text, no frame, no arrow. */
 .kumo-tooltip-popup {
   --color-kumo-base: var(--rh-ink);
   --text-color-kumo-default: var(--rh-ground);
@@ -344,7 +344,7 @@
   display: none;
 }
 
-/* Popover and dialog: elevated fill with the overlay shadow (section 8.4). */
+/* Popover and dialog: elevated fill with the overlay shadow. */
 .kumo-popover-popup,
 [role="dialog"][data-open],
 [role="alertdialog"][data-open] {
@@ -362,7 +362,7 @@
     border-radius: 0 !important;
   }
 
-  /* The one round element: radio dots (section 5.3). */
+  /* The one round element: radio dots. */
   input[type="radio"],
   [data-kumo-component="Radio"][data-kumo-part="item"],
   [data-kumo-component="Radio"][data-kumo-part="item"] span {
@@ -423,7 +423,7 @@
 }
 
 /* --------------------------------------------------------------------------------------------
- * 5. Type and structure utilities (section 4.2). Each `type-*` class sets size, line height,
+ * 5. Type and structure utilities. Each `type-*` class sets size, line height,
  *    weight, case and tracking together, so one class names one role.
  * ------------------------------------------------------------------------------------------ */
 
@@ -531,7 +531,7 @@
   border-top: 2px solid var(--rh-divider);
 }
 
-/* Photographs print in black and white (section 13). */
+/* Photographs print in black and white. */
 @utility photo-grayscale {
   filter: grayscale(1) contrast(1.08);
 }
@@ -563,7 +563,7 @@
 }
 
 /* --------------------------------------------------------------------------------------------
- * 6. Feedback: Loader and skeleton (section 8.5)
+ * 6. Feedback: Loader and skeleton
  * ------------------------------------------------------------------------------------------ */
 
 /* A square that fills with ink in a loop. `.rh-loader` is our Loader; the second selector
@@ -600,7 +600,7 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
 }
 
 /* --------------------------------------------------------------------------------------------
- * 7. Motion (section 11) and agent activity (section 11.1)
+ * 7. Motion and agent activity
  *
  * UI motion is quiet: 120-180ms ease-out, nothing loops on its own. Agent activity is the one
  * place motion leads: forks draw, packets travel between lanes, lanes flash on arrival, losers
@@ -618,7 +618,7 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
  *   <path pathLength={1} class="rh-merge" />                winner merges back into the trunk
  *
  * Under `prefers-reduced-motion: reduce` every duration below collapses to 0-80ms and the
- * agent animations become instant state changes (section 11 and 11.1). Show the event list
+ * agent animations become instant state changes. Show the event list
  * beside the view so the sequence stays readable without motion.
  * ------------------------------------------------------------------------------------------ */
 
@@ -627,7 +627,7 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
   --rh-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --rh-ease-linear: linear;
 
-  /* Section 11: UI */
+  /* UI motion */
   --rh-dur-ui-fast: 120ms;
   --rh-dur-ui: 150ms;
   --rh-dur-ui-slow: 180ms;
@@ -637,7 +637,7 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
   --rh-dur-bar: 0.8s;
   --rh-dur-heat: 0.4s;
 
-  /* Section 11.1: agent activity */
+  /* Agent activity motion */
   --rh-dur-fork: 280ms; /* 240-320ms, ease-out */
   --rh-dur-settle: 240ms;
   --rh-dur-packet: 560ms;
@@ -733,7 +733,7 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
     opacity var(--rh-dur-greyout) var(--rh-ease-out),
     filter var(--rh-dur-greyout) var(--rh-ease-out);
 }
-/* Greyed out, but the failing reason still reads (section 11, "in words"; section 14, 4.5:1).
+/* Greyed out, but the failing reason still reads in words at 4.5:1 contrast.
    An opacity fade multiplies into every nested text role (subtle inside a 62% fade measures
    2.4:1), so the loser loses its hue and drops its ink to the subtle role instead. */
 .rh-greyout[data-state="rejected"],
@@ -744,7 +744,7 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
   --text-color-kumo-strong: var(--rh-subtle);
 }
 
-/* Replay (section 11 and 11.1): a recorded fact appears when the playhead passes it, a short
+/* Replay: a recorded fact appears when the playhead passes it, a short
    scale-in with no bounce. Its duration is a motion token, so reduced motion makes it instant. */
 .rh-pop {
   animation: rh-pop var(--rh-dur-ui-slow) var(--rh-ease-out) both;
@@ -756,7 +756,7 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
   }
 }
 
-/* An agent at work: a slow opacity pulse on its square status dot (section 11.1 is the one
+/* An agent at work: a slow opacity pulse on its square status dot (agent activity is the one
    place a loop is allowed). The reduced-motion rule below stops it after one pass. */
 .rh-work-pulse {
   animation: rh-work-pulse 1.6s var(--rh-ease-in-out) infinite;
@@ -767,7 +767,7 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
   }
 }
 
-/* Section 11: remove translations and pulses, cut durations, keep live bars updating without a
+/* Reduced motion: remove translations and pulses, cut durations, keep live bars updating without a
    transition. The Loader keeps a static half fill so it still reads as "working". */
 @media (prefers-reduced-motion: reduce) {
   @layer base {

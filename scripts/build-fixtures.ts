@@ -1,6 +1,6 @@
 /**
  * Embeds demo fixture repositories into the integration Worker, which seeds them into Artifacts
- * (AGENTS.md section 54). Output: workers/integration/src/fixtures/<name>.fixture.gen.ts.
+ * (the Acme Shop and Wishlist demo). Output: workers/integration/src/fixtures/<name>.fixture.gen.ts.
  * Usage: bun scripts/build-fixtures.ts [--check]   (--check fails when an output is stale)
  */
 import { readdir, readFile, writeFile } from "node:fs/promises";

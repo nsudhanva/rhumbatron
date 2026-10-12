@@ -1,4 +1,4 @@
-// Model review of one semantic conflict (AGENTS.md sections 22.4, 32.3, 34.4.2; P9-05, P9-06).
+// Model review of one semantic conflict (P9-05, P9-06).
 // Pure: packet building, output parsing, citation checks, escalation rules, and the deterministic
 // application of a verdict. No I/O and no model calls; the agents Worker runs the call.
 //
@@ -22,7 +22,7 @@ import { normalizeResource, resourceOverlap } from "./normalize.ts";
 
 export type ReviewTier = "sonnet" | "opus";
 
-/** Section 24.2: Sonnet 4K to 8K, Opus 4K to 8K. Reasoning tokens count toward the limit. */
+/** Output caps: Sonnet 4K to 8K, Opus 4K to 8K. Reasoning tokens count toward the limit. */
 export const REVIEW_MAX_OUTPUT_TOKENS: Record<ReviewTier, number> = { sonnet: 4000, opus: 6000 };
 
 /** Body characters per packet item, so one long Intent field cannot crowd out the others. */
@@ -65,7 +65,7 @@ const clip = (text: string, max = MAX_ITEM_CHARS) =>
 const bullets = (items: readonly string[]) => items.map((s) => `- ${s}`).join("\n") || "- none";
 
 /**
- * The Context Packet of one review (section 27.5). Item IDs reuse the detector's references
+ * The Context Packet of one review. Item IDs reuse the detector's references
  * (`intent:<id>:data:0`), so a signal and the model's citation point at the same fact.
  */
 export function buildReviewPacket(input: ReviewPacketInput): ContextPacket {
@@ -260,7 +260,7 @@ export type CheckedCitations = {
 };
 
 /**
- * Section 34.4.2 for a conflict finding: every citation must be an item of the packet the model
+ * Citation validation for a conflict finding: every citation must be an item of the packet the model
  * received. The conflict ID plays the Candidate role, so a citation from another conflict fails.
  */
 export function checkCitations(
@@ -303,7 +303,7 @@ const AUTH =
 const RELEASE = /\b(migrations?|deploy\w*|release|rollback|promot\w*|canonical)\b/i;
 
 /**
- * Section 22.4: a conflict that changes architecture, security, data semantics, or release safety
+ * A conflict that changes architecture, security, data semantics, or release safety
  * goes to Opus when Sonnet cannot settle it. Deterministic; reads typed fields and signals only.
  */
 export function escalationReasons(
@@ -384,7 +384,7 @@ export type CurrentConflict = {
 };
 
 /**
- * Applies a parsed, citation-checked verdict to the current conflict (section 32.3). Deterministic:
+ * Applies a parsed, citation-checked verdict to the current conflict. Deterministic:
  *
  * - escalate_to_human: state unchanged; the conflict is flagged for a person.
  * - unsupported citations: nothing changes (`rejected_unsupported`).
@@ -394,7 +394,7 @@ export type CurrentConflict = {
  *   concrete citation (an Intent field or a ChangeSet). The action is `fork_candidates` when both
  *   sides have ChangeSets that executable checks can run on, otherwise `review`.
  * - needs_more_evidence: `fork_required` + `fork_candidates` when both sides have ChangeSets
- *   (section 32.4: fork when evidence can decide), otherwise state unchanged + `review`.
+ *   (fork when evidence can decide), otherwise state unchanged + `review`.
  */
 export function applyVerdict(
   current: CurrentConflict,
@@ -445,7 +445,7 @@ export function applyVerdict(
     }
     case "needs_more_evidence":
       return {
-        // Section 32.4: when both sides have ChangeSets, executable evidence decides, so fork.
+        // When both sides have ChangeSets, executable evidence decides, so fork.
         state: evidenceCanDecide === "fork_candidates" ? "fork_required" : current.state,
         recommendedAction:
           current.recommendedAction === "fork_candidates" ? "fork_candidates" : evidenceCanDecide,
@@ -463,10 +463,10 @@ export type FirstReview =
   | { kind: "reviewed"; effect: ReviewEffect };
 
 /**
- * Section 22.4 and 23.3: escalate a high-risk conflict (any `escalationReasons`) to Opus unless
+ * Escalate a high-risk conflict (any `escalationReasons`) to Opus unless
  * Sonnet agreed with a deterministic confirmation, which already forks and lets evidence decide
- * (section 24.1: fork instead of continuing debate). A failed call is a transport failure, never
- * a reason for a stronger model (section 42.8). Low-risk conflicts never reach Opus.
+ * (fork instead of continuing debate). A failed call is a transport failure, never
+ * a reason for a stronger model. Low-risk conflicts never reach Opus.
  */
 export function shouldEscalate(reasons: readonly EscalationReason[], first: FirstReview): boolean {
   if (reasons.length === 0 || first.kind === "call_failed") return false;
@@ -503,7 +503,7 @@ export type ConflictReviewRecord = {
 export type ReviewBudget = { ok: true } | { ok: false; reason: "max_cost_usd_per_change" };
 
 /**
- * A review counts against the Change budget like an agent call (section 44). Refused when the
+ * A review counts against the Change budget like an agent call. Refused when the
  * recorded spend already reached the budget or this call's worst case would pass it.
  */
 export function checkReviewBudget(input: {

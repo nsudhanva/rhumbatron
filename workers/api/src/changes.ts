@@ -25,12 +25,12 @@ import {
 } from "./members.ts";
 
 /**
- * `GET /v1/changes/:changeId` with the planned risk tier and record times (AGENTS.md section 16.1).
+ * `GET /v1/changes/:changeId` with the planned risk tier and record times.
  * Mounted before `projects` (through activity.ts), so this handler answers and the older handler
  * in projects.ts, which returns the same fields minus these three, is no longer reached.
  *
  * `POST /v1/changes/:changeId/cancel`, `/budget`, `/include`, and `/decline` are a person's
- * commands on one Change (sections 16.1, 44; ADR 0028). The integration Worker owns the
+ * commands on one Change (ADR 0028). The integration Worker owns the
  * transitions. Who may send each one is `can` in `@rhumbatron/protocol`.
  */
 
@@ -176,7 +176,7 @@ export const changeDetail = new Hono<AppEnv>()
   )
 
   /**
-   * Section 44 rule 5: a person raises the Change budget. A `budget_blocked` Change resumes and
+   * A person raises the Change budget. A `budget_blocked` Change resumes and
    * its ready Tasks are dispatched again. The budget can only go up. Safe to repeat.
    */
   .post(

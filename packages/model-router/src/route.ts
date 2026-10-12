@@ -4,7 +4,7 @@ import { resolveTier } from "./models.ts";
 import { applyOpusPolicy, decisionFor, routeByRules } from "./rules.ts";
 
 /**
- * ModelRouter (AGENTS.md section 23, P6-07). Deterministic rules decide whenever a specific rule
+ * ModelRouter (P6-07). Deterministic rules decide whenever a specific rule
  * fires. Only the generic default goes to Clef-flash, and deterministic floors still apply to its
  * answer. Abstain or cap reached: the rules' answer stands. Last, policy: while Opus is off
  * (`ALLOW_OPUS` not "true", ADR 0021) an opus decision runs on Sonnet, and the receipt records

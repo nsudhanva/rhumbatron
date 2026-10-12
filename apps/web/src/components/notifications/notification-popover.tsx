@@ -4,7 +4,7 @@ import { BellButton } from "./bell-button";
 import NotificationInbox from "./notification-inbox";
 
 /**
- * The inbox popover (DESIGN.md 8.4): Kumo Popover (Base UI) with focus trapped while open,
+ * The inbox popover: Kumo Popover (Base UI) with focus trapped while open,
  * Escape and outside click to close, and focus returned to the bell. Loaded as its own chunk
  * after first paint (or on first hover, focus, or click), so the shell's first load does not
  * carry the popover or the inbox list. The list itself is read only while the popover is open.
@@ -40,7 +40,7 @@ export default function NotificationPopover({
       <Popover.Content
         side="bottom"
         align="end"
-        // Square overlay without the arrow (DESIGN.md 8.4); the inner list scrolls.
+        // Square overlay without the arrow; the inner list scrolls.
         className="w-[min(400px,calc(100vw-32px))] gap-0 p-0 [&>[data-side]]:hidden"
       >
         <NotificationInbox onClose={() => setOpen(false)} />

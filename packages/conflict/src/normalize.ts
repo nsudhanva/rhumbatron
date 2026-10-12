@@ -1,4 +1,4 @@
-// Deterministic text normalization for the conflict detector (AGENTS.md section 32.3).
+// Deterministic text normalization for the conflict detector.
 // Every rule here is a documented heuristic. No model calls, no randomness, no locale-dependent APIs.
 import type { ChangeKind, DataModel } from "@rhumbatron/protocol";
 

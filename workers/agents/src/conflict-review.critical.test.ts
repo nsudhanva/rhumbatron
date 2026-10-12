@@ -1,4 +1,4 @@
-// Conflict review orchestration (AGENTS.md sections 22.4, 32.3, 34.4.2, 44; P9-05, P9-06). Runs the
+// Conflict review orchestration (P9-05, P9-06). Runs the
 // real migrations and review SQL against SQLite (node:sqlite) with a scripted model. A budget
 // refusal must leave the conflict unchanged and call no model; an applied dismissal must leave a
 // Decision Receipt; an unsupported finding must not change state; a high-risk disagreement goes to

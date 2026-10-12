@@ -17,8 +17,8 @@ import {
 } from "./model";
 
 /**
- * Human gate (AGENTS.md sections 36 rule 4, 40.2; DESIGN.md 8.4, 9.14, 10 "Confirm decisions in
- * place"). The dialog shows the Evidence the decision rests on, the facts it binds to, and the
+ * Human gate: promotion needs the required human approval, and only an owner or admin
+ * can give it. Decisions are confirmed in place. The dialog shows the Evidence the decision rests on, the facts it binds to, and the
  * required-check checklist. The API takes the approver from the session; the browser cannot name
  * one. Outside clicks do not close the dialog while a decision is pending.
  */

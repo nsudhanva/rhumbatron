@@ -6,7 +6,7 @@ import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Decision Receipts of one Change (AGENTS.md 23.5), for the Flight Control decisions panel.
+ * Decision Receipts of one Change, for the Flight Control decisions panel.
  * Read-only, D1 only: `decision_receipts` joined to `tasks` through idx_tasks_change_id and
  * idx_decision_receipts_task_id, capped at RECEIPT_LIMIT rows (oldest first; `truncated` says
  * when newer rows were dropped). A receipt holds routing inputs and outputs only, never

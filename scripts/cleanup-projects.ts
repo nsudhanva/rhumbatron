@@ -1,5 +1,5 @@
 /**
- * Archives the smoke-test Projects of the smoke user on prod (AGENTS.md section 43).
+ * Archives the smoke-test Projects of the smoke user on prod, so test data does not stay.
  * CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID must both be set in the environment, for the prod
  * Clerk instance. Nothing reads them from the Keychain.
  * Usage: bun run cleanup:projects [--dry-run] [--all]

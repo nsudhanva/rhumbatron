@@ -10,7 +10,7 @@ export type KeyValueItem = {
 };
 
 /**
- * Key-value grid (DESIGN.md 8.3): `auto 1fr`, 12px, keys subtle, values default. Empty values
+ * Key-value grid: `auto 1fr`, 12px, keys subtle, values default. Empty values
  * render as an em dash.
  *
  *   <KeyValue items={[

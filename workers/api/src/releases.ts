@@ -14,7 +14,7 @@ import { errorBody, fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity, projectRole } from "./identity.ts";
 
 /**
- * Releases of a Project (AGENTS.md sections 21.3, 42.10; ADR 0020). Read-only from D1: the
+ * Releases of a Project (ADR 0020). Read-only from D1: the
  * integration Worker's ReleaseWorkflow owns every release row. The failure injection route (P13-12)
  * is an RPC to the integration Worker and answers only where the fixture routes answer
  * (FIXTURES_ENABLED, local); elsewhere 404, as if absent.
@@ -101,7 +101,7 @@ export const releases = new Hono<AppEnv>()
   /**
    * P13-12: a real smoke failure on the latest deployed release, marked injected: the live app
    * is probed through the apps router with the normal smoke probes plus a route that does not exist. The Canonical
-   * Generation does not change; recovery is the next promotion (section 42.10). Safe to repeat.
+   * Generation does not change; recovery is the next promotion. Safe to repeat.
    */
   .post(
     "/v1/projects/:projectId/releases/inject-failure",

@@ -69,7 +69,7 @@ export const EVENT_TYPES = [
   "deployment.completed",
   /** A release did not deploy: no bundle, or the production pointer did not move (ADR 0020). */
   "deployment.failed",
-  /** A release deployed, but its smoke check did not pass (sections 21.3, 42.10). */
+  /** A release deployed, but its smoke check did not pass. */
   "release.smoke_failed",
   "test.failed",
   "security.check.failed",

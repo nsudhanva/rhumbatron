@@ -18,7 +18,7 @@ const FAILURE_LABEL: Record<string, string> = {
 };
 
 /**
- * Routing outcomes of one Change (AGENTS.md sections 23.5, 56): Decision Receipts by selected
+ * Routing outcomes of one Change: Decision Receipts by selected
  * tier, which layer decided, and what the attempts show about escalation and retries. Counts
  * only: no savings figure is claimed.
  */

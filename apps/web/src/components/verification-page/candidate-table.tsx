@@ -10,7 +10,7 @@ const linkClass =
   "relative z-10 text-kumo-link hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500";
 
 /**
- * Recent Candidates (DESIGN.md 8.3 table): the whole row opens the Candidate; the Change and
+ * Recent Candidates (table): the whole row opens the Candidate; the Change and
  * Compare links sit above the row link. `#` matches the heat grid column index.
  */
 export function CandidateTable({ items }: { items: VerifiedCandidate[] }) {

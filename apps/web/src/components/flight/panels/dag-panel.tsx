@@ -124,7 +124,7 @@ DagPanel.displayName = "DagPanel";
 
 /**
  * Smallest zoom at which a node header (the node's one pointer target, NODE_H - 4 px tall) is
- * still 24px tall on screen (DESIGN.md 5.2): 24 / 88, rounded up to 0.28.
+ * still 24px tall on screen: 24 / 88, rounded up to 0.28.
  */
 const MIN_ZOOM = Math.ceil((24 / (NODE_H - 4)) * 100) / 100;
 
@@ -515,7 +515,7 @@ function DagToolbar({
 }
 DagToolbar.displayName = "DagToolbar";
 
-/** Toggle chip (DESIGN.md 10: selected chip = ink fill, inverse text). */
+/** Toggle chip (selected chip = ink fill, inverse text). */
 function Chip({
   pressed,
   onClick,

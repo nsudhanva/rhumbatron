@@ -12,7 +12,7 @@ import {
 } from "./model";
 
 /**
- * Product Graph canvas (DESIGN.md 9.13): square area nodes on an elevated canvas with a 2px ink
+ * Product Graph canvas: square area nodes on an elevated canvas with a 2px ink
  * rule on top. The border encodes the area's relationship to the Change (see LEGEND). Edges read
  * left to right, from the dependent area to the area it depends on, with a mono label chip.
  */

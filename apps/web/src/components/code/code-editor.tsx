@@ -13,7 +13,7 @@ type Props = {
 };
 
 /**
- * Code editor (CodeMirror 6) in the file view's dress (DESIGN.md 9.10). CodeMirror loads on the
+ * Code editor (CodeMirror 6) in the file view's dress. CodeMirror loads on the
  * client only, in its own chunk; until it is ready, and during the server render, a plain mono
  * textarea with the same value stands in. The editor mounts once per path and read-only state;
  * a new `value` from outside replaces its document.

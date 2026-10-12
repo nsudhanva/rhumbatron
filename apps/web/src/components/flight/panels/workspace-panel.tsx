@@ -32,7 +32,7 @@ import {
 } from "./lanes/timeline";
 
 /**
- * Workspace lanes (GitButler / GitKraken style, DESIGN.md 11.1 "forking" and "converging"): the
+ * Workspace lanes (GitButler / GitKraken style, forking and converging): the
  * canonical trunk on top, one branch per Task workspace fork with its ChangeSet commits, and one
  * merge row per Candidate where the composing branches join. A promoted Candidate merges back
  * into the trunk with the new generation; a rejected one greys out with its reason in words.
@@ -665,7 +665,7 @@ function Graph({
 }
 Graph.displayName = "Graph";
 
-/** Text equivalent of the branch graph (DESIGN.md 14). */
+/** Text equivalent of the branch graph. */
 function WorkspaceTable({ forks, candidates }: { forks: ForkRow[]; candidates: CandidateRow[] }) {
   const clockOf = useClock();
   return (

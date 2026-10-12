@@ -11,7 +11,7 @@ import {
 /**
  * Live app release decisions (Phase 16 milestone B, ADR 0020). Pure: the integration Worker reads
  * D1 and ProjectRootDO, then applies these decisions with guarded writes. Deterministic; no model
- * decides whether an app version is served (AGENTS.md section 22.7). Unit tested in
+ * decides whether an app version is served. Unit tested in
  * app-release-model.critical.test.ts.
  */
 
@@ -82,7 +82,7 @@ export type PointerMove =
   | { kind: "release"; to: PointerTarget }
   /**
    * The release of `failed` did not pass its smoke check: production goes back to `to`, the
-   * version it served before, as a new recorded transition (section 42.10).
+   * version it served before, as a new recorded transition.
    */
   | { kind: "revert"; failed: { commit: string; generation: number }; to: PointerTarget | null };
 
@@ -162,7 +162,7 @@ export type RollbackDecision =
     };
 
 /**
- * Rollback transition rule (sections 21.3, 36, 42.10). Rolling back to Sk from Sn is the new
+ * Rollback transition rule. Rolling back to Sk from Sn is the new
  * transition Sn -> Sn+1 whose tree equals Sk's tree. Allowed only from the generation the caller
  * saw, only to an earlier, known generation, and only when the tree actually changes. History is
  * never deleted: Sn stays in the log, and Sn+1 is a new version.

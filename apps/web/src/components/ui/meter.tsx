@@ -5,7 +5,7 @@ import { FAMILY_FILL, statusView } from "./status-pill";
 const HEIGHT = { inline: "h-1", feature: "h-1.5", hero: "h-2.5" } as const;
 
 /**
- * Linear progress and threshold meter (DESIGN.md 9.1). Every bar shows its value as text.
+ * Linear progress and threshold meter. Every bar shows its value as text.
  *
  * - Without `threshold`: ink fill on a recessed track; `success` when complete, `danger` over max.
  * - With `threshold`: a 2px ink marker at the limit (4px above and below the track), fill in
@@ -96,7 +96,7 @@ ThresholdMeter.displayName = "ThresholdMeter";
 export type Step = { label: string; status: string };
 
 /**
- * Segmented step bar (DESIGN.md 9.1): N equal 8px segments with 2px gaps, each colored by the
+ * Segmented step bar: N equal 8px segments with 2px gaps, each colored by the
  * family of its step status and titled with its label and status word. The mono count of done
  * steps sits on the left.
  *

@@ -19,7 +19,7 @@ import { ensureIdentity, projectRole } from "./identity.ts";
  * `POST /v1/projects/:projectId/code/edits` (P16-19): a person saves one file on the Code page.
  * The integration Worker records a new Change with one human ChangeSet (an Artifacts fork with
  * the commit, the stored patch, the `changesets` row) and composes it like agent work. The edit
- * never touches canonical: only a verified Candidate can promote (AGENTS.md section 36).
+ * never touches canonical: only a verified Candidate can promote.
  *
  * Limits are checked here first (path, 256 KB, text only, base tree) and again in the
  * integration Worker against the authoritative canonical state.
@@ -107,7 +107,7 @@ export const codeEdit = new Hono<AppEnv>().post(
     if (outcome.status === "refused") return refused(c, outcome);
 
     if (outcome.status === "created") {
-      // The dashboard projection is eventually consistent (AGENTS.md section 59).
+      // The dashboard projection is eventually consistent.
       await projectView(c.env, projectId)
         .applyDelta({
           upsert: {

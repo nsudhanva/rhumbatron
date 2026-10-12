@@ -43,7 +43,7 @@ function harness(queue?: { send: (body: unknown) => Promise<void> }) {
   return { env, candidate, release };
 }
 
-describe("workflow start commands (section 20, HOM-202)", () => {
+describe("workflow start commands (HOM-202)", () => {
   it("maps a command to its Workflow with the idempotency key as the instance ID", () => {
     const verify = verificationCommand("cand_abc123", route, "2026-10-09T10:00:00.000Z");
     const rel = releaseCommand("rel_proj_acme_1842", route, "2026-10-09T10:00:00.000Z");

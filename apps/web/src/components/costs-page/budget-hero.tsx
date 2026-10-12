@@ -6,10 +6,10 @@ import { StatCell, StatStrip } from "../ui/stat-strip";
 import { type ChangeCost, formatCost } from "./cost-format";
 
 /**
- * Change budget hero (DESIGN.md 9.1): recorded spend against `changes.budget_usd` on a 10px
+ * Change budget hero: recorded spend against `changes.budget_usd` on a 10px
  * threshold meter, the limit drawn as a 2px ink marker. The scale runs past the limit so an
  * overrun stays visible; the fill turns accent over the limit. Then the recorded totals of the
- * Change in a stat strip (9.2).
+ * Change in a stat strip.
  */
 export function BudgetHero({ change }: { change: ChangeCost }) {
   const spent = change.costUsd;

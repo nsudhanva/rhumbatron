@@ -6,7 +6,7 @@ import { FAMILY_FILL } from "../ui/status-pill";
 import { ChangeStatusWord, requesterName, type StatusLine } from "./change-status";
 
 /**
- * Title block of the Change page (DESIGN.md 6.2.1): the status word, the short title, and the full
+ * Title block of the Change page: the status word, the short title, and the full
  * goal as asked, then one sentence on where the Change stands, who asked and when. Actions sit
  * bottom right: at most one primary, the rest secondary.
  */

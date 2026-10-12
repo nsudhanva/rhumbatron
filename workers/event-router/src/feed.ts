@@ -1,7 +1,7 @@
 import type { EventEnvelope, FeedData } from "@rhumbatron/protocol";
 
 /**
- * Event feed projection (`project_events`, migration 0010; AGENTS.md sections 16.1 and 39).
+ * Event feed projection (`project_events`, migration 0010).
  * The projector writes these statements in the same D1 batch as its dedupe claims, so a batch
  * that fails leaves neither and redelivers. `event_id` is UNIQUE and every insert is
  * `INSERT OR IGNORE`, so a redelivered event never becomes a second row.

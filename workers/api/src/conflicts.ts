@@ -6,7 +6,7 @@ import { fail, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Semantic conflicts of one Change (AGENTS.md sections 32 and 38.2). The agents Worker records
+ * Semantic conflicts of one Change. The agents Worker records
  * them in D1 when a Task declares its Intent; this route only reads them.
  */
 

@@ -1,4 +1,4 @@
-// Integrate rule for complementary Tasks (AGENTS.md sections 32.4 and 33). Pure; no model calls.
+// Integrate rule for complementary Tasks. Pure; no model calls.
 // Two Tasks of one Change on different semantic resources are parts of one plan, never
 // alternatives: a conflict between them makes one Task build on the other, not a Candidate fork.
 import type { Intent } from "@rhumbatron/protocol";

@@ -13,11 +13,11 @@ import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Agents of one Project (AGENTS.md sections 13.4, 22, 23.5, 38.6, 57). One logical agent exists
+ * Agents of one Project. One logical agent exists
  * per Task (`agt_<task suffix>`, workers/integration dispatch.ts); it wakes when its Task becomes
  * ready and sleeps when the run ends. The D1 `agents` table is not written yet, so the read model
  * comes from `tasks`, `task_runs` and `decision_receipts`. Active and recently active agents are
- * listed one by one; the rest of the pool is aggregated by role (section 38.6).
+ * listed one by one; the rest of the pool is aggregated by role.
  *
  * Claims and the last event per agent come from the `project_events` feed (migration 0010). That
  * projection is optional here: when it is not readable the page reports `feed.available: false`
@@ -47,7 +47,7 @@ const OPEN_STATUSES = new Set(["pending", "ready", "assigned", "running", "block
 /** Feed types that say nothing new about an agent. */
 const QUIET_EVENTS = ["claim.renewed"];
 
-/** Role per Task kind (section 22). One agent works one Task, so the Task kind decides the role. */
+/** Role per Task kind. One agent works one Task, so the Task kind decides the role. */
 const ROLE_BY_KIND: Record<TaskKind, string> = {
   design: "Task Implementer",
   implement: "Task Implementer",
@@ -67,7 +67,7 @@ const RunView = z.object({
   failureKind: z.string().nullable(),
   /** The reason the agent gave with `fail_task`, or the runtime failure. Not model reasoning. */
   failureReason: z.string().nullable(),
-  /** Decision Receipt: who routed this attempt and why (section 23.5). */
+  /** Decision Receipt: who routed this attempt and why. */
   decidedBy: z.string().nullable(),
   /**
    * Model provider of the attempt from its Decision Receipt (ADR 0021), or null when the receipt

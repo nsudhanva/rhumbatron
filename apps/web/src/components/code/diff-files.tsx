@@ -32,7 +32,7 @@ const SIGN: Record<Line["kind"], string> = {
 const HUNK = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 /**
- * Unified hunks to rows (DESIGN.md 9.10): the new line number for added and context lines, the
+ * Unified hunks to rows: the new line number for added and context lines, the
  * old one for removed lines. Code is highlighted as one text, so strings and comments that span
  * lines stay right; added and removed lines keep their status color.
  */

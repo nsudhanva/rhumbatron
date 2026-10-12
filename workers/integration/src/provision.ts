@@ -8,10 +8,10 @@ import acmeShop from "./fixtures/acme-shop.fixture.gen.ts";
 import type { SourceSeed } from "./source-seed.ts";
 
 /**
- * Project source provisioning (AGENTS.md section 29.1). One Artifacts repo per Project, named by the
+ * Project source provisioning. One Artifacts repo per Project, named by the
  * Project ID. The first commit holds only a `.gitignore` (git needs one file for a tree); agents
- * build the app from nothing. Internal demo and smoke scripts seed the Acme Shop fixture instead
- * (section 54). isomorphic-git pushes the commit from an in-memory file system, then it becomes
+ * build the app from nothing. Internal demo and smoke scripts seed the Acme Shop fixture instead.
+ * isomorphic-git pushes the commit from an in-memory file system, then it becomes
  * Canonical Generation 0. Safe to repeat; it never seeds a Project whose canonical source is
  * assigned (`needsSourceSeed`).
  */

@@ -25,13 +25,13 @@ import {
 } from "@rhumbatron/protocol";
 
 /**
- * Intent declaration and semantic-conflict detection for one Change (AGENTS.md sections 26 and 32,
- * P9-04 and P9-07). Every Intent of a Change lives on the ResourceShardDO that owns
+ * Intent declaration and semantic-conflict detection for one Change (P9-04
+ * and P9-07). Every Intent of a Change lives on the ResourceShardDO that owns
  * `change:<id>`, so one `listIntents` call sees the whole Change. Detection is deterministic: no
  * model call decides a conflict here. The model review runs later (conflict-review.ts).
  */
 
-/** The stored policy row read for protected resources (D1 `project_policies`, section 53). */
+/** The stored policy row read for protected resources (D1 `project_policies`). */
 const PROTECTED_RESOURCES_SQL = "SELECT policy_json FROM project_policies WHERE project_id = ?";
 
 /**
@@ -59,7 +59,7 @@ export async function readProtectedResources(db: D1Database, projectId: string) 
   return protectedResourcesFrom(row);
 }
 
-/** Candidate statuses that no longer count against `max_candidate_count` (section 44). */
+/** Candidate statuses that no longer count against `max_candidate_count`. */
 export const INACTIVE_CANDIDATE_STATUSES = ["rejected", "stale", "promoted"];
 
 /**
@@ -77,8 +77,8 @@ export type ConflictReview = {
 };
 
 /**
- * Synchronous second opinion on a deterministic report at detection time (section 32.3 steps
- * 6-7). It must not confirm a conflict without a hard signal from the detector. The model review
+ * Synchronous second opinion on a deterministic report at detection time, after the
+ * deterministic checks and before a Sonnet review. It must not confirm a conflict without a hard signal from the detector. The model review
  * (Sonnet, P9-05; Opus escalation, P9-06) does not use this hook: it runs after the conflict is
  * recorded, off the agent's run path (conflict-review.ts).
  */

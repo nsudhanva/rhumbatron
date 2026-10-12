@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Complexity, Id, ModelTier, RiskTier, Timestamp } from "./common.ts";
 
-/** Routing input for one meaningful reasoning step (AGENTS.md section 23.1). */
+/** Routing input for one meaningful reasoning step. */
 export const RouteRequest = z.object({
   taskKind: z.string().min(1),
   complexity: Complexity,
@@ -31,7 +31,7 @@ export const RouteDecision = z.object({
 });
 export type RouteDecision = z.infer<typeof RouteDecision>;
 
-/** Structured record of a model route (section 23.5). Never contains private reasoning. */
+/** Structured record of a model route. Never contains private reasoning. */
 export const DecisionReceipt = z.object({
   decisionType: z.literal("MODEL_ROUTE"),
   taskId: Id,

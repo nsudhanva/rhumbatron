@@ -3,7 +3,7 @@ import { formatNumber } from "../../lib/format";
 import { EVENT_GROUPS, type EventGroup } from "../dag/model";
 
 /**
- * Filter chips by event type group (DESIGN.md 8.3 filter chip, 9.9): 12px, 1px rule border,
+ * Filter chips by event type group (filter chip): 12px, 1px rule border,
  * selected in ink with inverse text, a trailing mono count at 70%. "All" clears the group.
  * Counts cover the loaded events that pass the other filters.
  */

@@ -1,5 +1,5 @@
 /**
- * A command that later succeeds closes its dead letter (AGENTS.md section 42.7): the operator
+ * A command that later succeeds closes its dead letter: the operator
  * banner must not ask for a decision about work that already happened. Lifts only the blocks the
  * dead letter itself set. Never throws: a failure here must not fail the command.
  */

@@ -3,7 +3,7 @@ import { utf8Length } from "./code.ts";
 import type { RiskTier } from "./common.ts";
 
 /**
- * Human edits (Phase 16 P16-19; AGENTS.md sections 15.4, 26.1, 33, 36). A person edits one file on
+ * Human edits (Phase 16 P16-19). A person edits one file on
  * the Code page. Save creates a new Change with one human ChangeSet. That Change goes through the
  * same composition, verification, and promotion as agent work: only verified evidence advances
  * the Canonical State. Everything here is deterministic; no model sees an edit.
@@ -184,7 +184,7 @@ export type HumanEditIntent = {
 };
 
 /**
- * The Intent of a human ChangeSet (section 26.1), derived from the path and the two file versions.
+ * The Intent of a human ChangeSet, derived from the path and the two file versions.
  * Route changes become declared contract changes, so the contract check accepts them. Risk is
  * deterministic: a protected resource or an authorization path is high (a human gate by default
  * policy), a route change medium, anything else low. Policy then decides promotion as for any

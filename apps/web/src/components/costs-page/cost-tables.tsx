@@ -21,7 +21,7 @@ import {
 } from "./cost-format";
 
 /**
- * Model usage by tier for one Change (AGENTS.md section 56): attempts, calls, the busiest
+ * Model usage by tier for one Change: attempts, calls, the busiest
  * attempt against the per-run call cap, tokens and recorded cost.
  */
 export function TierTable({ byTier }: { byTier: SelectedCost["byTier"] }) {

@@ -2,8 +2,8 @@ import { z } from "zod";
 import { CanonicalGeneration, Id } from "./common.ts";
 
 /**
- * Release of one promoted Canonical Generation (AGENTS.md sections 21.3, 42.10; ADR 0020).
- * One release per Project and generation (section 60: "Release -> canonical generation").
+ * Release of one promoted Canonical Generation (ADR 0020).
+ * One release per Project and generation ("Release -> canonical generation").
  *
  *   queued -> building -> deployed
  *                      -> failed        (no bundle, or the production pointer did not move)

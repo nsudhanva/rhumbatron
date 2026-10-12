@@ -28,7 +28,7 @@ import { ByTag, CausalTrace, clockOf, KindTag } from "../panels/decisions/decisi
  * recorded causes, its Decision Receipt or typed record, and the records that followed it
  * (the attempt outcome, the checks, the generations). Nothing is inferred: a receipt the API did
  * not record is named as missing, and route probabilities are shown as recorded routing inputs,
- * never as a release signal (AGENTS.md 22.5, 34, 45).
+ * never as a release signal.
  */
 
 type Json = { [key: string]: JsonValue };
@@ -49,7 +49,7 @@ function subjectButton(state: FlightState, ref: EntityRef) {
   );
 }
 
-/** Horizontal bar list (DESIGN.md 9.1): label · bar · value, every bar with its number. */
+/** Horizontal bar list: label · bar · value, every bar with its number. */
 function Probabilities({ values }: { values: Json }) {
   const rows = (["haiku", "sonnet", "opus"] as const)
     .map((tier) => ({ tier, value: values[tier] }))

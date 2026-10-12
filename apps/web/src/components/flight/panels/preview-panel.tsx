@@ -12,7 +12,7 @@ import { RefButton } from "./arena/ref-button";
 
 /**
  * Live application preview wall: the screenshots Browser Run recorded for each Candidate's browser
- * check (AGENTS.md 35), served through the same-origin proxy `/evidence/<cand>/<check>/<n>`.
+ * check, served through the same-origin proxy `/evidence/<cand>/<check>/<n>`.
  * Real Evidence only: no iframe, no simulated app. A screenshot the proxy cannot serve (signed
  * out, fixture mode, expired object) shows a labelled "not available" frame, never a stand-in.
  */

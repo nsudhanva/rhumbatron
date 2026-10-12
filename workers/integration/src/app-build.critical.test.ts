@@ -1,4 +1,4 @@
-// The composition build and the client-assets freshness rule (AGENTS.md sections 33, 34, 37). An
+// The composition build and the client-assets freshness rule. An
 // app that builds its client must ship the bundle built from the composed sources: a Candidate
 // that changes client sources but serves the old bundle fails, never passes.
 import { beforeEach, describe, expect, it, vi } from "vitest";

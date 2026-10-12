@@ -19,7 +19,7 @@ import { fail, respond, validate } from "./http.ts";
 import { canAccessProject, ensureIdentity } from "./identity.ts";
 
 /**
- * Activity reads for the UI (AGENTS.md sections 16.1, 39, 41, 58). All read D1 only, through
+ * Activity reads for the UI. All read D1 only, through
  * indexes, with capped row counts; none calls a Durable Object.
  *
  *   GET /v1/projects/:projectId/events   feed page (project_events, migration 0010)
@@ -30,7 +30,7 @@ import { canAccessProject, ensureIdentity } from "./identity.ts";
  *   GET /v1/changes/:changeId/progress   live progress of running attempts
  *
  * The feed is a projection of K2 events written by the event-router, so it lags the
- * authoritative state by the projector delay (eventual consistency, section 59).
+ * authoritative state by the projector delay (eventual consistency).
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -257,7 +257,7 @@ export const activity = new Hono<AppEnv>()
   )
 
   /**
-   * Claims of one Change (section 13.2). ResourceShardDO writes `claim.*` events to its outbox in
+   * Claims of one Change. ResourceShardDO writes `claim.*` events to its outbox in
    * the same transaction as the lease change, so the feed carries every Claim fact without a fan-out
    * to the shards. Reads at most CLAIM_FEED_LIMIT + 1 rows through a partial index.
    */

@@ -17,7 +17,7 @@ import { asRole, can } from "../lib/permissions";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
- * Project Settings (AGENTS.md 38, last navigation item): General, People, Defaults, Display and
+ * Project Settings (last navigation item): General, People, Defaults, Display and
  * Danger zone. Fields a role cannot change are hidden, not disabled (lib/permissions.ts); the
  * API enforces the same rules.
  */

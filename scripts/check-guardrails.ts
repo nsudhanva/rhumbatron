@@ -1,5 +1,5 @@
 /**
- * Enforces AGENTS.md project policy that generic linters cannot express.
+ * Enforces project policy that generic linters cannot express.
  * Fails when a tracked file can mutate remote Cloudflare state outside Terraform,
  * or when a credential literal appears in Terraform source.
  */

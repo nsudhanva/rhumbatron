@@ -6,7 +6,7 @@ import { formatUsd } from "../../lib/format";
 import { SectionError } from "../project/feedback";
 
 /**
- * A person's commands on one Change (AGENTS.md sections 16.1 and 44). The API owns every rule;
+ * A person's commands on one Change. The API owns every rule;
  * these controls only send the request and refresh the Change reads.
  */
 
@@ -72,7 +72,7 @@ export function CancelChange({ changeId, status }: { changeId: string; status: s
 }
 CancelChange.displayName = "CancelChange";
 
-/** Section 44 rule 5: shown only while a budget limit blocks the Change. */
+/** A person raises the budget here; shown only while a budget limit blocks the Change. */
 export function RaiseBudget({ changeId, budgetUsd }: { changeId: string; budgetUsd: number }) {
   const [budget, setBudget] = useState(String(Math.min(100, Math.max(1, budgetUsd * 2))));
   const next = Number(budget);

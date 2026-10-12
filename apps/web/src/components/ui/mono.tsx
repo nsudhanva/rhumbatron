@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { EMPTY, formatNumber } from "../../lib/format";
 
 /**
- * Machine values (DESIGN.md 4.3, 12): IDs, hashes, timestamps, paths, commands. Never re-cased.
+ * Machine values: IDs, hashes, timestamps, paths, commands. Never re-cased.
  * `truncate` cuts at the end with an ellipsis and exposes the full value in `title`; an
  * identifier is never cut in the middle.
  *

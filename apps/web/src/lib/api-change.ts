@@ -6,7 +6,7 @@ import type { CandidateDetail, ChangeDetail, ChangeMeta } from "./api";
 /**
  * Change-page server functions over the API Worker (service binding `API`), with the same call
  * pattern as `api.ts`: the browser never calls the API directly; each call runs on the web Worker
- * with the user's Clerk session token (AGENTS.md 12.1).
+ * with the user's Clerk session token.
  *
  * The types below mirror the API responses of `GET /v1/changes/:changeId`,
  * `GET /v1/changes/:changeId/candidates`, `GET /v1/candidates/:candidateId`, and

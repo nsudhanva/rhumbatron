@@ -7,7 +7,7 @@ locals {
   }
 }
 
-# Large Evidence and the K2 event archive (AGENTS.md sections 19.1 and 34.4).
+# Large Evidence and the K2 event archive.
 resource "cloudflare_r2_bucket" "evidence" {
   account_id    = var.account_id
   name          = "rhumbatron-evidence${local.suffix}"
@@ -38,7 +38,7 @@ resource "cloudflare_r2_bucket_lifecycle" "evidence" {
   )
 }
 
-# Product metadata (AGENTS.md section 14).
+# Product metadata.
 resource "cloudflare_d1_database" "control" {
   account_id = var.account_id
   name       = "rhumbatron-control${local.suffix}"

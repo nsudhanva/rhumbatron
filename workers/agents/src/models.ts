@@ -23,7 +23,7 @@ import type { ModelTier } from "@rhumbatron/protocol";
 
 export const PROVIDER_ID = "rhumbatron";
 
-/** Bounded context per call keeps the per-call reservation and spend small (section 24.3). */
+/** Bounded context per call keeps the per-call reservation and spend small. */
 const TIER_LIMITS: Record<ModelTier, { contextWindow: number; maxTokens: number }> = {
   haiku: { contextWindow: 200_000, maxTokens: 4000 },
   sonnet: { contextWindow: 200_000, maxTokens: 8000 },
@@ -78,7 +78,7 @@ export function tierModelCost(tier: ModelTier) {
 
 /**
  * Rewrites a Pi payload for a tier: the real model id, adaptive thinking with the text omitted
- * (no reasoning is stored, AGENTS.md rule 32), and the tier's effort. Exported for tests.
+ * (no reasoning is stored), and the tier's effort. Exported for tests.
  */
 export function tierPayload(payload: Record<string, unknown>, tier: ModelTier) {
   return {

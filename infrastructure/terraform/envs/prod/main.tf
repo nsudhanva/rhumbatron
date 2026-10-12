@@ -1,4 +1,4 @@
-# Prod environment (AGENTS.md section 10, ADR 0017): the only remote environment. Resources use
+# Prod environment (ADR 0017): the only remote environment. Resources use
 # `-prod` names and prod hostnames.
 
 locals {
@@ -39,7 +39,7 @@ module "state" {
   account_id  = var.account_id
   environment = local.environment
 
-  # AGENTS.md section 43. Prod keeps Evidence until a retention need is defined.
+  # Retention per R2 prefix. Prod keeps Evidence until a retention need is defined.
   evidence_retention_days = {
     events   = 365
     evidence = null
@@ -63,7 +63,7 @@ module "ai" {
   spend_limit_usd = var.anthropic_monthly_budget_usd
 }
 
-# Vectorize semantic memory (P1-10, P7-05). Provider 5.27 has no Vectorize index resource, so a
+# Vectorize semantic memory. Provider 5.27 has no Vectorize index resource, so a
 # temporary adapter creates it (ADR 0003). 384 dims for Workers AI bge-small-en-v1.5. Free plan:
 # 5M stored dimensions = 13,020 vectors; the indexer caps the account at 10,000 vectors in code.
 locals {
@@ -92,7 +92,7 @@ resource "terraform_data" "vectorize_index" {
 }
 
 # Deletes the index on a real destroy only. Keyed by the name alone. The index holds derived data
-# that the indexer rebuilds, so deletion is safe (section 11.4 step 9).
+# that the indexer rebuilds, so deletion is safe.
 resource "terraform_data" "vectorize_index_teardown" {
   input = {
     account_id = var.account_id
@@ -188,17 +188,17 @@ module "api_worker" {
     module.state.bindings.EVIDENCE,
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = module.coordinator_worker.name },
-    # Sandbox smoke check RPC on the agents Worker (AGENTS.md section 49.3).
+    # Sandbox smoke check RPC on the agents Worker.
     { type = "service", name = "AGENTS", service = module.agents_worker.name, environment = "production" },
-    # Approval and promotion RPC on the integration Worker (AGENTS.md section 36, ADR 0013).
+    # Approval and promotion RPC on the integration Worker (ADR 0013).
     { type = "service", name = "INTEGRATION", service = module.integration_worker.name, environment = "production" },
     # Project source provisioning commands (ADR 0010).
     { type = "queue", name = "INTEGRATION_COMMANDS", queue_name = module.async.queues["integration"].name },
-    # Dead-letter retry sends an `agent.wake` back to its original Queue (section 42.7).
+    # Dead-letter retry sends an `agent.wake` back to its original Queue.
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
-    # Starts one ChangeWorkflow per Change (AGENTS.md section 21.1).
+    # Starts one ChangeWorkflow per Change.
     { type = "workflow", name = "CHANGE_WORKFLOW", workflow_name = cloudflare_workflow.change.workflow_name, class_name = "ChangeWorkflow", script_name = module.integration_worker.name },
-    # Wishlist design-conflict fixture routes for the section 55 demo (ADR 0017).
+    # Wishlist design-conflict fixture routes for the Wishlist demo (ADR 0017).
     { type = "plain_text", name = "FIXTURES_ENABLED", text = "true" },
     # The Costs page shows this environment's caps (ADR 0017).
     local.cap_bindings.sandbox,
@@ -254,8 +254,9 @@ module "web_worker" {
   ] : []
 }
 
-# K2 event streams (AGENTS.md section 19). Provider 5.27 has no K2 resource, so a temporary
-# adapter creates them (ADR 0006). Names allow only letters, digits, and underscores.
+# K2 event streams: 8 shared streams, never one per Project or Agent. Provider 5.27 has no K2
+# resource, so a temporary adapter creates them (ADR 0006). Names allow only letters, digits,
+# and underscores.
 locals {
   k2_config = {
     streams = [for i in range(8) : {
@@ -305,7 +306,7 @@ data "external" "k2_streams" {
   depends_on = [terraform_data.k2_streams]
 }
 
-# Strong coordination Durable Objects (AGENTS.md section 12.3). SQLite-backed.
+# Strong coordination Durable Objects: ProjectRootDO, ResourceShardDO, ProjectViewDO. SQLite-backed.
 module "coordinator_worker" {
   source      = "../../modules/durable-worker"
   account_id  = var.account_id
@@ -352,7 +353,7 @@ module "coordinator_worker" {
   }
 }
 
-# K2 consumer: pulls events, deduplicates, projects into ProjectViewDO (AGENTS.md section 12.5).
+# K2 consumer: pulls events, deduplicates, projects into ProjectViewDO.
 # Fast path: the coordinator nudges it after each publish. Safety net: a 1-minute cron sweep.
 module "event_router_worker" {
   source      = "../../modules/worker"
@@ -380,16 +381,16 @@ module "event_router_worker" {
     module.state.bindings.EVIDENCE,
     # Literal name (not a module output) avoids a cycle: the coordinator binds back to this Worker.
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = "rhumbatron-coordinator-${local.environment}" },
-    # Dead-letter consumer records `task.failed` through the Change's shard outbox (section 42.7).
+    # Dead-letter consumer records `task.failed` through the Change's shard outbox.
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = "rhumbatron-coordinator-${local.environment}" },
-    # Causal Router (AGENTS.md section 31): wake commands, ready-task dispatch, Clef-flash.
+    # Causal Router: wake commands, ready-task dispatch, Clef-flash.
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
     { type = "queue", name = "INTEGRATION_COMMANDS", queue_name = module.async.queues["integration"].name },
-    # `index.build` on a new canonical tree, `index.purge` for archived Projects (section 12.7).
+    # `index.build` on a new canonical tree, `index.purge` for archived Projects.
     { type = "queue", name = "INDEXING", queue_name = module.async.queues["indexing"].name },
-    # Workers AI for Clef-flash only, capped at 200 calls per day in code (rule 50).
+    # Workers AI for Clef-flash only, capped at 200 calls per day in code (free limit).
     { type = "ai", name = "AI" },
-    # analytics-projector (section 41.1): one data point per lifecycle Event, own dataset so the
+    # analytics-projector: one data point per lifecycle Event, own dataset so the
     # source points in METRICS are not counted twice. About 1,000 points on a busy day (free 100k).
     { type = "analytics_engine", name = "EVENT_METRICS", dataset = "rhumbatron_event_metrics_${local.environment}" },
   ]
@@ -401,7 +402,7 @@ module "event_router_worker" {
   cron_schedules = local.paused ? [] : ["* * * * *"]
 }
 
-# Candidate, verification, and Change orchestration (AGENTS.md section 12.6).
+# Candidate, verification, and Change orchestration.
 module "integration_worker" {
   source      = "../../modules/worker"
   account_id  = var.account_id
@@ -427,12 +428,12 @@ module "integration_worker" {
     # Tens of reads and writes per day (KV free: 100,000 reads, 1,000 writes).
     module.state.bindings.CONFIG,
     { type = "queue", name = "AGENT_WAKEUPS", queue_name = module.async.queues["agent-wakeups"].name },
-    # Section 20 (HOM-202): Workflow start commands. This Worker produces and consumes them.
+    # Workflow start commands (HOM-202). This Worker produces and consumes them.
     { type = "queue", name = "VERIFICATION_COMMANDS", queue_name = module.async.queues["verification"].name },
     { type = "queue", name = "RELEASE_COMMANDS", queue_name = module.async.queues["release"].name },
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
-    # Project cleanup purges the live view and the Project's AgentDO instances (section 43).
+    # Project cleanup purges the live view and the Project's AgentDO instances.
     { type = "durable_object_namespace", name = "PROJECT_VIEW", class_name = "ProjectViewDO", script_name = module.coordinator_worker.name },
     # Literal name: the agents Worker is declared after this one.
     { type = "durable_object_namespace", name = "AGENT", class_name = "AgentDO", script_name = "rhumbatron-agents-${local.environment}" },
@@ -453,12 +454,12 @@ module "integration_worker" {
     { type = "plain_text", name = "MODEL_PROVIDER", text = var.model_provider },
     { type = "plain_text", name = "ALLOW_OPUS", text = tostring(var.allow_opus) },
     local.cap_bindings.anthropic,
-    # Browser Run for the Candidate browser check (AGENTS.md section 35). Capped in code: one
+    # Browser Run for the Candidate browser check. Capped in code: one
     # session of at most 55 s per check, 2 per Candidate, BROWSER_DAILY_SECONDS per UTC day (D1).
     { type = "browser", name = "BROWSER" },
     local.cap_bindings.browser,
     local.cap_bindings.sandbox,
-    # Self-binding to ReleaseWorkflow (AGENTS.md section 21.3, ADR 0020); literal name as above.
+    # Self-binding to ReleaseWorkflow (ADR 0020); literal name as above.
     { type = "workflow", name = "RELEASE_WORKFLOW", workflow_name = "rhumbatron-release-${local.environment}", class_name = "ReleaseWorkflow" },
     # Live apps (ADR 0020): bundle builds over RPC to the apps Worker. Without this
     # binding `app.provision` is a no-op.
@@ -481,7 +482,7 @@ resource "cloudflare_workflow" "change" {
   script_name   = module.integration_worker.name
 }
 
-# AGENTS.md section 21.2. One instance per Candidate; about 10 to 14 steps per Candidate.
+# CandidateVerificationWorkflow. One instance per Candidate; about 10 to 14 steps per Candidate.
 resource "cloudflare_workflow" "candidate_verification" {
   account_id    = var.account_id
   workflow_name = "rhumbatron-candidate-verification-${local.environment}"
@@ -489,7 +490,7 @@ resource "cloudflare_workflow" "candidate_verification" {
   script_name   = module.integration_worker.name
 }
 
-# AGENTS.md section 21.3 (ADR 0020). One instance per promoted generation of a Project with a
+# ReleaseWorkflow (ADR 0020). One instance per promoted generation of a Project with a
 # live app; about 8 steps per release.
 resource "cloudflare_workflow" "release" {
   account_id    = var.account_id
@@ -498,7 +499,7 @@ resource "cloudflare_workflow" "release" {
   script_name   = module.integration_worker.name
 }
 
-# Agent Plane (AGENTS.md section 12.4): wake consumer plus AgentDO running Pi (ADR 0009).
+# Agent Plane: wake consumer plus AgentDO running Pi (ADR 0009).
 module "agents_worker" {
   source      = "../../modules/durable-worker"
   account_id  = var.account_id
@@ -524,7 +525,7 @@ module "agents_worker" {
     { type = "durable_object_namespace", name = "PROJECT_ROOT", class_name = "ProjectRootDO", script_name = module.coordinator_worker.name },
     # Read-only canonical source for agent file tools (ADR 0010).
     { type = "artifacts", name = "ARTIFACTS", namespace = "rhumbatron-projects-${local.environment}" },
-    # Context Packet snapshots under context/ (AGENTS.md section 27.5).
+    # Context Packet snapshots under context/, content-hashed for replay.
     module.state.bindings.EVIDENCE,
     { type = "durable_object_namespace", name = "RESOURCE_SHARD", class_name = "ResourceShardDO", script_name = module.coordinator_worker.name },
     # Analytics Engine datasets are created on first write. Wakeups, model calls, run outcomes.
@@ -540,7 +541,7 @@ module "agents_worker" {
     { type = "ai", name = "AI" },
     local.cap_bindings.sandbox,
     local.cap_bindings.anthropic,
-    # Semantic memory, read-only: one top-k query per agent run, capped at 1,000 per day (P7-06).
+    # Semantic memory, read-only: one top-k query per agent run, capped at 1,000 per day.
     { type = "vectorize", name = "MEMORY", index_name = local.vectorize_index.name },
   ]
 
@@ -556,7 +557,7 @@ module "agents_worker" {
   depends_on = [terraform_data.sandbox_worker, terraform_data.vectorize_index, terraform_data.d1_migrations]
 }
 
-# Indexer (AGENTS.md section 12.7, Phase 7): exact symbol and dependency indexes, the Product Graph
+# Indexer: exact symbol and dependency indexes, the Product Graph
 # store, and Vectorize file summaries, once per canonical tree. Queue-driven only: no cron, no
 # public route. Per build: about 5 Artifacts operations, 3 R2 writes, 1 Workers AI batch.
 module "indexer_worker" {
@@ -586,7 +587,7 @@ module "indexer_worker" {
     # Read-only canonical source: one read token per build (ADR 0010).
     { type = "artifacts", name = "ARTIFACTS", namespace = "rhumbatron-projects-${local.environment}" },
     { type = "vectorize", name = "MEMORY", index_name = local.vectorize_index.name },
-    # Embeddings only (bge-small-en-v1.5), capped at 2,000 texts per day in code (rule 50).
+    # Embeddings only (bge-small-en-v1.5), capped at 2,000 texts per day in code (free limit).
     { type = "ai", name = "AI" },
     { type = "analytics_engine", name = "METRICS", dataset = "rhumbatron_metrics_${local.environment}" },
   ]
@@ -711,7 +712,7 @@ locals {
   }
 }
 
-# Deploys the apps Worker on any bundle or configuration change (temporary adapter, section 11.4).
+# Deploys the apps Worker on any bundle or configuration change (temporary adapter).
 # No destroy provisioner here: a replacement must never delete the live Worker and its app data.
 resource "terraform_data" "apps_worker" {
   triggers_replace = { config = jsonencode(local.apps_worker) }
@@ -790,7 +791,7 @@ resource "cloudflare_workers_route" "apps_bypass" {
   pattern = "${each.value}/*"
 }
 
-# One consumer for all wake commands. Poison commands go to the dead-letter Queue (section 42.7).
+# One consumer for all wake commands. Poison commands go to the dead-letter Queue.
 resource "cloudflare_queue_consumer" "agent_wakeups" {
   account_id        = var.account_id
   queue_id          = module.async.queues["agent-wakeups"].id
@@ -820,7 +821,7 @@ resource "cloudflare_queue_consumer" "integration" {
   }
 }
 
-# `verification.start` and `release.start` (section 20, HOM-202): the integration Worker starts the
+# `verification.start` and `release.start` (HOM-202): the integration Worker starts the
 # existing Workflow; the instance ID is the command's idempotency key, so a redelivery starts
 # nothing new. Batch 5 keeps one invocation at about 20 subrequests (Workers Free: 50). Queues: about
 # 3 operations per Candidate and per release.
@@ -871,7 +872,7 @@ resource "cloudflare_queue_consumer" "indexing" {
   }
 }
 
-# Poison commands (AGENTS.md section 42.7): the event router records each one in D1 and blocks its
+# Poison commands: the event router records each one in D1 and blocks its
 # Task. No dead-letter Queue of its own; a storage failure retries 5 times, then is logged.
 resource "cloudflare_queue_consumer" "dead_letter" {
   account_id  = var.account_id
@@ -886,7 +887,7 @@ resource "cloudflare_queue_consumer" "dead_letter" {
   }
 }
 
-# D1 schema migrations (AGENTS.md section 11.6). Re-runs when any migration file changes.
+# D1 schema migrations run only from terraform apply. Re-runs when any migration file changes.
 # The script applies only unapplied files and is safe to run again.
 locals {
   migrations_dir = "${local.repo_root}/migrations/d1"

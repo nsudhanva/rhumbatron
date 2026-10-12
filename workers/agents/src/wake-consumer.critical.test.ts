@@ -1,4 +1,4 @@
-// Duplicate Queue command (AGENTS.md sections 20, 42.2, P13-05). Queues deliver at least once, so a
+// Duplicate Queue command (P13-05). Queues deliver at least once, so a
 // redelivered or concurrently delivered wake must not assign the Task twice, record its events twice,
 // or start a second agent run (a second run is a second set of model calls).
 import { beforeEach, describe, expect, it, vi } from "vitest";

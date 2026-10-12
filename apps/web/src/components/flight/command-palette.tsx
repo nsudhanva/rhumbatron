@@ -20,7 +20,7 @@ import {
 import { stepFact } from "./scrubber";
 
 /**
- * Command palette (DESIGN.md 8.6), opened with Cmd/Ctrl+K (the page registers the shortcut).
+ * Command palette, opened with Cmd/Ctrl+K (the page registers the shortcut).
  * Built on Kumo's CommandPalette (Base UI Dialog + Autocomplete): focus trap and return, Escape,
  * arrow keys and Enter come from Kumo. Commands act on the current Flight Control state only:
  * jump to any entity, focus a panel, move the time machine, toggle filters, open related pages.

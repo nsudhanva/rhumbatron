@@ -1,5 +1,5 @@
-// The indexes decide what an agent sees first (AGENTS.md section 27.3) and what the Product Graph
-// shows (section 28). These tests pin the exact dependency index on a small fixture, the stale
+// The indexes decide what an agent sees first and what the Product Graph
+// shows. These tests pin the exact dependency index on a small fixture, the stale
 // vector cleanup between trees, and that a tree is built once (idempotent per tree SHA).
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

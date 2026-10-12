@@ -1,7 +1,7 @@
 import type { ModelTier } from "@rhumbatron/protocol";
 
 /**
- * Agent Runtime boundary (AGENTS.md section 25). Application code depends on this interface, never
+ * Agent Runtime boundary. Application code depends on this interface, never
  * on Pi types, so the harness can change without touching callers.
  */
 
