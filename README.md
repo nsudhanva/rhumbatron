@@ -4,7 +4,7 @@
 
 Rhumbatron lets a team of people and AI agents change one codebase at the same time. You describe an outcome in plain language. Agents do the work in parallel, Rhumbatron finds conflicts between their plans before a merge, and only a version that passes its checks ships.
 
-Made by Sudhanva Narayana ([@nsudhanva](https://github.com/nsudhanva)) and Maanasa Narayan ([@maanasanarayan](https://github.com/maanasanarayan)) for the Cloudflare competition *Build the Next-Gen Git Platform on Cloudflare*.
+Made by [Sudhanva Narayana](https://sudhanva.me) and [Maanasa Narayan](https://maanasa.dev) for the Cloudflare competition *Build the Next-Gen Git Platform on Cloudflare*.
 
 ## How it works
 
@@ -44,11 +44,20 @@ Requirements: [Bun](https://bun.sh) 1.3.14 and [Terraform](https://developer.has
 git clone https://github.com/nsudhanva/rhumbatron.git
 cd rhumbatron
 bun install
-cp apps/web/.env.example apps/web/.env.local   # add Clerk development keys
-bun run dev                                    # web on localhost:5173, API on localhost:8787
+cp apps/web/.env.example apps/web/.env.local
+bun run dev
 ```
 
+Add your Clerk development keys to `apps/web/.env.local`. The web app runs on `localhost:5173` and the API on `localhost:8787`.
+
 The local runtime simulates D1, R2, KV, Queues, Durable Objects, and Workflows. A full agent run needs Artifacts, K2, and Workers AI, so it needs a Cloudflare deployment. To deploy to your own account, follow the [deployment runbook](docs/operations/deploy.md).
+
+## Team
+
+| Name | Website | GitHub | LinkedIn | X |
+|---|---|---|---|---|
+| Sudhanva Narayana | [sudhanva.me](https://sudhanva.me) | [@nsudhanva](https://github.com/nsudhanva) | [nsudhanva](https://linkedin.com/in/nsudhanva) | [@SudhanvaN](https://x.com/SudhanvaN) |
+| Maanasa Narayan | [maanasa.dev](https://maanasa.dev) | [@maanasanarayan](https://github.com/maanasanarayan) | [maanasa-narayan](https://www.linkedin.com/in/maanasa-narayan/) | [@maanasa_narayan](https://x.com/maanasa_narayan) |
 
 ## License
 
