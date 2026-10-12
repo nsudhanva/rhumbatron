@@ -1,4 +1,10 @@
-import { apiData, changeTitle } from "@rhumbatron/protocol";
+import {
+  apiData,
+  BudgetScope,
+  changeTitle,
+  METER_COUNTER,
+  ProjectBudget,
+} from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
@@ -75,6 +81,8 @@ const ChangeCost = Usage.extend({
   title: z.string(),
   status: z.string(),
   budgetUsd: z.number(),
+  /** Which budget the Change draws on (ADR 0030); `budgetUsd` caps only scope `change`. */
+  budgetScope: BudgetScope,
   createdAt: z.string(),
 });
 
@@ -134,6 +142,8 @@ const CostView = z.object({
     agentModelCallsByDay: z.array(z.object({ day: z.string(), count: z.number().int() })),
   }),
   callCapPerRun: z.record(z.enum(TIERS), z.number().int()),
+  /** The Project monthly budget and this month's Project spend against it (ADR 0030). */
+  projectBudget: ProjectBudget,
 });
 export type CostView = z.infer<typeof CostView>;
 
@@ -188,10 +198,11 @@ export const cost = new Hono<AppEnv>().get(
 
     // Newest Changes with their run totals, and the meters. Indexed: changes.project_id,
     // tasks.change_id, task_runs.task_id, usage_counters primary key (day, counter).
-    const [changeRows, totalRows, meterRows] = await db.batch([
+    const projectMeter = METER_COUNTER.project(projectId);
+    const [changeRows, totalRows, meterRows, capRows] = await db.batch([
       db
         .prepare(
-          `SELECT id, goal, title, status, budget_usd, created_at FROM changes
+          `SELECT id, goal, title, status, budget_usd, budget_scope, created_at FROM changes
            WHERE project_id = ? ORDER BY created_at DESC LIMIT ?`,
         )
         .bind(projectId, CHANGE_LIMIT),
@@ -212,10 +223,14 @@ export const cost = new Hono<AppEnv>().get(
         .prepare(
           `SELECT day, counter, count FROM usage_counters
            WHERE (day >= ? AND day <= ? AND counter IN ('agent-model-calls', 'clef-flash'))
-              OR (day = ? AND counter IN ('sandbox-seconds', 'anthropic-usd-micro'))`,
+              OR (day = ? AND counter IN ('sandbox-seconds', 'anthropic-usd-micro', ?))`,
         )
-        .bind(days[0], day, month),
+        .bind(days[0], day, month, projectMeter),
+      db.prepare("SELECT monthly_budget_usd FROM projects WHERE id = ?").bind(projectId),
     ]);
+    const projectCapUsd =
+      (capRows?.results?.[0] as { monthly_budget_usd: number | null } | undefined)
+        ?.monthly_budget_usd ?? null;
 
     type ChangeRow = {
       id: string;
@@ -223,6 +238,7 @@ export const cost = new Hono<AppEnv>().get(
       title: string | null;
       status: string;
       budget_usd: number;
+      budget_scope: string | null;
       created_at: string;
     };
     type TotalRow = {
@@ -360,6 +376,7 @@ export const cost = new Hono<AppEnv>().get(
             title: changeTitle(ch.title, ch.goal),
             status: ch.status,
             budgetUsd: ch.budget_usd,
+            budgetScope: BudgetScope.catch("change").parse(ch.budget_scope),
             createdAt: ch.created_at,
             runs: t?.runs ?? 0,
             modelCalls: t?.model_calls ?? 0,
@@ -383,6 +400,11 @@ export const cost = new Hono<AppEnv>().get(
           agentModelCallsByDay: days.map((d) => ({ day: d, count: meter(d, "agent-model-calls") })),
         },
         callCapPerRun: MAX_CALLS_PER_RUN,
+        projectBudget: {
+          capUsd: projectCapUsd,
+          spentUsd: meter(month, projectMeter) / 1_000_000,
+          month,
+        },
       },
     });
   },

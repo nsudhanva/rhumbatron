@@ -1,11 +1,11 @@
 import { Link } from "@tanstack/react-router";
 import {
+  changeLabel,
   EMPTY,
   formatAge,
   formatFraction,
   formatNumber,
   formatUsd,
-  truncate,
 } from "../../lib/format";
 import { ChangeStatusPill } from "../project/status";
 import { DataTable, Td, Th, TitleCell, TRow } from "../ui/data-table";
@@ -164,7 +164,7 @@ export function ChangeTable({
                     aria-current={c.id === selectedId ? "true" : undefined}
                     className="after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-[-2px] focus-visible:after:outline-accent-500"
                   >
-                    {truncate(c.goal, 90)}
+                    {changeLabel(c)}
                   </Link>
                 }
                 meta={c.id}

@@ -1,4 +1,4 @@
-import { formatFraction, formatNumber, formatUsd, truncate } from "../../lib/format";
+import { changeLabel, formatFraction, formatNumber, formatUsd } from "../../lib/format";
 import { ChangeStatusPill } from "../project/status";
 import { ThresholdMeter } from "../ui/meter";
 import { Mono } from "../ui/mono";
@@ -16,19 +16,31 @@ export function BudgetHero({ change }: { change: ChangeCost }) {
   const budget = change.budgetUsd;
   // Scale only: the limit plus a quarter, or the overrun itself. Not a figure on its own.
   const scale = Math.max(budget * 1.25, spent);
+  // Scopes `project` and `account` have no own cap: the monthly budget meters them.
+  const pool =
+    change.budgetScope === "project"
+      ? "Project budget"
+      : change.budgetScope === "account"
+        ? "requester's monthly budget"
+        : null;
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="grid min-w-0 gap-1">
           <p className="min-w-0 text-[15px] font-semibold" title={change.goal}>
-            {truncate(change.goal, 160)}
+            {changeLabel(change)}
           </p>
           <Mono subtle>{change.id}</Mono>
         </div>
         <ChangeStatusPill status={change.status} />
       </div>
 
-      {scale > 0 ? (
+      {pool ? (
+        <p className="text-[13px] text-kumo-subtle">
+          This request draws on the {pool}, so it has no own limit.{" "}
+          <span className="font-mono tabular-nums">{formatCost(spent)}</span> recorded.
+        </p>
+      ) : scale > 0 ? (
         <ThresholdMeter
           label="Recorded model spend"
           value={spent}

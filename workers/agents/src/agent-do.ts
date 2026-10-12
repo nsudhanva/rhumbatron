@@ -17,19 +17,24 @@ import {
 import {
   AGENT_DAILY_CALL_CAP,
   anthropicMonthlyBudgetUsd,
+  type ChangeBudgets,
   CLEF_ROUTE_ABSTAIN_BELOW,
+  changeMeters,
   checkRunBudget,
   classifyProviderFailure,
   type FailureKind,
+  keyOf,
   MAX_CALLS_PER_RUN,
   meteredComplete,
-  monthSpentUsd,
   opusAllowed,
+  readChangeBudgets,
+  refusedMeter,
   reserveEstimateUsd,
-  reserveSpend,
+  reserveMeters,
   resolveTier,
   routeStep,
-  settleSpend,
+  type SpendMeter,
+  settleMeters,
   spendMonth,
   TIER_MODELS,
   taskBudgetUsd,
@@ -141,8 +146,28 @@ const MAX_RUN_CHECKS = 15;
  */
 const RUN_CHECK_INTERVAL_S = 60;
 
+/** Run outcomes of a refused budget reservation (ADR 0030); no further call is sent. */
+const BUDGET_OUTCOMES = ["spend_limited", "change_budget", "project_budget", "account_budget"];
+
+/** Who pays for the model calls of a run: the Change, its Project, and its requester. */
+type MeterOwners = Pick<ChangeBudgets, "changeId" | "projectId" | "requesterUserId">;
+
+/** The meter rows of a run this month, without caps: what settlement adjusts. */
+const ownerMeterKeys = (owners: MeterOwners, month = spendMonth()) =>
+  changeMeters(
+    { ...owners, scope: "change", changeCapUsd: 0, projectCapUsd: null, accountCapUsd: null },
+    0,
+    month,
+  ).map(({ day, counter }) => ({ day, counter }));
+
 /** Recorded run outcomes that end the run as that failure kind. */
-const STOP_OUTCOMES = new Set<string>(["budget_exhausted", "run_call_cap", "spend_limited"]);
+const STOP_OUTCOMES = new Set<string>([
+  "budget_exhausted",
+  "run_call_cap",
+  "run_cost_cap",
+  "spend_limited",
+  ...BUDGET_OUTCOMES,
+]);
 /** Provider failures seen during the run; the next model call clears them (Pi retried). */
 const TRANSPORT_OUTCOMES = new Set<string>(["rate_limited", "transient", "timeout"]);
 
@@ -282,7 +307,9 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const run = this.activeRun();
     if (!run) throw new Error("no active run");
     // A spend stop (monthly budget, gateway spend limit, billing): never send another request.
-    if (run.outcome === "spend_limited") throw new Error("Anthropic spend stop reached");
+    if (run.outcome && BUDGET_OUTCOMES.includes(run.outcome)) {
+      throw new Error("budget stop reached");
+    }
     // A new call after a provider failure means Pi retried; the failure no longer ends the run.
     if (run.outcome && TRANSPORT_OUTCOMES.has(run.outcome)) {
       this.ctx.storage.sql.exec(
@@ -290,7 +317,10 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         run.run_id,
       );
     }
-    const input = JSON.parse(run.input_json) as AgentRunInput & { budgetUsd: number };
+    const input = JSON.parse(run.input_json) as AgentRunInput & {
+      budgetUsd: number;
+      meterOwners?: MeterOwners;
+    };
     const budget = checkRunBudget({
       tier,
       callsSoFar: run.calls,
@@ -304,25 +334,28 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     if (!budget.ok || !daily) {
       this.ctx.storage.sql.exec(
         "UPDATE agent_runs SET outcome = ? WHERE run_id = ?",
-        budget.ok ? "budget_exhausted" : "run_call_cap",
+        budget.ok
+          ? "budget_exhausted"
+          : budget.reason === "cost_cap"
+            ? "run_cost_cap"
+            : "run_call_cap",
         run.run_id,
       );
       throw new Error(budget.ok ? "daily model call cap reached" : `run ${budget.reason}`);
     }
-    // Monthly Anthropic budget (ADR 0021): reserve this call's estimate, or stop the Change.
+    // Budgets (ADR 0021, ADR 0030): reserve this call's estimate on every meter of the Change
+    // (Change, Project, requester, monthly), or stop the Change with the budget that ran out.
     const reserveUsd = piCallReserveUsd(tier);
-    const admitted = await reserveSpend(
-      this.env.DB,
-      spendMonth(),
-      reserveUsd,
-      anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD),
-    );
-    if (!admitted) {
+    const meters = await this.meters(input.changeId);
+    const admitted = await reserveMeters(this.env.DB, meters, reserveUsd);
+    if (!admitted.ok) {
+      const limit = admitted.meter.limit;
       this.ctx.storage.sql.exec(
-        "UPDATE agent_runs SET outcome = 'spend_limited' WHERE run_id = ?",
+        "UPDATE agent_runs SET outcome = ? WHERE run_id = ?",
+        limit === "monthly_model_spend" ? "spend_limited" : limit,
         run.run_id,
       );
-      throw new Error("monthly Anthropic budget reached");
+      throw new Error(`budget reached: ${limit}`);
     }
     // Synchronous with the reservation, so a concurrent settlement sees both or neither.
     this.ctx.storage.sql.exec(
@@ -474,7 +507,16 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         runId,
         target,
       );
-      await settleSpend(this.env.DB, spendMonth(), metered, target);
+      const input = JSON.parse(
+        this.ctx.storage.sql
+          .exec<{ input_json: string }>("SELECT input_json FROM agent_runs WHERE run_id = ?", runId)
+          .one().input_json,
+      ) as AgentRunInput & { meterOwners?: MeterOwners };
+      // A run from before budget scopes settles the monthly meter only.
+      const keys = input.meterOwners
+        ? ownerMeterKeys(input.meterOwners)
+        : [{ day: spendMonth(), counter: USAGE_COUNTER.anthropicSpend }];
+      await settleMeters(this.env.DB, keys, metered, target);
     } catch (error) {
       log({ event: "agent.meter_settle_failed", runId, message: String(error).slice(0, 200) });
     }
@@ -595,13 +637,23 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const latestFailure = priorFailures.at(-1);
     if (latestFailure) latestFailure.sourceRefs = compacted.sourceRefs;
 
-    // Monthly Anthropic budget (ADR 0021): a run starts only with room for its first call.
-    // Each call still reserves on the meter before it is sent.
-    const monthlyBudget = anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD);
-    if ((await monthSpentUsd(this.env.DB, spendMonth())) + piCallReserveUsd(tier) > monthlyBudget) {
-      await this.failTask(input, task, "monthly_model_spend");
+    // Budgets (ADR 0021, ADR 0030): a run starts only with room for its first call on every
+    // meter of the Change. Each call still reserves on the meters before it is sent.
+    const startMeters = await this.meters(input.changeId);
+    const full = refusedMeter(
+      startMeters,
+      await this.meterCounts(startMeters),
+      piCallReserveUsd(tier),
+    );
+    if (full) {
+      await this.failTask(
+        input,
+        task,
+        full.limit === "monthly_model_spend" ? "monthly_model_spend" : full.limit,
+      );
       return { runId: "", accepted: false, state: { status: "idle" } };
     }
+    const owners = await readChangeBudgets(this.env.DB, input.changeId);
     // Policy (ADR 0021): a retry or escalation at opus runs on Sonnet while Opus is off.
     const resolved = resolveTier(tier, opusAllowed(this.env.ALLOW_OPUS));
     const requestedTier =
@@ -738,6 +790,15 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         ...input,
         taskKind: task.kind,
         budgetUsd,
+        ...(owners
+          ? {
+              meterOwners: {
+                changeId: owners.changeId,
+                projectId: owners.projectId,
+                requesterUserId: owners.requesterUserId,
+              },
+            }
+          : {}),
         provider: "anthropic",
         source: source ? { commit: source.commit, files: source.files } : null,
         stack,
@@ -1212,6 +1273,27 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   }
 
   /** Creates this instance's tables. Idempotent: the constructor and `purge` both call it. */
+  /** Every meter of a Change with its current caps (budget-meters.ts). One D1 read. */
+  private async meters(changeId: string): Promise<SpendMeter[]> {
+    return changeMeters(
+      await readChangeBudgets(this.env.DB, changeId),
+      anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD),
+      spendMonth(),
+    );
+  }
+
+  /** Current counts of the meters in micro-USD, keyed by `keyOf`. One D1 read. */
+  private async meterCounts(meters: readonly SpendMeter[]): Promise<Map<string, number>> {
+    const rows = await this.env.DB.prepare(
+      `SELECT day, counter, count FROM usage_counters WHERE ${meters
+        .map(() => "(day = ? AND counter = ?)")
+        .join(" OR ")}`,
+    )
+      .bind(...meters.flatMap((m) => [m.day, m.counter]))
+      .all<{ day: string; counter: string; count: number }>();
+    return new Map((rows.results ?? []).map((r) => [keyOf(r), r.count]));
+  }
+
   private migrate() {
     this.alarmGuard.migrate();
     this.ctx.storage.sql.exec(`
@@ -1297,7 +1379,10 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const ctx = this.changeContext(input);
     const now = new Date().toISOString();
     // Section 44 budget stop: the Task and Change name the exact limit that was reached.
-    const stop = limitStop(reason, this.env.ANTHROPIC_MONTHLY_BUDGET_USD);
+    const stop = limitStop(reason, this.env.ANTHROPIC_MONTHLY_BUDGET_USD, {
+      meters: await this.meters(input.changeId).catch(() => []),
+      month: spendMonth(),
+    });
     const budget = stop !== null;
     const graph = await this.env.DB.batch([
       this.env.DB.prepare("SELECT id, status FROM tasks WHERE change_id = ?").bind(input.changeId),
@@ -1518,11 +1603,13 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
           });
         },
         takeQuota: (counter, cap) => takeQuota(this.env.DB, today(), counter, cap),
-        callModel: (req) =>
+        callModel: async (req) =>
           meteredComplete(
             {
               db: this.env.DB,
               budgetUsd: anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD),
+              // The Change pays for compaction: every meter of the Change (ADR 0030).
+              meters: await this.meters(input.changeId),
             },
             {
               accountId: this.env.AI_ACCOUNT_ID,

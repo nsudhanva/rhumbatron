@@ -52,7 +52,8 @@ flowchart TB
 Notes:
 
 - `spent` is the cost of the Change's Task runs plus its conflict reviews.
-- A Change with spend and no budget left stops the Task with limit `max_cost_usd_per_change`.
+- A Change with spend and no budget left stops the Task with limit `change_budget`.
+- A run starts only when every meter of the Change has room for its first call (`refusedMeter`). Otherwise the Task stops with the limit of the full meter.
 - Claims are advisory (ADR 0015). A Claim that another Agent holds does not block the run. The shard records `claim.contended`, and conflict detection uses that signal.
 - A Claim lease is 120 seconds. The one-minute run check and each model call renew a lease at half-life. Every run end releases the Claims of the run.
 
@@ -106,8 +107,10 @@ Caps inside one run:
 A run that reaches its call cap or its spend cap ends as `run_call_cap`.
 That counts as a failure at the tier (see [Escalation](#escalation)).
 
-Commands must match the allowlist: `bun install`, `bun install --frozen-lockfile`, `bun test [paths]`, `bun run typecheck|test|bench|contract`, `bunx tsc --noEmit`, `git status|diff|log`, and `ls`.
-The command tool refuses shell metacharacters.
+Commands must match the allowlist (`commandAllowed` in `workspace.ts`): `bun install`, `bun install --frozen-lockfile`, `bun test [paths]`, `bun run typecheck|test|bench|contract|build`, `bun run <name>` when `<name>` is a script in the workspace `package.json`, `bunx tsc --noEmit`, `git status|diff|log`, and `ls`.
+The command tool refuses shell metacharacters and a script name that starts with `-`.
+A script runs in the same Sandbox, with the same network policy, as `bun test`.
+`bun run build` lets an agent check that its UI builds. The workspace then discards the files the build wrote, so the ChangeSet holds no build output. Candidate composition builds the app again (see [Live apps](live-apps.md#client-assets-built-by-the-app)).
 
 ## Model routing
 
@@ -163,10 +166,10 @@ flowchart LR
   OP -->|"yes"| OPUS["claude-opus-5-5"]
   H --> HM["claude-haiku-5-5"]
   S --> SM["claude-sonnet-5-5"]
-  HM --> RES{"Reserve on the<br/>monthly meter"}
+  HM --> RES{"Reserve on every<br/>meter of the Change"}
   SM --> RES
   OPUS --> RES
-  RES -->|"over budget"| STOP["No call:<br/>Task blocked (monthly_model_spend)"]
+  RES -->|"over budget"| STOP["No call: Change budget_blocked<br/>(the budget that ran out)"]
   RES -->|"reserved"| GW["AI Gateway /anthropic/v1/messages<br/>x-api-key + anthropic-workspace-id<br/>20 requests per minute"]
   GW --> SETTLE["Settle the meter to the<br/>exact cost from usage"]
 ```
@@ -193,8 +196,9 @@ Cost per call is exact: uncached input, output with thinking, cache reads, and c
 | Monthly Anthropic budget | `ANTHROPIC_MONTHLY_BUDGET_USD`: $100 in prod (Terraform maximum $100, code fallback $10) | D1 `usage_counters`, counter `anthropic-usd-micro`, one row per `YYYY-MM`. The AI Gateway spend limit has the same value. |
 | Model calls per UTC day | 400 for agent runs, conflict review, compaction, and the acceptance check | D1 `usage_counters`, counter `agent-model-calls` |
 | Clef-flash calls per UTC day | 200, shared by routing, intake, and the causal router | D1 `usage_counters`, counter `clef-flash` |
+| Request, Project, and user budgets | `changes.budget_usd`, `projects.monthly_budget_usd`, `users.monthly_budget_usd` (ADR 0030) | D1 `usage_counters`, counters `change-usd-micro:<id>`, `project-usd-micro:<id>`, `user-usd-micro:<id>` |
 
-Each call reserves an estimate on the monthly meter with one conditional statement, then settles to its exact cost.
+Each call that a Change pays for reserves an estimate on every meter of the Change in one D1 batch, all or nothing, then settles each meter to its exact cost (`reserveMeters`, `settleMeters` in `packages/model-router/src/budget-meters.ts`). See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
 These events are `spend_limited`: a refused reservation, a gateway spend-limit 429, and an Anthropic billing error.
 `spend_limited` is a budget stop. It never retries and never tries another provider.
 
@@ -228,9 +232,10 @@ Rules:
 
 - A failed run reads every failure of the Task in the current attempt window, its own included. A retry or escalation schedules the next attempt 5 seconds later. An escalation emits `agent.escalated` with `from`, `to`, and `reason`.
 - The next `start()` reads the same rows, applies the same rules, and routes to the same tier.
-- A person's budget raise after a repeated-failure stop or a Change budget stop opens a new attempt window (`tasks.attempts_reset_at`, `restoreAfterBudgetRaise`). A run that exceeds its share of a small budget ends as `run_call_cap`, so without the new window two such runs would stop the Task again before any new run.
+- A person's budget raise after a repeated-failure stop or a request, Project, or user budget stop opens a new attempt window (`tasks.attempts_reset_at`, `restoreAfterBudgetRaise`). A run that exceeds its share of the request budget ends as `run_cost_cap`, and a run whose call a budget refused ends as that budget, so without the new window the old runs would stop the Task again before any new run.
+- When the attempt limit stops a Task and its latest failure is `run_cost_cap`, the stop is a request budget stop (`change_budget`), not an attempt-limit stop.
 - A transport failure (`rate_limited`, `timeout`, `transient`) retries once at the same tier. A second transport failure in a row fails the Task. When the latest failure is a transport failure and the tier has no attempts left, the Task stops; it does not escalate.
-- The daily call cap, the monthly budget, and the Change budget stop at once. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit.
+- The daily call cap and the monthly, Project, user, and request budgets stop at once. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit.
 - `replan` is a budget stop with limit `max_attempts_per_tier`. No automatic re-plan runs. The Task becomes `blocked`, and the Change becomes `budget_blocked`.
 - `limitAttempts` allows at most 2 attempts per tier and counts every earlier run at that tier.
 - Conflicting dependency ChangeSets fail the Task at once (`dependency_merge_conflict`).

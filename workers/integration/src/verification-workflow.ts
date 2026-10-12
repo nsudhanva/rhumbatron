@@ -4,16 +4,11 @@ import {
   autoPromoteDecision,
   buildVerificationPlan,
   type CheckGap,
+  CLIENT_ASSETS_CHECK_ID,
   checkCompatibility,
   gateRequiredChecks,
 } from "@rhumbatron/evidence";
-import {
-  anthropicMonthlyBudgetUsd,
-  type CompletionRequest,
-  ModelCallError,
-  meteredComplete,
-  opusAllowed,
-} from "@rhumbatron/model-router";
+import { type CompletionRequest, ModelCallError } from "@rhumbatron/model-router";
 import {
   type AppCheckResult,
   ChangeSetIntent,
@@ -37,6 +32,7 @@ import {
   judgeAcceptance,
   takeDailyCall,
 } from "./acceptance-check.ts";
+import { APP_BUILD_COMMAND, appBuildOutcome } from "./app-build.ts";
 import {
   canonicalCommitOf,
   type PreviewOutcome,
@@ -77,6 +73,7 @@ import {
   runIntegrationJudge,
 } from "./candidate-selection.ts";
 import { releaseRequestScope } from "./change-commands.ts";
+import { changeComplete } from "./change-meter.ts";
 import { CHANGE_CANCELLED_REASON, verificationDeadEnd, verificationHalt } from "./change-status.ts";
 import { classifyBrowser, classifySecurity } from "./check-semantics.ts";
 import { storeTreeCode, walkTree } from "./code-store.ts";
@@ -304,22 +301,9 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     };
   }
 
-  /** Anthropic call admitted by the monthly budget (ADR 0021), tagged with the Change. */
+  /** Anthropic call admitted by every budget of the Change (change-meter.ts), tagged with it. */
   private complete(req: CompletionRequest, changeId: string) {
-    return meteredComplete(
-      {
-        db: this.env.DB,
-        budgetUsd: anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD),
-      },
-      {
-        accountId: this.env.AI_ACCOUNT_ID,
-        gatewayId: this.env.AI_GATEWAY_ID,
-        apiKey: this.env.ANTHROPIC_API_KEY,
-        workspaceId: this.env.ANTHROPIC_WORKSPACE_ID,
-        allowOpus: opusAllowed(this.env.ALLOW_OPUS),
-      },
-      { ...req, metadata: { ...req.metadata, changeId } },
-    );
+    return changeComplete(this.env, changeId, req);
   }
 
   private async verify(candidateId: string, step: WorkflowStep, policyOf: PolicyOf) {
@@ -659,6 +643,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
             liveAppEnabled:
               Boolean(this.env.APPS) &&
               (await productionRow(this.env, ctx.projectId))?.status !== "removed",
+            clientBuild: composed.appBuild !== undefined,
           });
           await this.env.DB.prepare(
             `UPDATE candidates SET status = 'verifying', artifact_ref = ?, composed_commit = ?,
@@ -732,6 +717,9 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
             },
             () =>
               this.guard(candidateId, async () => {
+                if (await this.recordCompositionBuild(ctx, candidateId, composed, check)) {
+                  return null;
+                }
                 if (isAppCheckerEligible(check, Boolean(this.env.APPS))) {
                   const tried = await this.tryAppChecker(
                     ctx,
@@ -813,7 +801,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
           () =>
             this.guard(candidateId, async () => {
               const build = await this.env.DB.prepare(
-                `SELECT 1 AS ok FROM evidence_index WHERE candidate_id = ? AND kind = 'build'
+                `SELECT 1 AS ok FROM evidence_index WHERE candidate_id = ? AND check_id = 'build'
                AND status = 'pass' AND coverage = 'checked_supported' LIMIT 1`,
               )
                 .bind(candidateId)
@@ -1197,6 +1185,58 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       runner: "dynamic-worker",
     });
     return { handled: true };
+  }
+
+  /**
+   * Evidence that the composition build already decided, with no runner: the `client-assets`
+   * freshness rule, and a `build` check whose composition build did not pass (the output tail is
+   * the Evidence). A passing composition build leaves the `build` check to its normal runner.
+   * Returns false when the check still has to run.
+   */
+  private async recordCompositionBuild(
+    ctx: ChangeContext,
+    candidateId: string,
+    composed: Extract<Composition, { ok: true }>,
+    check: VerificationCheck,
+  ): Promise<boolean> {
+    const sourceRefs = [`artifacts://${candidateFork(candidateId)}@${composed.commit}`];
+    const build = composed.appBuild;
+    if (check.checkId === CLIENT_ASSETS_CHECK_ID) {
+      const now = new Date().toISOString();
+      const outcome = composed.clientAssets ?? {
+        status: "error" as const,
+        coverage: "not_checked" as const,
+        summary: "No composition build result to compare. A gap, never a pass.",
+      };
+      await this.recordEvidence(ctx, candidateId, {
+        checkId: check.checkId,
+        kind: check.kind,
+        outcome,
+        startedAt: now,
+        completedAt: now,
+        output: [
+          `generated by ${APP_BUILD_COMMAND}: ${build?.generated.join(", ") || "(none)"}`,
+          outcome.summary,
+        ].join("\n"),
+        sourceRefs,
+        report: { generated: build?.generated ?? [] },
+      });
+      return true;
+    }
+    if (check.checkId !== "build" || !build || build.exitCode === 0) return false;
+    await this.recordEvidence(ctx, candidateId, {
+      checkId: check.checkId,
+      kind: check.kind,
+      outcome: appBuildOutcome(build),
+      startedAt: build.startedAt,
+      completedAt: build.completedAt,
+      output: `$ ${APP_BUILD_COMMAND}\n${build.output}${build.error ? `\n[error] ${build.error}` : ""}`,
+      sourceRefs,
+      exitCode: build.exitCode,
+      command: APP_BUILD_COMMAND,
+      runner: "sandbox",
+    });
+    return true;
   }
 
   /**

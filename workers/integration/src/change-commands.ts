@@ -5,6 +5,7 @@ import type {
   ChangeStatus,
   ClarifyChangeOutcome,
   ClarifyChangeRequest,
+  ReviewChangeOutcome,
   TaskStatus,
 } from "@rhumbatron/protocol";
 import {
@@ -63,9 +64,10 @@ const notFound = (changeId: string): ChangeCommandOutcome => ({
 
 /**
  * A Change that waits for an answer (`needs_input`) can be cancelled too: it has no Tasks yet, or
- * its Tasks never started (the cross-request check runs before the Work Graph is stored).
+ * its Tasks never started (the cross-request check runs before the Work Graph is stored). So can a
+ * `proposed` request: the requester withdraws it before review (ADR 0028).
  */
-const CANCEL_FROM: readonly ChangeStatus[] = [...CANCELLABLE_FROM, "needs_input"];
+const CANCEL_FROM: readonly ChangeStatus[] = [...CANCELLABLE_FROM, "needs_input", "proposed"];
 /** A system decision (arbiter, same requester, intake) cancels as the system, not as a person. */
 const actorKind = (decidedBy: string | undefined) =>
   decidedBy?.startsWith("system:") ? ("system" as const) : ("user" as const);
@@ -123,6 +125,7 @@ export async function cancelChange(
   if (
     !canCancel(row.status) &&
     row.status !== "needs_input" &&
+    row.status !== "proposed" &&
     !(selection && ["failed", "completed"].includes(row.status))
   ) {
     return {
@@ -201,8 +204,135 @@ export async function cancelChange(
       },
     ),
   ]);
-  await releaseRequestScope(env, row.project_id, row.id);
+  // A proposed request was never admitted to ProjectRootDO: nothing to release.
+  if (row.status !== "proposed") await releaseRequestScope(env, row.project_id, row.id);
   return recorded(after, false);
+}
+
+/**
+ * Statements that move a `budget_blocked` Change back to work (section 44 rule 5, ADR 0030): its
+ * budget-stopped Tasks return to `ready` or `pending` and the Change to `running`. A Change that
+ * a budget stopped while planning has no Tasks: it returns to `compiling`, and `replan` asks the
+ * caller to start planning again after the batch (`restartPlanning`). Every statement is guarded
+ * on `budget_blocked`, so a concurrent resume or cancel applies nothing twice.
+ */
+async function budgetResumeStatements(
+  env: Env,
+  row: Pick<ChangeRow, "id">,
+  now: string,
+): Promise<{ statements: D1PreparedStatement[]; replan: boolean }> {
+  const statements: D1PreparedStatement[] = [];
+  const [tasks, deps] = await env.DB.batch([
+    env.DB.prepare("SELECT id, status, blocked_limit FROM tasks WHERE change_id = ?").bind(row.id),
+    env.DB.prepare(
+      `SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d
+       JOIN tasks t ON t.id = d.task_id WHERE t.change_id = ?`,
+    ).bind(row.id),
+  ]);
+  const rows = (tasks?.results ?? []) as {
+    id: string;
+    status: TaskStatus;
+    blocked_limit: string | null;
+  }[];
+  const edges = (deps?.results ?? []) as { task_id: string; depends_on_task_id: string }[];
+  const restore = restoreAfterBudgetRaise(
+    rows.map((t) => ({
+      id: t.id,
+      status: t.status,
+      blockedLimit: t.blocked_limit,
+      dependsOn: edges.filter((e) => e.task_id === t.id).map((e) => e.depends_on_task_id),
+    })),
+  );
+  // Guarded on the Change: a concurrent raise or cancel restores nothing twice.
+  const blocked = `EXISTS (SELECT 1 FROM changes WHERE id = ? AND status = 'budget_blocked')`;
+  const moveTask = (id: string, to: "ready" | "pending") =>
+    env.DB.prepare(
+      `UPDATE tasks SET status = ?, assigned_agent_id = NULL, wake_sent_at = NULL,
+         attempts_reset_at = CASE WHEN ? = 1 THEN ? ELSE attempts_reset_at END,
+         blocked_limit = NULL, blocked_reason = NULL, updated_at = ?
+       WHERE id = ? AND status = 'blocked' AND ${blocked}`,
+    ).bind(to, restore.newAttemptWindow.includes(id) ? 1 : 0, now, now, id, row.id);
+  if (rows.length === 0) {
+    statements.push(
+      env.DB.prepare(
+        `UPDATE changes SET status = 'compiling', blocked_limit = NULL, blocked_reason = NULL,
+           updated_at = ? WHERE id = ? AND status = 'budget_blocked'`,
+      ).bind(now, row.id),
+    );
+    return { statements, replan: true };
+  }
+  statements.push(
+    ...restore.ready.map((id) => moveTask(id, "ready")),
+    ...restore.pending.map((id) => moveTask(id, "pending")),
+    // A dead-letter note on the Change is not a budget stop; it stays until its own resolution.
+    env.DB.prepare(
+      `UPDATE changes SET status = 'running',
+         blocked_limit = CASE WHEN blocked_limit = 'dead_letter' THEN blocked_limit ELSE NULL END,
+         blocked_reason = CASE WHEN blocked_limit = 'dead_letter' THEN blocked_reason ELSE NULL END,
+         updated_at = ?
+       WHERE id = ? AND status = 'budget_blocked'`,
+    ).bind(now, row.id),
+  );
+  return { statements, replan: false };
+}
+
+/** Starts a new ChangeWorkflow instance for a Change that a budget stopped while planning. */
+async function restartPlanning(env: Env, changeId: string) {
+  const row = await env.DB.prepare("SELECT status FROM changes WHERE id = ?")
+    .bind(changeId)
+    .first<{ status: string }>();
+  if (row?.status !== "compiling") return;
+  await startWorkflowOnce(env.CHANGE_WORKFLOW, `${changeId}_b${Date.now().toString(36)}`, {
+    changeId,
+  });
+}
+
+/**
+ * Resumes the Changes that a Project or a user monthly budget stopped (ADR 0030), after a person
+ * raised that budget: `project_budget` stops of one Project, or `account_budget` stops of one
+ * requester. The same restore as a Change budget raise. The admission checks run again on each
+ * start, so a budget that is still used up stops the Change again with its name.
+ */
+export async function resumeBudgetBlocked(
+  env: Env,
+  input:
+    | { limit: "project_budget"; projectId: string; actorUserId: string }
+    | { limit: "account_budget"; userId: string; actorUserId: string },
+): Promise<{ resumedChangeIds: string[] }> {
+  const rows = await (input.limit === "project_budget"
+    ? env.DB.prepare(
+        `SELECT c.id, c.project_id, c.status, c.base_generation, c.budget_usd, p.org_id, p.slug
+         FROM changes c JOIN projects p ON p.id = c.project_id
+         WHERE c.project_id = ? AND c.status = 'budget_blocked' AND c.blocked_limit = 'project_budget'`,
+      ).bind(input.projectId)
+    : env.DB.prepare(
+        `SELECT c.id, c.project_id, c.status, c.base_generation, c.budget_usd, p.org_id, p.slug
+         FROM changes c JOIN projects p ON p.id = c.project_id
+         WHERE c.created_by = ? AND c.status = 'budget_blocked' AND c.blocked_limit = 'account_budget'`,
+      ).bind(input.userId)
+  ).all<ChangeRow>();
+  const resumedChangeIds: string[] = [];
+  for (const row of rows.results ?? []) {
+    const now = new Date().toISOString();
+    const { statements, replan } = await budgetResumeStatements(env, row, now);
+    const results = await env.DB.batch(statements);
+    if (replan && results.at(-1)?.meta.changes) await restartPlanning(env, row.id);
+    const after = await loadChange(env, row.id);
+    if (after?.status === "running")
+      await dispatchReadyTasks(env, contextOf(after), after.budget_usd);
+    if (after && after.status !== "budget_blocked") resumedChangeIds.push(row.id);
+  }
+  if (resumedChangeIds.length > 0) {
+    console.warn(
+      JSON.stringify({
+        event: "change.budget_resumed",
+        limit: input.limit,
+        actorUserId: input.actorUserId,
+        changeIds: resumedChangeIds,
+      }),
+    );
+  }
+  return { resumedChangeIds };
 }
 
 /**
@@ -234,53 +364,15 @@ export async function raiseChangeBudget(
        WHERE id = ? AND status NOT IN ('completed', 'cancelled', 'failed')`,
     ).bind(input.budgetUsd, now, row.id),
   ];
+  let replan = false;
   if (row.status === "budget_blocked") {
-    const [tasks, deps] = await env.DB.batch([
-      env.DB.prepare("SELECT id, status, blocked_limit FROM tasks WHERE change_id = ?").bind(
-        row.id,
-      ),
-      env.DB.prepare(
-        `SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d
-         JOIN tasks t ON t.id = d.task_id WHERE t.change_id = ?`,
-      ).bind(row.id),
-    ]);
-    const rows = (tasks?.results ?? []) as {
-      id: string;
-      status: TaskStatus;
-      blocked_limit: string | null;
-    }[];
-    const edges = (deps?.results ?? []) as { task_id: string; depends_on_task_id: string }[];
-    const restore = restoreAfterBudgetRaise(
-      rows.map((t) => ({
-        id: t.id,
-        status: t.status,
-        blockedLimit: t.blocked_limit,
-        dependsOn: edges.filter((e) => e.task_id === t.id).map((e) => e.depends_on_task_id),
-      })),
-    );
-    // Guarded on the Change: a concurrent raise or cancel restores nothing twice.
-    const blocked = `EXISTS (SELECT 1 FROM changes WHERE id = ? AND status = 'budget_blocked')`;
-    const moveTask = (id: string, to: "ready" | "pending") =>
-      env.DB.prepare(
-        `UPDATE tasks SET status = ?, assigned_agent_id = NULL, wake_sent_at = NULL,
-           attempts_reset_at = CASE WHEN ? = 1 THEN ? ELSE attempts_reset_at END,
-           blocked_limit = NULL, blocked_reason = NULL, updated_at = ?
-         WHERE id = ? AND status = 'blocked' AND ${blocked}`,
-      ).bind(to, restore.newAttemptWindow.includes(id) ? 1 : 0, now, now, id, row.id);
-    statements.push(
-      ...restore.ready.map((id) => moveTask(id, "ready")),
-      ...restore.pending.map((id) => moveTask(id, "pending")),
-      // A dead-letter note on the Change is not a budget stop; it stays until its own resolution.
-      env.DB.prepare(
-        `UPDATE changes SET status = 'running',
-           blocked_limit = CASE WHEN blocked_limit = 'dead_letter' THEN blocked_limit ELSE NULL END,
-           blocked_reason = CASE WHEN blocked_limit = 'dead_letter' THEN blocked_reason ELSE NULL END,
-           updated_at = ?
-         WHERE id = ? AND status = 'budget_blocked'`,
-      ).bind(now, row.id),
-    );
+    const resumed = await budgetResumeStatements(env, row, now);
+    statements.push(...resumed.statements);
+    replan = resumed.replan;
   }
-  await env.DB.batch(statements);
+  const results = await env.DB.batch(statements);
+  // Only the resume that moved the Change starts planning again.
+  if (replan && results.at(-1)?.meta.changes) await restartPlanning(env, row.id);
   // An owner can repair a source-conflicted Change through the existing budget API, even with
   // the current budget unchanged. The same bound and guarded reset apply as automatic recovery.
   if (["verifying", "blocked", "awaiting_approval"].includes(row.status)) {
@@ -291,7 +383,8 @@ export async function raiseChangeBudget(
   const after = await loadChange(env, row.id);
   if (!after) return notFound(row.id);
   const raised = after.budget_usd > row.budget_usd;
-  const resumed = row.status !== "running" && after.status === "running";
+  const resumed =
+    row.status === "budget_blocked" && ["running", "compiling"].includes(after.status);
   // Dispatch reads only `running` Changes and wakes only ready Tasks not woken yet: safe to repeat.
   const dispatched =
     after.status === "running"
@@ -311,6 +404,133 @@ export async function raiseChangeBudget(
     );
   }
   return recorded(after, !raised && !resumed, dispatched);
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Request review (ADR 0028)                                                                  */
+/* ------------------------------------------------------------------------------------------ */
+
+type ReviewRow = ChangeRow & { review_state: string | null };
+
+const loadReviewRow = (env: Env, changeId: string) =>
+  env.DB.prepare(
+    `SELECT c.id, c.project_id, c.status, c.base_generation, c.budget_usd, c.review_state,
+            p.org_id, p.slug
+     FROM changes c JOIN projects p ON p.id = c.project_id WHERE c.id = ?`,
+  )
+    .bind(changeId)
+    .first<ReviewRow>();
+
+const notProposed = (row: ReviewRow, verb: string): ReviewChangeOutcome => ({
+  result: "refused",
+  reason: "not_proposed",
+  detail: `Change is ${row.status}; only a proposed request can be ${verb}.`,
+});
+
+/**
+ * Records `change.proposed` for a member's request that waits for review. The API inserted the
+ * row as `proposed`; this only writes the fact. The stable event ID makes a repeat harmless.
+ */
+export async function recordProposal(
+  env: Env,
+  input: { changeId: string; actorUserId: string },
+): Promise<{ recorded: boolean }> {
+  const row = await loadReviewRow(env, input.changeId);
+  if (!row || row.review_state === null) return { recorded: false };
+  const ctx = contextOf(row);
+  await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+    await changeEvent(
+      ctx,
+      "change.proposed",
+      {},
+      { actor: { kind: "user", id: input.actorUserId } },
+    ),
+  ]);
+  return { recorded: true };
+}
+
+/**
+ * An owner or admin includes a `proposed` request. The guarded update moves it to `created` at the
+ * current Canonical Generation and records who decided; then the ChangeWorkflow starts, the same
+ * instance as for a request without review (instance ID = Change ID). A repeat, or a retry after a
+ * partial failure, finds `review_state = included`, records the same event ID, and starts the
+ * workflow only while the Change is still `created` (`startWorkflowOnce` returns the existing one).
+ */
+export async function includeChange(
+  env: Env,
+  input: { changeId: string; actorUserId: string },
+): Promise<ReviewChangeOutcome> {
+  const row = await loadReviewRow(env, input.changeId);
+  if (!row) return { result: "refused", reason: "not_found", detail: "Change not found" };
+  let moved = false;
+  if (row.status === "proposed") {
+    const roots = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
+    const canonical = await roots.get(roots.idFromName(row.project_id)).getCanonical();
+    const now = new Date().toISOString();
+    const updated = await env.DB.prepare(
+      `UPDATE changes SET status = 'created', review_state = 'included', review_decided_by = ?,
+         review_decided_at = ?, base_generation = ?, updated_at = ?
+       WHERE id = ? AND status = 'proposed'`,
+    )
+      .bind(input.actorUserId, now, canonical?.generation ?? row.base_generation, now, row.id)
+      .run();
+    moved = (updated.meta.changes ?? 0) > 0;
+  }
+  const after = moved ? await loadReviewRow(env, row.id) : row;
+  if (!after) return { result: "refused", reason: "not_found", detail: "Change not found" };
+  if (after.review_state !== "included") return notProposed(after, "included");
+  const ctx = contextOf(after);
+  await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+    await changeEvent(
+      ctx,
+      "change.included",
+      {},
+      { actor: { kind: "user", id: input.actorUserId } },
+    ),
+  ]);
+  if (after.status === "created") {
+    await startWorkflowOnce(env.CHANGE_WORKFLOW, after.id, { changeId: after.id });
+  }
+  return { result: "recorded", changeId: after.id, status: after.status, repeated: !moved };
+}
+
+/**
+ * An owner or admin declines a `proposed` request. `declined` is terminal: no workflow, no model
+ * call. The reason is the review reason and the `declined` outcome reason. A repeat returns the
+ * stored result.
+ */
+export async function declineChange(
+  env: Env,
+  input: { changeId: string; actorUserId: string; reason: string | null },
+): Promise<ReviewChangeOutcome> {
+  const row = await loadReviewRow(env, input.changeId);
+  if (!row) return { result: "refused", reason: "not_found", detail: "Change not found" };
+  let moved = false;
+  if (row.status === "proposed") {
+    const now = new Date().toISOString();
+    const updated = await env.DB.prepare(
+      `UPDATE changes SET status = 'declined', review_state = 'declined', review_decided_by = ?,
+         review_decided_at = ?, review_reason = ?, outcome = 'declined', outcome_reason = ?,
+         outcome_decided_by = ?, updated_at = ?
+       WHERE id = ? AND status = 'proposed'`,
+    )
+      .bind(input.actorUserId, now, input.reason, input.reason, input.actorUserId, now, row.id)
+      .run();
+    moved = (updated.meta.changes ?? 0) > 0;
+  }
+  const after = moved ? await loadReviewRow(env, row.id) : row;
+  if (!after) return { result: "refused", reason: "not_found", detail: "Change not found" };
+  if (after.status !== "declined") return notProposed(after, "declined");
+  const ctx = contextOf(after);
+  await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+    await changeEvent(
+      ctx,
+      "change.declined",
+      { reason: input.reason },
+      { actor: { kind: "user", id: input.actorUserId } },
+    ),
+  ]);
+  return { result: "recorded", changeId: after.id, status: after.status, repeated: !moved };
 }
 
 /** Remove a terminal request from future scope registrations. Safe on a repeat. */

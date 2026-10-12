@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { BudgetHero } from "../components/costs-page/budget-hero";
 import { ChangeTable, TaskTable, TierTable } from "../components/costs-page/cost-tables";
 import { NotRecorded } from "../components/costs-page/not-recorded";
+import { ProjectBudgetMeter } from "../components/costs-page/project-budget";
 import { RoutingOutcomes } from "../components/costs-page/routing-outcomes";
 import { UsageMeters } from "../components/costs-page/usage-meters";
 import { SectionError, SkeletonBar, SkeletonRows } from "../components/project/feedback";
@@ -14,7 +15,8 @@ import { EmptyState } from "../components/ui/empty-state";
 import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section, TwoUp } from "../components/ui/page";
 import { getProject, getProjectCost } from "../lib/api";
-import { formatClock, formatNumber, truncate } from "../lib/format";
+import { changeLabel, formatClock, formatNumber } from "../lib/format";
+import { can } from "../lib/permissions";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
@@ -84,7 +86,7 @@ function CostsView() {
   const selectedId = data?.selected?.changeId;
   const selectedChange = data?.changes.find((c) => c.id === selectedId);
   usePageMeta({
-    trail: changeParam && selectedChange ? [{ label: truncate(selectedChange.goal, 48) }] : [],
+    trail: changeParam && selectedChange ? [{ label: changeLabel(selectedChange) }] : [],
   });
 
   return (
@@ -118,6 +120,16 @@ function CostsView() {
       ) : (
         <>
           <UsageMeters meters={data.meters} changes={data.changes} />
+
+          {data.projectBudget && (
+            <Section label="Project budget">
+              <ProjectBudgetMeter
+                projectId={projectId}
+                budget={data.projectBudget}
+                canEdit={can(project.data?.role, "settings.edit")}
+              />
+            </Section>
+          )}
 
           <Section
             label="Changes"

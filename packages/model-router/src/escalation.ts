@@ -10,6 +10,8 @@ import type { ModelTier } from "@rhumbatron/protocol";
 export type FailureKind =
   | "no_outcome"
   | "run_call_cap"
+  /** The run spent its share of the Change budget (`checkRunBudget` cost cap). */
+  | "run_cost_cap"
   | "invalid_output"
   | "verifier_rejected"
   | "agent_failed"
@@ -21,7 +23,11 @@ export type FailureKind =
    * The monthly Anthropic budget refused the call, or the gateway spend limit or a billing error
    * rejected it (ADR 0021): a budget stop, never a retry.
    */
-  | "spend_limited";
+  | "spend_limited"
+  /** A Change, Project, or requester budget refused the call (ADR 0030): a budget stop. */
+  | "change_budget"
+  | "project_budget"
+  | "account_budget";
 
 export type Failure = { tier: ModelTier; kind: FailureKind };
 
@@ -31,6 +37,7 @@ export type NextStep =
   | { action: "replan"; reason: string }
   | { action: "stop"; reason: string };
 
+const BUDGET_STOPS = new Set<FailureKind>(["change_budget", "project_budget", "account_budget"]);
 const TRANSPORT = new Set<FailureKind>(["rate_limited", "timeout", "transient"]);
 const NEXT_TIER: Record<ModelTier, ModelTier | null> = {
   haiku: "sonnet",
@@ -53,6 +60,7 @@ export function nextStep(
   if (!last) return { action: "retry", tier: currentTier, reason: "first_attempt" };
   if (last.kind === "budget_exhausted") return { action: "stop", reason: "budget_exhausted" };
   if (last.kind === "spend_limited") return { action: "stop", reason: "monthly_model_spend" };
+  if (BUDGET_STOPS.has(last.kind)) return { action: "stop", reason: last.kind };
 
   if (TRANSPORT.has(last.kind)) {
     // One same-tier retry per transport failure streak; a second in a row stops (section 42.8).

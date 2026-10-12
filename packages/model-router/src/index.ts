@@ -1,4 +1,5 @@
 export * from "./budget.ts";
+export * from "./budget-meters.ts";
 export * from "./decision.ts";
 export * from "./escalation.ts";
 export * from "./gateway-client.ts";

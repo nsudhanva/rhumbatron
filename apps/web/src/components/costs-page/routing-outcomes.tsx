@@ -8,6 +8,10 @@ const TIERS: Tier[] = ["haiku", "sonnet", "opus"];
 /** Failure kinds with a plain name; others show their recorded key. */
 const FAILURE_LABEL: Record<string, string> = {
   run_call_cap: "Run call cap",
+  run_cost_cap: "Task budget share used",
+  change_budget: "Request budget stop",
+  project_budget: "Project budget stop",
+  account_budget: "Personal budget stop",
   budget_exhausted: "Budget stop",
   spend_limited: "Spend stop",
   rate_limited: "Rate limited",

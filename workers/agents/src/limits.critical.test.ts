@@ -5,10 +5,17 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  blockChangeOnBudget,
+  changeMeters,
   meteredComplete,
   monthSpentUsd,
   nextStep,
+  readChangeBudgets,
+  refusedMeter,
+  reserveMeters,
   reserveSpend,
+  type SpendMeter,
+  settleMeters,
   settleSpend,
 } from "@rhumbatron/model-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -390,5 +397,140 @@ describe("monthly Anthropic budget", () => {
     expect(stop?.limit).toBe("monthly_model_spend");
     expect(stop?.text).toContain("model budget of $15");
     expect(limitStop("monthly_model_spend")?.text).toContain("model budget of $10");
+  });
+});
+
+// Budget scopes (ADR 0030): one reservation covers every meter of the Change, all or nothing, and
+// a refusal names the narrowest budget that ran out. A wrong sum lets a Change pass its Project
+// or requester cap; a wrong name sends the person to the wrong raise.
+describe("budget meters across scopes", () => {
+  const MONTH = "2026-10";
+  const counts = (db: DatabaseSync) =>
+    Object.fromEntries(
+      (
+        db.prepare("SELECT counter, count FROM usage_counters ORDER BY counter").all() as {
+          counter: string;
+          count: number;
+        }[]
+      ).map((r) => [r.counter, r.count / 1_000_000]),
+    );
+  const setup = (scope: "change" | "project" | "account") => {
+    const { db, d1 } = fakeD1();
+    db.exec(`
+      INSERT INTO users (id, auth_subject, created_at, updated_at, monthly_budget_usd)
+        VALUES ('usr_1', 'user_1', '${NOW}', '${NOW}', 4);
+      UPDATE projects SET monthly_budget_usd = 5 WHERE id = 'proj_1';
+      UPDATE changes SET budget_scope = '${scope}' WHERE id = 'chg_1';
+    `);
+    return { db, d1 };
+  };
+  const metersOf = async (d1: D1Database, globalUsd = 10) =>
+    changeMeters(await readChangeBudgets(d1, "chg_1"), globalUsd, MONTH);
+
+  it("reserves on every meter, refuses all or nothing, and settles each to the exact cost", async () => {
+    const { db, d1 } = setup("change");
+    const meters = await metersOf(d1);
+    expect(meters.map((m) => [m.limit, m.capUsd])).toEqual([
+      ["change_budget", 3],
+      ["project_budget", 5],
+      ["account_budget", 4],
+      ["monthly_model_spend", 10],
+    ]);
+    expect(await reserveMeters(d1, meters, 2)).toEqual({ ok: true });
+    // 2 + 1.5 passes the $3 Change cap: nothing is written on any meter.
+    const refused = await reserveMeters(d1, meters, 1.5);
+    expect(refused.ok ? null : refused.meter.limit).toBe("change_budget");
+    expect(counts(db)).toEqual({
+      "anthropic-usd-micro": 2,
+      "change-usd-micro:chg_1": 2,
+      "project-usd-micro:proj_1": 2,
+      "user-usd-micro:usr_1": 2,
+    });
+    // The $2 call cost $0.50: every meter returns the unused $1.50.
+    await settleMeters(d1, meters, 2, 0.5);
+    expect(new Set(Object.values(counts(db)))).toEqual(new Set([0.5]));
+    // Exactly at the Change cap is admitted; one micro-dollar more is not.
+    expect(await reserveMeters(d1, meters, 2.5)).toEqual({ ok: true });
+    expect((await reserveMeters(d1, meters, 0.000001)).ok).toBe(false);
+  });
+
+  it("caps a pool-scope Change by its pool only, and the pools apply to every scope", async () => {
+    const project = setup("project");
+    const meters = await metersOf(project.d1);
+    expect(meters.find((m) => m.limit === "change_budget")?.capUsd).toBeNull();
+    expect(await reserveMeters(project.d1, meters, 3.5)).toEqual({ ok: true });
+    // $3.50 + $1 passes the $4 requester cap before the $5 Project cap.
+    const refused = await reserveMeters(project.d1, meters, 1);
+    expect(refused.ok ? null : refused.meter.limit).toBe("account_budget");
+    // Another requester's Change of the same Project: the Project meter already holds $3.50.
+    project.db.exec(`
+      INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd, created_by,
+        budget_scope, created_at, updated_at)
+      VALUES ('chg_2', 'proj_1', 'Other', 'running', 1841, 3, 'usr_2', 'change', '${NOW}', '${NOW}');
+    `);
+    const other = changeMeters(await readChangeBudgets(project.d1, "chg_2"), 10, MONTH);
+    const second = await reserveMeters(project.d1, other, 2);
+    expect(second.ok ? null : second.meter.limit).toBe("project_budget");
+  });
+
+  it("names the narrowest refusing budget, and stops the Change with it", async () => {
+    const meter = (limit: SpendMeter["limit"], capUsd: number | null): SpendMeter => ({
+      limit,
+      day: MONTH,
+      counter: limit,
+      capUsd,
+    });
+    const all = [
+      meter("monthly_model_spend", 10),
+      meter("account_budget", 4),
+      meter("project_budget", 5),
+      meter("change_budget", null),
+    ];
+    const full = (...limits: string[]) =>
+      new Map(limits.map((l) => [`${MONTH}\u0000${l}`, 10_000_000]));
+    expect(refusedMeter(all, full(), 1)).toBeNull();
+    expect(refusedMeter(all, full("monthly_model_spend", "project_budget"), 1)?.limit).toBe(
+      "project_budget",
+    );
+    expect(refusedMeter(all, full("monthly_model_spend"), 1)?.limit).toBe("monthly_model_spend");
+    // An uncapped meter never refuses, whatever it holds.
+    expect(refusedMeter([meter("change_budget", null)], full("change_budget"), 1)).toBeNull();
+
+    const { db, d1 } = setup("project");
+    const [, projectMeter] = await metersOf(d1);
+    expect(await blockChangeOnBudget(d1, "chg_1", projectMeter as SpendMeter, MONTH)).toBe(true);
+    const row = db
+      .prepare("SELECT status, blocked_limit, blocked_reason FROM changes WHERE id = 'chg_1'")
+      .get() as { status: string; blocked_limit: string; blocked_reason: string };
+    expect(row.status).toBe("budget_blocked");
+    expect(row.blocked_limit).toBe("project_budget");
+    expect(row.blocked_reason).toBe(
+      "Stopped: the project budget of $5.00 for October is used up. An owner or admin can raise it in Settings.",
+    );
+  });
+
+  it("names the Change budget, not the attempt limit, when its share ran out", () => {
+    const at = (kind: string, minute: number) => ({
+      tier: "sonnet" as const,
+      failure_kind: kind,
+      started_at: `2026-10-11T00:0${minute}:00.000Z`,
+    });
+    const spent = nextAttempt([at("run_cost_cap", 1), at("run_cost_cap", 2)], null, {
+      allowOpus: false,
+    });
+    expect(spent.step).toEqual({ action: "stop", reason: "change_budget_exhausted" });
+    const stop = limitStop("change_budget_exhausted", undefined, {
+      meters: [{ limit: "change_budget", day: "total", counter: "c", capUsd: 3 }],
+      month: MONTH,
+    });
+    expect(stop?.limit).toBe("change_budget");
+    expect(stop?.text).toContain("request budget of $3.00");
+    expect(stop?.text).not.toContain("failed");
+    const failed = nextAttempt([at("agent_failed", 1), at("agent_failed", 2)], null, {
+      allowOpus: false,
+    });
+    expect(limitStop(failed.step?.action === "replan" ? failed.step.reason : "")?.text).toContain(
+      "failed 2 times",
+    );
   });
 });

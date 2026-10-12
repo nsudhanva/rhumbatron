@@ -1,13 +1,16 @@
 import {
   AGENT_DAILY_CALL_CAP,
   anthropicMonthlyBudgetUsd,
+  budgetStopText,
   type Failure,
   type FailureKind,
   type NextStep,
   nextStep,
   nextTier,
+  type SpendMeter,
+  spendMonth,
 } from "@rhumbatron/model-router";
-import type { ModelTier } from "@rhumbatron/protocol";
+import type { BudgetLimit, ModelTier } from "@rhumbatron/protocol";
 
 /**
  * Section 44 limits enforced where work is admitted (AGENTS.md sections 44 and 61). Each check is
@@ -36,7 +39,9 @@ export type LimitKey =
   | "max_attempts_per_tier"
   | "daily_model_calls"
   | "monthly_model_spend"
-  | "max_cost_usd_per_change";
+  | "change_budget"
+  | "project_budget"
+  | "account_budget";
 
 /** The minimum of D1 this module uses; D1Database satisfies it. */
 type Db = Pick<D1Database, "prepare">;
@@ -222,11 +227,29 @@ export function nextAttempt(
     .filter((r) => r.failure_kind)
     .map((r) => ({ tier: r.tier, kind: r.failure_kind as FailureKind }));
   const lastTier = previous.at(-1)?.tier;
-  const step = lastTier
+  const limited = lastTier
     ? limitAttempts(nextStep(lastTier, failures, options), previous, options)
     : null;
+  // A run that spent its whole share of the Change budget fails as `run_cost_cap`. When the
+  // attempt limit then stops the Task, the cause is the budget: name it, not the attempts.
+  const step =
+    limited &&
+    (limited.action === "stop" || limited.action === "replan") &&
+    ATTEMPT_STOP.test(limited.reason) &&
+    failures.at(-1)?.kind === "run_cost_cap"
+      ? ({ action: "stop", reason: "change_budget_exhausted" } as const)
+      : limited;
   return { previous, failures, step };
 }
+
+const ATTEMPT_STOP = /^(max_attempts_per_tier|two_failures_at_(haiku|sonnet|opus))/;
+
+const SCOPED_STOPS: Readonly<Record<string, BudgetLimit>> = {
+  change_budget_exhausted: "change_budget",
+  change_budget: "change_budget",
+  project_budget: "project_budget",
+  account_budget: "account_budget",
+};
 
 /**
  * A terminal step reason that is a section 44 budget stop: the Task is `blocked` and the Change
@@ -236,7 +259,14 @@ export function limitStop(
   reason: string,
   /** The `ANTHROPIC_MONTHLY_BUDGET_USD` binding (ADR 0021); the $10 fallback when absent. */
   monthlyBudgetUsd?: string,
+  /** The meters of the Change (budget-meters.ts): the stop text names the cap and the month. */
+  budgets?: { meters: readonly SpendMeter[]; month: string },
 ): { limit: LimitKey; text: string } | null {
+  const scoped = SCOPED_STOPS[reason];
+  if (scoped) {
+    const cap = budgets?.meters.find((m) => m.limit === scoped)?.capUsd ?? null;
+    return { limit: scoped, text: budgetStopText(scoped, cap, budgets?.month ?? spendMonth()) };
+  }
   if (reason === "budget_exhausted") {
     return {
       limit: "daily_model_calls",
@@ -249,12 +279,6 @@ export function limitStop(
     return {
       limit: "monthly_model_spend",
       text: `Paused: this month's model budget of $${shown} is used up, or Anthropic refused the call for billing. Work continues next month, or when an operator raises the budget.`,
-    };
-  }
-  if (reason === "change_budget_exhausted") {
-    return {
-      limit: "max_cost_usd_per_change",
-      text: "Paused: this Change spent its whole budget. Raise the Change budget to continue.",
     };
   }
   if (reason === "max_attempts_per_tier" || /^two_failures_at_(sonnet|opus)$/.test(reason)) {

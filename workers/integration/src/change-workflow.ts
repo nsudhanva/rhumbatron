@@ -1,7 +1,8 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
-import { anthropicMonthlyBudgetUsd, meteredComplete, opusAllowed } from "@rhumbatron/model-router";
+import { opusAllowed } from "@rhumbatron/model-router";
 import { cancelChange, closeNeedsInput, releaseRequestScope } from "./change-commands.ts";
+import { changeComplete } from "./change-meter.ts";
 import { readTreeFiles } from "./code-store.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent, qualify } from "./events.ts";
@@ -116,20 +117,7 @@ const scopeResources = (ctx: ChangeContext, planned: PlannerResult) => [
 
 export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams> {
   private complete(req: import("@rhumbatron/model-router").CompletionRequest, changeId: string) {
-    return meteredComplete(
-      {
-        db: this.env.DB,
-        budgetUsd: anthropicMonthlyBudgetUsd(this.env.ANTHROPIC_MONTHLY_BUDGET_USD),
-      },
-      {
-        accountId: this.env.AI_ACCOUNT_ID,
-        gatewayId: this.env.AI_GATEWAY_ID,
-        apiKey: this.env.ANTHROPIC_API_KEY,
-        workspaceId: this.env.ANTHROPIC_WORKSPACE_ID,
-        allowOpus: opusAllowed(this.env.ALLOW_OPUS),
-      },
-      { ...req, metadata: { ...req.metadata, changeId } },
-    );
+    return changeComplete(this.env, changeId, req);
   }
 
   /**
@@ -282,6 +270,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
     // A missing Change, or one that already compiled, needs no work.
     if (!loaded) return { skipped: true };
     if (!["created", "compiling"].includes(loaded.status)) {
+      // A `proposed` or `declined` request was never admitted: nothing to release.
       if (["completed", "failed", "cancelled", "not_selected"].includes(loaded.status)) {
         await step.do("release closed request", () =>
           releaseRequestScope(this.env, loaded.ctx.projectId, changeId),

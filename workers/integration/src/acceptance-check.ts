@@ -1,5 +1,6 @@
 import {
   AGENT_DAILY_CALL_CAP,
+  BudgetStopError,
   type CompletionRequest,
   type CompletionResult,
   ModelCallError,
@@ -107,7 +108,7 @@ export function acceptanceSource(
 }
 
 /** Local files a page references (`src` and `href`), as tree paths under `public/`. */
-function referencedAssets(indexHtml: string): string[] {
+export function referencedAssets(indexHtml: string): string[] {
   const out: string[] = [];
   for (const match of indexHtml.matchAll(/\b(?:src|href)\s*=\s*["']([^"'#?]+)/gi)) {
     const ref = match[1] ?? "";
@@ -328,7 +329,13 @@ export async function judgeAcceptance(
         metadata: { source: "acceptance-check", tier },
       });
     } catch (error) {
-      const kind = error instanceof ModelCallError ? error.kind : "transient";
+      // A budget stop names the budget that ran out (ADR 0030).
+      const kind =
+        error instanceof BudgetStopError
+          ? error.limit
+          : error instanceof ModelCallError
+            ? error.kind
+            : "transient";
       return { kind: "error", reason: `model call failed (${kind})`, calls };
     }
     const tool = result.toolCalls.filter((c) => c.function.name === "record_acceptance");

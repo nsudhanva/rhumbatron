@@ -31,12 +31,17 @@ import {
 import {
   AGENT_DAILY_CALL_CAP,
   anthropicMonthlyBudgetUsd,
+  BudgetStopError,
+  blockChangeOnBudget,
   type CompletionRequest,
   type CompletionResult,
+  changeMeters,
   ModelCallError,
   meteredComplete,
   opusAllowed,
+  readChangeBudgets,
   reserveEstimateUsd,
+  spendMonth,
   TIER_MODELS,
   USAGE_COUNTER,
 } from "@rhumbatron/model-router";
@@ -726,19 +731,36 @@ export async function runConflictReviews(env: Env, job: ConflictReviewJob) {
     createChallenge: async (challenge) =>
       (await shard().createChallenge({ ...scope, challenge })).ok,
     emit: (events) => appendChangeEvents(env.RESOURCE_SHARD, job.ctx, events),
-    callModel: (req) =>
-      meteredComplete(
-        { db: env.DB, budgetUsd: anthropicMonthlyBudgetUsd(env.ANTHROPIC_MONTHLY_BUDGET_USD) },
-        {
-          accountId: env.AI_ACCOUNT_ID,
-          gatewayId: env.AI_GATEWAY_ID,
-          apiKey: env.ANTHROPIC_API_KEY,
-          workspaceId: env.ANTHROPIC_WORKSPACE_ID,
-          allowOpus: opusAllowed(env.ALLOW_OPUS),
-          timeoutMs: 90_000,
-        },
-        req,
-      ),
+    // The Change pays for the review: every meter of the Change (ADR 0030). A refused
+    // reservation stops the Change with the budget that ran out.
+    callModel: async (req) => {
+      const budgetUsd = anthropicMonthlyBudgetUsd(env.ANTHROPIC_MONTHLY_BUDGET_USD);
+      const month = spendMonth();
+      const meters = changeMeters(
+        await readChangeBudgets(env.DB, job.ctx.changeId),
+        budgetUsd,
+        month,
+      );
+      try {
+        return await meteredComplete(
+          { db: env.DB, budgetUsd, meters },
+          {
+            accountId: env.AI_ACCOUNT_ID,
+            gatewayId: env.AI_GATEWAY_ID,
+            apiKey: env.ANTHROPIC_API_KEY,
+            workspaceId: env.ANTHROPIC_WORKSPACE_ID,
+            allowOpus: opusAllowed(env.ALLOW_OPUS),
+            timeoutMs: 90_000,
+          },
+          req,
+        );
+      } catch (error) {
+        if (error instanceof BudgetStopError) {
+          await blockChangeOnBudget(env.DB, job.ctx.changeId, error.meter, month);
+        }
+        throw error;
+      }
+    },
     allowOpus: opusAllowed(env.ALLOW_OPUS),
     storePacket: async (key, packet) => {
       await env.EVIDENCE.put(key, JSON.stringify(packet), {

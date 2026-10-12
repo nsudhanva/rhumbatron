@@ -18,6 +18,7 @@ export const TERMINAL_CHANGE_STATUSES: readonly ChangeStatus[] = [
   "cancelled",
   "failed",
   "not_selected",
+  "declined",
 ];
 
 /**
@@ -191,12 +192,22 @@ const BUDGET_STOP_LIMITS = [
   "monthly_model_spend",
   // Rows blocked before ADR 0021 (Gemini on Vertex) keep their limit name.
   "vertex_spend_limit",
+  // Rows blocked before ADR 0030 name the Change budget `max_cost_usd_per_change`.
   "max_cost_usd_per_change",
+  "change_budget",
+  "project_budget",
+  "account_budget",
   "max_attempts_per_tier",
 ] as const;
 
 /** Budget stops after which a raise opens a new attempt window for the Task. */
-const ATTEMPT_WINDOW_LIMITS = ["max_attempts_per_tier", "max_cost_usd_per_change"] as const;
+const ATTEMPT_WINDOW_LIMITS = [
+  "max_attempts_per_tier",
+  "max_cost_usd_per_change",
+  "change_budget",
+  "project_budget",
+  "account_budget",
+] as const;
 
 export type RestorableTask = {
   id: string;
@@ -214,9 +225,10 @@ export type RestorableTask = {
  * next start, so a limit that is still reached stops the Task again with its exact name.
  *
  * `newAttemptWindow` lists the restored Tasks whose earlier runs must not count against the
- * attempt limit: a repeated-failure stop, and a Change budget stop. A run that hits its share of
- * a too-small budget ends as `run_call_cap`, so after two such runs the old history alone would
- * stop the Task again before any new run (`nextAttempt` in agents limits.ts).
+ * attempt limit: a repeated-failure stop, and a Change, Project, or requester budget stop. A run
+ * that hits its share of a too-small budget ends as `run_cost_cap`, and a run whose call a budget
+ * refused ends as that budget, so the old history alone would stop the Task again before any new
+ * run (`nextAttempt` in agents limits.ts).
  */
 export function restoreAfterBudgetRaise(tasks: readonly RestorableTask[]): {
   ready: string[];

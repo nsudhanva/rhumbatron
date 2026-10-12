@@ -1,3 +1,10 @@
+import type { BudgetLimit } from "@rhumbatron/protocol";
+import {
+  type MeterBatchDb,
+  reserveMeters,
+  type SpendMeter,
+  settleMeters,
+} from "./budget-meters.ts";
 import {
   type CompletionRequest,
   type CompletionResult,
@@ -108,31 +115,52 @@ function promptTokensOf(req: CompletionRequest): number {
 }
 
 /**
- * One `complete` call admitted by the monthly budget: reserve the estimate, call, settle to the
- * exact cost. An HTTP error response settles to zero (Anthropic bills no rejected request); a
- * timeout or network failure keeps the reservation, because the request may still have run.
- * A refused reservation throws `spend_limited` and sends nothing.
+ * A refused reservation on a budget meter (ADR 0030). `kind` stays `spend_limited`, so every
+ * caller treats it as a budget stop; `meter` names the budget that ran out.
+ */
+export class BudgetStopError extends ModelCallError {
+  readonly limit: BudgetLimit;
+  constructor(readonly meter: SpendMeter) {
+    super("spend_limited", `Budget reached: ${meter.limit}`, null);
+    this.limit = meter.limit;
+  }
+}
+
+/**
+ * One `complete` call admitted by the budgets: reserve the estimate, call, settle to the exact
+ * cost. With `meters` (a call that a Change pays for, budget-meters.ts) the reservation and the
+ * settlement cover every meter of the Change in one batch; without, only the monthly meter. An
+ * HTTP error response settles to zero (Anthropic bills no rejected request); a timeout or network
+ * failure keeps the reservation, because the request may still have run. A refused reservation
+ * throws `spend_limited` (a `BudgetStopError` with `meters`) and sends nothing.
  */
 export async function meteredComplete(
-  meter: { db: MeterDb; budgetUsd: number },
+  meter: { db: MeterDb; budgetUsd: number; meters?: readonly SpendMeter[] },
   config: GatewayConfig,
   req: CompletionRequest,
 ): Promise<CompletionResult> {
   const { model } = resolveTier(req.tier, config.allowOpus === true);
   const month = spendMonth();
   const reservedUsd = reserveEstimateUsd(model, req.maxOutputTokens, promptTokensOf(req));
-  if (!(await reserveSpend(meter.db, month, reservedUsd, meter.budgetUsd))) {
+  const meters = meter.meters;
+  const batchDb = meter.db as unknown as MeterBatchDb;
+  if (meters) {
+    const reserved = await reserveMeters(batchDb, meters, reservedUsd);
+    if (!reserved.ok) throw new BudgetStopError(reserved.meter);
+  } else if (!(await reserveSpend(meter.db, month, reservedUsd, meter.budgetUsd))) {
     throw new ModelCallError("spend_limited", "Monthly Anthropic budget reached", null);
   }
+  const settle = (actualUsd: number) =>
+    meters
+      ? settleMeters(batchDb, meters, reservedUsd, actualUsd)
+      : settleSpend(meter.db, month, reservedUsd, actualUsd);
   let result: CompletionResult;
   try {
     result = await complete(config, req);
   } catch (error) {
-    if (error instanceof ModelCallError && error.status !== null) {
-      await settleSpend(meter.db, month, reservedUsd, 0);
-    }
+    if (error instanceof ModelCallError && error.status !== null) await settle(0);
     throw error;
   }
-  await settleSpend(meter.db, month, reservedUsd, result.costUsd);
+  await settle(result.costUsd);
   return result;
 }
