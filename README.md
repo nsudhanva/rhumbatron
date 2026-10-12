@@ -36,23 +36,24 @@ flowchart LR
 
 ## Built on Cloudflare
 
-| Cloudflare product | Use in Rhumbatron |
+| Cloudflare product | What Rhumbatron uses it for |
 |---|---|
-| [Workers](https://developers.cloudflare.com/workers/) | Ten Workers: web, API, coordinator, agents, event router, integration, indexer, Sandbox host, live apps, and docs |
-| [Artifacts](https://developers.cloudflare.com/artifacts/) | One Git repository for each Project, and one fork for each agent, Candidate, and edit session |
-| [Durable Objects](https://developers.cloudflare.com/durable-objects/) | Canonical Generation and promotion, Claims and Intents, live views, agent state, and app data |
-| [Sandbox](https://developers.cloudflare.com/sandbox/) | Isolated Linux for agent commands, builds, and tests |
-| [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/) | The live app of each Project and its Candidate previews |
-| [Workflows](https://developers.cloudflare.com/workflows/) | The Change, Candidate verification, and release processes |
-| [Queues](https://developers.cloudflare.com/queues/) | Agent wake-ups, verification, indexing, release, and dead letters |
-| [K2](https://developers.cloudflare.com/k2/) | The durable event log |
-| [D1](https://developers.cloudflare.com/d1/) | Projects, Changes, Tasks, Candidates, and the evidence index |
-| [R2](https://developers.cloudflare.com/r2/) | Evidence reports, context packets, app bundles, and the event archive |
-| [Workers KV](https://developers.cloudflare.com/kv/) | Project policy |
-| [Vectorize](https://developers.cloudflare.com/vectorize/) | Semantic memory of the code and of previous Changes |
-| [Workers AI](https://developers.cloudflare.com/workers-ai/) | Fast decisions, embeddings, and reranking for request intake |
-| [AI Gateway](https://developers.cloudflare.com/ai-gateway/) | Access to the Claude models, with spend limits |
-| [Browser Run](https://developers.cloudflare.com/browser-run/) | Browser checks of Candidate previews |
+| [Workers](https://developers.cloudflare.com/workers/) | Runs all server code in ten Workers: web, API, coordinator, agents, event router, integration, indexer, Sandbox host, live apps, and docs. |
+| [Artifacts](https://developers.cloudflare.com/artifacts/) | Keeps the Git repository of each Project. Each agent Task, Candidate, and code edit session works in its own fork. |
+| [Durable Objects](https://developers.cloudflare.com/durable-objects/) | `ProjectRootDO` keeps the Canonical Generation and does the compare-and-swap promotion. `ResourceShardDO` keeps Claims and Intents. `ProjectViewDO` sends live updates over WebSockets. `AgentDO` keeps agent state. `AppDataDO` keeps the data of each live app. |
+| [Sandbox](https://developers.cloudflare.com/sandbox/) | Runs agent shell commands, `bun install`, builds, and Candidate tests in a Linux container. |
+| [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/) | Loads and runs the bundle of each live app and Candidate preview at `<project>.rhumbatron.com`. |
+| [Workflows](https://developers.cloudflare.com/workflows/) | Runs three long processes: `ChangeWorkflow` plans a Change, `CandidateVerificationWorkflow` runs the checks, and `ReleaseWorkflow` deploys the live app. |
+| [Queues](https://developers.cloudflare.com/queues/) | Carries commands between Workers: agent wake-ups, integration, verification, indexing, release, and failed commands. |
+| [K2](https://developers.cloudflare.com/k2/) | Keeps all Events in order in eight streams. Durable Objects write each Event to an outbox first. |
+| [D1](https://developers.cloudflare.com/d1/) | Keeps the product data in SQL tables: Projects, Changes, Tasks, Candidates, check summaries, members, and usage meters. |
+| [R2](https://developers.cloudflare.com/r2/) | Keeps large files: check reports and logs, context packets, patches, app bundles, and the event archive. |
+| [Workers KV](https://developers.cloudflare.com/kv/) | Keeps a copy of each Project policy for fast reads. |
+| [Vectorize](https://developers.cloudflare.com/vectorize/) | Keeps embeddings of the code and of previous Changes. Agents search it after the exact dependency lookup. |
+| [Workers AI](https://developers.cloudflare.com/workers-ai/) | Runs `bge-small-en-v1.5` to make embeddings and `bge-reranker-base` to rank related requests at intake. |
+| [Clef-flash](https://developers.cloudflare.com/workers-ai/models/clef-flash/) | Makes small decisions: the model tier for a step, whether an Event wakes an agent, and whether a request is clear and new. Rhumbatron uses a decision only when its confidence is high enough. Clef-flash also writes the goal suggestions for a new Project. |
+| [AI Gateway](https://developers.cloudflare.com/ai-gateway/) | Sends all Claude calls to Anthropic, records the usage, and stops calls at the monthly spend limit. |
+| [Browser Run](https://developers.cloudflare.com/browser-run/) | Opens Candidate previews in a headless browser and saves screenshots as evidence. |
 
 Terraform manages all Cloudflare resources. The agents use Claude Sonnet 5.5 and Claude Haiku 5.5.
 
