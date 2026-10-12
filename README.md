@@ -2,7 +2,7 @@
 
 **[rhumbatron.com](https://rhumbatron.com)** · [Documentation](https://docs.rhumbatron.com)
 
-Rhumbatron lets a team of people and AI agents change one codebase at the same time. You describe an outcome in plain language. Agents do the work in parallel, Rhumbatron finds conflicts between their plans before a merge, and only a version that passes its checks ships.
+Rhumbatron lets a team of people and AI agents change one codebase at the same time. You describe an outcome in plain language. Agents do the work in parallel. Before their work merges, Rhumbatron finds conflicts between their plans. It then builds and tests each version, and it deploys only a version that passes all of its tests.
 
 Made by [Sudhanva Narayana](https://sudhanva.me) and [Maanasa Narayan](https://maanasa.dev) for the Cloudflare competition *Build the Next-Gen Git Platform on Cloudflare*.
 

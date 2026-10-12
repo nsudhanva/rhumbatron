@@ -105,10 +105,10 @@ jobs:
       - name: Plan global
         id: plan_global
         run: |
-          set -uo pipefail
-          bun scripts/tf.ts global plan -out=global.tfplan -lock-timeout=5m -detailed-exitcode -no-color
-          code=$?
-          if [ "$code" -eq 1 ]; then exit 1; fi
+          set -euo pipefail
+          code=0
+          bun scripts/tf.ts global plan -out=global.tfplan -lock-timeout=5m -detailed-exitcode -no-color || code=$?
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then exit "$code"; fi
           echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           bun scripts/tf.ts global show -json global.tfplan > "$RUNNER_TEMP/global.json"
           bun scripts/plan-guard.ts "$RUNNER_TEMP/global.json" global
@@ -116,10 +116,10 @@ jobs:
       - name: Plan prod
         id: plan_prod
         run: |
-          set -uo pipefail
-          bun scripts/tf.ts prod plan -out=prod.tfplan -lock-timeout=5m -detailed-exitcode -no-color
-          code=$?
-          if [ "$code" -eq 1 ]; then exit 1; fi
+          set -euo pipefail
+          code=0
+          bun scripts/tf.ts prod plan -out=prod.tfplan -lock-timeout=5m -detailed-exitcode -no-color || code=$?
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then exit "$code"; fi
           echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           bun scripts/tf.ts prod show -json prod.tfplan > "$RUNNER_TEMP/prod.json"
           bun scripts/plan-guard.ts "$RUNNER_TEMP/prod.json" prod
