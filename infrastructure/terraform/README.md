@@ -60,7 +60,7 @@ the adapters below.
 | R2 `app-previews/` retention | none | 7 days |
 | Clerk instance | development | production (ADR 0017) |
 | `MODEL_PROVIDER` | - | `anthropic` |
-| Anthropic budget per calendar month | - | $10 |
+| Anthropic budget per calendar month | - | $100 |
 | `ALLOW_OPUS` | - | `false` |
 | `www` | none | Custom domain of the prod web Worker; the Worker returns 301 to the apex |
 

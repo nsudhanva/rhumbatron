@@ -478,7 +478,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
       let askedInCompare = false;
       excluded.clear();
       // Diagnostic: which earlier requests this one compares with (ids only).
-      console.log(
+      console.warn(
         JSON.stringify({
           event: "request.compare_set",
           changeId,
@@ -497,7 +497,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
           );
         }
         if (!scope) {
-          console.log(
+          console.warn(
             JSON.stringify({
               event: "request.compare_skipped",
               changeId,
@@ -512,7 +512,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
           loadRequest(this.env, earlier.changeId, known.criteria, known.resources),
         );
         if (!a || ["cancelled", "not_selected", "failed", "completed"].includes(a.status)) {
-          console.log(
+          console.warn(
             JSON.stringify({
               event: "request.compare_skipped",
               changeId,
