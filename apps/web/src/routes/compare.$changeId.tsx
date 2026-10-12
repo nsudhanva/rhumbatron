@@ -14,7 +14,7 @@ import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
 import { StatusPill } from "../components/ui/status-pill";
 import { getChange, listCandidateEvidence, listCandidates } from "../lib/api";
-import { formatNumber, generation, timeAgo, truncate } from "../lib/format";
+import { changeLabel, formatNumber, generation, timeAgo } from "../lib/format";
 import { loadChange, loadOnServer, prefetch } from "../lib/ssr-data";
 
 /**
@@ -91,7 +91,7 @@ function CompareView() {
     <PageTitle
       size="detail"
       kicker="Compare Candidates"
-      title={change.data ? truncate(change.data.goal, 90) : "Candidate futures"}
+      title={change.data ? changeLabel(change.data) : "Candidate futures"}
       meta={
         <>
           <Mono>{changeId}</Mono>

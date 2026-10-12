@@ -9,6 +9,7 @@ import {
   type CodeEditOutcome,
   type PromotionOutcome,
   type ReleaseInjectionOutcome,
+  type ReviewChangeOutcome,
   type RollbackOutcome,
 } from "@rhumbatron/protocol";
 import { z } from "zod";
@@ -20,7 +21,27 @@ import {
   createCandidate,
   startCandidateVerification,
 } from "./candidate-create.ts";
-import { cancelChange, clarifyChange, raiseChangeBudget } from "./change-commands.ts";
+import {
+  cancelChange,
+  clarifyChange,
+  declineChange,
+  includeChange,
+  raiseChangeBudget,
+  recordProposal,
+  resumeBudgetBlocked,
+} from "./change-commands.ts";
+import {
+  closeCodeSession,
+  deleteCodeSessionFile,
+  execCodeSessionCommand,
+  expireCodeSessions,
+  getCodeSession,
+  openCodeSession,
+  readCodeSessionFile,
+  renameCodeSessionFile,
+  submitCodeSession,
+  writeCodeSessionFile,
+} from "./code-sessions.ts";
 import { backfillTreeCode, type CodeBackfill } from "./code-store.ts";
 import { resolveDeadLetter } from "./dead-letters.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
@@ -139,7 +160,11 @@ async function handleCommand(
     });
     // P16-22: preview rows (and their data) expire with their 7-day bundles.
     const previews = await expirePreviews(env);
-    console.warn(JSON.stringify({ event: "forks.sweep", ...result, ...previews, rebases }));
+    // ADR 0029: Code page edit sessions past their idle or 2-hour limit end; their forks go.
+    const sessions = await expireCodeSessions(env, { now: Date.now() });
+    console.warn(
+      JSON.stringify({ event: "forks.sweep", ...result, ...previews, rebases, sessions }),
+    );
     return result.more ? "continue" : undefined;
   }
   // A Change stuck in `releasing` (event router sweep, HOM-204). Bounded: one Change per command.
@@ -317,8 +342,48 @@ export default class Integration extends WorkerEntrypoint<Env> {
   }
 
   /**
+   * A person raised a Project or their own monthly budget: the Changes that budget stopped
+   * resume (ADR 0030).
+   */
+  async resumeBudgetBlocked(
+    input:
+      | { limit: "project_budget"; projectId: string; actorUserId: string }
+      | { limit: "account_budget"; userId: string; actorUserId: string },
+  ): Promise<{ resumedChangeIds: string[] }> {
+    return resumeBudgetBlocked(this.env, input);
+  }
+
+  /** Records `change.proposed` for a member's request that waits for review (ADR 0028). */
+  async recordProposal(input: {
+    changeId: string;
+    actorUserId: string;
+  }): Promise<{ recorded: boolean }> {
+    return recordProposal(this.env, input);
+  }
+
+  /**
+   * An owner or admin includes a `proposed` request: it becomes `created` and its ChangeWorkflow
+   * starts (ADR 0028). The API checked `change.review`. Safe to repeat.
+   */
+  async includeChange(input: {
+    changeId: string;
+    actorUserId: string;
+  }): Promise<ReviewChangeOutcome> {
+    return includeChange(this.env, input);
+  }
+
+  /** An owner or admin declines a `proposed` request. Terminal. Safe to repeat. */
+  async declineChange(input: {
+    changeId: string;
+    actorUserId: string;
+    reason: string | null;
+  }): Promise<ReviewChangeOutcome> {
+    return declineChange(this.env, input);
+  }
+
+  /**
    * Answers a `needs_input` Change, plans it without another question, or withdraws it (ADR 0025).
-   * The API authenticated the actor and checked the requester or the Project owner.
+   * The API authenticated the actor and checked the requester, the Project owner, or an admin.
    */
   async clarifyChange(input: {
     changeId: string;
@@ -353,6 +418,70 @@ export default class Integration extends WorkerEntrypoint<Env> {
    */
   async submitHumanEdit(input: HumanEditInput): Promise<CodeEditOutcome> {
     return submitHumanEdit(this.env, input);
+  }
+
+  /*
+   * Code page edit sessions (ADR 0029). The API checked `code.edit` for the Project and that the
+   * caller owns the session; each function checks the owner and the session state again.
+   */
+
+  /** Opens the caller's session (one per user per Project), or returns the open one. */
+  async openCodeSession(input: { projectId: string; userId: string }) {
+    return openCodeSession(this.env, input);
+  }
+
+  async getCodeSession(input: { sessionId: string; userId: string }) {
+    return getCodeSession(this.env, input);
+  }
+
+  async readCodeSessionFile(input: { sessionId: string; userId: string; path: string }) {
+    return readCodeSessionFile(this.env, input);
+  }
+
+  async writeCodeSessionFile(input: {
+    sessionId: string;
+    userId: string;
+    path: string;
+    content: string;
+  }) {
+    return writeCodeSessionFile(this.env, input);
+  }
+
+  async deleteCodeSessionFile(input: { sessionId: string; userId: string; path: string }) {
+    return deleteCodeSessionFile(this.env, input);
+  }
+
+  async renameCodeSessionFile(input: {
+    sessionId: string;
+    userId: string;
+    from: string;
+    to: string;
+  }) {
+    return renameCodeSessionFile(this.env, input);
+  }
+
+  /** One terminal command in the Project Sandbox, 120 s at most, on the monthly Sandbox meter. */
+  async execCodeSessionCommand(input: {
+    sessionId: string;
+    userId: string;
+    command: string;
+    cwd?: string | undefined;
+  }) {
+    return execCodeSessionCommand(this.env, input);
+  }
+
+  /** Every edit becomes one Change with one human ChangeSet; the session ends. */
+  async submitCodeSession(input: {
+    sessionId: string;
+    userId: string;
+    message: string;
+    authorName: string | null;
+  }) {
+    return submitCodeSession(this.env, input);
+  }
+
+  async closeCodeSession(input: { sessionId: string; userId: string }) {
+    return closeCodeSession(this.env, input);
   }
 
   /**

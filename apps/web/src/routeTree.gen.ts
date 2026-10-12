@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AccountRouteImport } from './routes/account'
 import { Route as DesignRouteImport } from './routes/design'
 import { Route as CandidatesCandidateIdRouteImport } from './routes/candidates.$candidateId'
 import { Route as ChangesChangeIdRouteImport } from './routes/changes.$changeId'
@@ -21,6 +22,7 @@ import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as ChangesChangeIdFlightRouteImport } from './routes/changes_.$changeId.flight'
 import { Route as LiveProjectsProjectIdRouteImport } from './routes/live.projects.$projectId'
 import { Route as ProjectsProjectIdAgentsRouteImport } from './routes/projects_.$projectId.agents'
+import { Route as ProjectsProjectIdBoardRouteImport } from './routes/projects_.$projectId.board'
 import { Route as ProjectsProjectIdCodeRouteImport } from './routes/projects_.$projectId.code'
 import { Route as ProjectsProjectIdCostsRouteImport } from './routes/projects_.$projectId.costs'
 import { Route as ProjectsProjectIdEventsRouteImport } from './routes/projects_.$projectId.events'
@@ -34,6 +36,11 @@ import { Route as EvidenceCandidateIdCheckIdNRouteImport } from './routes/eviden
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountRoute = AccountRouteImport.update({
+  id: '/account',
+  path: '/account',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DesignRoute = DesignRouteImport.update({
@@ -91,6 +98,11 @@ const ProjectsProjectIdAgentsRoute = ProjectsProjectIdAgentsRouteImport.update({
   path: '/projects/$projectId/agents',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsProjectIdBoardRoute = ProjectsProjectIdBoardRouteImport.update({
+  id: '/projects_/$projectId/board',
+  path: '/projects/$projectId/board',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectsProjectIdCodeRoute = ProjectsProjectIdCodeRouteImport.update({
   id: '/projects_/$projectId/code',
   path: '/projects/$projectId/code',
@@ -144,6 +156,7 @@ const EvidenceCandidateIdCheckIdNRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/account': typeof AccountRoute
   '/design': typeof DesignRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
@@ -155,6 +168,7 @@ export interface FileRoutesByFullPath {
   '/changes/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
+  '/projects/$projectId/board': typeof ProjectsProjectIdBoardRoute
   '/projects/$projectId/code': typeof ProjectsProjectIdCodeRoute
   '/projects/$projectId/costs': typeof ProjectsProjectIdCostsRoute
   '/projects/$projectId/events': typeof ProjectsProjectIdEventsRoute
@@ -167,6 +181,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/account': typeof AccountRoute
   '/design': typeof DesignRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
@@ -178,6 +193,7 @@ export interface FileRoutesByTo {
   '/changes/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
+  '/projects/$projectId/board': typeof ProjectsProjectIdBoardRoute
   '/projects/$projectId/code': typeof ProjectsProjectIdCodeRoute
   '/projects/$projectId/costs': typeof ProjectsProjectIdCostsRoute
   '/projects/$projectId/events': typeof ProjectsProjectIdEventsRoute
@@ -191,6 +207,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/account': typeof AccountRoute
   '/design': typeof DesignRoute
   '/candidates/$candidateId': typeof CandidatesCandidateIdRoute
   '/changes/$changeId': typeof ChangesChangeIdRoute
@@ -202,6 +219,7 @@ export interface FileRoutesById {
   '/changes_/$changeId/flight': typeof ChangesChangeIdFlightRoute
   '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects_/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
+  '/projects_/$projectId/board': typeof ProjectsProjectIdBoardRoute
   '/projects_/$projectId/code': typeof ProjectsProjectIdCodeRoute
   '/projects_/$projectId/costs': typeof ProjectsProjectIdCostsRoute
   '/projects_/$projectId/events': typeof ProjectsProjectIdEventsRoute
@@ -216,6 +234,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/account'
     | '/design'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
@@ -227,6 +246,7 @@ export interface FileRouteTypes {
     | '/changes/$changeId/flight'
     | '/live/projects/$projectId'
     | '/projects/$projectId/agents'
+    | '/projects/$projectId/board'
     | '/projects/$projectId/code'
     | '/projects/$projectId/costs'
     | '/projects/$projectId/events'
@@ -239,6 +259,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/account'
     | '/design'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
@@ -250,6 +271,7 @@ export interface FileRouteTypes {
     | '/changes/$changeId/flight'
     | '/live/projects/$projectId'
     | '/projects/$projectId/agents'
+    | '/projects/$projectId/board'
     | '/projects/$projectId/code'
     | '/projects/$projectId/costs'
     | '/projects/$projectId/events'
@@ -262,6 +284,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/account'
     | '/design'
     | '/candidates/$candidateId'
     | '/changes/$changeId'
@@ -273,6 +296,7 @@ export interface FileRouteTypes {
     | '/changes_/$changeId/flight'
     | '/live/projects/$projectId'
     | '/projects_/$projectId/agents'
+    | '/projects_/$projectId/board'
     | '/projects_/$projectId/code'
     | '/projects_/$projectId/costs'
     | '/projects_/$projectId/events'
@@ -286,6 +310,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AccountRoute: typeof AccountRoute
   DesignRoute: typeof DesignRoute
   CandidatesCandidateIdRoute: typeof CandidatesCandidateIdRoute
   ChangesChangeIdRoute: typeof ChangesChangeIdRoute
@@ -297,6 +322,7 @@ export interface RootRouteChildren {
   ChangesChangeIdFlightRoute: typeof ChangesChangeIdFlightRoute
   LiveProjectsProjectIdRoute: typeof LiveProjectsProjectIdRoute
   ProjectsProjectIdAgentsRoute: typeof ProjectsProjectIdAgentsRoute
+  ProjectsProjectIdBoardRoute: typeof ProjectsProjectIdBoardRoute
   ProjectsProjectIdCodeRoute: typeof ProjectsProjectIdCodeRoute
   ProjectsProjectIdCostsRoute: typeof ProjectsProjectIdCostsRoute
   ProjectsProjectIdEventsRoute: typeof ProjectsProjectIdEventsRoute
@@ -315,6 +341,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account': {
+      id: '/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AccountRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/design': {
@@ -394,6 +427,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectIdAgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects_/$projectId/board': {
+      id: '/projects_/$projectId/board'
+      path: '/projects/$projectId/board'
+      fullPath: '/projects/$projectId/board'
+      preLoaderRoute: typeof ProjectsProjectIdBoardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projects_/$projectId/code': {
       id: '/projects_/$projectId/code'
       path: '/projects/$projectId/code'
@@ -462,6 +502,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AccountRoute: AccountRoute,
   DesignRoute: DesignRoute,
   CandidatesCandidateIdRoute: CandidatesCandidateIdRoute,
   ChangesChangeIdRoute: ChangesChangeIdRoute,
@@ -473,6 +514,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChangesChangeIdFlightRoute: ChangesChangeIdFlightRoute,
   LiveProjectsProjectIdRoute: LiveProjectsProjectIdRoute,
   ProjectsProjectIdAgentsRoute: ProjectsProjectIdAgentsRoute,
+  ProjectsProjectIdBoardRoute: ProjectsProjectIdBoardRoute,
   ProjectsProjectIdCodeRoute: ProjectsProjectIdCodeRoute,
   ProjectsProjectIdCostsRoute: ProjectsProjectIdCostsRoute,
   ProjectsProjectIdEventsRoute: ProjectsProjectIdEventsRoute,

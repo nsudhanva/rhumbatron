@@ -12,8 +12,8 @@ const VIEWS: { value: ViewMode; label: string; description: string }[] = [
 ];
 
 /**
- * Display: the default Product View / Systems View (AGENTS.md 38.7), stored in this browser.
- * The header toggle on pages with a Systems view writes the same value.
+ * Display: the Events page default view, Product or Systems (AGENTS.md 38.7), stored in this
+ * browser. The Product | Systems toggle on the Events page writes the same value.
  */
 export function DisplaySection() {
   const view = useViewMode();
@@ -22,7 +22,9 @@ export function DisplaySection() {
     <Section label="Display">
       <div className="grid gap-2">
         <fieldset className="grid gap-[5px]">
-          <legend className="mb-[5px] text-[12px] text-kumo-default">Default view</legend>
+          <legend className="mb-[5px] text-[12px] text-kumo-default">
+            Events page default view
+          </legend>
           <div className="flex w-fit border border-kumo-divider">
             {VIEWS.map(({ value, label }, index) => {
               const on = view === value;
@@ -45,8 +47,8 @@ export function DisplaySection() {
           </div>
         </fieldset>
         <p className="text-[12px] text-kumo-subtle">
-          {selected?.description} Stored in this browser for every project. Pages with a Systems
-          view (Events) also show the toggle in the header.
+          {selected?.description} Stored in this browser for every project. The Events page also has
+          this toggle.
         </p>
       </div>
     </Section>

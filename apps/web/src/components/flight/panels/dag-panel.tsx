@@ -1,7 +1,6 @@
 import { Button, cn } from "@cloudflare/kumo";
 import { CornersOut, Minus, Plus } from "@phosphor-icons/react";
 import { MarkerType, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import {
   type CSSProperties,
   type MutableRefObject,

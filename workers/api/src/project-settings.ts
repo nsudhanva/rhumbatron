@@ -1,15 +1,21 @@
+import { can, deniedMessage, MonthlyBudgetUsd } from "@rhumbatron/protocol";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
+import { budgetRaised, projectMonthSpendUsd, resumeAfterRaise } from "./budgets.ts";
 import { fail, validate } from "./http.ts";
-import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
+import { ensureIdentity, projectRole } from "./identity.ts";
 
 /**
- * Project settings: the Project name and the default budget of new Changes.
+ * Project settings: the Project name, the default budget of new Changes, and member request review.
  *
- * - `GET /v1/projects/:projectId/settings`: owner or collaborator.
- * - `PATCH /v1/projects/:projectId`: owner only. Body `{ name?, defaultBudgetUsd? }`.
- *   `defaultBudgetUsd: null` returns the Project to the built-in default.
+ * - `GET /v1/projects/:projectId/settings`: any role.
+ * - `PATCH /v1/projects/:projectId`: owner or admin (`settings.edit`). Body
+ *   `{ name?, defaultBudgetUsd?, memberRequestReview? }`. `defaultBudgetUsd: null` returns the
+ *   Project to the built-in default. `memberRequestReview: true` (the default) makes a member's
+ *   request start as `proposed` (ADR 0028). `monthlyBudgetUsd` ($1 to $100, or null) is the
+ *   Project monthly budget (ADR 0030); a raise resumes the Changes it stopped.
+ * - The read adds `monthSpendUsd`: this month's model spend of the Project (read only).
  *
  * Cost: a read is 2 D1 queries (role, row). An update adds 1 write.
  */
@@ -32,10 +38,17 @@ const UpdateProjectSettings = z
       .max(MAX_DEFAULT_BUDGET_USD)
       .nullable()
       .optional(),
+    memberRequestReview: z.boolean().optional(),
+    monthlyBudgetUsd: MonthlyBudgetUsd.optional(),
   })
-  .refine((body) => body.name !== undefined || body.defaultBudgetUsd !== undefined, {
-    message: "Send name or defaultBudgetUsd",
-  });
+  .refine(
+    (body) =>
+      body.name !== undefined ||
+      body.defaultBudgetUsd !== undefined ||
+      body.memberRequestReview !== undefined ||
+      body.monthlyBudgetUsd !== undefined,
+    { message: "Send name, defaultBudgetUsd, memberRequestReview, or monthlyBudgetUsd" },
+  );
 
 type SettingsRow = {
   name: string;
@@ -43,16 +56,20 @@ type SettingsRow = {
   status: string;
   created_at: string;
   default_budget_usd: number | null;
+  member_request_review: number;
+  monthly_budget_usd: number | null;
 };
 
 async function readSettings(db: D1Database, projectId: string) {
   return db
-    .prepare("SELECT name, slug, status, created_at, default_budget_usd FROM projects WHERE id = ?")
+    .prepare(`SELECT name, slug, status, created_at, default_budget_usd, member_request_review,
+         monthly_budget_usd
+       FROM projects WHERE id = ?`)
     .bind(projectId)
     .first<SettingsRow>();
 }
 
-function toSettings(row: SettingsRow, role: string) {
+function toSettings(row: SettingsRow, role: string, monthSpendUsd: number) {
   return {
     name: row.name,
     slug: row.slug,
@@ -62,6 +79,12 @@ function toSettings(row: SettingsRow, role: string) {
     /** The budget a Change gets when its request has none. */
     effectiveDefaultBudgetUsd: row.default_budget_usd ?? BUILT_IN_CHANGE_BUDGET_USD,
     limits: { minBudgetUsd: MIN_DEFAULT_BUDGET_USD, maxBudgetUsd: MAX_DEFAULT_BUDGET_USD },
+    /** True: a member's request starts as `proposed` and waits for an owner or admin. */
+    memberRequestReview: row.member_request_review !== 0,
+    /** Project monthly budget in USD (ADR 0030); null: no own cap. */
+    monthlyBudgetUsd: row.monthly_budget_usd,
+    /** This calendar month's model spend of the Project. */
+    monthSpendUsd,
   };
 }
 
@@ -94,7 +117,9 @@ export const projectSettings = new Hono<AppEnv>()
       if (!role) return fail(c, 404, "not_found", "Project not found");
       const row = await readSettings(c.env.DB, projectId);
       if (!row) return fail(c, 404, "not_found", "Project not found");
-      return c.json({ data: toSettings(row, role) });
+      return c.json({
+        data: toSettings(row, role, await projectMonthSpendUsd(c.env.DB, projectId)),
+      });
     },
   )
 
@@ -109,8 +134,8 @@ export const projectSettings = new Hono<AppEnv>()
       const body = c.req.valid("json");
       const role = await projectRole(c.env.DB, userId, projectId);
       if (!role) return fail(c, 404, "not_found", "Project not found");
-      if (role !== "owner") {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("change project settings"));
+      if (!can(role, "settings.edit")) {
+        return fail(c, 403, "forbidden", deniedMessage("settings.edit", "change project settings"));
       }
       const row = await readSettings(c.env.DB, projectId);
       if (!row) return fail(c, 404, "not_found", "Project not found");
@@ -119,18 +144,50 @@ export const projectSettings = new Hono<AppEnv>()
       const name = body.name ?? row.name;
       const budget =
         body.defaultBudgetUsd === undefined ? row.default_budget_usd : body.defaultBudgetUsd;
+      const review =
+        body.memberRequestReview === undefined
+          ? row.member_request_review
+          : body.memberRequestReview
+            ? 1
+            : 0;
+      const monthly =
+        body.monthlyBudgetUsd === undefined ? row.monthly_budget_usd : body.monthlyBudgetUsd;
       const now = new Date().toISOString();
       // Same values again: a safe repeat, no write.
-      if (name !== row.name || budget !== row.default_budget_usd) {
+      if (
+        name !== row.name ||
+        budget !== row.default_budget_usd ||
+        review !== row.member_request_review ||
+        monthly !== row.monthly_budget_usd
+      ) {
         await c.env.DB.prepare(
-          `UPDATE projects SET name = ?, default_budget_usd = ?, updated_at = ?
+          `UPDATE projects SET name = ?, default_budget_usd = ?, member_request_review = ?,
+             monthly_budget_usd = ?, updated_at = ?
            WHERE id = ? AND status = 'active'`,
         )
-          .bind(name, budget, now, projectId)
+          .bind(name, budget, review, monthly, now, projectId)
           .run();
+        // A raised Project budget resumes the Changes it stopped (ADR 0030).
+        if (budgetRaised(row.monthly_budget_usd, monthly)) {
+          await resumeAfterRaise(c.env, {
+            limit: "project_budget",
+            projectId,
+            actorUserId: userId,
+          });
+        }
       }
       return c.json({
-        data: toSettings({ ...row, name, default_budget_usd: budget }, role),
+        data: toSettings(
+          {
+            ...row,
+            name,
+            default_budget_usd: budget,
+            member_request_review: review,
+            monthly_budget_usd: monthly,
+          },
+          role,
+          await projectMonthSpendUsd(c.env.DB, projectId),
+        ),
       });
     },
   );

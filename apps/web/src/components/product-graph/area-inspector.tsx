@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { ProductGraph } from "../../lib/api-graph";
-import { truncate } from "../../lib/format";
+import { changeLabel } from "../../lib/format";
 import { EmptyState } from "../ui/empty-state";
 import { KeyValue } from "../ui/key-value";
 import { StatusPill } from "../ui/status-pill";
@@ -51,7 +51,7 @@ export function AreaInspector({
     );
   }
   const { node } = area;
-  const goal = new Map(graph.changes.map((c) => [c.id, c.goal]));
+  const changeTitles = new Map(graph.changes.map((c) => [c.id, changeLabel(c)]));
   const outgoing = view.edges.filter((e) => e.edge.source === node.id);
   const incoming = view.edges.filter((e) => e.edge.target === node.id);
   const name = (id: string) => view.areas.find((a) => a.node.id === id)?.node.name ?? id;
@@ -79,7 +79,7 @@ export function AreaInspector({
           {
             label: "First touched",
             value: area.firstChangeId
-              ? truncate(goal.get(area.firstChangeId) ?? area.firstChangeId, 60)
+              ? (changeTitles.get(area.firstChangeId) ?? area.firstChangeId)
               : null,
           },
           { label: "Scope", value: zoom === "change" ? "This Change" : "All listed Changes" },

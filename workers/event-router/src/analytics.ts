@@ -41,6 +41,8 @@ export function metricFor(event: EventEnvelope): Mapped | null {
       return { name: "change_completed", result: "failed" };
     case "change.cancelled":
       return { name: "change_completed", result: "cancelled" };
+    case "change.declined":
+      return { name: "change_completed", result: "declined" };
     case "task.started":
       return { name: "task_started", result: "started" };
     case "task.completed":

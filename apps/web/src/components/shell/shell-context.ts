@@ -9,7 +9,7 @@ import {
   getProject,
   listChanges,
 } from "../../lib/api";
-import { truncate } from "../../lib/format";
+import { changeLabel } from "../../lib/format";
 import type { Crumb } from "./page-meta";
 
 /**
@@ -18,6 +18,7 @@ import type { Crumb } from "./page-meta";
  * themselves do not set a page name.
  */
 export const PROJECT_PAGES = {
+  board: "Board",
   graph: "Product Graph",
   agents: "Agents",
   events: "Events",
@@ -51,12 +52,6 @@ export type ShellSection =
   | ProjectPage
   | "other";
 
-/**
- * Sections whose page reads the Product View / Systems View choice (AGENTS.md 38.7). The header
- * shows the view toggle only there. A page that starts to read `useViewMode` adds its section.
- */
-export const VIEW_SECTIONS: ReadonlySet<ShellSection> = new Set<ShellSection>(["events"]);
-
 /** Route IDs of pathless-parent routes (`projects_.$projectId.x`) carry a trailing "_" per segment. */
 function sectionFor(routeId: string | undefined): ShellSection {
   const path = routeId?.replace(/_(?=\/|$)/g, "") ?? "";
@@ -83,7 +78,9 @@ export type ShellContext = {
   projectName?: string | undefined;
   changeId?: string | undefined;
   candidateId?: string | undefined;
-  /** Goal of the Change in context, once it loads. */
+  /** Short title of the Change in context, once it loads. */
+  changeTitle?: string | undefined;
+  /** Full goal of the Change in context, for tooltips. */
   changeGoal?: string | undefined;
   /**
    * The route names a Change or Candidate whose Project is still loading, and no earlier
@@ -91,7 +88,7 @@ export type ShellContext = {
    */
   resolving: boolean;
   /** Newest Change of the Project when no Change is in context (Flight Control, Candidates). */
-  latestChange?: Pick<ChangeSummary, "id" | "goal"> | undefined;
+  latestChange?: Pick<ChangeSummary, "id" | "goal" | "title"> | undefined;
   /** True once the Project's Changes list loaded and it is empty. */
   noChanges: boolean;
   /** Route-derived breadcrumbs, before any page-appended crumbs. */
@@ -127,14 +124,14 @@ function documentTitle(
   section: ShellSection,
   routeId: string | undefined,
   projectName: string | undefined,
-  changeGoal: string | undefined,
+  changeTitle: string | undefined,
 ): string | undefined {
   const page = pageName(section, routeId);
   if (!page) return undefined;
   // Pages of one Change name the Change; Project pages name the Project.
   const scoped =
     section === "changes" || section === "flight" || section === "candidates"
-      ? changeGoal && truncate(changeGoal, 48)
+      ? changeTitle
       : section === "projects"
         ? undefined
         : projectName;
@@ -165,7 +162,7 @@ function subViewTrail(
       const selected = requested ?? list[0];
       const zoom = selected ? (search.zoom ?? "change") : "project";
       return zoom === "change" && selected
-        ? [{ label: truncate(selected.goal, 44) }]
+        ? [{ label: changeLabel(selected) }]
         : [{ label: "All Changes" }];
     }
     default:
@@ -266,7 +263,7 @@ export function useShellContext(): ShellContext {
   if (changeId) {
     if (projectId) trail.push({ label: "Changes", link: changesLink(projectId) });
     trail.push({
-      label: change.data ? truncate(change.data.goal, 44) : "Change",
+      label: change.data ? changeLabel(change.data) : "Change",
       link: { to: "/changes/$changeId", params: { changeId } },
     });
   }
@@ -287,11 +284,19 @@ export function useShellContext(): ShellContext {
     projectName: project.data?.name,
     changeId,
     candidateId: params.candidateId,
+    changeTitle: change.data ? changeLabel(change.data) : undefined,
     changeGoal: change.data?.goal,
     resolving: loadingRecord && !projectId,
-    latestChange: latest ? { id: latest.id, goal: latest.goal } : undefined,
+    latestChange: latest
+      ? { id: latest.id, goal: latest.goal, title: latest.title ?? null }
+      : undefined,
     noChanges: changes.data?.length === 0,
     trail,
-    title: documentTitle(section, routeId, project.data?.name, change.data?.goal),
+    title: documentTitle(
+      section,
+      routeId,
+      project.data?.name,
+      change.data ? changeLabel(change.data) : undefined,
+    ),
   };
 }

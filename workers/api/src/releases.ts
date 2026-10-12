@@ -1,5 +1,7 @@
 import {
   apiData,
+  can,
+  deniedMessage,
   ProjectReleases,
   ReleaseInjectionOutcome,
   type ReleaseView,
@@ -9,7 +11,7 @@ import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { fixturesEnabled } from "./fixtures.ts";
 import { errorBody, fail, respond, validate } from "./http.ts";
-import { canAccessProject, ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
+import { canAccessProject, ensureIdentity, projectRole } from "./identity.ts";
 
 /**
  * Releases of a Project (AGENTS.md sections 21.3, 42.10; ADR 0020). Read-only from D1: the
@@ -109,8 +111,13 @@ export const releases = new Hono<AppEnv>()
       const { projectId } = c.req.valid("param");
       const userId = await member(c.env, c.get("authSubject"), projectId);
       if (!userId) return fail(c, 404, "not_found", "Project not found");
-      if ((await projectRole(c.env.DB, userId, projectId)) !== "owner") {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("inject a release failure"));
+      if (!can(await projectRole(c.env.DB, userId, projectId), "release.injectFailure")) {
+        return fail(
+          c,
+          403,
+          "forbidden",
+          deniedMessage("release.injectFailure", "inject a release failure"),
+        );
       }
       const outcome = ReleaseInjectionOutcome.parse(
         await integration(c.env).injectReleaseFailure({ projectId, actorUserId: userId }),

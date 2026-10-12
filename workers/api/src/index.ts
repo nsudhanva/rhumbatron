@@ -4,9 +4,12 @@ import { HTTPException } from "hono/http-exception";
 import { activity } from "./activity.ts";
 import { agents } from "./agents.ts";
 import { apps } from "./apps.ts";
+import { board } from "./board.ts";
+import { budgets } from "./budgets.ts";
 import { candidates } from "./candidates.ts";
 import { code } from "./code.ts";
 import { codeEdit } from "./code-edit.ts";
+import { codeSessions } from "./code-sessions.ts";
 import { conflicts } from "./conflicts.ts";
 import { cost } from "./cost.ts";
 import { deadLetters } from "./dead-letters.ts";
@@ -44,6 +47,7 @@ app.get("/v1/version", (c) =>
 
 // Before `projects`: these handlers answer first, so their own requireAuth runs only once.
 app.route("/", members);
+app.route("/", board);
 app.route("/", live);
 app.route("/", conflicts);
 app.route("/", candidates);
@@ -53,9 +57,11 @@ app.route("/", verification);
 app.route("/", activity);
 app.route("/", agents);
 app.route("/", cost);
+app.route("/", budgets);
 app.route("/", workspace);
 app.route("/", code);
 app.route("/", codeEdit);
+app.route("/", codeSessions);
 app.route("/", workspaceManifest);
 app.route("/", productGraph);
 app.route("/", deadLetters);

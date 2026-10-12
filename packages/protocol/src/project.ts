@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { BudgetScope, ChangeBudget } from "./budget.ts";
 import { MAX_TITLE_CHARS } from "./change-title.ts";
 import { CanonicalGeneration, Id, RiskTier, Timestamp } from "./common.ts";
+import { ProjectRole } from "./roles.ts";
 
 /** URL-safe Project slug, for example `acme-shop`. */
 export const Slug = z
@@ -40,18 +42,20 @@ export const Project = z.object({
   canonical: CanonicalRef,
   policies: ProjectPolicies,
   /** The caller's role, when the route knows the caller (docs/architecture/shared-projects.md). */
-  role: z.enum(["owner", "collaborator"]).optional(),
+  role: ProjectRole.optional(),
 });
 export type Project = z.infer<typeof Project>;
 
 /**
- * Who asked for a Change. `rank` is the requester's role when the request was made (0 is the
- * owner, 10 a collaborator), for display only. No build decision reads it.
+ * Who asked for a Change. `rank` is the rank of the requester's role when the request was made
+ * (`ROLE_RANK`), and `role` is the requester's current role (null after they left). Display only:
+ * no build decision reads either.
  */
 export const Requester = z.object({
   userId: Id,
   name: z.string().nullable(),
   rank: z.number().int().nonnegative().nullable(),
+  role: ProjectRole.nullable().optional(),
   isYou: z.boolean(),
 });
 export type Requester = z.infer<typeof Requester>;
@@ -59,10 +63,18 @@ export type Requester = z.infer<typeof Requester>;
 /**
  * How a request ended up after the intake gate and the cross-request check
  * (docs/architecture/shared-projects.md). `duplicate`: the request closed as a duplicate of
- * `winnerChangeId`, or of the current app when that is null.
+ * `winnerChangeId`, or of the current app when that is null. `declined`: an owner or admin
+ * declined the proposed request; `reason` is the decline reason.
  */
 export const RequestOutcome = z.object({
-  kind: z.enum(["selected", "partially_selected", "not_selected", "replaces", "duplicate"]),
+  kind: z.enum([
+    "selected",
+    "partially_selected",
+    "not_selected",
+    "replaces",
+    "duplicate",
+    "declined",
+  ]),
   reason: z.string().nullable(),
   winnerChangeId: Id.nullable(),
   decidedBy: z.string().nullable(),
@@ -70,6 +82,8 @@ export const RequestOutcome = z.object({
 export type RequestOutcome = z.infer<typeof RequestOutcome>;
 
 export const ChangeStatus = z.enum([
+  /** A member's request waits for an owner or admin to include it. No workflow, no model call. */
+  "proposed",
   "created",
   "compiling",
   "running",
@@ -87,8 +101,52 @@ export const ChangeStatus = z.enum([
   "not_selected",
   /** The request is unclear, a duplicate, or conflicts: the workflow waits for an answer. */
   "needs_input",
+  /** An owner or admin declined the proposed request. Terminal. */
+  "declined",
 ]);
 export type ChangeStatus = z.infer<typeof ChangeStatus>;
+
+/** A person in a response: user ID and display name (null when unknown). */
+export const PersonRef = z.object({ userId: Id, name: z.string().nullable() });
+export type PersonRef = z.infer<typeof PersonRef>;
+
+/**
+ * Review of a request (ADR 0028). `not_needed`: the request went straight to the system.
+ * `proposed`: it waits for an owner or admin. `included` or `declined`: who decided and when;
+ * `reason` is the decline reason.
+ */
+export const ChangeReview = z.object({
+  state: z.enum(["not_needed", "proposed", "included", "declined"]),
+  decidedBy: PersonRef.nullable(),
+  decidedAt: Timestamp.nullable(),
+  reason: z.string().nullable(),
+});
+export type ChangeReview = z.infer<typeof ChangeReview>;
+
+/** `POST /v1/changes/:changeId/decline` request. */
+export const DeclineChangeRequest = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+export type DeclineChangeRequest = z.infer<typeof DeclineChangeRequest>;
+
+/**
+ * Result of an include or a decline. A repeat of the same decision returns `repeated: true`;
+ * any other status is `refused` with `not_proposed`.
+ */
+export const ReviewChangeOutcome = z.discriminatedUnion("result", [
+  z.object({
+    result: z.literal("recorded"),
+    changeId: Id,
+    status: ChangeStatus,
+    repeated: z.boolean(),
+  }),
+  z.object({
+    result: z.literal("refused"),
+    reason: z.enum(["not_found", "not_proposed"]),
+    detail: z.string(),
+  }),
+]);
+export type ReviewChangeOutcome = z.infer<typeof ReviewChangeOutcome>;
 
 /** One question of a clarification. `options` lists distinct readings when the system found them. */
 export const ChangeQuestion = z.object({
@@ -177,6 +235,7 @@ export const Change = z.object({
   workGraphRef: z.string().optional(),
   budgetUsd: z.number().nonnegative(),
   rolloutPolicy: RolloutPolicy,
+  review: ChangeReview.optional(),
 });
 export type Change = z.infer<typeof Change>;
 
@@ -193,6 +252,8 @@ export const ChangeDetail = Change.extend({
   supersedesChangeId: Id.nullable().optional(),
   /** Set while the Change is `needs_input`; null otherwise. */
   clarification: ChangeClarification.nullable().optional(),
+  /** Which budget the Change draws on, its spend, and the budget that stopped it (ADR 0030). */
+  budget: ChangeBudget.optional(),
 });
 export type ChangeDetail = z.infer<typeof ChangeDetail>;
 
@@ -238,7 +299,10 @@ export type CreateProjectRequest = z.infer<typeof CreateProjectRequest>;
 /** `POST /v1/projects/:projectId/changes` request. `clientRequestId` makes retries idempotent. */
 export const CreateChangeRequest = z.object({
   goal: Change.shape.goal,
+  /** The Change cap of scope `change`. Left out: the Project default. Ignored for other scopes. */
   budgetUsd: z.number().positive().max(100).default(3),
+  /** Which budget pays (ADR 0030). `project` and `account` need that monthly budget set. */
+  budgetScope: BudgetScope.default("change"),
   clientRequestId: Id.optional(),
   /** false skips the Root Planner, for example in smoke checks that must not spend model calls. */
   startPlanning: z.boolean().default(true),

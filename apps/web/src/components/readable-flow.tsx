@@ -12,7 +12,6 @@ import {
   useReactFlow,
   useStore,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import { useLayoutEffect, useRef } from "react";
 
 /**

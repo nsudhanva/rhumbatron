@@ -14,7 +14,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { formatNumber, formatUsd, generation, truncate } from "../../lib/format";
+import { changeLabel, formatNumber, formatUsd, generation } from "../../lib/format";
 import type { LiveStatus } from "../../lib/live";
 import { MOTION } from "../../lib/motion";
 import type { ActivityEvent } from "../agents/activity-model";
@@ -304,7 +304,7 @@ function HeaderStrip({
       <div className="flex min-w-0 flex-[1_1_320px] items-baseline gap-2">
         <span className="type-kicker shrink-0 text-kumo-accent">Flight Control</span>
         <Heading className="min-w-0 truncate text-[15px] font-bold" title={change.goal}>
-          {truncate(change.goal, 140)}
+          {changeLabel(change)}
         </Heading>
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">

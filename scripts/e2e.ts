@@ -33,6 +33,7 @@ import {
   AppRemoveOutcome,
   AppVersionLink,
   apiData,
+  BoardResponse,
   CandidatePreview,
   Change,
   ChangeClaims,
@@ -43,6 +44,7 @@ import {
   CodeView,
   FeedPage,
   HealthResponse,
+  MembersResponse,
   Project,
   ProjectApp,
   ProjectReleases,
@@ -364,6 +366,7 @@ const ChangeListItem: Spec = {
   createdAt: "string",
   taskCount: "integer",
   completedCount: "integer",
+  review: { state: "string" },
 };
 const AgentsPage: Spec = {
   data: {
@@ -1057,9 +1060,14 @@ async function run() {
     ["GET", `/v1/projects/${p}/workspace`],
     ["GET", `/v1/projects/${p}/workspace/files`],
     ["GET", `/v1/projects/${p}/live`],
+    ["GET", `/v1/projects/${p}/board`],
+    ["GET", `/v1/projects/${p}/members`],
+    ["GET", `/v1/projects/${p}/settings`],
     ["GET", `/v1/changes/${ch}`],
     ["POST", `/v1/changes/${ch}/cancel`],
     ["POST", `/v1/changes/${ch}/budget`],
+    ["POST", `/v1/changes/${ch}/include`],
+    ["POST", `/v1/changes/${ch}/decline`],
     ["POST", `/v1/changes/${ch}/approve`],
     ["GET", `/v1/changes/${ch}/tasks`],
     ["GET", `/v1/changes/${ch}/candidates`],
@@ -1281,6 +1289,8 @@ async function run() {
       const change = (j as { data: Change }).data;
       return (
         same("status", change.status, "created") ??
+        // The owner's request needs no review (ADR 0028).
+        same("review.state", change.review?.state, "not_needed") ??
         same("budgetUsd", change.budgetUsd, 1) ??
         same("projectId", change.projectId, projectId)
       );
@@ -1340,6 +1350,51 @@ async function run() {
       const change = (j as { data: ChangeDetail }).data;
       return same("id", change.id, changeId) ?? same("riskTier", change.riskTier, null);
     },
+  );
+  // Request review (ADR 0028): only a `proposed` request can be included or declined.
+  expectError(
+    "POST /v1/changes/:id/include on a created Change is 409",
+    await call("POST", `/v1/changes/${changeId}/include`, { body: {} }),
+    409,
+    "conflict",
+  );
+  expectError(
+    "POST /v1/changes/:id/decline on a created Change is 409",
+    await call("POST", `/v1/changes/${changeId}/decline`, { body: { reason: "e2e" } }),
+    409,
+    "conflict",
+  );
+  expectError(
+    "POST /v1/changes/:id/decline with a long reason is 400",
+    await call("POST", `/v1/changes/${changeId}/decline`, { body: { reason: "x".repeat(501) } }),
+    400,
+    "invalid_request",
+  );
+  expect(
+    "GET /v1/projects/:id/members",
+    await call("GET", `/v1/projects/${projectId}/members`),
+    200,
+    apiData(MembersResponse),
+    (j) => same("role", (j as { data: MembersResponse }).data.role, "owner"),
+  );
+  expect(
+    "GET /v1/projects/:id/board",
+    await call("GET", `/v1/projects/${projectId}/board`),
+    200,
+    apiData(BoardResponse),
+    (j) => {
+      const board = (j as { data: BoardResponse }).data;
+      return (
+        same("canReview", board.canReview, true) ??
+        same("cards[0].column", board.cards[0]?.column, "building")
+      );
+    },
+  );
+  expect(
+    "GET /v1/projects/:id/settings has memberRequestReview",
+    await call("GET", `/v1/projects/${projectId}/settings`),
+    200,
+    { data: { role: "string", memberRequestReview: "boolean" } },
   );
   expectError(
     "GET /v1/changes/:id unknown is 404",

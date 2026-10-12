@@ -21,6 +21,7 @@ import {
   rollbackProject,
 } from "../lib/api";
 import { EMPTY, formatNumber, generation, timeAgo } from "../lib/format";
+import { can } from "../lib/permissions";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
@@ -176,6 +177,7 @@ function VersionsContent() {
                   version={v}
                   openUrl={links.get(v.generation) ?? null}
                   canRollBack={
+                    can(project.data?.role, "app.rollback") &&
                     live !== undefined &&
                     v.generation < live &&
                     !!v.treeSha &&

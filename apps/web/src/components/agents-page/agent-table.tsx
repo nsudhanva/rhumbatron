@@ -1,6 +1,6 @@
 import { cn } from "@cloudflare/kumo";
 import type { AgentView } from "../../lib/api";
-import { EMPTY, formatAge, formatNumber, formatUsd, truncate } from "../../lib/format";
+import { changeLabel, EMPTY, formatAge, formatNumber, formatUsd } from "../../lib/format";
 import { CALLS_PER_RUN } from "../agents/activity-model";
 import { DataTable, Td, Th, TitleCell, TRow } from "../ui/data-table";
 import { Mono } from "../ui/mono";
@@ -94,7 +94,11 @@ function AgentRow({
               <Mono className="font-normal">{agent.task.key}</Mono> {agent.task.title}
             </span>
           }
-          meta={<span title={agent.task.changeGoal}>{truncate(agent.task.changeGoal, 64)}</span>}
+          meta={
+            <span title={agent.task.changeGoal}>
+              {changeLabel({ goal: agent.task.changeGoal, title: agent.task.changeTitle })}
+            </span>
+          }
         />
       </Td>
       <Td>

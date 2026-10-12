@@ -11,6 +11,7 @@ import {
   type FlightFilters,
   type FlightTime,
   type PanelId,
+  PLAYBACK_SPEEDS,
   TIER_FILTERS,
   useFlightFilters,
   useFlightStore,
@@ -197,7 +198,7 @@ function commandGroups(
     });
   }
   if (historical) {
-    for (const speed of [1, 4, 16] as const) {
+    for (const speed of PLAYBACK_SPEEDS) {
       timeItems.push({
         id: `time:speed:${speed}`,
         title: `Speed ${speed}x`,

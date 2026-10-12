@@ -1,5 +1,5 @@
 // Shared Project access (docs/architecture/shared-projects.md).
-// A collaborator opens only the Project shared with them, never the owner's other Projects, and
+// A member opens only the Project shared with them, never the owner's other Projects, and
 // is never an owner. A stranger opens nothing. Runs the real migrations and SQL against SQLite.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -38,7 +38,7 @@ function setup() {
       ('p_private', 'org_alice', 'Private', 'private', 'active', 0, '${T}', '${T}');
     INSERT INTO project_members (project_id, user_id, role, rank, added_by, created_at) VALUES
       ('p_shared', 'usr_alice', 'owner', 0, 'usr_alice', '${T}'),
-      ('p_shared', 'usr_bob', 'collaborator', 10, 'usr_alice', '${T}');
+      ('p_shared', 'usr_bob', 'member', 10, 'usr_alice', '${T}');
   `);
   const visible = (userId: string) =>
     (
@@ -50,15 +50,15 @@ function setup() {
 }
 
 describe("shared Project access", () => {
-  it("gives the owner owner, the collaborator collaborator, and a stranger nothing", async () => {
+  it("gives the owner owner, a member member, and a stranger nothing", async () => {
     const { d1 } = setup();
     expect(await projectRole(d1, "usr_alice", "p_shared")).toBe("owner");
-    expect(await projectRole(d1, "usr_bob", "p_shared")).toBe("collaborator");
+    expect(await projectRole(d1, "usr_bob", "p_shared")).toBe("member");
     expect(await projectRole(d1, "usr_eve", "p_shared")).toBeNull();
     expect(await canAccessProject(d1, "usr_eve", "p_shared")).toBe(false);
   });
 
-  it("never lets a collaborator open the owner's other Projects", async () => {
+  it("never lets a member open the owner's other Projects", async () => {
     const { d1, visible } = setup();
     expect(await projectRole(d1, "usr_bob", "p_private")).toBeNull();
     expect(visible("usr_bob")).toEqual(["p_shared"]);
@@ -66,7 +66,7 @@ describe("shared Project access", () => {
     expect(visible("usr_eve")).toEqual([]);
   });
 
-  it("removes access when the collaborator row goes", async () => {
+  it("removes access when the member row goes", async () => {
     const { db, d1 } = setup();
     db.exec("DELETE FROM project_members WHERE user_id = 'usr_bob'");
     expect(await projectRole(d1, "usr_bob", "p_shared")).toBeNull();
@@ -93,11 +93,44 @@ describe("shared Project access", () => {
       email: "bob@example.org",
     };
     expect(requestFields(row, "usr_bob")).toMatchObject({
-      requester: { userId: "usr_bob", name: "bob", rank: 10, isYou: true },
+      requester: { userId: "usr_bob", name: "bob", rank: 10, role: null, isYou: true },
       outcome: null,
+      review: { state: "not_needed", decidedBy: null, decidedAt: null, reason: null },
     });
     expect(requestFields({ ...row, outcome: "not_selected" }, "usr_alice").outcome?.kind).toBe(
       "not_selected",
     );
+  });
+});
+
+describe("migration 0029", () => {
+  it("maps collaborator rows and pending invitations to member and keeps every row", () => {
+    const db = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false });
+    const files = readdirSync(MIGRATIONS)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+    const at = files.indexOf("0029_roles_and_request_review.sql");
+    for (const file of files.slice(0, at)) db.exec(readFileSync(join(MIGRATIONS, file), "utf8"));
+    db.exec(`
+      INSERT INTO projects (id, org_id, name, slug, status, canonical_generation, created_at, updated_at)
+        VALUES ('p1', 'o1', 'P', 'p', 'active', 0, '${T}', '${T}');
+      INSERT INTO project_members (project_id, user_id, role, rank, added_by, created_at) VALUES
+        ('p1', 'usr_alice', 'owner', 0, 'x', '${T}'), ('p1', 'usr_bob', 'collaborator', 10, 'x', '${T}');
+      INSERT INTO project_invitations (id, project_id, email, role, rank, invited_by, status, created_at, expires_at)
+        VALUES ('inv_1', 'p1', 'c@example.org', 'collaborator', 10, 'usr_alice', 'pending', '${T}', '${T}');
+    `);
+    for (const file of files.slice(at)) db.exec(readFileSync(join(MIGRATIONS, file), "utf8"));
+    expect(
+      db.prepare("SELECT user_id, role, rank FROM project_members ORDER BY rank").all(),
+    ).toEqual([
+      { user_id: "usr_alice", role: "owner", rank: 0 },
+      { user_id: "usr_bob", role: "member", rank: 10 },
+    ]);
+    expect(db.prepare("SELECT id, role, status FROM project_invitations").all()).toEqual([
+      { id: "inv_1", role: "member", status: "pending" },
+    ]);
+    expect(db.prepare("SELECT member_request_review FROM projects").get()).toEqual({
+      member_request_review: 1,
+    });
   });
 });

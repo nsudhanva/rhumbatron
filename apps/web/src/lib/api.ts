@@ -1,6 +1,15 @@
 import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
+import type {
+  AssignableRole,
+  ChangeReview,
+  InvitationView,
+  MembersResponse,
+  MemberView,
+  ProjectRole,
+} from "@rhumbatron/protocol";
 import { createServerFn } from "@tanstack/react-start";
+import type { BudgetScope, ChangeBudget, ProjectBudget } from "./api-budget";
 
 /**
  * Server functions over the API Worker (service binding `API`). The browser never calls the API
@@ -14,13 +23,15 @@ export type ProjectSummary = {
   status: string;
   canonicalGeneration: number;
   createdAt: string;
-  role?: "owner" | "collaborator" | string;
+  role?: ProjectRole | string;
 };
 
 export type ChangeRequester = {
   userId: string;
   name: string | null;
   rank: number | null;
+  /** Null when the requester left the Project. */
+  role?: ProjectRole | null;
   isYou: boolean;
 };
 
@@ -44,6 +55,9 @@ export type ChangeSummary = {
   requester?: ChangeRequester | null;
   outcome?: ChangeOutcome | null;
   supersedesChangeId?: string | null;
+  /** Short title from the planner; the goal stands in until it exists. */
+  title?: string | null;
+  review?: ChangeReview | null;
 };
 
 export type ChangeDetail = {
@@ -60,6 +74,11 @@ export type ChangeDetail = {
   requester?: ChangeRequester | null;
   outcome?: ChangeOutcome | null;
   supersedesChangeId?: string | null;
+  title?: string | null;
+  /** Review of a request whose requester's role needs it (shared-projects.md, "Request review"). */
+  review?: ChangeReview | null;
+  /** Which budget the Change draws on, and which budget stopped it (lib/api-budget.ts). */
+  budget?: ChangeBudget;
 };
 
 export type Intent = {
@@ -214,7 +233,7 @@ export type ProjectDetail = {
   name: string;
   slug: string;
   canonical: { generation: number; artifactRef: string; treeSha: string };
-  role?: "owner" | "collaborator" | string;
+  role?: ProjectRole | string;
 };
 
 export const getProject = createServerFn()
@@ -308,14 +327,19 @@ export const rollbackProject = createServerFn({ method: "POST" })
     }),
   );
 
+/** `budgetUsd` is the Change cap of scope `change`; scopes `project` and `account` send none. */
 export const createChange = createServerFn({ method: "POST" })
-  .inputValidator((input: { projectId: string; goal: string; budgetUsd: number }) => input)
+  .inputValidator(
+    (input: { projectId: string; goal: string; budgetScope: BudgetScope; budgetUsd?: number }) =>
+      input,
+  )
   .handler(({ data }) =>
     call<{ id: string }>(`/v1/projects/${data.projectId}/changes`, {
       method: "POST",
       body: {
         goal: data.goal,
-        budgetUsd: data.budgetUsd,
+        budgetScope: data.budgetScope,
+        ...(data.budgetScope === "change" ? { budgetUsd: data.budgetUsd } : {}),
         clientRequestId: `web-${crypto.randomUUID()}`,
       },
     }),
@@ -538,7 +562,13 @@ export type ProjectVerification = {
   /** Newest first: the latest `limit` Candidates plus older Candidates of the same Changes. */
   candidates: CandidateDetail[];
   evidence: EvidenceRecord[];
-  changes: { id: string; goal: string; status: string; riskTier: string | null }[];
+  changes: {
+    id: string;
+    goal: string;
+    title?: string | null;
+    status: string;
+    riskTier: string | null;
+  }[];
   limit: number;
   /** The Evidence cap cut rows; affected checks read as gaps, never as passes. */
   evidenceTruncated: boolean;
@@ -563,8 +593,11 @@ export type ProjectCost = {
   changes: (CostUsage & {
     id: string;
     goal: string;
+    title?: string | null;
     status: string;
     budgetUsd: number;
+    /** `budgetUsd` caps only scope `change`; other scopes draw on a monthly budget. */
+    budgetScope?: BudgetScope;
     createdAt: string;
   })[];
   selected: {
@@ -607,6 +640,8 @@ export type ProjectCost = {
     agentModelCallsByDay: { day: string; count: number }[];
   };
   callCapPerRun: Record<"haiku" | "sonnet" | "opus", number>;
+  /** The Project's monthly budget and this month's spend against it. */
+  projectBudget?: ProjectBudget;
 };
 
 export const getProjectCost = createServerFn()
@@ -808,6 +843,7 @@ export type WorkspaceView = {
   changes: {
     id: string;
     goal: string;
+    title?: string | null;
     status: string;
     baseGeneration: number;
     createdAt: string;
@@ -886,6 +922,8 @@ export type AgentView = {
     complexity: string | null;
     changeId: string;
     changeGoal: string;
+    /** Short title of the Change. */
+    changeTitle?: string | null;
   };
   tier: TaskRun["tier"] | null;
   attempts: number;
@@ -1036,7 +1074,12 @@ export type NotificationKind =
   | "release_deployed"
   | "request_not_selected"
   /** A Change waits for its requester's answer; links to the Change. */
-  | "request_needs_input";
+  | "request_needs_input"
+  /** To owner and admins: a request waits for review; links to the Change. */
+  | "request_proposed"
+  /** To the requester: an admin included or declined the request. */
+  | "request_included"
+  | "request_declined";
 
 /** `action`: needs a person until its condition clears. `attention`: stopped or rejected work. */
 export type NotificationSeverity = "action" | "attention" | "info";
@@ -1150,7 +1193,7 @@ export type CodeVersion = {
   commit: string | null;
   live: boolean;
   at: string | null;
-  change: { id: string; goal: string } | null;
+  change: { id: string; goal: string; title?: string | null } | null;
   candidateId: string | null;
   changeSets: ChangeSetAttribution[];
 };
@@ -1238,28 +1281,8 @@ export const getCandidateDiff = createServerFn()
  * Shared Projects (docs/architecture/shared-projects.md).
  * ------------------------------------------------------------------------------------------ */
 
-export type ProjectMember = {
-  userId: string;
-  name: string | null;
-  email: string | null;
-  role: "owner" | "collaborator" | string;
-  rank: number;
-  isYou: boolean;
-  addedAt?: string;
-};
-
-export type ProjectInvitation = {
-  id: string;
-  email: string;
-  createdAt: string;
-  expiresAt: string;
-};
-
-export type ProjectMembersView = {
-  role: "owner" | "collaborator" | string;
-  members: ProjectMember[];
-  invitations: ProjectInvitation[];
-};
+/** One person of `GET /v1/projects/:projectId/members` (protocol `MemberView`). */
+export type ProjectMember = MemberView;
 
 export type UserInvitation = {
   id: string;
@@ -1273,6 +1296,7 @@ export type UserInvitation = {
 export type RequestConflictSide = {
   changeId: string;
   goal: string;
+  title?: string | null;
   status: string;
   requester: {
     userId: string;
@@ -1304,14 +1328,15 @@ export type RequestConflictDetail = {
 
 export const getProjectMembers = createServerFn()
   .inputValidator((projectId: string) => projectId)
-  .handler(({ data }) => call<ProjectMembersView>(`/v1/projects/${data}/members`));
+  .handler(({ data }) => call<MembersResponse>(`/v1/projects/${data}/members`));
 
 export const inviteProjectMember = createServerFn({ method: "POST" })
-  .inputValidator((input: { projectId: string; email: string }) => input)
+  .inputValidator((input: { projectId: string; email: string; role: AssignableRole }) => input)
+  // A repeat invite to the same email updates the pending invitation's role.
   .handler(({ data }) =>
-    call<ProjectInvitation>(`/v1/projects/${data.projectId}/invitations`, {
+    call<InvitationView>(`/v1/projects/${data.projectId}/invitations`, {
       method: "POST",
-      body: { email: data.email },
+      body: { email: data.email, role: data.role },
     }),
   );
 

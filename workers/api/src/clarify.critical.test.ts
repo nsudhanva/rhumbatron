@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@clerk/backend", () => ({ verifyToken: async (token: string) => ({ sub: token }) }));
-const { clarify, mayClarify } = await import("./clarify.ts");
+const { clarify, mayActOnRequest } = await import("./clarify.ts");
 
 const MIGRATIONS = join(import.meta.dirname, "../../../migrations/d1");
 const T = "2026-10-10T12:00:00.000Z";
@@ -44,8 +44,8 @@ function setup() {
       ('proj_p', 'org_alice', 'P', 'p', 'active', 0, '${T}', '${T}');
     INSERT INTO project_members (project_id, user_id, role, rank, added_by, created_at) VALUES
       ('proj_p', 'usr_alice', 'owner', 0, 'usr_alice', '${T}'),
-      ('proj_p', 'usr_bob', 'collaborator', 10, 'usr_alice', '${T}'),
-      ('proj_p', 'usr_carol', 'collaborator', 10, 'usr_alice', '${T}');
+      ('proj_p', 'usr_bob', 'member', 10, 'usr_alice', '${T}'),
+      ('proj_p', 'usr_carol', 'member', 10, 'usr_alice', '${T}');
     INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd, created_by, created_at, updated_at)
       VALUES ('chg_b', 'proj_p', 'Add kanban feature', 'needs_input', 0, 1, 'usr_bob', '${T}', '${T}');
   `);
@@ -108,9 +108,11 @@ describe("clarify authorization", () => {
   });
 
   it("decides membership from roles, not from the request", () => {
-    expect(mayClarify("owner", "usr_bob", "usr_alice")).toBe(true);
-    expect(mayClarify("collaborator", "usr_bob", "usr_bob")).toBe(true);
-    expect(mayClarify("collaborator", "usr_bob", "usr_carol")).toBe(false);
-    expect(mayClarify(null, "usr_bob", "usr_bob")).toBe(false);
+    expect(mayActOnRequest("owner", "usr_bob", "usr_alice")).toBe(true);
+    expect(mayActOnRequest("admin", "usr_bob", "usr_alice")).toBe(true);
+    expect(mayActOnRequest("member", "usr_bob", "usr_bob")).toBe(true);
+    expect(mayActOnRequest("member", "usr_bob", "usr_carol")).toBe(false);
+    expect(mayActOnRequest("viewer", "usr_bob", "usr_bob")).toBe(false);
+    expect(mayActOnRequest(null, "usr_bob", "usr_bob")).toBe(false);
   });
 });

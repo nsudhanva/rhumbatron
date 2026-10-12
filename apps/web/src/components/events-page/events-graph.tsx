@@ -3,18 +3,9 @@ import { useQueries } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { type ChangeSummary, listTasks, type TaskDetail } from "../../lib/api";
-import { formatClock, formatNumber, timeAgo, truncate } from "../../lib/format";
+import { changeLabel, formatClock, formatNumber, timeAgo } from "../../lib/format";
 import { DagCanvas, edgeSwatch, type LegendItem, nodeSwatch } from "../dag/dag-canvas";
-import { DagFilters, type FilterOption } from "../dag/dag-filters";
-import {
-  type DagEdgeSpec,
-  type DagFilter,
-  type DagNodeSpec,
-  EMPTY_FILTER,
-  EVENT_GROUPS,
-  eventGroupOf,
-  inTimeRange,
-} from "../dag/model";
+import { type DagEdgeSpec, type DagNodeSpec, EVENT_GROUPS, eventGroupOf } from "../dag/model";
 import { EmptyState } from "../ui/empty-state";
 import { KeyValue } from "../ui/key-value";
 import { Mono } from "../ui/mono";
@@ -28,7 +19,8 @@ import { type FeedEvent, ingestLagMs, TONE_TEXT, typeTone } from "./feed-model";
  * to the event that caused it when the feed carries `causedBy`; the feed projection does not
  * keep it today, so each event sits in the lane of its Task under its Change, in sequence order.
  * Events with no Task sit in their Change's own lane, and events with no Change in the Project
- * lane. Task names come from one Task list per Change in view (at most MAX_TASK_LISTS).
+ * lane. Task names come from one Task list per Change in view (at most MAX_TASK_LISTS). The page
+ * filter (events-filter-bar.tsx, in the URL) is the same as the list's.
  */
 
 /** Newest matching events drawn; the rest stay in the list view. */
@@ -97,7 +89,7 @@ function buildGraph(
       id: headId,
       position: { x: 0, y: top + ((laneKeys.length - 1) * ROW) / 2 },
       kicker: g === "" ? "Project" : "Change",
-      title: g === "" ? "Project events" : change ? truncate(change.goal, 56) : g,
+      title: g === "" ? "Project events" : change ? changeLabel(change) : g,
       meta: `${formatNumber(count)} events${change?.requester?.name ? ` · ${change.requester.name}` : ""}`,
       status: change?.status,
       border: "ink",
@@ -187,39 +179,27 @@ const LEGEND: LegendItem[] = [
 export function EventsGraph({
   projectId,
   events,
+  total,
   changes,
   scopedToChange,
   footer,
 }: {
   projectId: string;
-  /** Loaded events, newest first. */
+  /** Loaded events that match the page filter, newest first. */
   events: FeedEvent[];
+  /** Loaded events before the filter. */
+  total: number;
   /** Changes of the Project, newest first, for names and requesters. */
   changes: ChangeSummary[];
   scopedToChange: boolean;
   /** Load-older control and paging state. */
   footer?: ReactNode;
 }) {
-  const [filter, setFilter] = useState<DagFilter>(EMPTY_FILTER);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const changeById = useMemo(() => new Map(changes.map((c) => [c.id, c])), [changes]);
 
-  const matching = useMemo(
-    () =>
-      events.filter((e) => {
-        if (filter.changeId && e.changeId !== filter.changeId) return false;
-        if (filter.taskId && e.taskId !== filter.taskId) return false;
-        if (filter.group && eventGroupOf(e.eventType) !== filter.group) return false;
-        if (!inTimeRange(e.occurredAt, filter.range)) return false;
-        if (filter.person) {
-          const change = e.changeId ? changeById.get(e.changeId) : undefined;
-          if (change?.requester?.userId !== filter.person) return false;
-        }
-        return true;
-      }),
-    [events, filter, changeById],
-  );
+  const matching = events;
   const shown = useMemo(() => matching.slice(0, MAX_EVENTS), [matching]);
 
   // Task names: one Task list per Change in view, newest Changes first.
@@ -250,35 +230,6 @@ export function EventsGraph({
   );
   const selection = selectedId ? graph.select.get(selectedId) : undefined;
 
-  const people: FilterOption[] = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const e of events) {
-      const r = e.changeId ? changeById.get(e.changeId)?.requester : undefined;
-      if (r) seen.set(r.userId, r.isYou ? "You" : (r.name ?? "Unnamed"));
-    }
-    return [...seen].map(([value, label]) => ({ value, label }));
-  }, [events, changeById]);
-  const changeOptions = useMemo(() => {
-    if (scopedToChange) return [];
-    const ids = [...new Set(events.flatMap((e) => (e.changeId ? [e.changeId] : [])))];
-    return ids
-      .filter((id) => !filter.person || changeById.get(id)?.requester?.userId === filter.person)
-      .map((id) => ({ value: id, label: changeById.get(id)?.goal ?? id }));
-  }, [events, changeById, filter.person, scopedToChange]);
-  const taskOptions = useMemo(() => {
-    const ids = [
-      ...new Set(
-        events.flatMap((e) =>
-          e.taskId && (!filter.changeId || e.changeId === filter.changeId) ? [e.taskId] : [],
-        ),
-      ),
-    ];
-    return ids.map((id) => {
-      const t = taskById.get(id);
-      return { value: id, label: t ? `${t.key} ${t.title}` : id };
-    });
-  }, [events, filter.changeId, taskById]);
-
   const onSelect = useCallback(
     (id: string) => setSelectedId((current) => (current === id ? null : id)),
     [],
@@ -290,24 +241,12 @@ export function EventsGraph({
         label="Graph"
         meta={
           <Mono subtle>
-            {formatNumber(shown.length)} of {formatNumber(events.length)} loaded events
+            {formatNumber(shown.length)} of {formatNumber(total)} loaded events
           </Mono>
         }
       >
         <div className="grid gap-4">
-          <DagFilters
-            filter={filter}
-            onChange={(next) => {
-              setFilter(next);
-              setSelectedId(null);
-            }}
-            people={people}
-            changes={changeOptions}
-            tasks={taskOptions}
-            taskLabel="Task"
-            groups
-          />
-          {events.length === 0 ? (
+          {total === 0 ? (
             <EmptyState
               what="No events recorded yet."
               how="Events appear here as soon as a Change starts and agents act on it."
@@ -407,8 +346,8 @@ function NodeDetail({
         <header className="grid gap-1.5">
           <p className="type-kicker text-kumo-accent">Change</p>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="min-w-0 text-[15px] font-semibold text-pretty">
-              {c?.goal ?? selection.changeId}
+            <h3 className="min-w-0 text-[15px] font-semibold text-pretty" title={c?.goal}>
+              {c ? changeLabel(c) : selection.changeId}
             </h3>
             {c && <StatusPill status={c.status} />}
           </div>

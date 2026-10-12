@@ -4,6 +4,7 @@ import { SignIn } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { BudgetScopeField, budgetPools } from "../components/change/budget-scope";
 import { DeadLetters } from "../components/dead-letters";
 import { EventStream } from "../components/project/event-stream";
 import { SectionError, SkeletonBar, SkeletonRows } from "../components/project/feedback";
@@ -38,10 +39,12 @@ import {
   type ProjectStats as ProjectStatsData,
   provisionProject,
 } from "../lib/api";
+import { type BudgetScope, getMe, ME_KEY } from "../lib/api-budget";
 import { getProjectSettings } from "../lib/api-settings";
 import { getTimelineTasks } from "../lib/api-timeline";
-import { EMPTY, formatAge, formatNumber, formatUsd, generation } from "../lib/format";
+import { changeLabel, EMPTY, formatAge, formatNumber, formatUsd, generation } from "../lib/format";
 import { useProjectLive } from "../lib/live";
+import { asRole, can, needsReview } from "../lib/permissions";
 import { useAdoptTypedText } from "../lib/pre-hydration";
 import { loadOnServer, prefetch, prefetchFeed } from "../lib/ssr-data";
 
@@ -199,7 +202,7 @@ function Overview() {
               <LiveAppLine
                 projectId={projectId}
                 hasSource={assigned}
-                canManage={project.data?.role !== "collaborator"}
+                canManage={can(project.data.role, "app.publish")}
               />
             </>
           )
@@ -292,7 +295,8 @@ function Overview() {
       </Section>
 
       <TwoUp>
-        <NewChange projectId={projectId} />
+        {/* A viewer reads the project only: no request form. */}
+        {can(project.data?.role, "change.create") && <NewChange projectId={projectId} />}
         <Section label="Canonical source">
           {project.isPending ? (
             <div className="grid gap-2">
@@ -453,7 +457,7 @@ function ChangesTable({ changes }: { changes: ChangeSummary[] | undefined }) {
                     <div className="grid min-w-0 gap-0.5">
                       <span className="min-w-0 truncate font-semibold" title={change.goal}>
                         <RowLink to="/changes/$changeId" params={{ changeId: change.id }}>
-                          {change.goal}
+                          {changeLabel(change)}
                         </RowLink>
                       </span>
                       <ChangeOutcomeLine change={change} />
@@ -507,6 +511,23 @@ function reasonAfter(prefix: string, reason: string | null | undefined): string 
 }
 
 function ChangeOutcomeLine({ change }: { change: ChangeSummary }) {
+  if (change.status === "proposed") {
+    return (
+      <span className="text-[12px] font-medium text-accent-700">
+        Waiting for an admin to include it
+      </span>
+    );
+  }
+  if (change.status === "declined") {
+    const by = change.review?.decidedBy?.name;
+    const reason = change.review?.reason;
+    return (
+      <span className="text-[12px] text-kumo-subtle">
+        Declined{by ? ` by ${by}` : ""}
+        {reason ? `: ${reason}` : ""}
+      </span>
+    );
+  }
   if (change.status === "needs_input") {
     return (
       <span className="text-[12px] font-medium text-accent-700">
@@ -560,8 +581,12 @@ function RiskCell({ risk }: { risk: string | null }) {
   );
 }
 
-/** `budget: null` until the user types one: the field then shows the Project's default budget. */
-type ChangeDraft = { goal: string; budget: string | null };
+/**
+ * `budget: null` until the user types one: the field then shows the Project's default budget.
+ * `scope`: which budget the request draws on (components/change/budget-scope.tsx).
+ */
+type ChangeDraft = { goal: string; budget: string | null; scope: BudgetScope };
+const SCOPES: readonly BudgetScope[] = ["change", "project", "account"];
 /** Used only until the Project settings load (the API applies the same built-in default). */
 const FALLBACK_BUDGET = "3";
 /** Unsent drafts live outside the component so a remount (auth refresh, route re-render) keeps them. */
@@ -577,12 +602,13 @@ function readDraft(projectId: string): ChangeDraft {
       return {
         goal: typeof parsed.goal === "string" ? parsed.goal : "",
         budget: typeof parsed.budget === "string" ? parsed.budget : null,
+        scope: SCOPES.find((s) => s === parsed.scope) ?? "change",
       };
     }
   } catch {
     // Storage unavailable or corrupt: start from an empty draft.
   }
-  return { goal: "", budget: null };
+  return { goal: "", budget: null, scope: "change" };
 }
 
 function writeDraft(projectId: string, draft: ChangeDraft | null) {
@@ -619,6 +645,15 @@ function NewChange({ projectId }: { projectId: string }) {
   };
   const setGoal = (value: string) => update({ goal: value });
   const setBudget = (value: string) => update({ budget: value });
+  // Pools that are set: Project monthly budget (settings) and the user's own (`GET /v1/me`).
+  const me = useQuery({ queryKey: ME_KEY, queryFn: () => getMe(), staleTime: 60_000 });
+  const pools = budgetPools(settings.data, me.data);
+  // The stored scope applies after mount, so the first client render equals the server HTML
+  // (which has no session storage); a scope whose pool is not set falls back to the request.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const scope: BudgetScope =
+    mounted && draft.scope !== "change" && pools[draft.scope] ? draft.scope : "change";
   // Text typed before hydration stays when the first live update re-renders the form.
   const goalRef = useRef<HTMLTextAreaElement>(null);
   const budgetRef = useRef<HTMLInputElement>(null);
@@ -638,12 +673,22 @@ function NewChange({ projectId }: { projectId: string }) {
     retry: false,
   });
   const pills = suggestions.data?.suggestions ?? [];
+  // A member's request waits for an owner or admin while the Project's member review is on.
+  const reviewed = needsReview(asRole(project.data?.role), settings.data?.memberRequestReview);
   const budgetUsd = Number(budget);
   const create = useMutation({
-    mutationFn: () => createChange({ data: { projectId, goal: goal.trim(), budgetUsd } }),
+    mutationFn: () =>
+      createChange({
+        data: {
+          projectId,
+          goal: goal.trim(),
+          budgetScope: scope,
+          ...(scope === "change" ? { budgetUsd } : {}),
+        },
+      }),
     onSuccess: async ({ id }) => {
       writeDraft(projectId, null);
-      setDraft({ goal: "", budget: null });
+      setDraft({ goal: "", budget: null, scope: "change" });
       await queryClient.invalidateQueries({ queryKey: ["changes", projectId] });
       await navigate({ to: "/changes/$changeId", params: { changeId: id } });
     },
@@ -657,7 +702,7 @@ function NewChange({ projectId }: { projectId: string }) {
         onSubmit={(event) => {
           event.preventDefault();
           if (!goal.trim()) setInvalid("Describe the goal before you submit.");
-          else if (!(budgetUsd > 0)) setInvalid("Set a budget above $0.00.");
+          else if (scope === "change" && !(budgetUsd > 0)) setInvalid("Set a budget above $0.00.");
           else create.mutate();
         }}
       >
@@ -685,24 +730,31 @@ function NewChange({ projectId }: { projectId: string }) {
             ))}
           </ul>
         )}
-        <div className="max-w-56">
-          <Input
-            label="Budget (USD)"
-            description={
-              draft.budget === null && settings.data
-                ? "The Project's default. New expensive work stops at this limit."
-                : "New expensive work stops at this limit."
-            }
-            ref={budgetRef}
-            type="number"
-            min={0.1}
-            step={0.1}
-            className="font-mono"
-            value={budget}
-            onChange={(e) => setBudget(e.target.value)}
-            required
-          />
-        </div>
+        <BudgetScopeField
+          projectId={projectId}
+          scope={scope}
+          onScope={(next) => update({ scope: next })}
+          pools={pools}
+          canSetProjectBudget={can(project.data?.role, "settings.edit")}
+          amountField={
+            <Input
+              label="Budget (USD)"
+              description={
+                draft.budget === null && settings.data
+                  ? "The Project's default. New expensive work stops at this limit."
+                  : "New expensive work stops at this limit."
+              }
+              ref={budgetRef}
+              type="number"
+              min={0.1}
+              step={0.1}
+              className="font-mono"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+              required
+            />
+          }
+        />
         {invalid && (
           <p role="alert" className="text-[12px] font-semibold text-kumo-danger">
             {invalid}
@@ -715,6 +767,11 @@ function NewChange({ projectId }: { projectId: string }) {
           <Button type="submit" variant="primary" loading={create.isPending}>
             Submit change
           </Button>
+          {reviewed && (
+            <p className="mt-2 text-[12px] text-kumo-subtle">
+              An admin reviews requests before anything is built.
+            </p>
+          )}
         </div>
       </form>
     </Section>

@@ -1,3 +1,4 @@
+import { changeTitle } from "@rhumbatron/protocol";
 import type { ChangeDetail, TaskDetail, TaskRun } from "./api";
 import { displayTimeZone, renderNow } from "./render-time";
 
@@ -106,6 +107,14 @@ export const generation = (n: number) => `S${n}`;
 
 export function truncate(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}\u2026` : text;
+}
+
+/**
+ * A Change as a short label for headers, lists, and breadcrumbs: the planner title, else a title
+ * derived from the goal. Show the full goal only where the goal is the content, or in a tooltip.
+ */
+export function changeLabel(change: { goal: string; title?: string | null | undefined }) {
+  return changeTitle(change.title, change.goal);
 }
 
 export function runDuration(run: TaskRun, now = renderNow()) {

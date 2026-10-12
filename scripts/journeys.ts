@@ -1087,8 +1087,10 @@ async function a10(ctx: Ctx) {
     budgetUsd: number;
     dispatchedTaskIds: string[];
   }>(ctx, "POST", `/v1/changes/${change.id}/budget`, { budgetUsd: 3 });
+  // A stop while planning resumes in `compiling` (planning runs again); a stop while building
+  // resumes in `running` (ADR 0030).
   ctx.check(
-    raised.changeStatus === "running" && raised.budgetUsd === 3,
+    ["running", "compiling"].includes(raised.changeStatus) && raised.budgetUsd === 3,
     "raise resumes the Change",
     `${raised.changeStatus} $${raised.budgetUsd}, ${raised.dispatchedTaskIds.length} Tasks dispatched`,
   );

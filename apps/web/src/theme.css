@@ -744,6 +744,29 @@ svg[role="status"]:has(> circle > animateTransform) > circle {
   --text-color-kumo-strong: var(--rh-subtle);
 }
 
+/* Replay (section 11 and 11.1): a recorded fact appears when the playhead passes it, a short
+   scale-in with no bounce. Its duration is a motion token, so reduced motion makes it instant. */
+.rh-pop {
+  animation: rh-pop var(--rh-dur-ui-slow) var(--rh-ease-out) both;
+}
+@keyframes rh-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
+/* An agent at work: a slow opacity pulse on its square status dot (section 11.1 is the one
+   place a loop is allowed). The reduced-motion rule below stops it after one pass. */
+.rh-work-pulse {
+  animation: rh-work-pulse 1.6s var(--rh-ease-in-out) infinite;
+}
+@keyframes rh-work-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 /* Section 11: remove translations and pulses, cut durations, keep live bars updating without a
    transition. The Loader keeps a static half fill so it still reads as "working". */
 @media (prefers-reduced-motion: reduce) {

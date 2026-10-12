@@ -14,7 +14,7 @@ import { Page, PageTitle, Section } from "../components/ui/page";
 import { StatCell, StatStrip } from "../components/ui/stat-strip";
 import { getProject, listChanges } from "../lib/api";
 import { getProjectProductGraph, type ProductGraph } from "../lib/api-graph";
-import { formatNumber, generation, truncate } from "../lib/format";
+import { changeLabel, formatNumber, generation } from "../lib/format";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
@@ -158,7 +158,7 @@ function GraphScreen() {
               onValueChange={(value) => {
                 if (typeof value === "string") setSearch({ changeId: value, zoom: "change" });
               }}
-              items={Object.fromEntries(changeList.map((c) => [c.id, truncate(c.goal, 72)]))}
+              items={Object.fromEntries(changeList.map((c) => [c.id, changeLabel(c)]))}
             />
           </div>
         )}

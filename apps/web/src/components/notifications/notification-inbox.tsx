@@ -9,10 +9,13 @@ import {
   CloudWarning,
   GitMerge,
   type Icon,
+  PlayCircle,
   Prohibit,
+  Tray,
   UserCheck,
   WarningOctagon,
   X,
+  XCircle,
   XSquare,
 } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -51,13 +54,20 @@ const ICONS: Record<NotificationKind, Icon> = {
   release_deployed: CloudCheck,
   request_not_selected: XSquare,
   request_needs_input: ChatCircleText,
+  request_proposed: Tray,
+  request_included: PlayCircle,
+  request_declined: XCircle,
 };
 
-/** Inline action for items whose next step is a decision on another page. */
-const ACTIONS: Partial<Record<NotificationKind, string>> = {
-  approval_required: "Review",
-  promotion_ready: "Open",
-  request_needs_input: "Answer",
+/**
+ * Inline actions for items whose next step is a decision on another page. A proposed request
+ * offers Include and Decline: both open the Change, where the decision is made in place.
+ */
+const ACTIONS: Partial<Record<NotificationKind, string[]>> = {
+  approval_required: ["Review"],
+  promotion_ready: ["Open"],
+  request_needs_input: ["Answer"],
+  request_proposed: ["Include", "Decline"],
 };
 
 /** The icon is the status here (DESIGN.md 7), paired with the title's words. */
@@ -147,7 +157,7 @@ export default function NotificationInbox({ onClose }: { onClose: () => void }) 
           <EmptyState
             className="px-3"
             what="Nothing needs you."
-            how="Approvals, questions about your requests, failed commands, and finished Changes appear here."
+            how="Requests to review, approvals, questions about your requests, failed commands, and finished Changes appear here."
           />
         ) : (
           <>
@@ -190,7 +200,7 @@ Group.displayName = "NotificationGroup";
 function Row({ item, onOpen }: { item: AppNotification; onOpen: (item: AppNotification) => void }) {
   // A kind newer than this build (the API ships first) falls back to a plain bell, never a crash.
   const IconComponent = ICONS[item.kind] ?? Bell;
-  const action = ACTIONS[item.kind];
+  const actions = ACTIONS[item.kind] ?? [];
   // `href` is an app path from the API; the router resolves it at runtime.
   const to = item.href as "/";
   return (
@@ -228,15 +238,20 @@ function Row({ item, onOpen }: { item: AppNotification; onOpen: (item: AppNotifi
         />
         {!item.read && <span className="sr-only">, unread</span>}
       </Link>
-      {action && (
-        <Link
-          to={to}
-          onClick={() => onOpen(item)}
-          aria-label={`${action}: ${item.title}`}
-          className={cn(buttonVariants({ variant: "secondary", size: "xs" }), "mr-3 shrink-0")}
-        >
-          {action}
-        </Link>
+      {actions.length > 0 && (
+        <span className="mr-3 flex shrink-0 gap-1.5">
+          {actions.map((action) => (
+            <Link
+              key={action}
+              to={to}
+              onClick={() => onOpen(item)}
+              aria-label={`${action}: ${item.title}`}
+              className={cn(buttonVariants({ variant: "secondary", size: "xs" }), "shrink-0")}
+            >
+              {action}
+            </Link>
+          ))}
+        </span>
       )}
     </li>
   );

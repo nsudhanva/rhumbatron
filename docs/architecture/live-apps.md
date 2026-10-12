@@ -82,6 +82,21 @@ A deterministic failure returns a reason and is not retried. A build that finds 
 
 The cap is 60 app builds per UTC day (`APP_BUILDS_PER_DAY`, counter `app-builds` in `usage_counters`).
 
+### Client assets built by the app
+
+The builder serves the files under `public/` as they are in the commit. It does not run the app's own build.
+An app can build its client itself, for example React and Tailwind bundled by `scripts/build.ts` to `public/app.js` and `public/app.css`.
+For such an app, Candidate composition runs the app's build in the Sandbox (`workers/integration/src/app-build.ts`):
+
+1. After the ChangeSets merge, composition reads the composed `package.json`. Without a `build` script, no build runs.
+2. With a `build` script, composition runs `bun install` and then `bun run build` (120 s timeout).
+3. Composition commits the files that the build changed (`Build <candidate>`) on top of the merges. The Candidate commit, the preview, the promotion, and the release then all serve the assets built from the composed sources.
+4. A failed build commits nothing. Its exit code and output tail are the `build` Evidence (`fail`, `checked_supported`). A build timeout is a gap.
+5. The required `client-assets` check compares the composed commit with the base. See [Source and verification](source-and-verification.md#which-checks-run).
+
+The Sandbox time of the build counts on the reservation of the verification workflow.
+Agents edit the client sources, not the generated files (`APP_CONVENTIONS`). A `bun run build` in an agent workspace does not keep its output, so sibling ChangeSets never conflict on generated files.
+
 ## Preview of a Candidate
 
 The verification workflow builds the composed commit of a Candidate and points the preview host at it.

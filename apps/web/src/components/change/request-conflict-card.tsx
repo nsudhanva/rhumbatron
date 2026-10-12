@@ -4,7 +4,7 @@ import type {
   RequestConflictDetail,
   RequestConflictSide,
 } from "../../lib/api";
-import { timeAgo } from "../../lib/format";
+import { changeLabel, timeAgo } from "../../lib/format";
 import { Mono } from "../ui/mono";
 import { Tag } from "../ui/tag";
 import { ChangeStatusWord } from "./change-status";
@@ -19,7 +19,7 @@ import { ChangeStatusWord } from "./change-status";
 type WithReason = RequestConflictDetail & { reason?: string | null };
 
 function sideName(side: RequestConflictSide) {
-  return side.requester.isYou ? "You" : (side.requester.name ?? "A collaborator");
+  return side.requester.isYou ? "You" : (side.requester.name ?? "A member");
 }
 
 /** Who decided, in words. `system:arbiter` is the automatic arbiter. */
@@ -36,7 +36,7 @@ function requestDecision(conflict: RequestConflictDetail) {
   const winner =
     conflict.winnerChangeId === a.changeId ? a : conflict.winnerChangeId === b.changeId ? b : null;
   if (!winner) return "Not decided yet";
-  return `"${winner.goal}" goes ahead`;
+  return `"${changeLabel(winner)}" goes ahead`;
 }
 
 export function RequestConflictCard({
@@ -141,14 +141,17 @@ function RequestSide({
       </div>
       <div className="grid gap-1">
         {isCurrent ? (
-          <span className="line-clamp-2 text-[14px] font-semibold">{side.goal}</span>
+          <span className="line-clamp-2 text-[14px] font-semibold" title={side.goal}>
+            {changeLabel(side)}
+          </span>
         ) : (
           <Link
             to="/changes/$changeId"
             params={{ changeId: side.changeId }}
             className="line-clamp-2 text-[14px] font-semibold hover:underline"
+            title={side.goal}
           >
-            {side.goal}
+            {changeLabel(side)}
           </Link>
         )}
         <p className="text-[12px] text-kumo-subtle">

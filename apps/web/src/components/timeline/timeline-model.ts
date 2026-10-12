@@ -6,7 +6,7 @@ import type {
   TaskDetail,
   TaskRun,
 } from "../../lib/api";
-import { generation, truncate } from "../../lib/format";
+import { changeLabel, generation, truncate } from "../../lib/format";
 import { renderNow } from "../../lib/render-time";
 
 /**
@@ -66,6 +66,8 @@ export type TimelineMarker = {
 export type TimelineChange = {
   id: string;
   goal: string;
+  /** Short title for the row label; the goal stays for the tooltip. */
+  title: string;
   status: string;
   start: number;
   /** Null while the Change is in flight: the span grows to "now". */
@@ -112,7 +114,18 @@ export type TimelineModel = {
   /** Promotions, for the full-height rules and axis labels. */
   promotions: TimelineMarker[];
   attention: AttentionItem[];
+  /** Recorded Challenges, for the "Needs attention" rail at a replay playhead. */
+  challenges: TimelineChallenge[];
   counts: { changes: number; tasks: number; running: number; people: number };
+};
+
+export type TimelineChallenge = {
+  id: string;
+  changeId: string;
+  resource: string | null;
+  at: number;
+  /** When `challenge.resolved` was recorded; null while it is open (or not in the feed). */
+  resolvedAt: number | null;
 };
 
 /** Change statuses with work in flight (mirrors components/project/status.tsx). */
@@ -240,7 +253,7 @@ export function buildTimeline(input: {
   const byId = new Map(input.changes.map((c) => [c.id, c]));
   const markersByChange = new Map<string, TimelineMarker[]>();
   const challenges = new Map<string, { at: number; changeId: string; resource: string | null }>();
-  const resolved = new Set<string>();
+  const resolved = new Map<string, number>();
 
   for (const event of input.events) {
     if (!event.changeId || !byId.has(event.changeId)) continue;
@@ -253,7 +266,7 @@ export function buildTimeline(input: {
       });
     }
     if (event.eventType === "challenge.resolved" && challengeId) {
-      resolved.add(challengeId);
+      resolved.set(challengeId, ms(event.occurredAt) ?? 0);
       continue;
     }
     const marker = markerOf(event, byId.get(event.changeId));
@@ -363,6 +376,7 @@ export function buildTimeline(input: {
     person.changes.push({
       id: change.id,
       goal: change.goal,
+      title: changeLabel(change),
       status: change.status,
       start: created,
       end: inFlight ? null : last,
@@ -372,7 +386,7 @@ export function buildTimeline(input: {
     });
     people.set(personKey, person);
 
-    const goal = truncate(change.goal, 90);
+    const title = changeLabel(change);
     const lastAt = markers.at(-1)?.at ?? created;
     if (change.status === "needs_input") {
       const question = [...markers].reverse().find((m) => m.kind === "clarify");
@@ -380,7 +394,7 @@ export function buildTimeline(input: {
         key: `clarify:${change.id}`,
         kind: "clarify",
         title: "The planner asked a question",
-        detail: goal,
+        detail: title,
         at: question?.at ?? lastAt,
         changeId: change.id,
       });
@@ -389,7 +403,7 @@ export function buildTimeline(input: {
         key: `approval:${change.id}`,
         kind: "approval",
         title: "Approval needed before promotion",
-        detail: goal,
+        detail: title,
         at: lastAt,
         changeId: change.id,
       });
@@ -398,7 +412,7 @@ export function buildTimeline(input: {
         key: `budget:${change.id}`,
         kind: "budget",
         title: "Stopped at its budget",
-        detail: goal,
+        detail: title,
         at: lastAt,
         changeId: change.id,
       });
@@ -412,7 +426,7 @@ export function buildTimeline(input: {
       key: `conflict:${id}`,
       kind: "conflict",
       title: c.resource ? `Agents disagree on ${c.resource}` : "Agents disagree",
-      detail: truncate(change.goal, 90),
+      detail: changeLabel(change),
       at: c.at,
       changeId: c.changeId,
     });
@@ -449,6 +463,13 @@ export function buildTimeline(input: {
     live,
     promotions,
     attention,
+    challenges: [...challenges].map(([id, c]) => ({
+      id,
+      changeId: c.changeId,
+      resource: c.resource,
+      at: c.at,
+      resolvedAt: resolved.get(id) ?? null,
+    })),
     counts: { changes: input.changes.length, tasks: taskCount, running, people: people.size },
   };
 }

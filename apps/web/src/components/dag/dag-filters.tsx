@@ -31,6 +31,7 @@ export function DagFilters({
   tasks,
   taskLabel = "Task or agent",
   groups = false,
+  showClear = true,
 }: {
   filter: DagFilter;
   onChange: (next: DagFilter) => void;
@@ -39,8 +40,10 @@ export function DagFilters({
   changes: FilterOption[];
   tasks: FilterOption[];
   taskLabel?: string;
-  /** Show the event type group field (Events graph). */
+  /** Show the event type group field. */
   groups?: boolean;
+  /** Show "Clear filters"; false when the page shows its own clear control. */
+  showClear?: boolean;
 }) {
   const id = useId();
   const set = (patch: Partial<DagFilter>) => onChange({ ...filter, ...patch });
@@ -107,7 +110,7 @@ export function DagFilters({
           items={Object.fromEntries(Object.entries(TIME_RANGES).map(([k, r]) => [k, r.label]))}
         />
       </Field>
-      {filterActive(filter) && (
+      {showClear && filterActive(filter) && (
         <Button size="sm" variant="secondary" icon={X} onClick={() => onChange(EMPTY_FILTER)}>
           Clear filters
         </Button>

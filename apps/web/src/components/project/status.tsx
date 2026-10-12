@@ -26,6 +26,8 @@ const CHANGE_OVERRIDES: Record<string, { family: StatusFamily; label: string }> 
   not_selected: { family: "idle", label: "Not selected" },
   awaiting_approval: { family: "attention", label: "Waiting for owner" },
   needs_input: { family: "attention", label: "Needs input" },
+  proposed: { family: "attention", label: "Proposed" },
+  declined: { family: "idle", label: "Declined" },
 };
 
 export function ChangeStatusPill({ status }: { status: string }) {

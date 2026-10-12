@@ -61,12 +61,14 @@ Reliability safeguards:
 
 - `/`: Projects list and invitations ("Shared with you"). The header has the notification bell.
 - `/projects/<id>`: Project overview.
+- `/projects/<id>/board`: Board of every request by person or by stage (Proposed, Needs answer, Building, Checking, Shipped, Not built). An owner or admin includes or declines proposed requests.
 - `/changes/<id>`: Change details, acceptance criteria, invariants, candidates.
 - `/changes/<id>/flight`: Flight Control (execution DAG, agent swimlanes, workspace lanes, codebase heatmap, candidate arena, preview wall, evidence explorer, decisions, events, time machine, command palette Cmd+K).
 - `/candidates/<id>`: Candidate verification evidence, approval, promotion.
 - `/compare/<changeId>`: Candidate comparison matrix.
-- `/projects/<id>/{agents,events,verification,workspace,costs,graph,code,versions}`: Project views. The Events page has the Product and Systems toggle.
-- `/projects/<id>/settings`: Project name and default Change budget.
+- `/projects/<id>/{agents,events,verification,workspace,costs,graph,code,versions}`: Project views. The Events page has a Product | Systems toggle next to its List | Graph toggle.
+- `/projects/<id>/code`: Code page. Everyone with access browses the files of any version and its history. An owner or admin can edit one file of the live tree, or use Start editing (`?edit=true`) to open an edit session: an IDE with a file tree (new file, rename, delete, changed markers), tabs, the CodeMirror editor, a resizable terminal that runs commands in the session Sandbox, and a status bar with the idle countdown, Submit as change, and Discard session. Keys: Cmd/Ctrl+S saves, Cmd/Ctrl+P opens a file by path, Ctrl+` shows or hides the terminal. The IDE loads only when a session starts.
+- `/projects/<id>/settings`: Project name, people and roles, default Change budget, and member request review.
 
 ## Prerequisites
 

@@ -25,7 +25,8 @@ export function ChangeStats({
   tasks: TaskDetail[];
   conflicts: ConflictDetail[];
   candidates: CandidateDetail[];
-  budgetUsd: number;
+  /** The request budget; null when the Change draws on a monthly pool (Project or personal). */
+  budgetUsd: number | null;
 }) {
   const done = tasks.filter((t) => t.status === "completed").length;
   const running = tasks.filter((t) => latestRun(t)?.status === "running").length;
@@ -74,7 +75,11 @@ export function ChangeStats({
         <StatCell
           label="Model calls"
           value={formatNumber(spend.calls)}
-          footnote={`${formatFraction(formatUsd(spend.costUsd), formatUsd(budgetUsd))} spent`}
+          footnote={
+            budgetUsd === null
+              ? `${formatUsd(spend.costUsd)} spent`
+              : `${formatFraction(formatUsd(spend.costUsd), formatUsd(budgetUsd))} spent`
+          }
         />
       )}
     </StatStrip>

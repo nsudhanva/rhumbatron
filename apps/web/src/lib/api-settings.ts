@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
+import type { ProjectRole } from "./permissions";
 
 /**
  * Project settings server functions (`GET /v1/projects/:projectId/settings`,
@@ -12,17 +13,25 @@ export type ProjectSettings = {
   name: string;
   slug: string;
   createdAt: string;
-  role: "owner" | "collaborator" | string;
+  role: ProjectRole | string;
   /** Null: new Changes without a budget get the built-in default. */
   defaultBudgetUsd: number | null;
   effectiveDefaultBudgetUsd: number;
   limits: { minBudgetUsd: number; maxBudgetUsd: number };
+  /** True: a member's request waits for an owner or admin to include it before anything is built. */
+  memberRequestReview: boolean;
+  /** Project monthly budget in USD; null: the Project has no own monthly cap. */
+  monthlyBudgetUsd?: number | null;
+  /** Model spend of the Project this calendar month (read only). */
+  monthSpendUsd?: number;
 };
 
 export type ProjectSettingsPatch = {
   projectId: string;
   name?: string;
   defaultBudgetUsd?: number | null;
+  memberRequestReview?: boolean;
+  monthlyBudgetUsd?: number | null;
 };
 
 async function call<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {

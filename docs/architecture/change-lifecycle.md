@@ -20,6 +20,9 @@ The path uses these stable IDs (`AGENTS.md` section 60):
 
 The API stores the Change and starts one ChangeWorkflow (request field `startPlanning`, default `true`).
 The API returns before any model call (section 58).
+A member's request waits for review first (ADR 0028): while the Project setting `memberRequestReview` is on, the API stores it as `proposed` and starts no ChangeWorkflow.
+When an owner or admin includes it, the Change becomes `created` at the current Canonical Generation, and the integration Worker starts the ChangeWorkflow with the same instance ID.
+[Shared Projects](shared-projects.md#request-review) describes the review.
 The ChangeWorkflow runs the intake gate, calls the Root Planner, and compares the plan with the other open requests.
 Then it stores the Work Graph and dispatches the ready Tasks.
 An unclear, duplicate, or conflicting request waits for its requester (`needs_input`).
@@ -39,9 +42,17 @@ sequenceDiagram
 
   User->>API: POST /v1/projects/:id/changes (through rhumbatron-web)
   API->>Root: getCanonical()
-  API->>D1: INSERT changes (status created)
-  API->>CW: CHANGE_WORKFLOW.create(id = changeId)
-  API-->>User: 201 Change
+  alt a member's request, review on
+    API->>D1: INSERT changes (status proposed)
+    API-->>User: 201 Change (proposed)
+    User->>API: POST /v1/changes/:id/include (owner or admin)
+    API->>D1: integration RPC includeChange: status created
+    API->>CW: integration CHANGE_WORKFLOW.create(id = changeId)
+  else owner or admin, or review off
+    API->>D1: INSERT changes (status created)
+    API->>CW: CHANGE_WORKFLOW.create(id = changeId)
+    API-->>User: 201 Change
+  end
   CW->>D1: status compiling
   CW->>GW: intake gate (embeddings, reranker, Clef-flash, Sonnet)
   opt unclear or duplicate
@@ -190,6 +201,10 @@ The diagrams show only the transitions that the code writes.
 ```mermaid
 stateDiagram-v2
   [*] --> created: API insert
+  [*] --> proposed: API insert, a member's request, review on
+  proposed --> created: owner or admin includes it
+  proposed --> declined: owner or admin declines it
+  proposed --> cancelled: the requester withdraws it
   created --> compiling: ChangeWorkflow
   compiling --> needs_input: unclear, duplicate, or undecided conflict
   needs_input --> compiling: answer or proceed anyway
@@ -197,6 +212,8 @@ stateDiagram-v2
   compiling --> failed: planner failed
   compiling --> not_selected: lost to an earlier request
   compiling --> running: Work Graph stored
+  compiling --> budget_blocked: a budget refused a planner or intake call
+  budget_blocked --> compiling: budget raised while planning
   running --> budget_blocked: budget or limit stop
   budget_blocked --> running: person raises the budget
   running --> verifying: last Task completed
@@ -219,13 +236,14 @@ The pure rules are in `workers/integration/src/change-status.ts`.
 
 | Rule | Source |
 |---|---|
-| A person can cancel a Change in `created`, `compiling`, `needs_input`, `running`, `verifying`, `awaiting_approval`, `budget_blocked`, or `blocked`. A Change with a promoted Candidate cannot be cancelled. | `CANCELLABLE_FROM`, `cancelChange` in `change-commands.ts` |
+| A person can cancel a Change in `proposed`, `created`, `compiling`, `needs_input`, `running`, `verifying`, `awaiting_approval`, `budget_blocked`, or `blocked`. A Change with a promoted Candidate cannot be cancelled. | `CANCELLABLE_FROM`, `cancelChange` in `change-commands.ts` |
+| Only an owner or admin moves a `proposed` Change: include to `created`, decline to `declined`. Each update is guarded on `proposed`; a repeat returns the stored result. | `includeChange`, `declineChange` in `change-commands.ts` |
 | A later request that wins the system arbiter makes an earlier Change `not_selected` from any of these statuses, and also from `failed` or `completed`, when the earlier Change has no promoted Candidate. See [Shared Projects](shared-projects.md#the-system-arbiter). | `request-check.ts` |
 | A merge conflict makes the Change re-run the conflicting Tasks on the new base. After 2 re-runs the Change is `blocked` with the reason "The request could not be merged with newer changes twice. Submit it again." | `MAX_REBASE_RERUNS` in `rebase.ts` |
 | The Change ends as `failed` when every Candidate on the newest base is `rejected` for a reason other than a merge conflict or a cancel, and no Candidate of the Change is `composing`, `verifying`, `verified`, or `promoted`. `blocked_reason` starts with "No Candidate passed its required checks:" and quotes the Candidate reasons. `change.failed` records it with `phase: "verification"`. | `verificationDeadEnd` |
 | A refused compare-and-swap returns the Change to its status before `promoting`. | `leavePromoting` in `promotion.ts` |
 | A verified Candidate can also promote from `running` or `budget_blocked`. | `PROMOTABLE_FROM` |
-| `completed`, `cancelled`, `failed`, and `not_selected` are terminal. | `TERMINAL_CHANGE_STATUSES` |
+| `completed`, `cancelled`, `failed`, `not_selected`, and `declined` are terminal. | `TERMINAL_CHANGE_STATUSES` |
 
 `POST /v1/changes/:changeId/cancel`:
 
@@ -237,10 +255,12 @@ The pure rules are in `workers/integration/src/change-status.ts`.
 
 `POST /v1/changes/:changeId/budget` raises `budget_usd`. The budget cannot go down.
 
-1. A `budget_blocked` Change returns to `running`. `running` is the only status that a budget stop interrupts.
+1. A `budget_blocked` Change returns to `running`. A Change that a budget stopped while planning (it has no Tasks) returns to `compiling`, and a new ChangeWorkflow instance plans it again. `compiling` and `running` are the only statuses that a budget stop interrupts.
 2. Its budget-stopped Tasks become `ready` again with a new attempt window, and their blocked dependents become `pending`.
 3. The normal dispatch runs (section 44 rule 5).
 4. On a `verifying`, `blocked`, or `awaiting_approval` Change, the same call retries a merge-conflict re-run within its bound and recomposes a stale Candidate.
+
+A raise of the Project monthly budget (`PATCH /v1/projects/:projectId`) or of a user monthly budget (`PATCH /v1/me/budget`) runs the same restore for each Change that budget stopped (`resumeBudgetBlocked` in `change-commands.ts`, ADR 0030).
 
 ### Task status
 

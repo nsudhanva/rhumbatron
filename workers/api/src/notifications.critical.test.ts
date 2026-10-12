@@ -267,7 +267,7 @@ describe("shared Project request notifications", () => {
         VALUES ('usr_c', 'c', '${T}', '${T}');
       INSERT INTO project_members (project_id, user_id, role, rank, added_by, created_at) VALUES
         ('proj_a', 'usr_a', 'owner', 0, 'test', '${T}'),
-        ('proj_a', 'usr_c', 'collaborator', 10, 'test', '${T}');
+        ('proj_a', 'usr_c', 'member', 10, 'test', '${T}');
     `);
     const request = (id: string, status: string, outcome: string | null, updatedAt = T) =>
       ctx.db

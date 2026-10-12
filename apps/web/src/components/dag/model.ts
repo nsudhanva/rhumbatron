@@ -24,6 +24,13 @@ export type DagNodeSpec = {
   /** Text color of the title, for event type tones. */
   titleClass?: string;
   width?: number;
+  /** Replay: not recorded yet at the playhead. The node keeps its place but does not show. */
+  hidden?: boolean;
+  /** Model tier letter badge of an agent at work (H, S, O). */
+  tier?: "haiku" | "sonnet" | "opus" | null;
+  /** An agent at work: a pulsing status square and, when known, a progress line (0 to 1). */
+  working?: boolean;
+  progress?: number | null;
 };
 
 /**
@@ -45,6 +52,8 @@ export type DagEdgeSpec = {
   target: string;
   kind: DagEdgeKind;
   label?: string;
+  /** Replay: not recorded yet at the playhead. */
+  hidden?: boolean;
 };
 
 export const isConflictEdge = (kind: DagEdgeKind) => kind.startsWith("conflict_");

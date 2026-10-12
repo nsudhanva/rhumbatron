@@ -36,7 +36,11 @@ const sameRef = (a: EntityRef | null, b: EntityRef | null) =>
  */
 export type FlightTime =
   | { mode: "live" }
-  | { mode: "historical"; at: number; playing: boolean; speed: 1 | 4 | 16 };
+  | { mode: "historical"; at: number; playing: boolean; speed: PlaybackSpeed };
+
+/** Playback speeds of the time machine, as multiples of real time. */
+export const PLAYBACK_SPEEDS = [1, 4, 8, 16] as const;
+export type PlaybackSpeed = (typeof PLAYBACK_SPEEDS)[number];
 
 export const TIER_FILTERS = ["haiku", "sonnet", "opus"] as const;
 export type TierFilter = (typeof TIER_FILTERS)[number];
@@ -90,7 +94,7 @@ export type FlightStore = {
   scrubTo: (at: number) => void;
   goLive: () => void;
   setPlaying: (playing: boolean) => void;
-  setSpeed: (speed: 1 | 4 | 16) => void;
+  setSpeed: (speed: PlaybackSpeed) => void;
   setFilters: (patch: Partial<FlightFilters>) => void;
   resetFilters: () => void;
   setFocus: (panel: PanelId | null) => void;

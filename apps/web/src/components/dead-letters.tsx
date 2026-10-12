@@ -9,6 +9,7 @@ import {
   retryDeadLetter,
 } from "../lib/api";
 import { timeAgo } from "../lib/format";
+import { can, useProjectRole } from "../lib/permissions";
 import { Banner } from "./candidate/banner";
 import { Mono } from "./ui/mono";
 
@@ -31,6 +32,8 @@ export function DeadLetters({
   changeId?: string | undefined;
 }) {
   const queryClient = useQueryClient();
+  // Retry and Dismiss are for an owner or admin; everyone else reads the banner.
+  const operate = can(useProjectRole(projectId), "deadLetter.resolve");
   const state = useQuery({
     queryKey: ["dead-letters", projectId, changeId ?? null],
     queryFn: () => getDeadLetters({ data: { projectId: projectId ?? "", changeId } }),
@@ -83,8 +86,10 @@ export function DeadLetters({
         <Banner family="danger" title={`${plural(letters.length, "command")} failed after retries`}>
           <p>
             Each was retried by its Queue, then moved to the dead-letter Queue, and its Task is
-            blocked. Retry sends the same command (same command ID) back to its Queue; work that
-            already happened is not repeated. Dismiss accepts the failure.
+            blocked.{" "}
+            {operate
+              ? "Retry sends the same command (same command ID) back to its Queue; work that already happened is not repeated. Dismiss accepts the failure."
+              : "An owner or admin retries or dismisses each one."}
           </p>
           {actionError && <p className="mt-1 font-semibold">{actionError.message}</p>}
           <ul className="mt-2 grid">
@@ -93,6 +98,7 @@ export function DeadLetters({
                 key={letter.id}
                 letter={letter}
                 showChange={!changeId}
+                actions={operate}
                 retrying={retryingIds.includes(letter.id)}
                 dismissing={dismissingIds.includes(letter.id)}
                 onRetry={() => retry.mutate(letter.id)}
@@ -134,6 +140,7 @@ function ChangeLink({ changeId }: { changeId: string }) {
 function DeadLetterRow({
   letter,
   showChange,
+  actions,
   retrying,
   dismissing,
   onRetry,
@@ -141,6 +148,7 @@ function DeadLetterRow({
 }: {
   letter: DeadLetter;
   showChange: boolean;
+  actions: boolean;
   retrying: boolean;
   dismissing: boolean;
   onRetry: () => void;
@@ -161,30 +169,32 @@ function DeadLetterRow({
         )}
       </span>
       {/* While one action runs, only its button shows, with a loader; the other is hidden. */}
-      <span className="flex shrink-0 gap-2">
-        {!dismissing && (
-          <Button
-            size="sm"
-            variant="secondary"
-            className="ring-current"
-            loading={retrying}
-            onClick={onRetry}
-          >
-            Retry
-          </Button>
-        )}
-        {!retrying && (
-          <Button
-            size="sm"
-            variant="secondary"
-            className="ring-current"
-            loading={dismissing}
-            onClick={onDismiss}
-          >
-            Dismiss
-          </Button>
-        )}
-      </span>
+      {actions && (
+        <span className="flex shrink-0 gap-2">
+          {!dismissing && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="ring-current"
+              loading={retrying}
+              onClick={onRetry}
+            >
+              Retry
+            </Button>
+          )}
+          {!retrying && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="ring-current"
+              loading={dismissing}
+              onClick={onDismiss}
+            >
+              Dismiss
+            </Button>
+          )}
+        </span>
+      )}
     </li>
   );
 }

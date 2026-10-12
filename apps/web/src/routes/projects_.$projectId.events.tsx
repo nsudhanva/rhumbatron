@@ -4,9 +4,23 @@ import { SignIn, X } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  changeOptions,
+  type EventsFilter,
+  eventsFilterActive,
+  type FilterSearch,
+  filterFromSearch,
+  matchesEvent,
+  parseFilterSearch,
+  personOptions,
+  searchFromFilter,
+  taskOptions,
+} from "../components/dag/filter-search";
+import { type EventGroup, eventGroupOf } from "../components/dag/model";
 import { type DagMode, ViewToggle } from "../components/dag/view-toggle";
 import { EventPlane } from "../components/events-page/event-plane";
 import { EventStream } from "../components/events-page/event-stream";
+import { EventsFilterBar } from "../components/events-page/events-filter-bar";
 import { EventsGraph } from "../components/events-page/events-graph";
 import {
   FEED_FIRST_LIMIT,
@@ -19,12 +33,19 @@ import {
   firstPageKey,
   useEventFeed,
 } from "../components/events-page/use-event-feed";
+import { VIEW_MODE_HINT, ViewModeToggle } from "../components/events-page/view-mode-toggle";
 import { SectionError } from "../components/project/feedback";
 import { EmptyState } from "../components/ui/empty-state";
 import { Mono } from "../components/ui/mono";
 import { Page, PageTitle, Section } from "../components/ui/page";
 import { StatCell, StatStrip } from "../components/ui/stat-strip";
-import { listChangeEvents, listChanges, listProjectEvents } from "../lib/api";
+import {
+  listChangeEvents,
+  listChanges,
+  listProjectEvents,
+  listTasks,
+  type TaskDetail,
+} from "../lib/api";
 import { EMPTY, formatAge, formatClock, formatNumber } from "../lib/format";
 import { type LiveStatus, useProjectLive } from "../lib/live";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
@@ -35,13 +56,14 @@ import { SystemsOnly, useViewMode } from "../lib/view-mode";
  * newest first, live. The rows come from the feed projection; the live socket only says that
  * something changed, and each signal pulls the events after the newest sequence shown.
  * `?change=<id>` narrows the stream to one Change. `?view=graph` shows the loaded events as a DAG;
- * the list is the default.
+ * the list is the default. The filter bar (`?q=&person=&task=&group=&range=`) narrows the loaded
+ * events in both views; "Load older" reads further back within the same scope.
  */
-type EventsSearch = { change?: string; view?: DagMode };
+type EventsSearch = FilterSearch & { view?: DagMode };
 
 export const Route = createFileRoute("/projects_/$projectId/events")({
   validateSearch: (search: Record<string, unknown>): EventsSearch => ({
-    ...(typeof search.change === "string" && search.change ? { change: search.change } : {}),
+    ...parseFilterSearch(search),
     ...(search.view === "list" || search.view === "graph" ? { view: search.view } : {}),
   }),
   loaderDeps: ({ search }) => ({ change: search.change }),
@@ -92,13 +114,14 @@ function EventsPage() {
 
 function EventsView() {
   const { projectId } = Route.useParams();
-  const { change: changeId, view } = Route.useSearch();
+  const search = Route.useSearch();
+  const { change: changeId, view } = search;
   const mode: DagMode = view ?? "list";
   const navigate = useNavigate({ from: Route.fullPath });
+  // Read by the project shell on the server: names and requesters for the filter.
   const changes = useQuery({
     queryKey: ["changes", projectId],
     queryFn: () => listChanges({ data: projectId }),
-    enabled: mode === "graph",
   });
   const systems = useViewMode() === "systems";
 
@@ -117,6 +140,80 @@ function EventsView() {
   const { pull } = feed;
 
   const live = useProjectLive(projectId, true, () => pull());
+
+  const filter = useMemo(() => filterFromSearch(search), [search]);
+  const setFilter = useCallback(
+    (next: EventsFilter) =>
+      void navigate({
+        search: (prev) => ({
+          ...searchFromFilter(next),
+          ...(prev.view ? { view: prev.view } : {}),
+        }),
+        replace: true,
+      }),
+    [navigate],
+  );
+  const filtered = eventsFilterActive(filter);
+  const clearFilter = useCallback(
+    () =>
+      setFilter({
+        query: "",
+        person: null,
+        changeId: null,
+        taskId: null,
+        group: null,
+        range: "all",
+      }),
+    [setFilter],
+  );
+  const changeById = useMemo(
+    () => new Map((changes.data ?? []).map((c) => [c.id, c])),
+    [changes.data],
+  );
+  // Task names: the chosen Change's Task list, plus any Task list already read on this visit.
+  const scopedTasks = useQuery({
+    queryKey: ["tasks", changeId],
+    queryFn: () => listTasks({ data: changeId as string }),
+    enabled: !!changeId,
+  });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: new events can come with Task lists the graph read
+  const taskById = useMemo(() => {
+    const map = new Map<string, TaskDetail>();
+    for (const [, list] of queryClient.getQueriesData<TaskDetail[]>({ queryKey: ["tasks"] })) {
+      for (const t of list ?? []) map.set(t.id, t);
+    }
+    for (const t of scopedTasks.data ?? []) map.set(t.id, t);
+    return map;
+  }, [queryClient, scopedTasks.data, feed.events]);
+  const matching = useMemo(
+    () => (filtered ? feed.events.filter((e) => matchesEvent(e, filter, changeById)) : feed.events),
+    [feed.events, filter, filtered, changeById],
+  );
+  // Group counts: loaded events that pass every field except the group.
+  const groupCounts = useMemo(() => {
+    const rest = { ...filter, group: null };
+    const counts = new Map<EventGroup | "other", number>();
+    let total = 0;
+    for (const e of feed.events) {
+      if (!matchesEvent(e, rest, changeById)) continue;
+      total += 1;
+      const g = eventGroupOf(e.eventType);
+      counts.set(g, (counts.get(g) ?? 0) + 1);
+    }
+    return { counts, total };
+  }, [feed.events, filter, changeById]);
+  const filterBar = (
+    <EventsFilterBar
+      filter={filter}
+      onChange={setFilter}
+      people={personOptions(feed.events, changeById)}
+      changes={changeOptions(changes.data ?? [], filter.person)}
+      tasks={taskOptions(feed.events, filter.changeId, taskById)}
+      groupCounts={groupCounts.counts}
+      groupTotal={groupCounts.total}
+    />
+  );
+  const filterKey = JSON.stringify(searchFromFilter(filter));
 
   // Fallback pull: slower while the socket is open, faster while it is down. Visible tabs only.
   useEffect(() => {
@@ -191,31 +288,35 @@ function EventsView() {
           </>
         }
         actions={
-          <div className="flex flex-wrap items-center gap-3">
-            {changeId && (
-              <Link
-                to="/projects/$projectId/events"
-                params={{ projectId }}
-                search={view ? { view } : {}}
-                className={cn(buttonVariants({ variant: "secondary", size: "sm" }), "gap-1.5")}
-              >
-                <X size={14} aria-hidden />
-                All project events
-              </Link>
-            )}
-            <ViewToggle
-              mode={mode}
-              label="Events view"
-              onChange={(next) =>
-                void navigate({
-                  search: (prev) => {
-                    const { view: _old, ...rest } = prev;
-                    return next === "list" ? rest : { ...rest, view: next };
-                  },
-                  replace: true,
-                })
-              }
-            />
+          <div className="grid justify-items-end gap-1.5 max-[720px]:justify-items-start">
+            <div className="flex flex-wrap items-center gap-3">
+              {changeId && (
+                <Link
+                  to="/projects/$projectId/events"
+                  params={{ projectId }}
+                  search={view ? { view } : {}}
+                  className={cn(buttonVariants({ variant: "secondary", size: "sm" }), "gap-1.5")}
+                >
+                  <X size={14} aria-hidden />
+                  All project events
+                </Link>
+              )}
+              <ViewToggle
+                mode={mode}
+                label="Events view"
+                onChange={(next) =>
+                  void navigate({
+                    search: (prev) => {
+                      const { view: _old, ...rest } = prev;
+                      return next === "list" ? rest : { ...rest, view: next };
+                    },
+                    replace: true,
+                  })
+                }
+              />
+              <ViewModeToggle />
+            </div>
+            <p className="text-[12px] text-kumo-subtle">{VIEW_MODE_HINT}</p>
           </div>
         }
       />
@@ -233,6 +334,8 @@ function EventsView() {
         <EventPlane projectId={projectId} events={feed.events} live={live} />
       </SystemsOnly>
 
+      {filterBar}
+
       {mode === "graph" ? (
         changes.isError ? (
           <SectionError
@@ -244,7 +347,8 @@ function EventsView() {
         ) : (
           <EventsGraph
             projectId={projectId}
-            events={feed.events}
+            events={matching}
+            total={feed.events.length}
             changes={changes.data ?? []}
             scopedToChange={!!changeId}
             footer={footer}
@@ -267,7 +371,10 @@ function EventsView() {
         >
           <EventStream
             projectId={projectId}
-            events={feed.events}
+            events={matching}
+            total={feed.events.length}
+            filterKey={filterKey}
+            onClearFilter={filtered ? clearFilter : null}
             loading={loading}
             systems={systems}
             scopedToChange={!!changeId}

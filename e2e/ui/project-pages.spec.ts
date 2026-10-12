@@ -50,13 +50,13 @@ test("Agents: List and Graph, filters", async ({ page }, info) => {
   await evidence(page, info, "agents-graph-filtered");
 });
 
-test("Events: List and Graph, family filter, Load older", async ({ page }) => {
+test("Events: List and Graph, type filter, Load older", async ({ page }) => {
   await open(page, `${P}/events`);
-  const filters = page.getByRole("group", { name: "Filter events by family" });
+  const filters = page.getByRole("group", { name: "Event type" });
   await expect(filters).toBeVisible();
-  const task = filters.getByRole("button", { name: /^task/ });
-  await task.click();
-  await expect(task).toHaveAttribute("aria-pressed", "true");
+  const planning = filters.getByRole("button", { name: /^Planning/ });
+  await planning.click();
+  await expect(planning).toHaveAttribute("aria-pressed", "true");
   await filters.getByRole("button", { name: /^All/ }).click();
   await expect(filters.getByRole("button", { name: /^All/ })).toHaveAttribute(
     "aria-pressed",
@@ -76,7 +76,9 @@ test("Events: List and Graph, family filter, Load older", async ({ page }) => {
   const view = page.getByRole("group", { name: "Events view" });
   await view.getByRole("button", { name: "Graph" }).click();
   await expect(view.getByRole("button", { name: "Graph" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("combobox", { name: "Event type" })).toBeVisible();
+  // The List and the Graph share one filter bar.
+  await expect(page.getByRole("searchbox", { name: "Search" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Time" })).toBeVisible();
 });
 
 test("Verification, Workspace, Versions, Costs show their data", async ({ page }) => {

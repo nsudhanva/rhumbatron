@@ -15,6 +15,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
   useCallback,
   useEffect,
   useId,
@@ -28,6 +29,8 @@ import { formatAge, formatNumber, truncate } from "../../lib/format";
 import { displayTimeZone, renderNow, zoneOffsetMs } from "../../lib/render-time";
 import { SectionError, SkeletonBar } from "../project/feedback";
 import { ChangeStatusPill } from "../project/status";
+import { ReplayBar } from "../replay/replay-bar";
+import { type Replay, useReplay } from "../replay/use-replay";
 import { EmptyState } from "../ui/empty-state";
 import { Section } from "../ui/page";
 import { FAMILY_FILL, statusView } from "../ui/status-pill";
@@ -45,6 +48,7 @@ import {
   type TimelineModel,
   type TimelineTask,
 } from "./timeline-model";
+import { attentionAt, REPLAY_LEGEND, replayTicks, replayTimes } from "./timeline-replay";
 import { useTimelineEvents, useTimelineTasks } from "./use-timeline-data";
 
 /**
@@ -63,6 +67,12 @@ import { useTimelineEvents, useTimelineTasks } from "./use-timeline-data";
  * Zoom: buttons, + / - / 0 keys on the plot, or Ctrl (or pinch) with the wheel. Fit shows the
  * whole span; Now scrolls to the live edge. Full screen gives the plot and the rail the whole
  * viewport (the Fullscreen API, else a fixed overlay); Esc or "Exit full screen" closes it.
+ *
+ * Replay (components/replay): the replay bar plays the recorded facts again. An accent playhead
+ * sweeps the time axis; attempt bars and Change spans are revealed up to the playhead with a
+ * clip that follows it every animation frame (no layout change); markers appear when the
+ * playhead passes them; the rail shows what waited on a person at the playhead. Live (the
+ * default) keeps the now line and the growing running bars and follows new facts.
  */
 
 const LEFT = 340;
@@ -273,6 +283,52 @@ function useFullScreen(el: HTMLElement | null) {
   return { full: mode !== null, enter, exit };
 }
 
+/**
+ * Moves the replay playhead on every animation frame without a React render: the `--rh-ph`
+ * variable (plot px) that clips bars and spans, the accent line, and the axis label. While the
+ * replay plays, the plot scrolls so the playhead stays in view.
+ */
+function usePlayhead(replay: Replay, x: (t: number) => number, scroller: HTMLElement | null) {
+  const plot = useRef<HTMLDivElement>(null);
+  const line = useRef<HTMLDivElement>(null);
+  const label = useRef<HTMLSpanElement>(null);
+  const xRef = useRef(x);
+  xRef.current = x;
+  const playingRef = useRef(replay.playing);
+  playingRef.current = replay.playing;
+  const { subscribe } = replay;
+  useEffect(
+    () =>
+      subscribe((at) => {
+        const p = xRef.current(at);
+        plot.current?.style.setProperty("--rh-ph", String(p));
+        if (line.current) line.current.style.transform = `translateX(${p - 1}px)`;
+        if (label.current) label.current.style.transform = `translateX(${p}px)`;
+        if (scroller && playingRef.current) {
+          const view = scroller.clientWidth - LEFT;
+          if (p > scroller.scrollLeft + view - 32 || p < scroller.scrollLeft) {
+            scroller.scrollLeft = Math.max(0, p - view * 0.25);
+          }
+        }
+      }),
+    [subscribe, scroller],
+  );
+  return { plot, line, label };
+}
+
+/**
+ * Reveals a bar or span that starts at `left` and is `width` px wide up to the replay playhead
+ * (`--rh-ph`, plot px). A clip, not a width: nothing moves in the layout. The 8px outset keeps
+ * the hover area of thin bars.
+ */
+const revealTo = (left: number, width: number): CSSProperties => ({
+  clipPath: `inset(-8px calc((${width} - clamp(0, var(--rh-ph) - ${left}, ${width})) * 1px) -8px 0)`,
+});
+
+/** A bar's status at the replay playhead: running until the playhead passes its recorded end. */
+const statusAt = (bar: TimelineBar, at: number | null): BarStatus =>
+  at !== null && (bar.end === null || bar.end > at) ? "running" : bar.status;
+
 /* ------------------------------------------------------------------------------------------ */
 /* Rows                                                                                        */
 /* ------------------------------------------------------------------------------------------ */
@@ -476,6 +532,15 @@ function TimelineBody({
 }) {
   const summaryId = useId();
   const now = useNow(model.live);
+  const times = useMemo(() => replayTimes(model), [model]);
+  const ticks = useMemo(() => replayTicks(model), [model]);
+  const replay = useReplay(times, { live: model.live });
+  const replaying = replay.mode === "replay";
+  const replayAt = replaying ? replay.at : null;
+  const attention = useMemo(
+    () => (replayAt === null ? model.attention : attentionAt(model, replayAt)),
+    [model, replayAt],
+  );
   const scroller = useWidth();
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
   const tooltip = useTooltip(frame);
@@ -508,7 +573,7 @@ function TimelineBody({
     [model.start, viewEnd, px],
   );
 
-  const ticks = useMemo(() => {
+  const axisTicks = useMemo(() => {
     const step =
       TICK_STEPS.find((s) => s * px >= 96) ?? TICK_STEPS[TICK_STEPS.length - 1] ?? 60_000;
     const offset = -zoneOffsetMs(model.start);
@@ -552,9 +617,9 @@ function TimelineBody({
       el.scrollLeft = Math.max(0, PAD_L + (a.t - model.start) * px - a.offset);
       return;
     }
-    // While pinned to the live edge, a growing plot keeps "now" in view.
-    if (follow.current && model.live) el.scrollLeft = el.scrollWidth;
-  }, [px, plotWidth, scroller.el, model.start, model.live]);
+    // While pinned to the live edge, a growing plot keeps "now" in view (not during a replay).
+    if (follow.current && model.live && !replaying) el.scrollLeft = el.scrollWidth;
+  }, [px, plotWidth, scroller.el, model.start, model.live, replaying]);
 
   const goNow = useCallback(() => {
     const el = scroller.el;
@@ -582,17 +647,24 @@ function TimelineBody({
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
+    // Space and L act on the replay when the plot itself has focus (links keep their keys).
+    if ((e.key === " " || e.key === "l" || e.key === "L") && e.target === e.currentTarget) {
+      if (replay.onKeyDown(e)) return;
+    }
     if (e.key === "+" || e.key === "=") zoomTo(px * ZOOM_STEP);
     else if (e.key === "-" || e.key === "_") zoomTo(px / ZOOM_STEP);
     else if (e.key === "0") zoomTo("fit");
-    else if (e.key === "End" && e.target === e.currentTarget) goNow();
-    else return;
+    else if (e.key === "End" && e.target === e.currentTarget) {
+      replay.goLive();
+      goNow();
+    } else return;
     e.preventDefault();
   };
 
   const { rows, height } = useMemo(() => layoutRows(model, collapsed), [model, collapsed]);
   const frameHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, AXIS_H + height + 14));
-  const nowX = model.live ? x(now) : null;
+  const nowX = model.live && !replaying ? x(now) : null;
+  const playhead = usePlayhead(replay, x, scroller.el);
 
   const tipFor = {
     bar: (task: TimelineTask, bar: TimelineBar) => [
@@ -636,6 +708,13 @@ function TimelineBody({
         full={full}
         onFullScreen={() => (full ? screen.exit() : void screen.enter())}
       />
+      <ReplayBar
+        replay={replay}
+        ticks={ticks}
+        legend={REPLAY_LEGEND}
+        label="Timeline replay"
+        className="shrink-0"
+      />
       {(eventsError || tasksError) && (
         <SectionError
           message={`Part of the timeline could not refresh. ${eventsError ?? tasksError}`}
@@ -667,13 +746,25 @@ function TimelineBody({
             className="relative overflow-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-500"
             style={{ height: full ? "100%" : frameHeight }}
           >
-            <div className="relative" style={{ width: LEFT + plotWidth, height: AXIS_H + height }}>
+            <div
+              ref={playhead.plot}
+              className="relative"
+              style={
+                {
+                  width: LEFT + plotWidth,
+                  height: AXIS_H + height,
+                  "--rh-ph": replayAt === null ? undefined : x(replayAt),
+                } as CSSProperties
+              }
+            >
               <Axis
-                ticks={ticks}
+                ticks={axisTicks}
                 x={x}
                 plotWidth={plotWidth}
                 promotions={model.promotions}
                 nowX={nowX}
+                replayAt={replayAt}
+                playheadRef={playhead.label}
               />
               {rows.map((row) => (
                 <RowView
@@ -681,6 +772,7 @@ function TimelineBody({
                   row={row}
                   x={x}
                   now={now}
+                  replayAt={replayAt}
                   plotWidth={plotWidth}
                   onToggle={toggle}
                   tip={tooltip}
@@ -706,6 +798,13 @@ function TimelineBody({
                     style={{ left: nowX - 1 }}
                   />
                 )}
+                {replayAt !== null && (
+                  <div
+                    ref={playhead.line}
+                    className="absolute top-0 bottom-0 left-0 w-0.5 bg-accent-500 will-change-transform"
+                    style={{ transform: `translateX(${x(replayAt) - 1}px)` }}
+                  />
+                )}
               </div>
             </div>
           </section>
@@ -724,13 +823,14 @@ function TimelineBody({
           )}
         </div>
         <AttentionRail
-          items={model.attention}
+          items={attention}
+          at={replayAt}
           height={full ? null : frameHeight}
           projectId={projectId}
         />
       </div>
       <p id={summaryId} className="sr-only">
-        {`${model.counts.people} people, ${model.counts.changes} changes, ${model.counts.tasks} tasks, ${model.counts.running} running. ${model.attention.length} items need attention. On the timeline, press plus or minus to zoom, 0 to fit, End to go to now.`}
+        {`${model.counts.people} people, ${model.counts.changes} changes, ${model.counts.tasks} tasks, ${model.counts.running} running. ${attention.length} items need attention${replayAt === null ? "" : " at the replay playhead"}. On the timeline, press plus or minus to zoom, 0 to fit, End to go to now, Space to play or pause the replay, L to go live.`}
       </p>
       <Legend truncated={eventsTruncated} />
     </div>
@@ -884,12 +984,16 @@ function Axis({
   plotWidth,
   promotions,
   nowX,
+  replayAt,
+  playheadRef,
 }: {
   ticks: { t: number; seconds: boolean; day: string | null }[];
   x: (t: number) => number;
   plotWidth: number;
   promotions: TimelineMarker[];
   nowX: number | null;
+  replayAt: number | null;
+  playheadRef: Ref<HTMLSpanElement>;
 }) {
   return (
     <div
@@ -930,6 +1034,15 @@ function Axis({
             now
           </span>
         )}
+        {replayAt !== null && (
+          <span
+            ref={playheadRef}
+            className="absolute bottom-0 left-0 border-l-2 border-accent-500 bg-kumo-ink px-1 font-mono text-[10px] leading-[14px] text-kumo-inverse tabular-nums will-change-transform"
+            style={{ transform: `translateX(${x(replayAt)}px)` }}
+          >
+            {clockOf(replayAt, true)}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -953,6 +1066,7 @@ function RowView({
   row,
   x,
   now,
+  replayAt,
   plotWidth,
   onToggle,
   tip,
@@ -961,6 +1075,7 @@ function RowView({
   row: Row;
   x: (t: number) => number;
   now: number;
+  replayAt: number | null;
   plotWidth: number;
   onToggle: (id: string) => void;
   tip: TipApi;
@@ -1022,6 +1137,7 @@ function RowView({
         style={style}
         x={x}
         now={now}
+        replayAt={replayAt}
         onToggle={onToggle}
         tip={tip}
         tipFor={tipFor}
@@ -1035,6 +1151,7 @@ function RowView({
       style={style}
       x={x}
       now={now}
+      replayAt={replayAt}
       tip={tip}
       tipFor={tipFor}
     />
@@ -1048,6 +1165,7 @@ function ChangeRow({
   style,
   x,
   now,
+  replayAt,
   onToggle,
   tip,
   tipFor,
@@ -1057,6 +1175,8 @@ function ChangeRow({
   style: { top: number; height: number; width: number };
   x: (t: number) => number;
   now: number;
+  /** Replay playhead; null in live mode. */
+  replayAt: number | null;
   onToggle: (id: string) => void;
   tip: TipApi;
   tipFor: TipFor;
@@ -1087,7 +1207,7 @@ function ChangeRow({
         <button
           type="button"
           aria-expanded={!collapsed}
-          aria-label={`${collapsed ? "Show" : "Hide"} the Tasks of ${truncate(change.goal, 60)}`}
+          aria-label={`${collapsed ? "Show" : "Hide"} the Tasks of ${change.title}`}
           title={collapsed ? "Show Tasks" : "Hide Tasks"}
           onClick={() => onToggle(change.id)}
           className="grid size-6 shrink-0 place-items-center hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-accent-500 pointer-coarse:size-11"
@@ -1101,7 +1221,7 @@ function ChangeRow({
             title={change.goal}
             className="truncate text-[13px] font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-accent-500"
           >
-            {change.goal}
+            {change.title}
           </Link>
           <span className="flex min-w-0 items-center gap-1.5">
             <ChangeStatusPill status={change.status} />
@@ -1120,58 +1240,73 @@ function ChangeRow({
               ? "bg-kumo-ink transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
               : "bg-tone-400",
           )}
-          style={{ left: x0, top: lineY, width: Math.max(2, x1 - x0) }}
+          style={{
+            left: x0,
+            top: lineY,
+            width: Math.max(2, x1 - x0),
+            ...(replayAt === null ? {} : revealTo(x0, Math.max(2, x1 - x0))),
+          }}
         />
         {collapsed &&
           change.tasks.flatMap((t) =>
-            t.bars.map((b) => (
-              <span
-                key={b.key}
-                aria-hidden
-                onPointerEnter={(e) => tip.show(e.currentTarget, tipFor.bar(t, b))}
-                onPointerLeave={tip.hide}
-                // The 6px bar takes pointer hits 6px above and below it.
-                className={cn(
-                  "absolute h-1.5 before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']",
-                  BAR_STYLE[b.status],
-                  "border-0",
-                )}
-                style={{
-                  left: x(b.start),
-                  top: lineY + 6,
-                  width: Math.max(2, x(b.end ?? now) - x(b.start)),
-                }}
-              />
-            )),
+            t.bars.map((b) => {
+              const left = x(b.start);
+              const width = Math.max(2, x(b.end ?? now) - left);
+              return (
+                <span
+                  key={b.key}
+                  aria-hidden
+                  onPointerEnter={(e) => tip.show(e.currentTarget, tipFor.bar(t, b))}
+                  onPointerLeave={tip.hide}
+                  // The 6px bar takes pointer hits 6px above and below it.
+                  className={cn(
+                    "absolute h-1.5 before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']",
+                    BAR_STYLE[statusAt(b, replayAt)],
+                    "border-0",
+                  )}
+                  style={{
+                    left,
+                    top: lineY + 6,
+                    width,
+                    ...(replayAt === null ? {} : revealTo(left, width)),
+                  }}
+                />
+              );
+            }),
           )}
-        {placed.map(({ m, left, label }) => (
-          <Link
-            key={m.key}
-            {...(m.candidateId
-              ? { to: "/candidates/$candidateId", params: { candidateId: m.candidateId } }
-              : { to: "/changes/$changeId", params: { changeId: m.changeId } })}
-            aria-label={`${m.label}, ${clockOf(m.at, true)}: ${m.detail}`}
-            onPointerEnter={(e) => tip.show(e.currentTarget, tipFor.marker(m))}
-            onPointerLeave={tip.hide}
-            onFocus={(e) => tip.show(e.currentTarget, tipFor.marker(m), true)}
-            onBlur={tip.hide}
-            className="absolute z-[6] flex min-w-3 flex-col items-start justify-end gap-1 focus-visible:outline-2 focus-visible:outline-accent-500"
-            style={{ left, top: MARKER_TOP, height: lineY + 5 - MARKER_TOP }}
-          >
-            {label && (
-              <span
-                aria-hidden
-                className={cn(
-                  "font-mono text-[10px] leading-[10px] whitespace-nowrap text-kumo-default",
-                  MARKER_TEXT[m.kind],
-                )}
-              >
-                {m.label}
-              </span>
-            )}
-            <span aria-hidden className={cn("block size-2.5 shrink-0", MARKER_STYLE[m.kind])} />
-          </Link>
-        ))}
+        {placed.map(({ m, left, label }) =>
+          replayAt !== null && m.at > replayAt ? null : (
+            <Link
+              key={m.key}
+              {...(m.candidateId
+                ? { to: "/candidates/$candidateId", params: { candidateId: m.candidateId } }
+                : { to: "/changes/$changeId", params: { changeId: m.changeId } })}
+              aria-label={`${m.label}, ${clockOf(m.at, true)}: ${m.detail}`}
+              onPointerEnter={(e) => tip.show(e.currentTarget, tipFor.marker(m))}
+              onPointerLeave={tip.hide}
+              onFocus={(e) => tip.show(e.currentTarget, tipFor.marker(m), true)}
+              onBlur={tip.hide}
+              className={cn(
+                "absolute z-[6] flex min-w-3 origin-bottom-left flex-col items-start justify-end gap-1 focus-visible:outline-2 focus-visible:outline-accent-500",
+                replayAt !== null && "rh-pop",
+              )}
+              style={{ left, top: MARKER_TOP, height: lineY + 5 - MARKER_TOP }}
+            >
+              {label && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "font-mono text-[10px] leading-[10px] whitespace-nowrap text-kumo-default",
+                    MARKER_TEXT[m.kind],
+                  )}
+                >
+                  {m.label}
+                </span>
+              )}
+              <span aria-hidden className={cn("block size-2.5 shrink-0", MARKER_STYLE[m.kind])} />
+            </Link>
+          ),
+        )}
       </div>
     </div>
   );
@@ -1184,6 +1319,7 @@ function TaskRow({
   style,
   x,
   now,
+  replayAt,
   tip,
   tipFor,
 }: {
@@ -1192,6 +1328,8 @@ function TaskRow({
   style: { top: number; height: number; width: number };
   x: (t: number) => number;
   now: number;
+  /** Replay playhead; null in live mode. */
+  replayAt: number | null;
   tip: TipApi;
   tipFor: TipFor;
 }) {
@@ -1248,6 +1386,7 @@ function TaskRow({
         {task.bars.map((bar) => {
           const x0 = x(bar.start);
           const width = Math.max(4, x(bar.end ?? now) - x0);
+          const status = statusAt(bar, replayAt);
           const letter = TIER_LETTER[bar.tier];
           const inner =
             width >= 150
@@ -1265,11 +1404,18 @@ function TaskRow({
               onPointerLeave={tip.hide}
               className={cn(
                 "absolute flex items-center overflow-hidden px-1 font-mono text-[10px] leading-none font-semibold whitespace-nowrap",
-                BAR_STYLE[bar.status],
-                bar.status === "running" &&
+                BAR_STYLE[status],
+                replayAt === null &&
+                  bar.status === "running" &&
                   "transition-[width] duration-1000 ease-linear motion-reduce:transition-none",
               )}
-              style={{ left: x0, top: BAR_Y, width, height: BAR_H }}
+              style={{
+                left: x0,
+                top: BAR_Y,
+                width,
+                height: BAR_H,
+                ...(replayAt === null ? {} : revealTo(x0, width)),
+              }}
             >
               {inner}
             </span>
@@ -1287,10 +1433,13 @@ TaskRow.displayName = "TaskRow";
 
 function AttentionRail({
   items,
+  at,
   height,
   projectId,
 }: {
   items: AttentionItem[];
+  /** Replay playhead: the rail shows that instant; null in live mode. */
+  at: number | null;
   /** Height of the plot frame; null in full screen, where the rail fills its grid row. */
   height: number | null;
   projectId: string;
@@ -1308,6 +1457,11 @@ function AttentionRail({
     >
       <div className="flex min-h-10 shrink-0 items-center justify-between gap-2 border-b-2 border-kumo-divider px-3">
         <h3 className="type-h6">Needs attention</h3>
+        {at !== null && (
+          <span className="mr-auto font-mono text-[11px] text-kumo-subtle tabular-nums">
+            at {clockOf(at, true)}
+          </span>
+        )}
         <span
           className={cn(
             "font-mono text-[12px] font-semibold tabular-nums",
@@ -1319,7 +1473,9 @@ function AttentionRail({
       </div>
       {items.length === 0 ? (
         <p className="px-3 py-3 text-[13px] text-kumo-subtle">
-          Nothing waits on a person. Questions, approvals, blocks and failed commands appear here.
+          {at === null
+            ? "Nothing waits on a person. Questions, approvals, blocks and failed commands appear here."
+            : "Nothing waited on a person at this point of the replay."}
         </p>
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto">
@@ -1331,7 +1487,7 @@ function AttentionRail({
                   params={{ changeId: item.changeId }}
                   className="block px-3 py-2 hover:bg-kumo-row-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-500"
                 >
-                  <AttentionBody item={item} />
+                  <AttentionBody item={item} replay={at !== null} />
                 </Link>
               ) : (
                 <Link
@@ -1340,7 +1496,7 @@ function AttentionRail({
                   hash="operator-actions"
                   className="block px-3 py-2 hover:bg-kumo-row-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-500"
                 >
-                  <AttentionBody item={item} />
+                  <AttentionBody item={item} replay={at !== null} />
                 </Link>
               )}
             </li>
@@ -1352,7 +1508,7 @@ function AttentionRail({
 }
 AttentionRail.displayName = "AttentionRail";
 
-function AttentionBody({ item }: { item: AttentionItem }) {
+function AttentionBody({ item, replay }: { item: AttentionItem; replay: boolean }) {
   const urgent = item.kind === "dead_letter";
   return (
     <span className="grid gap-0.5">
@@ -1371,7 +1527,7 @@ function AttentionBody({ item }: { item: AttentionItem }) {
         </span>
         {item.at !== null && (
           <span className="font-mono text-[10px] text-kumo-subtle tabular-nums">
-            {formatAge(new Date(item.at).toISOString())}
+            {replay ? clockOf(item.at, true) : formatAge(new Date(item.at).toISOString())}
           </span>
         )}
       </span>

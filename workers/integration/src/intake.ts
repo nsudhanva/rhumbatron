@@ -191,7 +191,22 @@ export function quoteSupported(quote: string, source: string | undefined): boole
 /* ------------------------------------------------------------------------------------------ */
 
 /** One candidate the new request is compared with: another request, or the current app. */
-export type CoverageTarget = { id: string; goal: string; items: Criterion[] };
+export type CoverageTarget = {
+  id: string;
+  goal: string;
+  items: Criterion[];
+  /** Set for a `proposed` request: who proposed it (null when the name is unknown). */
+  proposedBy?: string | null;
+};
+
+/** How a question names the covering target. */
+function targetLabel(target: CoverageTarget | null): string {
+  if (!target) return "the current app";
+  if (target.proposedBy === undefined) return "another request";
+  return target.proposedBy
+    ? `a request that ${target.proposedBy} proposed (it waits for review)`
+    : "a proposed request (it waits for review)";
+}
 
 export type IntakePacket = {
   /** The goal plus answered questions. */
@@ -208,7 +223,12 @@ export function buildPacket(
   return {
     request,
     targets: [
-      ...related.map((r) => ({ id: r.changeId, goal: r.goal, items: r.items })),
+      ...related.map((r) => ({
+        id: r.changeId,
+        goal: r.goal,
+        items: r.items,
+        ...(r.proposedBy !== undefined ? { proposedBy: r.proposedBy } : {}),
+      })),
       ...(canonical.known && !canonical.empty
         ? [{ id: "canonical", goal: "The current app", items: app }]
         : []),
@@ -609,8 +629,8 @@ export async function reviewIntake(
           kind: hit.decision === "duplicate" ? "duplicate" : "unclear",
           summary:
             hit.decision === "duplicate"
-              ? `This request asks for what ${related ? "another request" : "the current app"} already delivers.`
-              : `This request may already be covered by ${related ? "another request" : "the current app"}.`,
+              ? `This request asks for what ${targetLabel(related)} already delivers.`
+              : `This request may already be covered by ${targetLabel(related)}.`,
           questions: [{ id: "q1", text: duplicateQuestion(hit.target, hit.votes) }],
           relatedChangeId: related?.id ?? null,
           relatedGoal: related?.goal ?? null,

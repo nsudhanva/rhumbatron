@@ -1,6 +1,6 @@
 import { cn } from "@cloudflare/kumo";
 import { Link } from "@tanstack/react-router";
-import { EMPTY, formatAge, generation, truncate } from "../../lib/format";
+import { changeLabel, EMPTY, formatAge, generation } from "../../lib/format";
 import { formatP95 } from "../candidate/model";
 import { DataTable, RowLink, Td, Th, TitleCell, TRow } from "../ui/data-table";
 import { FAMILY_TEXT, StatusPill } from "../ui/status-pill";
@@ -61,7 +61,7 @@ export function CandidateTable({ items }: { items: VerifiedCandidate[] }) {
                     title={item.change?.goal}
                     className={cn(linkClass, "truncate")}
                   >
-                    {item.change ? truncate(item.change.goal, 64) : candidate.changeId}
+                    {item.change ? changeLabel(item.change) : candidate.changeId}
                   </Link>
                   <span className="truncate font-mono text-[11px] text-kumo-subtle">
                     {candidate.changeId}

@@ -4,13 +4,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { type ChangeClarification, type ClarifyInput, clarifyChange } from "../../lib/api-change";
-import { timeAgo } from "../../lib/format";
+import { changeLabel, timeAgo } from "../../lib/format";
 
 /**
  * "Waiting for your answer" (change status `needs_input`). The system found the request unclear,
- * a duplicate, or in conflict with another request, and asks before it builds. The requester or
- * the Project owner answers; everyone else sees who the Change waits for. The API checks who may
- * answer; this form only sends the request.
+ * a duplicate, or in conflict with another request, and asks before it builds. The requester, an
+ * admin or the owner answers; everyone else sees who the Change waits for. The API checks who
+ * may answer; this form only sends the request.
  */
 
 const KIND: Record<ChangeClarification["kind"], { title: string; related: string }> = {
@@ -92,8 +92,14 @@ export function ClarificationCard({
               to="/changes/$changeId"
               params={{ changeId: clarification.relatedChangeId }}
               className="font-semibold text-kumo-link hover:underline"
+              title={clarification.relatedGoal ?? undefined}
             >
-              {clarification.relatedGoal ?? clarification.relatedChangeId}
+              {clarification.relatedGoal
+                ? changeLabel({
+                    goal: clarification.relatedGoal,
+                    title: clarification.relatedTitle,
+                  })
+                : clarification.relatedChangeId}
             </Link>
           </p>
         )}
@@ -191,7 +197,7 @@ export function ClarificationCard({
             </ol>
           )}
           <p className="text-[13px] text-kumo-subtle">
-            Only {requester} or the Project owner can answer. Work continues after an answer.
+            Only {requester}, an admin or the owner can answer. Work continues after an answer.
           </p>
         </div>
       )}

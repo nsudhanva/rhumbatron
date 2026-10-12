@@ -153,28 +153,45 @@ export type RelatedItem = {
   changeId: string;
   goal: string;
   status: string;
+  /**
+   * For a `proposed` request (ADR 0028): the requester's display name, so a duplicate question
+   * can say who already proposed it. Null otherwise or when the name is unknown.
+   */
+  proposedBy?: string | null;
   /** `<changeId>:goal` first, then `<changeId>:c1` ... from the stored acceptance criteria. */
   items: Criterion[];
 };
 
 /** Change statuses that end a request. */
-const ENDED = ["completed", "failed", "cancelled", "not_selected"];
+const ENDED = ["completed", "failed", "cancelled", "not_selected", "declined"];
 
 /**
  * Open requests of the Project plus the 20 most recent completed ones, without the Change itself.
- * Two indexed reads (`idx_changes_project_id`), at most 70 rows.
+ * A `proposed` request that waits for review counts as open, so a later duplicate gets the
+ * question "already proposed by <name>". Two indexed reads (`idx_changes_project_id`), at most 70
+ * rows.
  */
 export async function loadRelatedRequests(
   env: Pick<Env, "DB">,
   projectId: string,
   changeId: string,
 ): Promise<RelatedItem[]> {
-  type Row = { id: string; goal: string; status: string; acceptance_criteria_json: string };
+  type Row = {
+    id: string;
+    goal: string;
+    status: string;
+    acceptance_criteria_json: string;
+    proposed_by?: string | null;
+  };
   const [open, done] = await env.DB.batch<Row>([
     env.DB.prepare(
-      `SELECT id, goal, status, acceptance_criteria_json FROM changes
-       WHERE project_id = ? AND id <> ? AND status NOT IN (${ENDED.map(() => "?").join(", ")})
-       ORDER BY created_at DESC LIMIT 50`,
+      `SELECT c.id, c.goal, c.status, c.acceptance_criteria_json,
+              CASE WHEN c.status = 'proposed'
+                THEN COALESCE(u.display_name, substr(u.email, 1, instr(u.email, '@') - 1))
+              END AS proposed_by
+       FROM changes c LEFT JOIN users u ON u.id = c.created_by
+       WHERE c.project_id = ? AND c.id <> ? AND c.status NOT IN (${ENDED.map(() => "?").join(", ")})
+       ORDER BY c.created_at DESC LIMIT 50`,
     ).bind(projectId, changeId, ...ENDED),
     env.DB.prepare(
       `SELECT id, goal, status, acceptance_criteria_json FROM changes
@@ -196,6 +213,7 @@ export async function loadRelatedRequests(
       changeId: row.id,
       goal: row.goal,
       status: row.status,
+      ...(row.status === "proposed" ? { proposedBy: row.proposed_by || null } : {}),
       items: [
         { id: `${row.id}:goal`, text: row.goal },
         ...texts.slice(0, 20).map((text, i) => ({ id: `${row.id}:c${i + 1}`, text })),

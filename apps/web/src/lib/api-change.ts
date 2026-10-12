@@ -23,6 +23,8 @@ export type ChangeClarification = {
   questions: ClarificationQuestion[];
   relatedChangeId: string | null;
   relatedGoal: string | null;
+  /** Short title of the related Change. */
+  relatedTitle?: string | null;
   askedAt: string;
   round: number;
 };
@@ -88,7 +90,7 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
 
 /**
  * Answers the questions of a `needs_input` Change, or builds it as it is, or withdraws it. Only
- * the requester or the Project owner may answer; the API checks this from the session.
+ * the requester, an admin or the Project owner may answer; the API checks this from the session.
  */
 export const clarifyChange = createServerFn({ method: "POST" })
   .inputValidator((input: ClarifyInput) => input)

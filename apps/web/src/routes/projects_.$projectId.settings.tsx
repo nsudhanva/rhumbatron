@@ -13,12 +13,13 @@ import { EmptyState } from "../components/ui/empty-state";
 import { Page, PageTitle, Section, TwoUp } from "../components/ui/page";
 import { getProjectApp, getProjectMembers } from "../lib/api";
 import { getProjectSettings } from "../lib/api-settings";
+import { asRole, can } from "../lib/permissions";
 import { loadOnServer, prefetch, prefetchProjectShell } from "../lib/ssr-data";
 
 /**
  * Project Settings (AGENTS.md 38, last navigation item): General, People, Defaults, Display and
- * Danger zone. Owner-only fields are hidden for a collaborator, not disabled; the API enforces
- * the same rule.
+ * Danger zone. Fields a role cannot change are hidden, not disabled (lib/permissions.ts); the
+ * API enforces the same rules.
  */
 export const Route = createFileRoute("/projects_/$projectId/settings")({
   // Server render: every section, with its current values, is in the first HTML.
@@ -71,14 +72,20 @@ function SettingsContent() {
     queryFn: () => getProjectSettings({ data: projectId }),
   });
   const data = settings.data;
-  const isOwner = data?.role === "owner";
+  const role = asRole(data?.role);
+  const edits = can(role, "settings.edit");
+  const owner = can(role, "project.delete");
 
   return (
     <Page>
       <PageTitle
         kicker="Project"
         title="Settings"
-        meta={data && !isOwner ? <span>Only the project owner can change these.</span> : undefined}
+        meta={
+          data && !edits ? (
+            <span>Only the project owner or an admin can change these.</span>
+          ) : undefined
+        }
       />
 
       {settings.isError ? (
@@ -100,7 +107,7 @@ function SettingsContent() {
           <GeneralSection projectId={projectId} settings={data} />
 
           <Section label="People">
-            <ProjectPeople projectId={projectId} isOwner={isOwner} />
+            <ProjectPeople projectId={projectId} role={role} />
           </Section>
 
           <TwoUp>
@@ -111,7 +118,7 @@ function SettingsContent() {
           <Section label="Danger zone">
             <div className="grid justify-items-start gap-3">
               <p className="max-w-[760px] text-[13px] text-kumo-subtle">
-                {isOwner
+                {owner
                   ? "Deleting removes the project's source, previews, live app, app data, evidence and request history. It cannot be undone."
                   : "Leaving removes your access. Your open requests are cancelled; finished ones stay with the project."}
               </p>

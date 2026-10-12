@@ -7,6 +7,12 @@ export const EVENT_TYPES = [
   "change.created",
   "change.compiled",
   "change.cancelled",
+  /** A member's request waits for review by an owner or admin (ADR 0028). */
+  "change.proposed",
+  /** An owner or admin included a proposed request: its ChangeWorkflow starts. */
+  "change.included",
+  /** An owner or admin declined a proposed request. Terminal. */
+  "change.declined",
   /** The intake gate decided a Change before planning: plan, or ask (shared-projects.md). */
   "change.intake.reviewed",
   /** The requester or the owner answered a `needs_input` Change, or asked to plan anyway. */
@@ -72,6 +78,12 @@ export const EVENT_TYPES = [
   "agent.slept",
   "agent.escalated",
   "model.route.decided",
+  /** A person opened a Code page edit session (ADR 0029). */
+  "code.session.opened",
+  /** An edit session ended without a Change: discarded, idle, 2-hour limit, or archived Project. */
+  "code.session.closed",
+  /** An edit session became one Change with one human ChangeSet. */
+  "code.session.submitted",
 ] as const;
 
 export const EventType = z.enum(EVENT_TYPES);

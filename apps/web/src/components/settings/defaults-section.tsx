@@ -1,15 +1,18 @@
-import { Button, Input } from "@cloudflare/kumo";
+import { Button, cn, Input } from "@cloudflare/kumo";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { type ProjectSettings, updateProjectSettings } from "../../lib/api-settings";
 import { formatUsd } from "../../lib/format";
+import { can } from "../../lib/permissions";
 import { SectionError } from "../project/feedback";
 import { KeyValue } from "../ui/key-value";
 import { Section } from "../ui/page";
+import { ProjectMonthlyBudget } from "./project-monthly-budget";
 
 /**
- * Defaults: the budget of a new Change that is created without one. The owner sets it; a
- * collaborator reads it.
+ * Defaults: the budget of a new Change that is created without one, whether a member's request
+ * waits for review, and the Project monthly budget. The owner or an admin sets them; everyone
+ * else reads them.
  */
 export function DefaultsSection({
   projectId,
@@ -20,8 +23,11 @@ export function DefaultsSection({
 }) {
   return (
     <Section label="Defaults">
-      {settings.role === "owner" ? (
-        <BudgetForm projectId={projectId} settings={settings} />
+      {can(settings.role, "settings.edit") ? (
+        <>
+          <BudgetForm projectId={projectId} settings={settings} />
+          <ReviewToggle projectId={projectId} settings={settings} />
+        </>
       ) : (
         <KeyValue
           items={[
@@ -33,9 +39,14 @@ export function DefaultsSection({
                 </span>
               ),
             },
+            {
+              label: "Member requests need review",
+              value: settings.memberRequestReview === false ? "Off" : "On",
+            },
           ]}
         />
       )}
+      <ProjectMonthlyBudget projectId={projectId} settings={settings} />
     </Section>
   );
 }
@@ -125,3 +136,60 @@ function BudgetForm({ projectId, settings }: { projectId: string; settings: Proj
     </form>
   );
 }
+
+/**
+ * "Member requests need review: On / Off" (segmented control, DESIGN.md 8.2). On: a member's
+ * request waits as Proposed until an owner or admin includes it. Owner and admin requests never
+ * wait. Saves at once.
+ */
+function ReviewToggle({ projectId, settings }: { projectId: string; settings: ProjectSettings }) {
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: (memberRequestReview: boolean) =>
+      updateProjectSettings({ data: { projectId, memberRequestReview } }),
+    onSuccess: (next) => queryClient.setQueryData(["project-settings", projectId], next),
+  });
+  const on =
+    (save.isPending ? save.variables : undefined) ?? settings.memberRequestReview !== false;
+  const hintId = useId();
+  return (
+    <fieldset className="grid gap-1.5 border-t border-kumo-rule pt-3" aria-describedby={hintId}>
+      <legend className="float-left mb-1.5 text-[13px] font-semibold">
+        Member requests need review
+      </legend>
+      <div className="clear-left flex w-fit border border-kumo-divider">
+        {(
+          [
+            [true, "On"],
+            [false, "Off"],
+          ] as const
+        ).map(([value, label], index) => (
+          <button
+            key={label}
+            type="button"
+            aria-pressed={on === value}
+            disabled={save.isPending}
+            title={save.isPending ? "Saving" : undefined}
+            onClick={() => on !== value && save.mutate(value)}
+            className={cn(
+              "flex h-8 items-center px-3 text-[13px] transition-colors duration-(--rh-dur-ui) focus-visible:outline-offset-[-2px] pointer-coarse:h-11",
+              index > 0 && "border-l border-kumo-divider",
+              on === value ? "bg-kumo-ink text-kumo-inverse" : "hover:bg-kumo-tint",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p id={hintId} className="text-[12px] text-kumo-subtle">
+        {on
+          ? "A member's request waits as Proposed until an owner or admin includes it."
+          : "Member requests start at once. Owner and admin requests never wait."}
+      </p>
+      {save.isError && (
+        <SectionError message={`The setting was not saved. ${save.error.message}`} />
+      )}
+    </fieldset>
+  );
+}
+ReviewToggle.displayName = "ReviewToggle";

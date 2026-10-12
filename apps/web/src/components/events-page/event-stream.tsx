@@ -9,15 +9,7 @@ import { Td, Th, TRow } from "../ui/data-table";
 import { EmptyState } from "../ui/empty-state";
 import { KeyValue } from "../ui/key-value";
 import { Payload } from "../ui/log-well";
-import { EventFilters } from "./event-filters";
-import {
-  type FamilyKey,
-  type FeedEvent,
-  familyOf,
-  ingestLagMs,
-  TONE_TEXT,
-  typeTone,
-} from "./feed-model";
+import { type FeedEvent, ingestLagMs, TONE_TEXT, typeTone } from "./feed-model";
 
 /** Scroll distance (px) under which the reader counts as "at the top" of the stream. */
 const TOP_SLACK = 8;
@@ -26,19 +18,29 @@ const TOP_SLACK = 8;
  * Event stream (DESIGN.md 9.9): sequence, time, type, actor, detail and version, newest on top.
  * New rows never move what the reader is looking at: below the top, the scroll position holds
  * and an "N new" control appears instead. Pause freezes the rows at the current sequence; new
- * events then only add to a "N new" count, and the announcements stop.
+ * events then only add to a "N new" count, and the announcements stop. The page filters the
+ * events (events-filter-bar.tsx); the stream shows the matching ones.
  */
 export function EventStream({
   projectId,
   events,
+  total,
+  filterKey,
+  onClearFilter,
   loading,
   systems,
   scopedToChange,
   footer,
 }: {
   projectId: string;
-  /** Newest first. */
+  /** Loaded events that match the filter, newest first. */
   events: FeedEvent[];
+  /** Loaded events before the filter. */
+  total: number;
+  /** Changes when the filter changes: the stream then goes back to the top. */
+  filterKey: string;
+  /** Clears the page filter; null when no filter is set. */
+  onClearFilter: (() => void) | null;
   loading: boolean;
   /** Systems View: adds the ingest lag column. */
   systems: boolean;
@@ -47,7 +49,6 @@ export function EventStream({
   /** Load-older control and paging state, under the table. */
   footer?: ReactNode;
 }) {
-  const [families, setFamilies] = useState<Set<FamilyKey>>(new Set());
   const [frozenAt, setFrozenAt] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [unseen, setUnseen] = useState(0);
@@ -55,20 +56,7 @@ export function EventStream({
   const reduceMotion = usePrefersReducedMotion();
   const paused = frozenAt !== null;
 
-  const counts = useMemo(() => {
-    const map = new Map<FamilyKey, number>();
-    for (const event of events) {
-      const key = familyOf(event.eventType);
-      map.set(key, (map.get(key) ?? 0) + 1);
-    }
-    return map;
-  }, [events]);
-
-  const matching = useMemo(
-    () =>
-      families.size === 0 ? events : events.filter((e) => families.has(familyOf(e.eventType))),
-    [events, families],
-  );
+  const matching = events;
   const visible = useMemo(
     () => (frozenAt === null ? matching : matching.filter((e) => e.seq <= frozenAt)),
     [matching, frozenAt],
@@ -78,7 +66,6 @@ export function EventStream({
   // Keep the reader's place when rows insert above it (DESIGN.md 9.9).
   const scrollRef = useRef<HTMLDivElement>(null);
   const anchor = useRef<{ seq: number; top: number } | null>(null);
-  const filterKey = [...families].sort().join(",");
   const lastFilterKey = useRef(filterKey);
   const topSeq = visible[0]?.seq;
 
@@ -144,24 +131,27 @@ export function EventStream({
       return next;
     });
 
-  const changeFilter = (next: Set<FamilyKey>) => {
-    setFamilies(next);
+  // A new filter starts from the top of the stream.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the filter key is the trigger
+  useLayoutEffect(() => {
     setUnseen(0);
     scrollRef.current?.scrollTo({ top: 0 });
-  };
+  }, [filterKey]);
 
   const columns = systems ? 7 : 6;
-  const filtered = families.size > 0;
+  const filtered = onClearFilter !== null;
 
   return (
     <div className="grid min-w-0 gap-3">
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
-        <EventFilters
-          counts={counts}
-          total={events.length}
-          selected={families}
-          onChange={changeFilter}
-        />
+        <p className="text-[12px] text-kumo-subtle">
+          {paused
+            ? `Paused at sequence ${formatNumber(frozenAt)}. New events wait until you resume.`
+            : "Live. Newest first."}{" "}
+          {filtered
+            ? `${formatNumber(matching.length)} of ${formatNumber(total)} loaded events match the filter.`
+            : `${formatNumber(total)} loaded events.`}
+        </p>
         <div className="flex shrink-0 items-center gap-3">
           {paused && (
             <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">
@@ -179,15 +169,6 @@ export function EventStream({
           </Button>
         </div>
       </div>
-
-      <p className="text-[12px] text-kumo-subtle">
-        {paused
-          ? `Paused at sequence ${formatNumber(frozenAt)}. New events wait until you resume.`
-          : "Live. Newest first."}{" "}
-        {filtered
-          ? `${formatNumber(visible.length)} of ${formatNumber(events.length)} loaded events match the filter.`
-          : `Counts cover the ${formatNumber(events.length)} loaded events.`}
-      </p>
 
       {/* Silent while paused (DESIGN.md 9.9, 14). */}
       <p className="sr-only" aria-live={paused ? "off" : "polite"} aria-atomic="true">
@@ -248,7 +229,7 @@ export function EventStream({
               ) : visible.length === 0 ? (
                 <tr>
                   <td colSpan={columns} className="p-2">
-                    {events.length === 0 ? (
+                    {total === 0 ? (
                       <EmptyState
                         what="No events recorded yet."
                         how="Events appear here as soon as a Change starts and agents act on it."
@@ -258,13 +239,11 @@ export function EventStream({
                         what="No loaded events match the filter."
                         how="Clear the filter, or load older events below."
                         action={
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => changeFilter(new Set())}
-                          >
-                            Show all families
-                          </Button>
+                          onClearFilter && (
+                            <Button size="sm" variant="secondary" onClick={onClearFilter}>
+                              Clear filters
+                            </Button>
+                          )
                         }
                       />
                     )}

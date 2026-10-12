@@ -1,19 +1,37 @@
 import { createClerkClient } from "@clerk/backend";
-import { ChangeClarification, changeTitle } from "@rhumbatron/protocol";
+import {
+  AssignableRole,
+  apiData,
+  ChangeClarification,
+  type ChangeReview,
+  ChangeRoleRequest,
+  can,
+  canChangeRole,
+  canInvite,
+  canRemoveMember,
+  changeTitle,
+  deniedMessage,
+  InviteRequest,
+  MembersResponse,
+  ProjectRole,
+  type RequestOutcome,
+  ROLE_RANK,
+} from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { clarify } from "./clarify.ts";
-import { fail, validate } from "./http.ts";
-import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
+import { fail, respond, validate } from "./http.ts";
+import { ensureIdentity, projectRole } from "./identity.ts";
 
 /**
  * Shared Projects (docs/architecture/shared-projects.md).
  *
- * The owner shares a Project by email. An invitation binds only to a Clerk-verified email of the
- * signed-in user, and the membership binds to the immutable user ID. `rank` only orders the member
- * list (the owner is 0, a collaborator 10). No build decision reads it: the system decides
- * between requests (ADR 0025).
+ * The owner or an admin shares a Project by email with a role (ADR 0028). An invitation binds only
+ * to a Clerk-verified email of the signed-in user, and the membership binds to the immutable user
+ * ID. The permission matrix is `can` in `@rhumbatron/protocol`. `rank` only orders the member list
+ * (`ROLE_RANK`). No build decision reads a role or a rank: the system decides between requests
+ * (ADR 0025).
  *
  * Also the request views: who asked for a Change, how the intake gate and the cross-request check
  * decided it, and the clarification route (clarify.ts, mounted here).
@@ -21,14 +39,12 @@ import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
 
-const COLLABORATOR_RANK = 10;
 const INVITATION_DAYS = 7;
 
 const ProjectIdParam = z.object({ projectId: z.string().regex(/^proj_[a-z0-9-]+$/) });
 const ChangeIdParam = z.object({ changeId: z.string().regex(/^chg_[a-z0-9-]+$/) });
 const InvitationParam = z.object({ invitationId: z.string().regex(/^inv_[a-f0-9]{32}$/) });
 const MemberParam = ProjectIdParam.extend({ userId: z.string().regex(/^usr_[A-Za-z0-9_]+$/) });
-const InviteRequest = z.object({ email: z.string().trim().toLowerCase().email().max(254) });
 
 /** Internal RPC on the integration Worker (service binding `INTEGRATION`). */
 type IntegrationRpc = {
@@ -92,7 +108,7 @@ export async function ensureProfile(env: Env, userId: string, authSubject: strin
 }
 
 /** A person's label: display name, else the email's local part, else null. */
-function requesterName(name: string | null, email: string | null): string | null {
+export function requesterName(name: string | null, email: string | null): string | null {
   return name ?? (email ? (email.split("@")[0] ?? email) : null);
 }
 
@@ -103,8 +119,10 @@ function requesterName(name: string | null, email: string | null): string | null
 /** The Change columns the request fields need (join `users u ON u.id = c.created_by`). */
 export type RequestColumns = {
   created_by: string;
-  /** Role snapshot at request time, display only. */
+  /** Rank of the requester's role at request time (`ROLE_RANK`), display only. */
   requester_rank: number | null;
+  /** The requester's current role (`REVIEW_COLUMNS`). A query that does not select it reads null. */
+  requester_role?: string | null;
   /** Set while the Change is `needs_input`. A query that does not select it reads null. */
   clarification_json?: string | null;
   /** Stored title of the clarification's related Change. A query that does not select it reads null. */
@@ -116,7 +134,25 @@ export type RequestColumns = {
   supersedes_change_id: string | null;
   display_name: string | null;
   email: string | null;
+} & Partial<ReviewColumns>;
+
+/** Review columns of a Change row and its reviewer (`REVIEW_COLUMNS` with `REVIEWER_JOIN`). */
+export type ReviewColumns = {
+  review_state: string | null;
+  review_decided_by: string | null;
+  review_decided_at: string | null;
+  review_reason: string | null;
+  reviewer_name: string | null;
+  reviewer_email: string | null;
 };
+
+/** Select list for the review and the requester's current role, on a Change row aliased `c`. */
+export const REVIEW_COLUMNS = `c.review_state, c.review_decided_by, c.review_decided_at,
+  c.review_reason, rv.display_name AS reviewer_name, rv.email AS reviewer_email,
+  (SELECT pm.role FROM project_members pm
+     WHERE pm.project_id = c.project_id AND pm.user_id = c.created_by) AS requester_role`;
+/** Join for `REVIEW_COLUMNS`. */
+export const REVIEWER_JOIN = "LEFT JOIN users rv ON rv.id = c.review_decided_by";
 
 /** Select expression for `related_title` on a Change row aliased `c`. */
 export const RELATED_TITLE = `(SELECT o.title FROM changes o
@@ -128,7 +164,27 @@ const OUTCOMES = new Set([
   "not_selected",
   "replaces",
   "duplicate",
+  "declined",
 ]);
+
+const REVIEW_STATES = new Set(["proposed", "included", "declined"]);
+
+/** The review of a request (ADR 0028). A NULL `review_state` means no review was needed. */
+export function reviewOf(row: Partial<ReviewColumns>): ChangeReview {
+  const state = row.review_state && REVIEW_STATES.has(row.review_state) ? row.review_state : null;
+  if (!state) return { state: "not_needed", decidedBy: null, decidedAt: null, reason: null };
+  return {
+    state: state as ChangeReview["state"],
+    decidedBy: row.review_decided_by
+      ? {
+          userId: row.review_decided_by,
+          name: requesterName(row.reviewer_name ?? null, row.reviewer_email ?? null),
+        }
+      : null,
+    decidedAt: row.review_decided_at ?? null,
+    reason: row.review_reason ?? null,
+  };
+}
 
 /** The stored clarification, or null when there is none or it does not parse. */
 function clarificationOf(
@@ -155,17 +211,13 @@ export function requestFields(row: RequestColumns, viewerUserId: string) {
       userId: row.created_by,
       name: requesterName(row.display_name, row.email),
       rank: row.requester_rank,
+      role: ProjectRole.safeParse(row.requester_role).data ?? null,
       isYou: row.created_by === viewerUserId,
     },
     outcome:
       row.outcome && OUTCOMES.has(row.outcome)
         ? {
-            kind: row.outcome as
-              | "selected"
-              | "partially_selected"
-              | "not_selected"
-              | "replaces"
-              | "duplicate",
+            kind: row.outcome as RequestOutcome["kind"],
             reason: row.outcome_reason,
             winnerChangeId: row.outcome_winner_change_id,
             decidedBy: row.outcome_decided_by,
@@ -173,6 +225,7 @@ export function requestFields(row: RequestColumns, viewerUserId: string) {
         : null,
     supersedesChangeId: row.supersedes_change_id,
     clarification: clarificationOf(row.clarification_json, row.related_title),
+    review: reviewOf(row),
   };
 }
 
@@ -236,10 +289,18 @@ function citedCriteria(
 
 const newInvitationId = () => `inv_${crypto.randomUUID().replaceAll("-", "")}`;
 
+/** Open requests of one person in one Project: the statuses a cancel still applies to. */
+const OPEN_REQUESTS = `SELECT id FROM changes WHERE project_id = ? AND created_by = ?
+  AND status NOT IN ('completed', 'cancelled', 'failed', 'not_selected', 'declined',
+                     'promoting', 'releasing')`;
+
 export const members = new Hono<AppEnv>()
   /** `POST /v1/changes/:changeId/clarify` (clarify.ts). */
   .route("/", clarify)
-  /** Members of a shared Project. The owner also sees pending invitations. */
+  /**
+   * Members of a Project, ordered by rank. A caller who may manage people (owner, admin) also sees
+   * the pending invitations and every email; anyone else sees only their own email.
+   */
   .get(
     "/v1/projects/:projectId/members",
     requireAuth,
@@ -249,54 +310,74 @@ export const members = new Hono<AppEnv>()
       const { projectId } = c.req.valid("param");
       const role = await projectRole(c.env.DB, userId, projectId);
       if (!role) return fail(c, 404, "not_found", "Project not found");
+      const manages = can(role, "people.manage");
       const [rows, invites] = await c.env.DB.batch([
         c.env.DB.prepare(
-          `SELECT pm.user_id, pm.role, pm.rank, pm.created_at, u.display_name, u.email
+          `SELECT pm.user_id, pm.role, pm.created_at, u.display_name, u.email
            FROM project_members pm LEFT JOIN users u ON u.id = pm.user_id
-           WHERE pm.project_id = ? ORDER BY pm.rank, pm.created_at`,
+           WHERE pm.project_id = ? ORDER BY pm.rank, pm.created_at LIMIT 200`,
         ).bind(projectId),
         c.env.DB.prepare(
-          `SELECT id, email, created_at, expires_at FROM project_invitations
+          `SELECT id, email, role, created_at, expires_at FROM project_invitations
            WHERE project_id = ? AND status = 'pending' AND expires_at > ?
-           ORDER BY created_at`,
+           ORDER BY created_at LIMIT 100`,
         ).bind(projectId, new Date().toISOString()),
       ]);
       type MemberRow = {
         user_id: string;
         role: string;
-        rank: number;
         created_at: string;
         display_name: string | null;
         email: string | null;
       };
-      type InviteRow = { id: string; email: string; created_at: string; expires_at: string };
-      return c.json({
+      type InviteRow = {
+        id: string;
+        email: string;
+        role: string;
+        created_at: string;
+        expires_at: string;
+      };
+      return respond(c, apiData(MembersResponse), {
         data: {
           role,
-          members: ((rows?.results ?? []) as MemberRow[]).map((m) => ({
-            userId: m.user_id,
-            name: requesterName(m.display_name, m.email),
-            email: role === "owner" || m.user_id === userId ? m.email : null,
-            role: m.role,
-            rank: m.rank,
-            isYou: m.user_id === userId,
-            addedAt: m.created_at,
-          })),
-          invitations:
-            role === "owner"
-              ? ((invites?.results ?? []) as InviteRow[]).map((i) => ({
-                  id: i.id,
-                  email: i.email,
-                  createdAt: i.created_at,
-                  expiresAt: i.expires_at,
-                }))
-              : [],
+          members: ((rows?.results ?? []) as MemberRow[]).flatMap((m) => {
+            const memberRole = ProjectRole.safeParse(m.role);
+            if (!memberRole.success) return [];
+            return [
+              {
+                userId: m.user_id,
+                name: requesterName(m.display_name, m.email),
+                email: manages || m.user_id === userId ? m.email : null,
+                role: memberRole.data,
+                joinedAt: m.created_at,
+                isYou: m.user_id === userId,
+              },
+            ];
+          }),
+          invitations: manages
+            ? ((invites?.results ?? []) as InviteRow[]).flatMap((i) => {
+                const invited = AssignableRole.safeParse(i.role);
+                if (!invited.success) return [];
+                return [
+                  {
+                    id: i.id,
+                    email: i.email,
+                    role: invited.data,
+                    createdAt: i.created_at,
+                    expiresAt: i.expires_at,
+                  },
+                ];
+              })
+            : [],
         },
       });
     },
   )
 
-  /** The owner invites a person by email. A repeat for the same pending email returns it. */
+  /**
+   * The owner or an admin invites a person by email with a role (default `member`). Only the owner
+   * invites an admin. A repeat for the same pending email returns that invitation with the new role.
+   */
   .post(
     "/v1/projects/:projectId/invitations",
     requireAuth,
@@ -306,10 +387,14 @@ export const members = new Hono<AppEnv>()
       const authSubject = c.get("authSubject");
       const { userId } = await ensureIdentity(c.env.DB, authSubject);
       const { projectId } = c.req.valid("param");
-      const { email } = c.req.valid("json");
+      const { email, role: invitedRole } = c.req.valid("json");
       const role = await projectRole(c.env.DB, userId, projectId);
       if (!role) return fail(c, 404, "not_found", "Project not found");
-      if (role !== "owner") return fail(c, 403, "forbidden", ownerOnlyMessage("share it"));
+      if (!canInvite(role, invitedRole)) {
+        return invitedRole === "admin"
+          ? fail(c, 403, "forbidden", deniedMessage("admins.manage", "invite an admin"))
+          : fail(c, 403, "forbidden", deniedMessage("people.manage", "invite people"));
+      }
       const project = await c.env.DB.prepare("SELECT status FROM projects WHERE id = ?")
         .bind(projectId)
         .first<{ status: string }>();
@@ -326,6 +411,7 @@ export const members = new Hono<AppEnv>()
       await ensureProfile(c.env, userId, authSubject);
       const now = new Date();
       const expires = new Date(now.getTime() + INVITATION_DAYS * 86_400_000);
+      const rank = ROLE_RANK[invitedRole];
       // Expired pending rows would block the partial unique index: revoke them first.
       await c.env.DB.batch([
         c.env.DB.prepare(
@@ -335,30 +421,43 @@ export const members = new Hono<AppEnv>()
         c.env.DB.prepare(
           `INSERT INTO project_invitations
              (id, project_id, email, role, rank, invited_by, status, created_at, expires_at)
-           VALUES (?, ?, ?, 'collaborator', ?, ?, 'pending', ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
            ON CONFLICT DO NOTHING`,
         ).bind(
           newInvitationId(),
           projectId,
           email,
-          COLLABORATOR_RANK,
+          invitedRole,
+          rank,
           userId,
           now.toISOString(),
           expires.toISOString(),
         ),
+        // A repeat with another role changes the pending invitation's role.
+        c.env.DB.prepare(
+          `UPDATE project_invitations SET role = ?, rank = ?
+           WHERE project_id = ? AND email = ? AND status = 'pending' AND role <> ?`,
+        ).bind(invitedRole, rank, projectId, email, invitedRole),
       ]);
       const row = await c.env.DB.prepare(
-        `SELECT id, email, created_at, expires_at FROM project_invitations
+        `SELECT id, email, role, created_at, expires_at FROM project_invitations
          WHERE project_id = ? AND email = ? AND status = 'pending'`,
       )
         .bind(projectId, email)
-        .first<{ id: string; email: string; created_at: string; expires_at: string }>();
+        .first<{
+          id: string;
+          email: string;
+          role: string;
+          created_at: string;
+          expires_at: string;
+        }>();
       if (!row) throw new Error("Invitation was not readable after creation");
       return c.json(
         {
           data: {
             id: row.id,
             email: row.email,
+            role: AssignableRole.parse(row.role),
             createdAt: row.created_at,
             expiresAt: row.expires_at,
           },
@@ -368,7 +467,7 @@ export const members = new Hono<AppEnv>()
     },
   )
 
-  /** The owner revokes a pending invitation. Safe to repeat. */
+  /** The owner or an admin revokes a pending invitation (an admin invitation: the owner). Safe to repeat. */
   .delete(
     "/v1/projects/:projectId/invitations/:invitationId",
     requireAuth,
@@ -378,31 +477,80 @@ export const members = new Hono<AppEnv>()
       const { projectId, invitationId } = c.req.valid("param");
       const role = await projectRole(c.env.DB, userId, projectId);
       if (!role) return fail(c, 404, "not_found", "Project not found");
-      if (role !== "owner") return fail(c, 403, "forbidden", ownerOnlyMessage("manage sharing"));
-      const revoked = await c.env.DB.prepare(
-        `UPDATE project_invitations SET status = 'revoked'
-         WHERE id = ? AND project_id = ? AND status = 'pending'`,
+      const invite = await c.env.DB.prepare(
+        "SELECT role, status FROM project_invitations WHERE id = ? AND project_id = ?",
       )
         .bind(invitationId, projectId)
-        .run();
-      if ((revoked.meta.changes ?? 0) === 0) {
-        // A repeat on an already revoked invitation of this Project stays 200.
-        const prior = await c.env.DB.prepare(
-          `SELECT 1 AS found FROM project_invitations
-           WHERE id = ? AND project_id = ? AND status = 'revoked'`,
+        .first<{ role: string; status: string }>();
+      const invitedRole = AssignableRole.safeParse(invite?.role).data ?? "member";
+      if (!canInvite(role, invitedRole)) {
+        return fail(c, 403, "forbidden", deniedMessage("people.manage", "manage sharing"));
+      }
+      if (!invite) return fail(c, 404, "not_found", "Invitation not found");
+      if (invite.status === "pending") {
+        await c.env.DB.prepare(
+          `UPDATE project_invitations SET status = 'revoked'
+           WHERE id = ? AND project_id = ? AND status = 'pending'`,
         )
           .bind(invitationId, projectId)
-          .first();
-        if (!prior) return fail(c, 404, "not_found", "Invitation not found");
+          .run();
+      } else if (invite.status !== "revoked") {
+        return fail(c, 404, "not_found", "Invitation not found");
       }
       return c.json({ data: { id: invitationId, status: "revoked" } });
     },
   )
 
   /**
-   * The owner removes a collaborator, or a collaborator removes themselves (leaves). The owner row
-   * cannot be removed. A leaver's open requests are cancelled through the same integration command
-   * as `POST /v1/changes/:changeId/cancel`; their past Changes stay with the Project.
+   * Changes the role of a member (`admin`, `member`, or `viewer`). The owner or an admin changes
+   * a member or a viewer; only the owner makes an admin or changes an admin. The owner row never
+   * changes. The same role again writes nothing.
+   */
+  .patch(
+    "/v1/projects/:projectId/members/:userId",
+    requireAuth,
+    validate("param", MemberParam),
+    validate("json", ChangeRoleRequest),
+    async (c) => {
+      const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+      const { projectId, userId: member } = c.req.valid("param");
+      const { role: next } = c.req.valid("json");
+      const role = await projectRole(c.env.DB, userId, projectId);
+      if (!role) return fail(c, 404, "not_found", "Project not found");
+      if (!can(role, "people.manage")) {
+        return fail(c, 403, "forbidden", deniedMessage("people.manage", "change roles"));
+      }
+      const target = await c.env.DB.prepare(
+        "SELECT role FROM project_members WHERE project_id = ? AND user_id = ?",
+      )
+        .bind(projectId, member)
+        .first<{ role: string }>();
+      const current = ProjectRole.safeParse(target?.role);
+      if (!current.success) return fail(c, 404, "not_found", "Member not found");
+      if (current.data === "owner") {
+        return fail(c, 403, "forbidden", "The owner role cannot change.");
+      }
+      if (!canChangeRole(role, current.data, next)) {
+        return fail(c, 403, "forbidden", deniedMessage("admins.manage", "make or change an admin"));
+      }
+      if (current.data !== next) {
+        await c.env.DB.prepare(
+          `UPDATE project_members SET role = ?, rank = ?
+           WHERE project_id = ? AND user_id = ? AND role = ?`,
+        )
+          .bind(next, ROLE_RANK[next], projectId, member, current.data)
+          .run();
+      }
+      return c.json({ data: { userId: member, role: next } });
+    },
+  )
+
+  /**
+   * Removes a member, or the caller leaves. The owner or an admin removes a member or a viewer;
+   * only the owner removes an admin. Any role except the owner can leave. The owner row is never
+   * removed. A leaver's open requests are cancelled through the same integration command as
+   * `POST /v1/changes/:changeId/cancel`; a removed person's `proposed` requests are cancelled the
+   * same way. Their past Changes stay with the Project.
    */
   .delete(
     "/v1/projects/:projectId/members/:userId",
@@ -413,31 +561,46 @@ export const members = new Hono<AppEnv>()
       const { projectId, userId: member } = c.req.valid("param");
       const role = await projectRole(c.env.DB, userId, projectId);
       if (!role) return fail(c, 404, "not_found", "Project not found");
-      const leaving = role === "collaborator" && member === userId;
-      if (role !== "owner" && !leaving) {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("manage sharing"));
+      const leaving = member === userId;
+      if (leaving && !can(role, "project.leave")) {
+        return fail(c, 403, "forbidden", "The project owner cannot leave the project.");
       }
-      if (leaving) {
-        const open = await c.env.DB.prepare(
-          `SELECT id FROM changes WHERE project_id = ? AND created_by = ?
-             AND status NOT IN ('completed', 'cancelled', 'failed', 'not_selected',
-                                'promoting', 'releasing')`,
-        )
-          .bind(projectId, userId)
-          .all<{ id: string }>();
-        // A refused cancel (the Change moved on) is fine; a thrown error fails the leave, so a
-        // retry cancels the rest while the membership still exists.
-        for (const { id } of open.results ?? []) {
-          await integration(c.env).cancelChange({ changeId: id, actorUserId: userId });
+      const target = await c.env.DB.prepare(
+        "SELECT role FROM project_members WHERE project_id = ? AND user_id = ?",
+      )
+        .bind(projectId, member)
+        .first<{ role: string }>();
+      const targetRole = ProjectRole.safeParse(target?.role);
+      if (!leaving) {
+        if (!can(role, "people.manage")) {
+          return fail(c, 403, "forbidden", deniedMessage("people.manage", "remove people"));
         }
+        if (!targetRole.success) return fail(c, 404, "not_found", "Member not found");
+        if (!canRemoveMember(role, targetRole.data)) {
+          return targetRole.data === "owner"
+            ? fail(c, 403, "forbidden", "The project owner cannot be removed.")
+            : fail(c, 403, "forbidden", deniedMessage("admins.manage", "remove an admin"));
+        }
+      } else if (!targetRole.success) {
+        return fail(c, 404, "not_found", "Member not found");
+      }
+      const open = await c.env.DB.prepare(
+        leaving ? OPEN_REQUESTS : `${OPEN_REQUESTS} AND status = 'proposed'`,
+      )
+        .bind(projectId, member)
+        .all<{ id: string }>();
+      // A refused cancel (the Change moved on) is fine; a thrown error fails the request, so a
+      // retry cancels the rest while the membership still exists.
+      for (const { id } of open.results ?? []) {
+        await integration(c.env).cancelChange({ changeId: id, actorUserId: userId });
       }
       const removed = await c.env.DB.prepare(
-        `DELETE FROM project_members WHERE project_id = ? AND user_id = ? AND role = 'collaborator'`,
+        `DELETE FROM project_members WHERE project_id = ? AND user_id = ? AND role <> 'owner'`,
       )
         .bind(projectId, member)
         .run();
       if ((removed.meta.changes ?? 0) === 0) {
-        return fail(c, 404, "not_found", "Collaborator not found");
+        return fail(c, 404, "not_found", "Member not found");
       }
       return c.json({ data: { userId: member, removed: true } });
     },
@@ -494,7 +657,7 @@ export const members = new Hono<AppEnv>()
       const { userId } = await ensureIdentity(c.env.DB, authSubject);
       const { invitationId } = c.req.valid("param");
       const invite = await c.env.DB.prepare(
-        `SELECT id, project_id, email, rank, invited_by, status, accepted_user_id, expires_at
+        `SELECT id, project_id, email, role, rank, invited_by, status, accepted_user_id, expires_at
          FROM project_invitations WHERE id = ?`,
       )
         .bind(invitationId)
@@ -502,6 +665,7 @@ export const members = new Hono<AppEnv>()
           id: string;
           project_id: string;
           email: string;
+          role: string;
           rank: number;
           invited_by: string;
           status: string;
@@ -510,7 +674,9 @@ export const members = new Hono<AppEnv>()
         }>();
       if (!invite) return fail(c, 404, "not_found", "Invitation not found");
       if (invite.status === "accepted" && invite.accepted_user_id === userId) {
-        return c.json({ data: { projectId: invite.project_id, role: "collaborator" } });
+        const role = await projectRole(c.env.DB, userId, invite.project_id);
+        if (!role) return fail(c, 409, "conflict", "This invitation is no longer valid.");
+        return c.json({ data: { projectId: invite.project_id, role } });
       }
       const profile = await clerkProfile(c.env, authSubject);
       // Not addressed to a verified email of this user: the same answer as a missing invitation.
@@ -526,9 +692,17 @@ export const members = new Hono<AppEnv>()
       await c.env.DB.batch([
         c.env.DB.prepare(
           `INSERT OR IGNORE INTO project_members (project_id, user_id, role, rank, added_by, created_at)
-           SELECT ?, ?, 'collaborator', ?, ?, ?
+           SELECT ?, ?, ?, ?, ?, ?
            WHERE EXISTS (SELECT 1 FROM project_invitations WHERE id = ? AND status = 'pending')`,
-        ).bind(invite.project_id, userId, invite.rank, invite.invited_by, now, invite.id),
+        ).bind(
+          invite.project_id,
+          userId,
+          AssignableRole.safeParse(invite.role).data ?? "member",
+          invite.rank,
+          invite.invited_by,
+          now,
+          invite.id,
+        ),
         c.env.DB.prepare(
           `UPDATE project_invitations SET status = 'accepted', accepted_user_id = ?, accepted_at = ?
            WHERE id = ? AND status = 'pending'`,

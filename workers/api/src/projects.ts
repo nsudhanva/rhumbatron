@@ -4,26 +4,34 @@ import {
   Change,
   CreateChangeRequest,
   CreateProjectRequest,
+  can,
   changeTitle,
+  deniedMessage,
   fallbackTitle,
+  needsReview,
   Project,
   type ProjectPolicies,
+  ProjectRole,
+  ROLE_RANK,
   Task,
 } from "@rhumbatron/protocol";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
+import { resolveBudgetScope } from "./budgets.ts";
 import { fixturesEnabled } from "./fixtures.ts";
 import { fail, respond, validate } from "./http.ts";
+import { canAccessProject, ensureIdentity, PROJECT_VISIBLE_SQL, projectRole } from "./identity.ts";
 import {
-  canAccessProject,
-  ensureIdentity,
-  ownerOnlyMessage,
-  PROJECT_VISIBLE_SQL,
-  type ProjectRole,
-  projectRole,
-} from "./identity.ts";
-import { ensureProfile, RELATED_TITLE, type RequestColumns, requestFields } from "./members.ts";
+  ensureProfile,
+  RELATED_TITLE,
+  REVIEW_COLUMNS,
+  REVIEWER_JOIN,
+  type RequestColumns,
+  type ReviewColumns,
+  requestFields,
+  reviewOf,
+} from "./members.ts";
 import { changeBudgetUsd } from "./project-settings.ts";
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -44,6 +52,12 @@ const projectRoot = (env: Env, projectId: string) => {
   return ns.get(ns.idFromName(projectId));
 };
 
+/** Internal RPC on the integration Worker (service binding `INTEGRATION`). */
+type IntegrationRpc = {
+  recordProposal(input: { changeId: string; actorUserId: string }): Promise<unknown>;
+};
+const integrationRpc = (env: Env) => env.INTEGRATION as unknown as IntegrationRpc;
+
 const projectView = (env: Env, projectId: string) => {
   const ns = env.PROJECT_VIEW as DurableObjectNamespace<ProjectViewDO>;
   return ns.get(ns.idFromName(projectId));
@@ -62,7 +76,11 @@ type ChangeRow = {
   acceptance_criteria_json: string;
   invariants_json: string;
   work_graph_ref: string | null;
-};
+} & Partial<ReviewColumns>;
+
+/** A Change row with its reviewer's name (`reviewOf`). Bind the WHERE values after it. */
+const CHANGE_WITH_REVIEWER = `SELECT c.*, rv.display_name AS reviewer_name, rv.email AS reviewer_email
+  FROM changes c LEFT JOIN users rv ON rv.id = c.review_decided_by`;
 
 type TaskRow = {
   id: string;
@@ -95,6 +113,7 @@ function toChange(row: ChangeRow): Change {
     ...(row.work_graph_ref ? { workGraphRef: row.work_graph_ref } : {}),
     budgetUsd: row.budget_usd,
     rolloutPolicy: { target: "preview" },
+    review: reviewOf(row),
   };
 }
 
@@ -123,21 +142,24 @@ async function loadProject(env: Env, projectId: string): Promise<Project | null>
 }
 
 /**
- * The caller's role plus the Project status. Null when the caller cannot open the Project.
+ * The caller's role plus the Project status and its member request review setting. Null when the
+ * caller cannot open the Project.
  */
 async function projectAccess(
   db: D1Database,
   userId: string,
   projectId: string,
-): Promise<{ status: string; role: ProjectRole } | null> {
+): Promise<{ status: string; role: ProjectRole; memberRequestReview: boolean } | null> {
   const [role, row] = await Promise.all([
     projectRole(db, userId, projectId),
     db
-      .prepare("SELECT status FROM projects WHERE id = ?")
+      .prepare("SELECT status, member_request_review FROM projects WHERE id = ?")
       .bind(projectId)
-      .first<{ status: string }>(),
+      .first<{ status: string; member_request_review: number }>(),
   ]);
-  return role && row ? { status: row.status, role } : null;
+  return role && row
+    ? { status: row.status, role, memberRequestReview: row.member_request_review !== 0 }
+    : null;
 }
 
 const ARCHIVED = "Project is archived";
@@ -289,7 +311,8 @@ export const projects = new Hono<AppEnv>()
         status: p.status,
         canonicalGeneration: p.canonical_generation,
         createdAt: p.created_at,
-        role: p.member_role === "collaborator" ? "collaborator" : "owner",
+        // Organization members without a row own the Project (`projectRole`).
+        role: ProjectRole.safeParse(p.member_role).data ?? "owner",
       })),
     });
   })
@@ -305,10 +328,10 @@ export const projects = new Hono<AppEnv>()
       `SELECT c.id, c.goal, c.title, c.status, c.risk_tier, c.budget_usd, c.created_at,
               c.created_by, c.requester_rank, c.outcome, c.outcome_reason,
               c.outcome_winner_change_id, c.outcome_decided_by, c.supersedes_change_id,
-              c.clarification_json, u.display_name, u.email, ${RELATED_TITLE},
+              c.clarification_json, u.display_name, u.email, ${RELATED_TITLE}, ${REVIEW_COLUMNS},
               (SELECT COUNT(*) FROM tasks t WHERE t.change_id = c.id) AS task_count,
               (SELECT COUNT(*) FROM tasks t WHERE t.change_id = c.id AND t.status = 'completed') AS completed_count
-       FROM changes c LEFT JOIN users u ON u.id = c.created_by
+       FROM changes c LEFT JOIN users u ON u.id = c.created_by ${REVIEWER_JOIN}
        WHERE c.project_id = ? ORDER BY c.created_at DESC LIMIT 50`,
     )
       .bind(projectId)
@@ -348,7 +371,9 @@ export const projects = new Hono<AppEnv>()
     const { projectId } = c.req.valid("param");
     const access = await projectAccess(c.env.DB, userId, projectId);
     if (!access) return fail(c, 404, "not_found", "Project not found");
-    if (access.role !== "owner") return fail(c, 403, "forbidden", ownerOnlyMessage("provision it"));
+    if (!can(access.role, "project.provision")) {
+      return fail(c, 403, "forbidden", deniedMessage("project.provision", "provision it"));
+    }
     if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
     await sendProvision(c.env, projectId);
     return c.json({ data: { queued: true } }, 202);
@@ -360,7 +385,9 @@ export const projects = new Hono<AppEnv>()
     const { projectId } = c.req.valid("param");
     const access = await projectAccess(c.env.DB, userId, projectId);
     if (!access) return fail(c, 404, "not_found", "Project not found");
-    if (access.role !== "owner") return fail(c, 403, "forbidden", ownerOnlyMessage("run checks"));
+    if (!can(access.role, "project.runChecks")) {
+      return fail(c, 403, "forbidden", deniedMessage("project.runChecks", "run checks"));
+    }
     if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
     const agents = c.env.AGENTS as unknown as {
       sandboxSmoke(id: string): Promise<{ ok: boolean; steps: unknown[] }>;
@@ -385,8 +412,8 @@ export const projects = new Hono<AppEnv>()
     const { projectId } = c.req.valid("param");
     const access = await projectAccess(c.env.DB, userId, projectId);
     if (!access) return fail(c, 404, "not_found", "Project not found");
-    if (access.role !== "owner") {
-      return fail(c, 403, "forbidden", ownerOnlyMessage("remove the project"));
+    if (!can(access.role, "project.delete")) {
+      return fail(c, 403, "forbidden", deniedMessage("project.delete", "remove the project"));
     }
     const now = new Date().toISOString();
     await c.env.DB.prepare(
@@ -436,7 +463,12 @@ export const projects = new Hono<AppEnv>()
     return c.json({ data: view });
   })
 
-  // P3-09: create a Change at the current Canonical Generation. Idempotent on clientRequestId.
+  /**
+   * P3-09: create a Change at the current Canonical Generation. Idempotent on clientRequestId.
+   * A member's request starts as `proposed` while the Project setting `memberRequestReview` is on
+   * (ADR 0028): no ChangeWorkflow, no model call, no admission to ProjectRootDO until an owner or
+   * admin includes it. Owner and admin requests never need review.
+   */
   .post(
     "/v1/projects/:projectId/changes",
     validate("param", ProjectIdParam),
@@ -447,53 +479,69 @@ export const projects = new Hono<AppEnv>()
       const body = c.req.valid("json");
       const access = await projectAccess(c.env.DB, userId, projectId);
       if (!access) return fail(c, 404, "not_found", "Project not found");
+      if (!can(access.role, "change.create")) {
+        return fail(c, 403, "forbidden", deniedMessage("change.create", "send a request"));
+      }
       if (access.status === "archived") return fail(c, 409, "conflict", ARCHIVED);
       // A request without a budget uses the Project default from Settings.
       body.budgetUsd = await changeBudgetUsd(c, projectId, body.budgetUsd);
+      // Which budget pays (ADR 0030): a pool scope needs that monthly budget set.
+      const scoped = await resolveBudgetScope(c, {
+        projectId,
+        userId,
+        scope: body.budgetScope,
+        budgetUsd: body.budgetUsd,
+      });
+      if (!scoped.ok) return scoped.response;
+      body.budgetUsd = scoped.budgetUsd;
 
       // A request ID is unique per requester, so two users never collide (phase 17a).
       const requestKey = body.clientRequestId ? `${userId}:${body.clientRequestId}` : null;
-      if (requestKey) {
-        const existing = await c.env.DB.prepare(
-          "SELECT * FROM changes WHERE project_id = ? AND client_request_id = ?",
+      const byRequestKey = () =>
+        c.env.DB.prepare(
+          `${CHANGE_WITH_REVIEWER} WHERE c.project_id = ? AND c.client_request_id = ?`,
         )
           .bind(projectId, requestKey)
           .first<ChangeRow>();
+      if (requestKey) {
+        const existing = await byRequestKey();
         if (existing) return respond(c, apiData(Change), { data: toChange(existing) });
       }
 
       const canonical = await projectRoot(c.env, projectId).getCanonical();
       if (!canonical) throw new Error(`ProjectRootDO missing for ${projectId}`);
 
+      const proposed = needsReview(access.role, access.memberRequestReview);
+      const status = proposed ? "proposed" : "created";
       const changeId = `chg_${crypto.randomUUID()}`;
       const now = new Date().toISOString();
       // ON CONFLICT closes the race between two retries that both missed the lookup above.
       const inserted = await c.env.DB.prepare(
         `INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd,
-           client_request_id, created_by, requester_rank, created_at, updated_at)
-         VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?, ?)
+           client_request_id, created_by, requester_rank, review_state, created_at, updated_at,
+           budget_scope)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (project_id, client_request_id) DO NOTHING`,
       )
         .bind(
           changeId,
           projectId,
           body.goal,
+          status,
           canonical.generation,
           body.budgetUsd,
           requestKey,
           userId,
-          // Display only: the requester's role when the request was made. No decision reads it.
-          access.role === "owner" ? 0 : 10,
+          // Display only: the rank of the requester's role at request time. No decision reads it.
+          ROLE_RANK[access.role],
+          proposed ? "proposed" : null,
           now,
           now,
+          scoped.scope,
         )
         .run();
       if (inserted.meta.changes === 0 && requestKey) {
-        const winner = await c.env.DB.prepare(
-          "SELECT * FROM changes WHERE project_id = ? AND client_request_id = ?",
-        )
-          .bind(projectId, requestKey)
-          .first<ChangeRow>();
+        const winner = await byRequestKey();
         if (winner) return respond(c, apiData(Change), { data: toChange(winner) });
       }
 
@@ -505,9 +553,23 @@ export const projects = new Hono<AppEnv>()
         await profile; // No ExecutionContext (tests): finish inline.
       }
 
-      // ChangeWorkflow compiles the Work Graph asynchronously (AGENTS.md section 58). The instance
-      // ID is the Change ID, so a retried request cannot start a second planner.
-      if (body.startPlanning) {
+      if (proposed) {
+        // Records `change.proposed`. The D1 row is the truth, so a failed event only delays the
+        // dashboard (section 59).
+        try {
+          await integrationRpc(c.env).recordProposal({ changeId, actorUserId: userId });
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              event: "change.proposal_event_failed",
+              changeId,
+              message: String(error).slice(0, 200),
+            }),
+          );
+        }
+      } else if (body.startPlanning) {
+        // ChangeWorkflow compiles the Work Graph asynchronously (AGENTS.md section 58). The
+        // instance ID is the Change ID, so a retried request cannot start a second planner.
         try {
           await c.env.CHANGE_WORKFLOW.create({ id: changeId, params: { changeId } });
         } catch (error) {
@@ -524,12 +586,10 @@ export const projects = new Hono<AppEnv>()
 
       // The dashboard projection is eventually consistent (AGENTS.md section 59).
       await projectView(c.env, projectId).applyDelta({
-        upsert: {
-          activeChanges: [{ id: changeId, status: "created", label: fallbackTitle(body.goal) }],
-        },
+        upsert: { activeChanges: [{ id: changeId, status, label: fallbackTitle(body.goal) }] },
       });
 
-      const row = await c.env.DB.prepare("SELECT * FROM changes WHERE id = ?")
+      const row = await c.env.DB.prepare(`${CHANGE_WITH_REVIEWER} WHERE c.id = ?`)
         .bind(changeId)
         .first<ChangeRow>();
       if (!row) throw new Error("Change was not readable after creation");

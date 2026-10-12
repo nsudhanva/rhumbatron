@@ -33,31 +33,53 @@ type DagNodeData = {
 };
 type DagFlowNode = Node<DagNodeData, "dag">;
 
+const TIER_WORD = { haiku: "Haiku", sonnet: "Sonnet", opus: "Opus" } as const;
+const TIER_LETTER = { haiku: "H", sonnet: "S", opus: "O" } as const;
+
 function DagNode({ data }: NodeProps<DagFlowNode>) {
   const { spec, selected, dimmed } = data;
+  const hidden = spec.hidden === true;
   return (
     <button
       type="button"
       aria-pressed={selected}
-      aria-label={`${spec.kicker}: ${spec.title}${spec.meta ? `, ${spec.meta}` : ""}`}
+      aria-hidden={hidden || undefined}
+      tabIndex={hidden ? -1 : undefined}
+      aria-label={`${spec.kicker}: ${spec.title}${spec.tier ? `, ${TIER_WORD[spec.tier]}` : ""}${spec.meta ? `, ${spec.meta}` : ""}`}
       className={cn(
-        "grid cursor-pointer gap-1 bg-kumo-base px-3 py-2 text-left transition-[opacity,box-shadow] duration-(--rh-dur-ui) hover:bg-kumo-row-hover",
+        "relative grid cursor-pointer gap-1 bg-kumo-base px-3 py-2 text-left transition-[opacity,box-shadow,transform,border-color] duration-(--rh-dur-settle) ease-(--rh-ease-out) hover:bg-kumo-row-hover",
         BORDER[spec.border],
         dimmed && "opacity-30",
+        hidden && "pointer-events-none translate-y-1 opacity-0",
       )}
       style={{ width: spec.width ?? 200, ...(selected ? SELECTED : {}) }}
     >
       <Handle type="target" position={Position.Left} className="opacity-0!" />
       <span className="flex min-w-0 items-center justify-between gap-2">
-        <span
-          className={cn(
-            "truncate text-[10px] tracking-[0.1em] uppercase",
-            spec.border === "accent" ? "text-kumo-accent" : "text-kumo-subtle",
+        <span className="flex min-w-0 items-center gap-1.5">
+          {spec.working && (
+            <span aria-hidden className="rh-work-pulse size-1.5 shrink-0 bg-accent-500" />
           )}
-        >
-          {spec.kicker}
+          <span
+            className={cn(
+              "truncate text-[10px] tracking-[0.1em] uppercase",
+              spec.border === "accent" ? "text-kumo-accent" : "text-kumo-subtle",
+            )}
+          >
+            {spec.kicker}
+          </span>
         </span>
-        {spec.status && <StatusPill status={spec.status} className="shrink-0" />}
+        <span className="flex shrink-0 items-center gap-1">
+          {spec.tier && (
+            <span
+              title={TIER_WORD[spec.tier]}
+              className="grid size-4 place-items-center bg-kumo-ink font-mono text-[10px] leading-none font-semibold text-kumo-inverse"
+            >
+              {TIER_LETTER[spec.tier]}
+            </span>
+          )}
+          {spec.status && <StatusPill status={spec.status} className="shrink-0" />}
+        </span>
       </span>
       <span
         className={cn(
@@ -74,6 +96,14 @@ function DagNode({ data }: NodeProps<DagFlowNode>) {
       {spec.meta && (
         <span className="truncate font-mono text-[11px] text-kumo-subtle" title={spec.meta}>
           {spec.meta}
+        </span>
+      )}
+      {spec.working && spec.progress != null && (
+        <span aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 bg-kumo-recessed">
+          <span
+            className="block h-full bg-kumo-ink transition-[width] duration-200 ease-linear"
+            style={{ width: `${Math.round(spec.progress * 100)}%` }}
+          />
         </span>
       )}
       <Handle type="source" position={Position.Right} className="opacity-0!" />
@@ -199,12 +229,13 @@ export function DagCanvas({
       .map((e) => {
         const dim = lit !== null && !(lit.has(e.source) && lit.has(e.target));
         const conflict = isConflictEdge(e.kind);
+        const shown = e.hidden !== true;
         return {
           id: e.id,
           source: e.source,
           target: e.target,
           type: conflict ? "straight" : "default",
-          ...(e.label
+          ...(e.label && shown
             ? {
                 label: e.label,
                 labelStyle: EDGE_LABEL,
@@ -223,9 +254,14 @@ export function DagCanvas({
                   color: "var(--color-kumo-ink)",
                 },
               }),
-          style: { ...EDGE_STYLE[e.kind], opacity: dim ? 0.15 : 1 },
+          style: {
+            ...EDGE_STYLE[e.kind],
+            opacity: shown ? (dim ? 0.15 : 1) : 0,
+            transition: `opacity var(--rh-dur-settle) var(--rh-ease-out), stroke var(--rh-dur-greyout) var(--rh-ease-out)`,
+          },
           zIndex: conflict ? 1 : 0,
           ariaLabel: `${e.source} to ${e.target}${e.label ? `: ${e.label}` : ""}`,
+          ...(shown ? {} : { focusable: false }),
         };
       });
     const height = canvasHeight(

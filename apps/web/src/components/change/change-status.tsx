@@ -1,7 +1,8 @@
 import type { TaskDetail } from "../../lib/api";
 import type { CandidateView, ChangeView } from "../../lib/api-change";
-import { formatNumber, formatUsd, generation, truncate } from "../../lib/format";
+import { formatNumber, generation, truncate } from "../../lib/format";
 import { type StatusFamily, StatusPill } from "../ui/status-pill";
+import { budgetStopText } from "./change-budget";
 
 /**
  * Change status in plain words (DESIGN.md 8.3, 12). The pill maps every Change status, including
@@ -24,6 +25,8 @@ const CHANGE_STATUS: Record<string, { family: StatusFamily; label: string }> = {
   failed: { family: "danger", label: "Fail" },
   cancelled: { family: "idle", label: "Cancelled" },
   not_selected: { family: "idle", label: "Not selected" },
+  proposed: { family: "attention", label: "Proposed" },
+  declined: { family: "idle", label: "Declined" },
 };
 
 export function ChangeStatusWord({ status, className }: { status: string; className?: string }) {
@@ -69,6 +72,16 @@ export function statusLine({
     ["composing", "composed", "verifying"].includes(c.status),
   ).length;
   switch (change.status) {
+    case "proposed":
+      return { text: "Waiting for an admin to include it", family: "attention" };
+    case "declined": {
+      const by = change.review?.decidedBy?.name;
+      const reason = change.review?.reason ?? change.outcome?.reason;
+      return {
+        text: `Not built: declined${by ? ` by ${by}` : ""}${reason ? `: ${short(reason, "")}` : ""}`,
+        family: "idle",
+      };
+    }
     case "created":
     case "compiling":
       return { text: "Planning: splitting the request into tasks", family: "active" };
@@ -95,10 +108,7 @@ export function statusLine({
     case "awaiting_approval":
       return { text: "Waiting for approval before it ships", family: "attention" };
     case "budget_blocked":
-      return {
-        text: `Stopped: the ${formatUsd(change.budgetUsd)} budget is used up`,
-        family: "danger",
-      };
+      return { text: budgetStopText(change), family: "danger" };
     case "blocked":
       return {
         text: `Blocked: ${short(change.blockedReason, "work cannot continue")}`,
@@ -129,6 +139,9 @@ export function statusLine({
         family: "danger",
       };
     case "cancelled":
+      if (change.review?.state === "proposed") {
+        return { text: "Withdrawn before review", family: "idle" };
+      }
       return {
         text: `Cancelled: ${short(change.blockedReason ?? change.outcome?.reason, "no further work runs")}`,
         family: "idle",

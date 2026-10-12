@@ -2,23 +2,36 @@ import {
   apiData,
   ChangeCommandOutcome,
   ChangeDetail,
+  can,
   changeTitle,
+  DeclineChangeRequest,
+  deniedMessage,
   RaiseBudgetRequest,
+  ReviewChangeOutcome,
 } from "@rhumbatron/protocol";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
+import { CHANGE_BUDGET_COLUMNS, type ChangeBudgetColumns, changeBudget } from "./budgets.ts";
+import { mayActOnRequest } from "./clarify.ts";
 import { errorBody, fail, respond, validate } from "./http.ts";
-import { ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
-import { RELATED_TITLE, type RequestColumns, requestFields } from "./members.ts";
+import { ensureIdentity, projectRole } from "./identity.ts";
+import {
+  RELATED_TITLE,
+  REVIEW_COLUMNS,
+  REVIEWER_JOIN,
+  type RequestColumns,
+  requestFields,
+} from "./members.ts";
 
 /**
  * `GET /v1/changes/:changeId` with the planned risk tier and record times (AGENTS.md section 16.1).
  * Mounted before `projects` (through activity.ts), so this handler answers and the older handler
  * in projects.ts, which returns the same fields minus these three, is no longer reached.
  *
- * `POST /v1/changes/:changeId/cancel` and `POST /v1/changes/:changeId/budget` are a person's
- * commands on one Change (sections 16.1, 44). The integration Worker owns the transitions.
+ * `POST /v1/changes/:changeId/cancel`, `/budget`, `/include`, and `/decline` are a person's
+ * commands on one Change (sections 16.1, 44; ADR 0028). The integration Worker owns the
+ * transitions. Who may send each one is `can` in `@rhumbatron/protocol`.
  */
 
 type AppEnv = { Bindings: Env; Variables: AuthVariables };
@@ -30,6 +43,12 @@ type IntegrationRpc = {
     changeId: string;
     budgetUsd: number;
     actorUserId: string;
+  }): Promise<unknown>;
+  includeChange(input: { changeId: string; actorUserId: string }): Promise<unknown>;
+  declineChange(input: {
+    changeId: string;
+    actorUserId: string;
+    reason: string | null;
   }): Promise<unknown>;
 };
 const integration = (env: Env) => env.INTEGRATION as unknown as IntegrationRpc;
@@ -51,7 +70,8 @@ type ChangeRow = {
   blocked_reason: string | null;
   created_at: string;
   updated_at: string;
-} & RequestColumns;
+} & RequestColumns &
+  ChangeBudgetColumns;
 
 function toDetail(row: ChangeRow, viewerUserId: string): ChangeDetail {
   return {
@@ -71,6 +91,7 @@ function toDetail(row: ChangeRow, viewerUserId: string): ChangeDetail {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...requestFields(row, viewerUserId),
+    budget: changeBudget(row),
   };
 }
 
@@ -90,6 +111,18 @@ function refused(c: Context, outcome: Extract<ChangeCommandOutcome, { status: "r
     : c.json(errorBody("conflict", outcome.detail, outcome), 409);
 }
 
+/** The reply to an include or a decline: the new status, 404, or 409 when it is not `proposed`. */
+function reviewed(c: Context, outcome: ReviewChangeOutcome) {
+  if (outcome.result === "refused") {
+    return outcome.reason === "not_found"
+      ? c.json(errorBody("not_found", outcome.detail, outcome), 404)
+      : c.json(errorBody("conflict", outcome.detail, outcome), 409);
+  }
+  return c.json({
+    data: { changeId: outcome.changeId, status: outcome.status, repeated: outcome.repeated },
+  });
+}
+
 export const changeDetail = new Hono<AppEnv>()
   .get("/v1/changes/:changeId", requireAuth, validate("param", ChangeIdParam), async (c) => {
     const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
@@ -100,8 +133,8 @@ export const changeDetail = new Hono<AppEnv>()
               c.blocked_reason, c.created_at, c.updated_at, c.created_by, c.requester_rank,
               c.outcome, c.outcome_reason, c.outcome_winner_change_id, c.outcome_decided_by,
               c.supersedes_change_id, c.clarification_json, u.display_name, u.email,
-              ${RELATED_TITLE}
-       FROM changes c LEFT JOIN users u ON u.id = c.created_by WHERE c.id = ?`,
+              ${RELATED_TITLE}, ${REVIEW_COLUMNS}, ${CHANGE_BUDGET_COLUMNS}
+       FROM changes c LEFT JOIN users u ON u.id = c.created_by ${REVIEWER_JOIN} WHERE c.id = ?`,
     )
       .bind(changeId)
       .first<ChangeRow>();
@@ -111,7 +144,10 @@ export const changeDetail = new Hono<AppEnv>()
     return respond(c, apiData(ChangeDetail), { data: toDetail(row, userId) });
   })
 
-  /** Cancels the Change before promotion starts; no new Task is dispatched. Safe to repeat. */
+  /**
+   * Cancels the Change before promotion starts; no new Task is dispatched. The requester withdraws
+   * their own request this way, also a `proposed` one. Safe to repeat.
+   */
   .post(
     "/v1/changes/:changeId/cancel",
     requireAuth,
@@ -121,9 +157,15 @@ export const changeDetail = new Hono<AppEnv>()
       const { changeId } = c.req.valid("param");
       const change = await memberChange(c.env, userId, changeId);
       if (!change) return fail(c, 404, "not_found", "Change not found");
-      // A collaborator can cancel only their own request (phase 17a, decision S-04).
-      if (change.role !== "owner" && change.created_by !== userId) {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("cancel another person's request"));
+      if (!mayActOnRequest(change.role, change.created_by, userId)) {
+        return change.created_by === userId
+          ? fail(c, 403, "forbidden", deniedMessage("change.manageOwn", "cancel a request"))
+          : fail(
+              c,
+              403,
+              "forbidden",
+              deniedMessage("change.manageAny", "cancel another person's request"),
+            );
       }
       const outcome = ChangeCommandOutcome.parse(
         await integration(c.env).cancelChange({ changeId, actorUserId: userId }),
@@ -148,13 +190,66 @@ export const changeDetail = new Hono<AppEnv>()
       const { budgetUsd } = c.req.valid("json");
       const change = await memberChange(c.env, userId, changeId);
       if (!change) return fail(c, 404, "not_found", "Change not found");
-      if (change.role !== "owner") {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("raise a budget"));
+      if (!can(change.role, "change.raiseBudget")) {
+        return fail(c, 403, "forbidden", deniedMessage("change.raiseBudget", "raise a budget"));
       }
       const outcome = ChangeCommandOutcome.parse(
         await integration(c.env).raiseChangeBudget({ changeId, budgetUsd, actorUserId: userId }),
       );
       if (outcome.status === "refused") return refused(c, outcome);
       return respond(c, apiData(ChangeCommandOutcome), { data: outcome });
+    },
+  )
+
+  /**
+   * An owner or admin includes a `proposed` request (ADR 0028): the Change becomes `created` and
+   * its ChangeWorkflow starts, as for a request that needs no review. A repeat returns the same
+   * result. Another status is 409.
+   */
+  .post(
+    "/v1/changes/:changeId/include",
+    requireAuth,
+    validate("param", ChangeIdParam),
+    async (c) => {
+      const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+      const { changeId } = c.req.valid("param");
+      const change = await memberChange(c.env, userId, changeId);
+      if (!change) return fail(c, 404, "not_found", "Change not found");
+      if (!can(change.role, "change.review")) {
+        return fail(c, 403, "forbidden", deniedMessage("change.review", "include a request"));
+      }
+      const outcome = ReviewChangeOutcome.parse(
+        await integration(c.env).includeChange({ changeId, actorUserId: userId }),
+      );
+      return reviewed(c, outcome);
+    },
+  )
+
+  /**
+   * An owner or admin declines a `proposed` request with an optional reason. `declined` is
+   * terminal; no model call is made. A repeat returns the same result. Another status is 409.
+   */
+  .post(
+    "/v1/changes/:changeId/decline",
+    requireAuth,
+    validate("param", ChangeIdParam),
+    validate("json", DeclineChangeRequest),
+    async (c) => {
+      const { userId } = await ensureIdentity(c.env.DB, c.get("authSubject"));
+      const { changeId } = c.req.valid("param");
+      const { reason } = c.req.valid("json");
+      const change = await memberChange(c.env, userId, changeId);
+      if (!change) return fail(c, 404, "not_found", "Change not found");
+      if (!can(change.role, "change.review")) {
+        return fail(c, 403, "forbidden", deniedMessage("change.review", "decline a request"));
+      }
+      const outcome = ReviewChangeOutcome.parse(
+        await integration(c.env).declineChange({
+          changeId,
+          actorUserId: userId,
+          reason: reason ? reason : null,
+        }),
+      );
+      return reviewed(c, outcome);
     },
   );

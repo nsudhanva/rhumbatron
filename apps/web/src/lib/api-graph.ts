@@ -81,7 +81,7 @@ export type ProductGraph = {
   /** Runtime wiring files of the indexed tree, not shown as areas. */
   wiringFiles: string[];
   /** Oldest first, newest 20. */
-  changes: { id: string; goal: string; status: string; createdAt: string }[];
+  changes: { id: string; goal: string; title?: string | null; status: string; createdAt: string }[];
   nodes: ProductGraphNode[];
   edges: ProductGraphEdge[];
   counts: {

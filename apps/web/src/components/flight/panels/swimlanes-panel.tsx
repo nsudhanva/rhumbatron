@@ -1,7 +1,7 @@
 // biome-ignore-all lint/a11y/useFocusableInteractive: listbox options here are aria-activedescendant items of a one-tab-stop composite (use-roving-focus.ts); they are not focusable by design
 import { cn } from "@cloudflare/kumo";
 import { type CSSProperties, useId, useMemo } from "react";
-import { formatDuration, formatNumber, truncate } from "../../../lib/format";
+import { formatDuration, formatNumber } from "../../../lib/format";
 import { CALLS_PER_RUN } from "../../agents/activity-model";
 import { FAMILY_FILL, statusView } from "../../ui/status-pill";
 import { useFlight } from "../flight-context";
@@ -25,10 +25,15 @@ import { TIER_FILL, TIER_LETTER, useDimmed, useVisibleLanes } from "./lanes/lane
 import {
   AXIS_H,
   type AxisMark,
+  clusterByX,
+  countBoxWidth,
   LEFT,
   labelWidth,
+  nextInGroup,
   PlotRules,
+  placeLabel,
   relTime,
+  type Span,
   TimeAxis,
   TimelineToolbar,
   type TimeScale,
@@ -45,8 +50,11 @@ import {
  * Task with an agent, on a time axis shared with the workspace lanes. Each attempt is a bar
  * filled by model tier (letter inside: H, S, O); a failed attempt is hatched with its failure
  * kind; an escalation is a step-up glyph. Typed facts of the lane (Ready, Claim, Intent,
- * ChangeSet, Challenge, Done, Fail) are square markers above the bar. An open conflict holds an
- * accent connector between the two lanes. Candidate milestones are full-height rules.
+ * ChangeSet, Challenge, Done, Fail) are square markers above the bar; facts at the same or nearly
+ * the same instant collapse into one count marker ("3 facts") that lists them in its title. A
+ * marker label takes the free space right or left of its marker, truncated or omitted when there
+ * is none. An open conflict holds an accent connector between the two lanes; its chip sits in a
+ * bar row, clear of every marker row. Candidate milestones are full-height rules.
  *
  * Each lane plot is ONE tab stop (use-roving-focus.ts): a listbox whose options are the attempt
  * bars and fact markers in time order. Arrows walk them, Up/Down move to the lane above or below,
@@ -63,6 +71,10 @@ const MARK_Y = 4;
 const BAR_Y = 17;
 const BAR_H = 20;
 const UNDER_Y = 39;
+/** Facts closer than this (px) share one count marker. */
+const GROUP_WITHIN = 12;
+/** Top of a conflict chip's 24px target inside a lane row: below the marker row, above the under row. */
+const CHIP_Y = 16;
 
 type MarkKind =
   | "ready"
@@ -98,6 +110,32 @@ const MARK_STYLE: Record<MarkKind, string> = {
   challenge: "bg-accent-500",
   done: "bg-kumo-success",
   fail: "bg-accent-500 border border-kumo-ink",
+};
+
+/** Label priority when markers compete for room (lower wins). */
+const LABEL_RANK: Record<MarkKind, number> = {
+  challenge: 0,
+  fail: 1,
+  expired: 2,
+  done: 3,
+  changeset: 4,
+  claim: 5,
+  intent: 6,
+  release: 7,
+  ready: 8,
+  renew: 9,
+};
+
+/** One marker of a lane: a single fact or a group of facts at nearly the same instant. */
+type Slot = {
+  key: string;
+  /** Marker centre in plot px. */
+  x: number;
+  /** Facts in label priority order; the first names a single marker. */
+  members: Mark[];
+  /** Marker width: the 8px square, or the count box of a group. */
+  box: number;
+  label: ReturnType<typeof placeLabel>;
 };
 
 const MARK_TEXT: Partial<Record<MarkKind, string>> = {
@@ -469,20 +507,43 @@ function Lane({
     return null;
   }, [marks, inFlight]);
 
-  // Marker placement: same-instant facts sit side by side (2px apart). A label shows only when
-  // it ends before the next marker starts, so labels never run under another square.
-  const placed = useMemo(() => {
-    let lastX = Number.NEGATIVE_INFINITY;
-    const xs = marks.map((m) => {
-      lastX = Math.max(scale.x(m.t) - MARK / 2, lastX + MARK + 2);
-      return lastX;
+  // Marker placement: facts within GROUP_WITHIN px share one count marker, so markers never
+  // stack. Every marker reserves its own span; labels then take free room by priority.
+  const placed = useMemo<Slot[]>(() => {
+    const groups = clusterByX(marks, (m) => scale.x(m.t), GROUP_WITHIN).map((g) => {
+      const members = [...g.items].sort(
+        (a, b) => LABEL_RANK[a.kind] - LABEL_RANK[b.kind] || a.t - b.t,
+      );
+      const box = members.length > 1 ? countBoxWidth(members.length) : MARK;
+      const key = members.length > 1 ? `group:${g.items[0]?.key}` : (members[0]?.key ?? "");
+      const x = Math.min(Math.max(g.x, box / 2), scale.width - box / 2);
+      return { key, x, members, box, label: null } as Slot;
     });
-    return marks.map((m, i) => {
-      const x = xs[i] ?? 0;
-      const next = xs[i + 1] ?? Number.POSITIVE_INFINITY;
-      const showLabel = m.label !== "" && x + MARK + 3 + labelWidth(m.label) < next - 2;
-      return { ...m, x, showLabel };
-    });
+    const taken: Span[] = groups.map((g) => ({
+      left: g.x - g.box / 2,
+      right: g.x + g.box / 2,
+      owner: g.key,
+    }));
+    const order = [...groups].sort(
+      (a, b) =>
+        LABEL_RANK[(a.members[0] as Mark).kind] - LABEL_RANK[(b.members[0] as Mark).kind] ||
+        a.x - b.x,
+    );
+    for (const g of order) {
+      const text = slotText(g);
+      if (text === "") continue;
+      g.label = placeLabel({
+        anchor: g.x,
+        gap: g.box / 2 + 3,
+        width: labelWidth(text),
+        min: g.members.length > 1 ? labelWidth(text) : 36,
+        plot: scale.width,
+        taken,
+        owner: g.key,
+      });
+      if (g.label) taken.push({ left: g.label.left, right: g.label.left + g.label.width });
+    }
+    return groups;
   }, [marks, scale]);
 
   // Lane items in time order: attempt bars (by start) and fact markers, one composite.
@@ -492,24 +553,26 @@ function Lane({
         ...task.runs.map((run) => ({
           key: `run:${run.attempt}`,
           x: scale.x(run.startedAt),
-          ref: { kind: "decision", id: `route:${task.id}:${run.attempt}` } as EntityRef,
+          refs: [{ kind: "decision", id: `route:${task.id}:${run.attempt}` } as EntityRef],
         })),
-        ...placed.map((m) => ({ key: m.key, x: m.x, ref: m.ref })),
+        ...placed.map((m) => ({ key: m.key, x: m.x, refs: m.members.map((f) => f.ref) })),
       ].sort((a, b) => a.x - b.x),
     [task, placed, scale],
   );
   const rows = useMemo(() => [items.map((i) => i.key)], [items]);
   const selection = useSelection();
   const initial = selection
-    ? (items.find((i) => refKey(i.ref) === refKey(selection))?.key ?? null)
+    ? (items.find((i) => i.refs.some((r) => refKey(r) === refKey(selection)))?.key ?? null)
     : null;
   const roving = useRovingFocus({
     rows,
     initial,
     group: "agent-lanes",
     onActivate: (key) => {
-      const ref = items.find((i) => i.key === key)?.ref;
-      if (ref) useFlightStore.getState().toggle(ref);
+      const refs = items.find((i) => i.key === key)?.refs ?? [];
+      const store = useFlightStore.getState();
+      if (refs.length === 1 && refs[0]) store.toggle(refs[0]);
+      else if (refs.length > 1) store.select(nextInGroup(refs, store.selection));
     },
   });
 
@@ -531,14 +594,7 @@ function Lane({
         />
       ))}
       {placed.map((m) => (
-        <Marker
-          key={m.key}
-          mark={m}
-          x={m.x}
-          showLabel={m.showLabel}
-          item={roving.itemProps(m.key)}
-          show={roving.show(m.key)}
-        />
+        <Marker key={m.key} slot={m} item={roving.itemProps(m.key)} show={roving.show(m.key)} />
       ))}
     </>
   );
@@ -772,63 +828,90 @@ function AttemptBar({
 }
 AttemptBar.displayName = "AttemptBar";
 
-function Marker({
-  mark,
-  x,
-  showLabel,
-  item,
-  show,
-}: {
-  mark: Mark;
-  x: number;
-  showLabel: boolean;
-  item: ItemProps;
-  show: RovingShow;
-}) {
+/** Label text of a marker: the fact's label, or "facts" after a group's count box. */
+const slotText = (slot: Slot) =>
+  slot.members.length > 1 ? "facts" : (slot.members[0]?.label ?? "");
+
+function Marker({ slot, item, show }: { slot: Slot; item: ItemProps; show: RovingShow }) {
   const { animated } = useFlight();
-  const { selected } = useIsHighlighted(mark.ref);
-  const enterRef = useEnter<HTMLSpanElement>(mark.eventId !== null && animated.has(mark.eventId));
+  const selection = useSelection();
+  const first = slot.members[0] as Mark;
+  const group = slot.members.length > 1;
+  const selected =
+    selection !== null && slot.members.some((m) => refKey(m.ref) === refKey(selection));
+  const enterRef = useEnter<HTMLSpanElement>(
+    slot.members.some((m) => m.eventId !== null && animated.has(m.eventId)),
+  );
+  const label = slot.label;
   const style: CSSProperties = {
-    left: x,
+    left: label?.side === "left" ? label.left : slot.x - slot.box / 2,
     top: 0,
     height: MARK_Y * 2 + MARK,
+    flexDirection: label?.side === "left" ? "row-reverse" : "row",
     scrollMarginLeft: LEFT + 8,
   };
-  return (
-    <EntityHover entity={mark.ref} show={show}>
-      <div
-        role="option"
-        aria-selected={selected}
-        {...item}
-        title={mark.title}
-        className={cn("absolute z-[6] flex items-center gap-[3px]", ROVING_ITEM)}
-        style={style}
-      >
+  const title = group
+    ? [`${slot.members.length} facts`, ...slot.members.map((m) => m.title)].join("\n")
+    : first.title;
+  const option = (
+    <div
+      role="option"
+      aria-selected={selected}
+      {...item}
+      title={title}
+      className={cn("absolute z-[6] flex items-center gap-[3px]", ROVING_ITEM)}
+      style={style}
+    >
+      {group ? (
+        <span
+          ref={enterRef}
+          aria-hidden
+          className={cn(
+            "grid h-3 shrink-0 place-items-center bg-kumo-ink font-mono text-[9px] leading-none font-semibold text-kumo-inverse tabular-nums",
+            selected && "outline-2 outline-offset-1 outline-accent-500",
+          )}
+          style={{ width: slot.box }}
+        >
+          {slot.members.length}
+        </span>
+      ) : (
         <span
           ref={enterRef}
           aria-hidden
           className={cn(
             "block shrink-0",
-            MARK_STYLE[mark.kind],
+            MARK_STYLE[first.kind],
             selected && "outline-2 outline-offset-1 outline-accent-500",
           )}
           style={{ width: MARK, height: MARK }}
         />
-        {showLabel && (
-          <span
-            className={cn(
-              "font-mono text-[10px] leading-none whitespace-nowrap text-kumo-default",
-              MARK_TEXT[mark.kind],
-            )}
-          >
-            {mark.label}
-          </span>
-        )}
-        <span className="sr-only">
-          {showLabel ? ": " : ""}
-          {mark.title}
+      )}
+      {label && (
+        <span
+          aria-hidden
+          className={cn(
+            "block truncate font-mono text-[10px] leading-none whitespace-nowrap text-kumo-default",
+            // A group takes the tone of its highest-priority fact (a Challenge inside stays accent).
+            MARK_TEXT[first.kind],
+          )}
+          style={{ maxWidth: label.width }}
+        >
+          {slotText(slot)}
         </span>
-      </div>
+      )}
+      <span className="sr-only">
+        {group
+          ? `${slot.members.length} facts: ${slot.members.map((m) => m.title).join("; ")}`
+          : first.title}
+      </span>
+    </div>
+  );
+  // A group stands for several entities: its title lists them and activating it steps through them.
+  return group ? (
+    option
+  ) : (
+    <EntityHover entity={first.ref} show={show}>
+      {option}
     </EntityHover>
   );
 }
@@ -841,19 +924,60 @@ Marker.displayName = "Marker";
  */
 function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number> }) {
   const { state, animated } = useFlight();
-  const items = useMemo(
-    () =>
-      state.conflicts.flatMap((c) => {
+  // Chips sit in a bar row between the two lanes (CHIP_Y), never in a marker row, so they never
+  // cover a marker or its label. Each takes the free room right or left of its connector, in the
+  // row nearest the middle of its span, truncated when room is short.
+  const items = useMemo(() => {
+    const taken = new Map<number, Span[]>();
+    return state.conflicts
+      .flatMap((c) => {
         const a = row.get(c.taskIds[0]);
         const b = row.get(c.taskIds[1]);
         const event = state.events.find((e) => e.id === c.eventId);
-        if (a === undefined || b === undefined || !event) return [];
-        const y1 = Math.min(a, b) * ROW_H + MARK_Y + MARK / 2;
-        const y2 = Math.max(a, b) * ROW_H + MARK_Y + MARK / 2;
-        return [{ c, x: scale.x(event.at), y1, y2 }];
-      }),
-    [state, row, scale],
-  );
+        if (a === undefined || b === undefined || a === b || !event) return [];
+        return [{ c, a, b, x: scale.x(event.at) }];
+      })
+      .sort((p, q) => p.x - q.x)
+      .map(({ c, a, b, x }) => {
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        const y1 = lo * ROW_H + MARK_Y + MARK / 2;
+        const y2 = hi * ROW_H + MARK_Y + MARK / 2;
+        const text = `${c.open ? "⇄ " : "resolved · "}${c.resource.split(":").slice(-2).join(":")}`;
+        const mid = (lo + hi - 1) / 2;
+        const lanes = Array.from({ length: hi - lo }, (_, i) => lo + i).sort(
+          (p, q) => Math.abs(p - mid) - Math.abs(q - mid),
+        );
+        for (const lane of lanes) {
+          const spans = taken.get(lane) ?? [];
+          const chip = placeLabel({
+            anchor: x,
+            gap: 4,
+            width: labelWidth(text) + 4,
+            min: 44,
+            plot: scale.width,
+            taken: spans,
+          });
+          if (chip) {
+            taken.set(lane, [...spans, { left: chip.left, right: chip.left + chip.width }]);
+            return {
+              c,
+              x,
+              y1,
+              y2,
+              text,
+              left: chip.left,
+              width: chip.width,
+              top: lane * ROW_H + CHIP_Y,
+            };
+          }
+        }
+        // No free room in any row of the span: a minimal chip right of the connector.
+        const lane = lanes[0] ?? lo;
+        const left = Math.min(x + 4, scale.width - 24);
+        return { c, x, y1, y2, text, left, width: 24, top: lane * ROW_H + CHIP_Y };
+      });
+  }, [state, row, scale]);
   if (items.length === 0) return null;
   return (
     <div
@@ -876,9 +1000,8 @@ function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number>
           />
         ))}
       </svg>
-      {items.map(({ c, x, y1, y2 }) => {
+      {items.map(({ c, text, left, width, top }) => {
         const ref: EntityRef = { kind: "conflict", id: c.id };
-        const text = `${c.open ? "" : "resolved · "}${truncate(c.resource.split(":").slice(-2).join(":"), 28)}`;
         return (
           <EntityHover key={c.id} entity={ref}>
             <button
@@ -887,21 +1010,22 @@ function Connectors({ scale, row }: { scale: TimeScale; row: Map<string, number>
               title={`Conflict on ${c.resource}\n“${c.statements[0]}”\nvs “${c.statements[1]}”`}
               // 24px tall target around the 16px chip (DESIGN.md 5.2).
               className="pointer-events-auto absolute flex h-6 items-center font-mono text-[10px] leading-[14px] whitespace-nowrap focus-visible:outline-2 focus-visible:outline-accent-500"
-              style={{ left: x + 4, top: (y1 + y2) / 2 - 12 }}
+              style={{ left, top }}
             >
               <span
+                aria-hidden
                 className={cn(
-                  "border bg-kumo-elevated px-1",
+                  "block truncate border bg-kumo-elevated px-1",
                   c.open
                     ? "border-accent-500 text-kumo-accent"
                     : "border-kumo-rule text-kumo-subtle",
                 )}
+                style={{ maxWidth: width }}
               >
-                {c.open && <span aria-hidden>⇄ </span>}
                 {text}
               </span>
               <span className="sr-only">
-                , conflict on {c.resource}, {c.open ? "open" : "resolved"}
+                Conflict on {c.resource}, {c.open ? "open" : "resolved"}
               </span>
             </button>
           </EntityHover>

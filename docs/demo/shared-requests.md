@@ -1,13 +1,13 @@
 # Shared requests demo
 
-This runbook shows two people who change one live Project at the same time. Alice owns the Project. Bob is a collaborator. Five requests run in parallel: one pair conflicts, and one request repeats another. The system decides. A role never decides (ADR 0025). The design is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
+This runbook shows two people who change one live Project at the same time. Alice owns the Project. Bob is a member. Before the demo, Alice turns off "Member requests need review" in Settings, so Bob's requests go to the system at once (ADR 0028). Five requests run in parallel: one pair conflicts, and one request repeats another. The system decides. A role never decides (ADR 0025). The design is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
 
 Use prod (`https://rhumbatron.com`). You need two accounts with different email addresses and two browser profiles. Alice must own a Project whose live app is a daily planner: one section per day with checklist items.
 
 ```mermaid
 sequenceDiagram
   actor A as Alice (owner)
-  actor B as Bob (collaborator)
+  actor B as Bob (member)
   participant API as api
   participant W as ChangeWorkflow
   participant R as ProjectRootDO
@@ -71,7 +71,7 @@ For the conflict, check these items:
 
 For D, check that the question quotes the criterion of A that already counts the items left, and that D has no Task.
 
-If Bob calls an owner-only route, the API returns 403.
+If Bob calls a route for the owner and the admins, the API returns 403.
 
 ## Answer the questions
 

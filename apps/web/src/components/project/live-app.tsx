@@ -18,7 +18,7 @@ export function LiveAppLine({
 }: {
   projectId: string;
   hasSource: boolean;
-  /** Owner only: deploy, retry and remove (a collaborator sees the app but cannot manage it). */
+  /** Owner or admin: deploy, retry and remove (everyone else sees the app but cannot manage it). */
   canManage?: boolean;
 }) {
   const queryClient = useQueryClient();

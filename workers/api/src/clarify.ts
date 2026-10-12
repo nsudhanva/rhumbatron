@@ -1,4 +1,10 @@
-import { apiData, ClarifyChangeOutcome, ClarifyChangeRequest } from "@rhumbatron/protocol";
+import {
+  apiData,
+  ClarifyChangeOutcome,
+  ClarifyChangeRequest,
+  can,
+  type ProjectRole,
+} from "@rhumbatron/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
@@ -13,7 +19,8 @@ import { ensureIdentity, projectRole } from "./identity.ts";
  * - `{ action: "proceed_anyway" }` plans without another question this round.
  * - `{ action: "withdraw" }` cancels the Change with the reason "Withdrawn by the requester".
  *
- * Only the requester (`created_by`) or the Project owner may answer; another collaborator gets 403.
+ * The requester (`created_by`, any role that may submit) or the owner or an admin may answer;
+ * anyone else gets 403 (`change.manageOwn`, `change.manageAny`).
  * The integration Worker owns the transition and the workflow event (`clarifyChange`).
  */
 
@@ -31,13 +38,16 @@ const integration = (env: Env) => env.INTEGRATION as unknown as IntegrationRpc;
 
 const ChangeIdParam = z.object({ changeId: z.string().regex(/^chg_[a-z0-9-]+$/) });
 
-/** True when the caller may answer: the requester, or the Project owner. */
-export function mayClarify(
-  role: "owner" | "collaborator" | null,
+/**
+ * True when the caller may act on a request as its requester or as a manager: answer, withdraw,
+ * or cancel it. The requester needs `change.manageOwn`, anyone else `change.manageAny`.
+ */
+export function mayActOnRequest(
+  role: ProjectRole | null,
   requesterUserId: string,
   userId: string,
 ): boolean {
-  return role === "owner" || (role !== null && requesterUserId === userId);
+  return requesterUserId === userId ? can(role, "change.manageOwn") : can(role, "change.manageAny");
 }
 
 export const clarify = new Hono<AppEnv>().post(
@@ -54,12 +64,12 @@ export const clarify = new Hono<AppEnv>().post(
       .first<{ project_id: string; created_by: string }>();
     const role = change ? await projectRole(c.env.DB, userId, change.project_id) : null;
     if (!change || !role) return fail(c, 404, "not_found", "Change not found");
-    if (!mayClarify(role, change.created_by, userId)) {
+    if (!mayActOnRequest(role, change.created_by, userId)) {
       return fail(
         c,
         403,
         "forbidden",
-        "Only the person who made the request or the project owner can answer it.",
+        "Only the person who made the request, the project owner, or an admin can answer it.",
       );
     }
     const outcome = ClarifyChangeOutcome.parse(

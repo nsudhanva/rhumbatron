@@ -22,7 +22,7 @@ import {
   shortSha,
 } from "../components/workspace-page/model";
 import { getProject, getWorkspace, getWorkspaceFiles, type WorkspaceView } from "../lib/api";
-import { EMPTY, formatAge, formatNumber, generation, truncate } from "../lib/format";
+import { changeLabel, EMPTY, formatAge, formatNumber, generation } from "../lib/format";
 import { loadOnServer, prefetchProjectShell } from "../lib/ssr-data";
 
 export const Route = createFileRoute("/projects_/$projectId/workspace")({
@@ -418,7 +418,7 @@ function ChangeChips({
   const chips = [
     ...changes.map((c) => ({
       id: c.id,
-      label: truncate(c.goal, 36),
+      label: changeLabel(c),
       title: c.goal,
       count: c.forks,
     })),

@@ -3,6 +3,7 @@ import { ArrowRight } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import type { AgentClaim, AgentRunView, AgentView } from "../../lib/api";
 import {
+  changeLabel,
   EMPTY,
   formatAge,
   formatClock,
@@ -62,7 +63,9 @@ export function AgentInspector({
                 className="inline-flex items-center gap-1.5 text-kumo-accent hover:underline"
                 title={agent.task.changeGoal}
               >
-                <span className="line-clamp-2">{agent.task.changeGoal}</span>
+                <span className="line-clamp-2">
+                  {changeLabel({ goal: agent.task.changeGoal, title: agent.task.changeTitle })}
+                </span>
                 <ArrowRight size={14} aria-hidden className="shrink-0" />
               </Link>
             ),

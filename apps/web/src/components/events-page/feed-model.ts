@@ -14,31 +14,6 @@ export const FEED_PAGE_LIMIT = 100;
 /** First page: enough to fill the stream without paging. */
 export const FEED_FIRST_LIMIT = 50;
 
-/** Event families for the filter chips, in the order of the AGENTS.md 17.2 list. */
-export const FAMILIES = [
-  "change",
-  "task",
-  "claim",
-  "intent",
-  "challenge",
-  "changeset",
-  "candidate",
-  "verification",
-  "approval",
-  "canonical",
-  "agent",
-  "model",
-] as const;
-
-export type Family = (typeof FAMILIES)[number];
-/** Types outside the twelve families (project, preview, build, deployment, test...). */
-export type FamilyKey = Family | "other";
-
-export function familyOf(eventType: string): FamilyKey {
-  const head = eventType.split(".")[0] ?? "";
-  return (FAMILIES as readonly string[]).includes(head) ? (head as Family) : "other";
-}
-
 /**
  * Type color role (DESIGN.md 9.9): failure in danger, completion in success, state-changing
  * commits in brand, everything else default. Status words in the kept payload refine the two

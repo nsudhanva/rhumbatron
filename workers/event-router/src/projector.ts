@@ -65,6 +65,10 @@ const TASK_STATUS: StatusMap = {
 
 const CHANGE_STATUS: StatusMap = {
   "change.created": "created",
+  // Request review (ADR 0028): a member's request waits, then starts or ends.
+  "change.proposed": "proposed",
+  "change.included": "created",
+  "change.declined": null,
   "change.compiled": "running",
   "verification.started": "verifying",
   // Complementary Tasks integrate: the dependent Task re-runs before any Candidate composes.

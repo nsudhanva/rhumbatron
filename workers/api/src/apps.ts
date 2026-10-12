@@ -7,6 +7,8 @@ import {
   apiData,
   appUrl,
   CandidatePreview,
+  can,
+  deniedMessage,
   isVersionPreviewId,
   ProjectApp,
   previewChannel,
@@ -18,7 +20,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { errorBody, fail, respond, validate } from "./http.ts";
-import { canAccessProject, ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
+import { canAccessProject, ensureIdentity, projectRole } from "./identity.ts";
 
 /**
  * Live app of a Project (Phase 16, ADR 0020). Prod only: the `APPS_DOMAIN` binding exists only
@@ -128,8 +130,8 @@ export const apps = new Hono<AppEnv>()
       const { projectId } = c.req.valid("param");
       const userId = await member(c.env, c.get("authSubject"), projectId);
       if (!userId) return fail(c, 404, "not_found", "Project not found");
-      if ((await projectRole(c.env.DB, userId, projectId)) !== "owner") {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("publish the app"));
+      if (!can(await projectRole(c.env.DB, userId, projectId), "app.publish")) {
+        return fail(c, 403, "forbidden", deniedMessage("app.publish", "publish the app"));
       }
       if (!c.env.APPS_DOMAIN) {
         return respond(c, apiData(AppProvisionOutcome), { data: { status: "disabled" } });
@@ -176,8 +178,8 @@ export const apps = new Hono<AppEnv>()
       const { projectId } = c.req.valid("param");
       const userId = await member(c.env, c.get("authSubject"), projectId);
       if (!userId) return fail(c, 404, "not_found", "Project not found");
-      if ((await projectRole(c.env.DB, userId, projectId)) !== "owner") {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("remove the app"));
+      if (!can(await projectRole(c.env.DB, userId, projectId), "app.remove")) {
+        return fail(c, 403, "forbidden", deniedMessage("app.remove", "remove the app"));
       }
       const removed = await c.env.DB.prepare(
         "UPDATE app_deployments SET status = 'removed', updated_at = ? WHERE project_id = ?",
@@ -261,8 +263,8 @@ export const apps = new Hono<AppEnv>()
       const { projectId } = c.req.valid("param");
       const userId = await member(c.env, c.get("authSubject"), projectId);
       if (!userId) return fail(c, 404, "not_found", "Project not found");
-      if ((await projectRole(c.env.DB, userId, projectId)) !== "owner") {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("roll back"));
+      if (!can(await projectRole(c.env.DB, userId, projectId), "app.rollback")) {
+        return fail(c, 403, "forbidden", deniedMessage("app.rollback", "roll back"));
       }
       const body = c.req.valid("json");
       const outcome = RollbackOutcome.parse(

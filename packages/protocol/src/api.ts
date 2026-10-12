@@ -7,6 +7,8 @@ export const ApiErrorCode = z.enum([
   "forbidden",
   "not_found",
   "conflict",
+  /** A usage cap refuses the request (for example the monthly Sandbox seconds). */
+  "rate_limited",
   "internal",
 ]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCode>;

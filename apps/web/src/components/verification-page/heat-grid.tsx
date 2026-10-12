@@ -1,6 +1,6 @@
 import { cn } from "@cloudflare/kumo";
 import { Link } from "@tanstack/react-router";
-import { truncate } from "../../lib/format";
+import { changeLabel } from "../../lib/format";
 import { criterion, REASON_WORDS } from "../candidate/model";
 import { statusView } from "../ui/status-pill";
 import { GRID_COLUMNS, type HeatCell, heatCell, type VerifiedCandidate } from "./model";
@@ -70,7 +70,7 @@ export function HeatGrid({ items, kinds }: { items: VerifiedCandidate[]; kinds: 
                   scope="col"
                   title={
                     item
-                      ? `${index(i + 1)} · ${item.label} · ${truncate(item.change?.goal ?? item.candidate.changeId, 80)}`
+                      ? `${index(i + 1)} · ${item.label} · ${item.change ? changeLabel(item.change) : item.candidate.changeId}`
                       : `${index(i + 1)} · no Candidate`
                   }
                   className="w-7 p-0 pb-1 text-center align-bottom font-mono text-[9px] font-normal text-kumo-subtle tabular-nums"

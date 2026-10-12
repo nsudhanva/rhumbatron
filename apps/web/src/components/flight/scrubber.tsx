@@ -6,20 +6,19 @@ import { displayTimeZone } from "../../lib/render-time";
 import type { ActivityEvent } from "../agents/activity-model";
 import { StatusPill } from "../ui/status-pill";
 import { useFlight } from "./flight-context";
-import { type FlightTime, useFlightStore, useFlightTime } from "./flight-store";
+import { type FlightTime, PLAYBACK_SPEEDS, useFlightStore, useFlightTime } from "./flight-store";
 
 /**
  * Time machine (DESIGN.md 9.8, 11): a range over the recorded time of the Change. Live folds every
  * fact; any other position folds only the facts recorded at or before it. Tick marks are recorded
  * notable facts (Candidate forks, conflicts, failures, promotion), placed by their time. Play
- * advances through recorded time at 1x, 4x or 16x and stops at the end. Nothing is interpolated.
+ * advances through recorded time at 1x, 4x, 8x or 16x and stops at the end. Nothing is interpolated.
  *
  * Keyboard on the range: Left/Right step to the previous/next recorded fact, Home to the start,
  * End back to live. The page maps `[` and `]` to the same steps.
  */
 
 const TICK_MS = 100;
-const SPEEDS = [1, 4, 16] as const;
 
 /**
  * The instant of the previous (-1) or next (+1) recorded fact from the current time-machine
@@ -199,7 +198,7 @@ export function Scrubber() {
         {historical && (
           <fieldset className="flex border border-kumo-divider">
             <legend className="sr-only">Playback speed</legend>
-            {SPEEDS.map((s, i) => (
+            {PLAYBACK_SPEEDS.map((s, i) => (
               <button
                 key={s}
                 type="button"

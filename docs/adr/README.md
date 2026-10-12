@@ -28,3 +28,6 @@ The [architecture pages](../architecture/README.md) describe how the system work
 | [0025](./0025-system-decides-requests.md) | The system decides requests, and asks before it builds |
 | [0026](./0026-candidate-selection-and-acceptance.md) | Candidate selection among siblings and the acceptance check |
 | [0027](./0027-server-rendered-page-data.md) | Server-rendered page data and the phone text floor |
+| [0028](./0028-roles-and-request-review.md) | Project roles and member request review |
+| [0029](./0029-code-edit-sessions.md) | Code page edit sessions with a terminal |
+| [0030](./0030-budget-scopes.md) | Budget scopes for requests, Projects, and users |

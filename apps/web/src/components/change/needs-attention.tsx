@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import type { ConflictDetail } from "../../lib/api";
 import type { CandidateView, ChangeView } from "../../lib/api-change";
 import { truncate } from "../../lib/format";
@@ -7,7 +8,7 @@ import { conflictLine, needsPerson } from "../conflict-card";
 import { DeadLetters } from "../dead-letters";
 import { SectionError } from "../project/feedback";
 import { Section } from "../ui/page";
-import { RaiseBudget } from "./change-controls";
+import { BudgetBlock } from "./change-budget";
 import { requesterName } from "./change-status";
 import { ClarificationCard } from "./clarification-card";
 
@@ -31,13 +32,19 @@ export function NeedsAttention({
   conflicts,
   candidateLabel,
   canAnswer,
+  canRaiseBudget,
   hasOperatorIssues,
+  review,
 }: {
   change: ChangeView;
   candidates: CandidateView[];
   conflicts: ConflictDetail[];
   candidateLabel: (id: string) => string;
   canAnswer: boolean;
+  /** Owner or admin: raise the request budget of a budget-blocked Change. */
+  canRaiseBudget: boolean;
+  /** Include / Decline of a proposed request, for an owner or admin; null otherwise. */
+  review: ReactNode;
   /** Dead letters or limit stops exist for this Change (the DeadLetters read). */
   hasOperatorIssues: boolean;
 }) {
@@ -47,9 +54,11 @@ export function NeedsAttention({
   const planFailed =
     change.status === "failed" && (change.blockedReason?.startsWith("Planning failed:") ?? false);
   const blocked = change.status === "blocked" && change.blockedReason;
+  // Every viewer sees which budget stopped the Change and who can raise it (change-budget.tsx).
   const budget = change.status === "budget_blocked";
 
   if (
+    !review &&
     !clarification &&
     !approval &&
     humanConflicts.length === 0 &&
@@ -64,6 +73,20 @@ export function NeedsAttention({
   return (
     <Section label="Needs attention">
       <div className="grid gap-3">
+        {review && (
+          <div className="grid gap-3 bg-kumo-warning-tint px-3.5 py-2.5 text-[13px] text-kumo-warning">
+            <p>
+              <span className="font-semibold">
+                {requesterName(change) === "you" ? "You" : requesterName(change)} proposed this
+                request.
+              </span>{" "}
+              Member requests wait for an owner or admin. Include starts the work; Decline ends it
+              as not built.
+            </p>
+            <div className="text-kumo-default">{review}</div>
+          </div>
+        )}
+
         {clarification && (
           <ClarificationCard
             changeId={change.id}
@@ -90,7 +113,7 @@ export function NeedsAttention({
           </p>
         )}
 
-        {budget && <RaiseBudget changeId={change.id} budgetUsd={change.budgetUsd} />}
+        {budget && <BudgetBlock change={change} canRaiseBudget={canRaiseBudget} />}
 
         {blocked && <SectionError message={change.blockedReason} />}
 

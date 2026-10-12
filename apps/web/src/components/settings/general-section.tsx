@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getProjectApp } from "../../lib/api";
 import { type ProjectSettings, updateProjectSettings } from "../../lib/api-settings";
 import { timeAgo } from "../../lib/format";
+import { can } from "../../lib/permissions";
 import { SectionError } from "../project/feedback";
 import { KeyValue } from "../ui/key-value";
 import { Section } from "../ui/page";
@@ -21,7 +22,7 @@ function Copy({ value }: { value: string }) {
 Copy.displayName = "SettingsCopy";
 
 /**
- * General: the Project name (the owner edits it), the slug and live app host (read-only, with
+ * General: the Project name (the owner or an admin edits it), the slug and live app host (read-only, with
  * copy) and the creation date.
  */
 export function GeneralSection({
@@ -31,7 +32,7 @@ export function GeneralSection({
   projectId: string;
   settings: ProjectSettings;
 }) {
-  const isOwner = settings.role === "owner";
+  const edits = can(settings.role, "settings.edit");
   const app = useQuery({
     queryKey: ["project-app", projectId],
     queryFn: () => getProjectApp({ data: projectId }),
@@ -41,10 +42,10 @@ export function GeneralSection({
 
   return (
     <Section label="General">
-      {isOwner && <NameForm projectId={projectId} name={settings.name} />}
+      {edits && <NameForm projectId={projectId} name={settings.name} />}
       <KeyValue
         items={[
-          ...(isOwner ? [] : [{ label: "Name", value: settings.name }]),
+          ...(edits ? [] : [{ label: "Name", value: settings.name }]),
           { label: "Slug", value: <Copy value={settings.slug} /> },
           {
             label: "Live app",

@@ -15,9 +15,9 @@ import { ensureIdentity } from "./identity.ts";
  * Access: every query joins `memberships` on the caller's user ID, the same rule as
  * `canAccessProject`, so a user never sees another tenant's rows. Archived Projects are skipped.
  *
- * Cost: one D1 batch of 10 capped SELECTs per read (list and count share it), plus the 3-statement
+ * Cost: one D1 batch of 13 capped SELECTs per read (list and count share it), plus the 3-statement
  * `ensureIdentity` batch. Each SELECT starts from a rare state (verified Candidates, open dead
- * letters, blocked Changes, confirmed conflicts, requests that need input) or a 7-day window through an index, so rows read
+ * letters, blocked Changes, confirmed conflicts, requests that need input or review) or a 7-day window through an index, so rows read
  * scale with open and recent items, not with history. Marking read writes one row per new mark.
  * Promotion still re-checks everything (section 36): a notification is a pointer, never a gate.
  */
@@ -37,6 +37,9 @@ const NotificationKind = z.enum([
   "release_deployed",
   "request_not_selected",
   "request_needs_input",
+  "request_proposed",
+  "request_included",
+  "request_declined",
 ]);
 type NotificationKind = z.infer<typeof NotificationKind>;
 
@@ -235,10 +238,16 @@ WHERE ch.status = 'not_selected' AND ch.outcome = 'not_selected' AND ch.created_
   AND ch.updated_at >= ?2
 ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
 
+/** True for the Project owner or an admin (`change.manageAny`, `change.review`). `?1` = user. */
+const MANAGES = `(EXISTS (SELECT 1 FROM memberships m WHERE m.org_id = p.org_id AND m.user_id = ?1)
+  OR EXISTS (SELECT 1 FROM project_members pm
+             WHERE pm.project_id = p.id AND pm.user_id = ?1 AND pm.role IN ('owner', 'admin')))`;
+
 /**
- * request_needs_input (ADR 0025): the requester; for a conflict also the Project owner (owner
- * member row, or organization member: the `projectRole` rule). An action item while the status
- * holds. The ID carries the round, so a new question of the same Change is a new item.
+ * request_needs_input (ADR 0025): the requester; for a conflict also the Project owner and the
+ * admins (owner or admin member row, or organization member: the `projectRole` rule). An action
+ * item while the status holds. The ID carries the round, so a new question of the same Change is
+ * a new item.
  */
 const NEEDS_INPUT_SQL = `
 SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.title, ch.updated_at,
@@ -248,11 +257,35 @@ ${MINE("ch.project_id")}
 ${read("r", `'request_needs_input:' || ch.id || ':' || COALESCE(json_extract(ch.clarification_json, '$.round'), 1)`)}
 WHERE ch.status = 'needs_input'
   AND (ch.created_by = ?1
-    OR (json_extract(ch.clarification_json, '$.kind') = 'conflict'
-      AND (EXISTS (SELECT 1 FROM memberships m WHERE m.org_id = p.org_id AND m.user_id = ?1)
-        OR EXISTS (SELECT 1 FROM project_members pm
-                   WHERE pm.project_id = p.id AND pm.user_id = ?1 AND pm.role = 'owner'))))
+    OR (json_extract(ch.clarification_json, '$.kind') = 'conflict' AND ${MANAGES}))
 ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
+
+/**
+ * request_proposed (ADR 0028): a member's request waits for review. The Project owner and the
+ * admins, not the requester. An action item while the Change is `proposed`.
+ */
+const PROPOSED_SQL = `
+SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.title, ch.updated_at,
+       u.display_name, u.email, r.read_at
+FROM changes ch
+${MINE("ch.project_id")}
+LEFT JOIN users u ON u.id = ch.created_by
+${read("r", `'request_proposed:' || ch.id`)}
+WHERE ch.status = 'proposed' AND ch.created_by <> ?1 AND ${MANAGES}
+ORDER BY ch.updated_at DESC LIMIT ${PER_KIND}`;
+
+/**
+ * request_included and request_declined: the requester, within the window, after an owner or
+ * admin decided. `?2` = since. Starts from `idx_changes_review_decided`.
+ */
+const reviewedPart = (state: "included" | "declined") => `
+SELECT ch.id, ch.project_id, p.name AS project_name, ch.goal, ch.title,
+       ch.review_decided_at AS updated_at, ch.review_reason AS outcome_reason, r.read_at
+FROM changes ch
+${MINE("ch.project_id")}
+${read("r", `'request_${state}:' || ch.id`)}
+WHERE ch.review_state = '${state}' AND ch.review_decided_at >= ?2 AND ch.created_by = ?1
+ORDER BY ch.review_decided_at DESC LIMIT ${PER_KIND}`;
 
 type Base = { project_id: string; project_name: string; read_at?: string | null };
 type VerifiedRow = Base & {
@@ -570,6 +603,42 @@ function needsInputItem(row: NeedsInputRow): NotificationView {
   };
 }
 
+type ProposedRow = CompletedRow & { display_name: string | null; email: string | null };
+
+function proposedItem(row: ProposedRow): NotificationView {
+  const who = row.display_name ?? (row.email ? (row.email.split("@")[0] ?? null) : null);
+  return {
+    ...project(row),
+    changeId: row.id,
+    id: `request_proposed:${row.id}`,
+    kind: "request_proposed",
+    severity: "action",
+    title: "A request waits for your review",
+    body: joinParts(who ? `From ${who}` : null, changeTitle(row.title, row.goal)),
+    href: `/changes/${row.id}`,
+    createdAt: row.updated_at,
+    read: !!row.read_at,
+  };
+}
+
+function reviewedItem(row: NotSelectedRow, state: "included" | "declined"): NotificationView {
+  return {
+    ...project(row),
+    changeId: row.id,
+    id: `request_${state}:${row.id}`,
+    kind: state === "included" ? "request_included" : "request_declined",
+    severity: state === "included" ? "info" : "attention",
+    title: state === "included" ? "Your request was included" : "Your request was declined",
+    body: joinParts(
+      state === "declined" ? clip(row.outcome_reason ?? "No reason given", 160) : null,
+      changeTitle(row.title, row.goal),
+    ),
+    href: `/changes/${row.id}`,
+    createdAt: row.updated_at,
+    read: !!row.read_at,
+  };
+}
+
 const RANK: Record<NotificationSeverity, number> = { action: 0, attention: 1, info: 2 };
 
 /**
@@ -596,6 +665,9 @@ export async function deriveNotifications(
     released,
     notSelected,
     needsInput,
+    proposed,
+    included,
+    declined,
   ] = await db.batch([
     userOnly(VERIFIED_SQL),
     userOnly(DEAD_LETTER_SQL),
@@ -607,6 +679,9 @@ export async function deriveNotifications(
     statement(RELEASES_SQL),
     statement(NOT_SELECTED_SQL),
     userOnly(NEEDS_INPUT_SQL),
+    userOnly(PROPOSED_SQL),
+    statement(reviewedPart("included")),
+    statement(reviewedPart("declined")),
   ]);
   const rows = <T>(result: D1Result | undefined) => (result?.results ?? []) as T[];
   const items: NotificationView[] = [
@@ -622,6 +697,9 @@ export async function deriveNotifications(
     ...rows<ReleaseRow>(released).map(releaseItem),
     ...rows<NotSelectedRow>(notSelected).map(notSelectedItem),
     ...rows<NeedsInputRow>(needsInput).map(needsInputItem),
+    ...rows<ProposedRow>(proposed).map(proposedItem),
+    ...rows<NotSelectedRow>(included).map((row) => reviewedItem(row, "included")),
+    ...rows<NotSelectedRow>(declined).map((row) => reviewedItem(row, "declined")),
   ];
   return items.sort(
     (a, b) =>

@@ -6,8 +6,10 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deriveActivity } from "../components/agents/activity-model";
 import { AgentActivity } from "../components/agents/agent-activity";
+import { ReviewActions } from "../components/board/review-actions";
 import { candidateLabels } from "../components/candidate/model";
 import { CandidateSummary } from "../components/change/candidate-summary";
+import { budgetDetail } from "../components/change/change-budget";
 import { CancelChange } from "../components/change/change-controls";
 import { ChangeHeader } from "../components/change/change-header";
 import { ChangeStats, changeSpend, InvariantList } from "../components/change/change-overview";
@@ -42,15 +44,9 @@ import {
   listTasks,
 } from "../lib/api";
 import type { CandidateView, ChangeView as ChangeRead } from "../lib/api-change";
-import {
-  formatFraction,
-  formatNumber,
-  formatUsd,
-  generation,
-  isCompiling,
-  isLive,
-} from "../lib/format";
+import { changeLabel, formatNumber, generation, isCompiling, isLive } from "../lib/format";
 import { deltaTouchesChange, type LiveStatus, useProjectLive } from "../lib/live";
+import { asRole, can } from "../lib/permissions";
 import { loadOnServer } from "../lib/ssr-data";
 
 /**
@@ -116,10 +112,11 @@ function ChangeView() {
     queryKey: ["change", changeId],
     // The API returns the risk tier and record times with the detail (workers/api changes.ts).
     queryFn: () => getChange({ data: changeId }) as Promise<ChangeRead>,
-    // A Change waiting for an answer has no live work, but the answer can come from another
-    // person, so it keeps the slow poll.
+    // A Change waiting for an answer or a review has no live work, but the answer can come
+    // from another person, so it keeps the slow poll.
     refetchInterval: (query) =>
-      isLive(query.state.data, undefined) || query.state.data?.status === "needs_input"
+      isLive(query.state.data, undefined) ||
+      ["needs_input", "proposed"].includes(query.state.data?.status ?? "")
         ? fallback
         : false,
     // A demo screen may sit in a background tab; polling still stops once the Change is idle.
@@ -193,7 +190,9 @@ function ChangeView() {
     queryFn: () => getProject({ data: projectId ?? "" }),
     enabled: !!projectId,
   });
-  const isOwner = project.data?.role === "owner";
+  const role = asRole(project.data?.role);
+  // Owner and admin: approve and promote (the primary actions), compose, cancel any request.
+  const operate = can(role, "candidate.approve");
   // The live app answers "Live as Sn" and the "Open live app" action, once the Change ships.
   const shipped = ["releasing", "completed"].includes(change.data?.status ?? "");
   const projectApp = useQuery({
@@ -310,15 +309,20 @@ function ChangeView() {
   const selectedTask = selected ? taskList.find((t) => t.id === selected) : undefined;
   const spend = changeSpend(taskList);
   const compiling = isCompiling(data.status) && taskList.length === 0;
-  // Ended before planning (withdrawn, not selected, or cancelled or failed before the Work Graph):
-  // no Task, agent run, Candidate or file change can appear, so those sections stay out.
+  // Waiting for review, or ended before planning (withdrawn, declined, not selected, or cancelled
+  // or failed before the Work Graph): no Task, agent run, Candidate or file change can appear
+  // yet, so those sections stay out.
   const endedBeforePlanning =
-    ENDED.has(data.status) &&
+    (ENDED.has(data.status) || data.status === "proposed") &&
     !tasks.isPending &&
     taskList.length === 0 &&
     !candidates.isPending &&
     candidateList.length === 0;
-  const canAnswer = data.requester?.isYou === true || isOwner;
+  // The requester answers, withdraws or cancels their own request; owner and admin any request.
+  const canAnswer =
+    (data.requester?.isYou === true && can(role, "change.manageOwn")) ||
+    can(role, "change.manageAny");
+  const reviewable = data.status === "proposed" && can(role, "change.review");
   const names = candidateLabels(candidateList);
   const liveApp = projectApp.data?.app?.status === "ready" ? projectApp.data.app : null;
   const line = statusLine({
@@ -344,7 +348,19 @@ function ChangeView() {
 
   // One primary action at most (DESIGN.md 8.1). Answering happens in the form below the title.
   const primary =
-    data.status === "needs_input" ? null : approval ? (
+    data.status === "needs_input" || data.status === "proposed" ? null : !operate ? (
+      data.status === "completed" && liveApp ? (
+        <a
+          href={liveApp.url}
+          target="_blank"
+          rel="noreferrer"
+          className={cn(buttonVariants({ variant: "primary" }), "gap-1.5")}
+        >
+          <ArrowSquareOut size={16} aria-hidden />
+          Open live app
+        </a>
+      ) : null
+    ) : approval ? (
       <Link
         to="/candidates/$candidateId"
         params={{ candidateId: approval.id }}
@@ -382,13 +398,14 @@ function ChangeView() {
         live={liveOpen}
         actions={
           <>
-            {/* The API lets the requester or the Project owner cancel; nobody else sees it. */}
+            {/* The API lets the requester, an admin or the owner cancel; nobody else sees it. */}
             {canAnswer && <CancelChange changeId={data.id} status={data.status} />}
             <Link
               to="/changes/$changeId/flight"
               params={{ changeId }}
               className={cn(
-                buttonVariants({ variant: primary ? "secondary" : "primary" }),
+                // Include in Needs attention is the one primary action of a proposed request.
+                buttonVariants({ variant: primary || reviewable ? "secondary" : "primary" }),
                 "gap-1.5",
               )}
             >
@@ -406,7 +423,17 @@ function ChangeView() {
         conflicts={conflictList}
         candidateLabel={(id) => names.get(id) ?? id}
         canAnswer={canAnswer}
+        canRaiseBudget={can(role, "change.raiseBudget")}
         hasOperatorIssues={operatorIssues}
+        review={
+          reviewable ? (
+            <ReviewActions
+              projectId={data.projectId}
+              changeId={data.id}
+              title={changeLabel(data)}
+            />
+          ) : null
+        }
       />
 
       <div
@@ -436,7 +463,9 @@ function ChangeView() {
               how={
                 data.status === "needs_input"
                   ? "Tasks appear after the questions above are answered."
-                  : "This Change has no Work Graph."
+                  : data.status === "proposed"
+                    ? "Tasks appear after an admin includes the request."
+                    : "This Change has no Work Graph."
               }
             />
           ) : (
@@ -473,6 +502,7 @@ function ChangeView() {
             evidence={evidenceById}
             criteria={data.acceptanceCriteria}
             canCompose={
+              can(role, "candidate.compose") &&
               ![
                 "cancelled",
                 "failed",
@@ -500,7 +530,11 @@ function ChangeView() {
           tasks={taskList}
           conflicts={conflictList}
           candidates={candidateList}
-          budgetUsd={data.budgetUsd}
+          budgetUsd={
+            data.budget && data.budget.scope !== "change"
+              ? null
+              : (data.budget?.capUsd ?? data.budgetUsd)
+          }
         />
         <KeyValue
           items={[
@@ -509,9 +543,7 @@ function ChangeView() {
             { label: "Base generation", value: generation(data.baseGeneration), mono: true },
             {
               label: "Budget",
-              value: spend
-                ? formatFraction(formatUsd(spend.costUsd), formatUsd(data.budgetUsd))
-                : formatUsd(data.budgetUsd),
+              value: budgetDetail(data, spend ? spend.costUsd : null),
               mono: true,
             },
             { label: "Risk tier", value: data.riskTier ?? null },
@@ -533,7 +565,7 @@ function ChangeView() {
 }
 
 /** Statuses that end a Change for good; with no Tasks they mean it ended before planning. */
-const ENDED: ReadonlySet<string> = new Set(["cancelled", "failed", "not_selected"]);
+const ENDED: ReadonlySet<string> = new Set(["cancelled", "failed", "not_selected", "declined"]);
 
 /** The recorded request-conflict outcome in words. */
 function outcomeWords(outcome: ChangeOutcome) {

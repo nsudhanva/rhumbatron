@@ -1,7 +1,8 @@
 import { type ReactNode, useSyncExternalStore } from "react";
 
 /**
- * Product View / Systems View (AGENTS.md 38.7). The header holds the toggle; pages only read it.
+ * Product View / Systems View (AGENTS.md 38.7). The Events page holds the toggle
+ * (components/events-page/view-mode-toggle) and Settings > Display sets the same value.
  *
  * Product View (the default) shows user outcomes. Systems View adds the machinery: K2 flow, Queue
  * flow, Durable Object ownership, model routes, Sandbox state and cost details.

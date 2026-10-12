@@ -19,6 +19,7 @@ export const REAL = {
 };
 
 const PROJECT_PAGES = [
+  "board",
   "graph",
   "agents",
   "events",

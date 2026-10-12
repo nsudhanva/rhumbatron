@@ -6,6 +6,8 @@ import {
   ApprovalView,
   apiData,
   CandidateSelectionView,
+  can,
+  deniedMessage,
   EvidenceRecord,
   PromotionOutcome,
   ReleaseView,
@@ -16,7 +18,7 @@ import { z } from "zod";
 import { type AuthVariables, requireAuth } from "./auth.ts";
 import { readGate } from "./candidate-read.ts";
 import { errorBody, fail, respond, validate } from "./http.ts";
-import { canAccessProject, ensureIdentity, ownerOnlyMessage, projectRole } from "./identity.ts";
+import { canAccessProject, ensureIdentity, projectRole } from "./identity.ts";
 
 /**
  * Candidates and their Evidence (AGENTS.md sections 15.5, 16.1, 33, 34). Creating a Candidate is
@@ -310,8 +312,8 @@ export const candidates = new Hono<AppEnv>()
       if (!change || !(await canAccessProject(c.env.DB, userId, change.project_id))) {
         return fail(c, 404, "not_found", "Change not found");
       }
-      if ((await projectRole(c.env.DB, userId, change.project_id)) !== "owner") {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("compose a Candidate"));
+      if (!can(await projectRole(c.env.DB, userId, change.project_id), "candidate.compose")) {
+        return fail(c, 403, "forbidden", deniedMessage("candidate.compose", "compose a Candidate"));
       }
       // No body (or no `changeSetIds`) composes every proposed ChangeSet.
       const subset = CandidateSubset.safeParse(await c.req.json().catch(() => ({})));
@@ -392,8 +394,8 @@ export const candidates = new Hono<AppEnv>()
       ) {
         return fail(c, 404, "not_found", "Candidate not found");
       }
-      if ((await projectRole(c.env.DB, userId, candidate.project_id)) !== "owner") {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("approve a release"));
+      if (!can(await projectRole(c.env.DB, userId, candidate.project_id), "candidate.approve")) {
+        return fail(c, 403, "forbidden", deniedMessage("candidate.approve", "approve a release"));
       }
       const outcome = ApprovalOutcome.parse(
         await integration(c.env).decideApproval({
@@ -434,8 +436,8 @@ export const candidates = new Hono<AppEnv>()
       if (!candidate || !(await canAccessProject(c.env.DB, userId, candidate.project_id))) {
         return fail(c, 404, "not_found", "Candidate not found");
       }
-      if ((await projectRole(c.env.DB, userId, candidate.project_id)) !== "owner") {
-        return fail(c, 403, "forbidden", ownerOnlyMessage("promote a Candidate"));
+      if (!can(await projectRole(c.env.DB, userId, candidate.project_id), "candidate.promote")) {
+        return fail(c, 403, "forbidden", deniedMessage("candidate.promote", "promote a Candidate"));
       }
       const outcome = PromotionOutcome.parse(
         await integration(c.env).promoteCandidate({ candidateId, actorUserId: userId }),

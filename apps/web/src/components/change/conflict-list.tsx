@@ -1,5 +1,5 @@
 import type { ConflictDetail, RequestConflictDetail } from "../../lib/api";
-import { formatNumber, truncate } from "../../lib/format";
+import { changeLabel, formatNumber } from "../../lib/format";
 import { ConflictCard, conflictKind, conflictLine } from "../conflict-card";
 import { Section } from "../ui/page";
 import { StatusPill } from "../ui/status-pill";
@@ -46,7 +46,7 @@ export function ConflictList({
                   label={
                     <span className="font-normal">
                       <span className="font-semibold">Request conflict</span> with "
-                      {truncate(other.goal, 90)}"
+                      {changeLabel(other)}"
                     </span>
                   }
                   meta={

@@ -10,6 +10,7 @@ import {
   type Release,
 } from "../lib/api";
 import { generation, timeAgo } from "../lib/format";
+import { can, useProjectRole } from "../lib/permissions";
 import { ApprovalDialog } from "./candidate/approval-dialog";
 import { Banner } from "./candidate/banner";
 import { type CheckRow, gateRule, shortHash } from "./candidate/model";
@@ -49,9 +50,15 @@ export function CandidatePromotion({
   });
 
   const { approval } = candidate;
+  // Approve, reject and promote are for an owner or admin; everyone else reads the state.
+  const role = useProjectRole(candidate.projectId);
+  const operate = can(role, "candidate.approve");
   const verified = candidate.status === "verified" && candidate.gate?.promotable === true;
   const awaitingApproval = verified && candidate.approvalRequired && !approval;
-  const canPromote = verified && (!candidate.approvalRequired || approval?.decision === "granted");
+  const canPromote =
+    can(role, "candidate.promote") &&
+    verified &&
+    (!candidate.approvalRequired || approval?.decision === "granted");
   const from = generation(candidate.baseGeneration);
   const to = generation(candidate.promotedGeneration ?? candidate.baseGeneration + 1);
   const rule = gateRule(candidate, riskTier);
@@ -69,7 +76,7 @@ export function CandidatePromotion({
           <p className="max-w-[760px] text-[13px] text-pretty">{rule}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {awaitingApproval && (
+          {awaitingApproval && operate && (
             <>
               <Button variant="primary" icon={CheckCircle} onClick={() => setDialogOpen(true)}>
                 Review and approve
@@ -192,7 +199,10 @@ export function CandidatePromotion({
         </p>
       )}
 
-      {awaitingApproval && (
+      {awaitingApproval && !operate && (
+        <p className="text-[13px] text-kumo-subtle">Waiting for an owner or admin to approve.</p>
+      )}
+      {awaitingApproval && operate && (
         <ApprovalDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}

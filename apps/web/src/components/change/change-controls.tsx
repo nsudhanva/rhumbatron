@@ -12,6 +12,7 @@ import { SectionError } from "../project/feedback";
 
 /** Statuses the API can cancel from: before promotion starts (integration change-status.ts). */
 const CANCELLABLE = new Set([
+  "proposed",
   "created",
   "compiling",
   "running",
@@ -42,6 +43,8 @@ export function CancelChange({ changeId, status }: { changeId: string; status: s
     },
   });
   if (!CANCELLABLE.has(status)) return null;
+  // A request still waiting for review is withdrawn, not cancelled: nothing ran yet.
+  const proposed = status === "proposed";
   if (!confirming) {
     return (
       <>
@@ -49,7 +52,7 @@ export function CancelChange({ changeId, status }: { changeId: string; status: s
           <span className="text-[13px] font-semibold text-kumo-danger">{cancel.error.message}</span>
         )}
         <Button variant="secondary" onClick={() => setConfirming(true)}>
-          Cancel change
+          {proposed ? "Withdraw request" : "Cancel change"}
         </Button>
       </>
     );
@@ -58,11 +61,11 @@ export function CancelChange({ changeId, status }: { changeId: string; status: s
     <>
       {!cancel.isPending && (
         <Button variant="ghost" onClick={() => setConfirming(false)}>
-          Keep running
+          {proposed ? "Keep it" : "Keep running"}
         </Button>
       )}
       <Button variant="secondary" loading={cancel.isPending} onClick={() => cancel.mutate()}>
-        Confirm cancel
+        {proposed ? "Confirm withdraw" : "Confirm cancel"}
       </Button>
     </>
   );

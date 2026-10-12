@@ -14,6 +14,7 @@ import {
   GitFork,
   Graph,
   type Icon,
+  Kanban,
   List,
   Moon,
   Pulse,
@@ -26,9 +27,9 @@ import {
 } from "@phosphor-icons/react";
 import { Link, type LinkOptions, useLocation, useRouter } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
+import { changeLabel } from "../../lib/format";
 import { type ShellLiveState, useShellLiveState } from "../../lib/live-status";
 import { type ColorMode, useColorMode } from "../../lib/mode";
-import { setViewMode, useViewMode, type ViewMode } from "../../lib/view-mode";
 import { NotificationBell } from "../notifications/notification-bell";
 import { SkeletonBar } from "../project/feedback";
 import { type Crumb, useDocumentTitle, usePageTrail } from "./page-meta";
@@ -40,7 +41,6 @@ import {
   type ShellContext,
   type ShellSection,
   useShellContext,
-  VIEW_SECTIONS,
 } from "./shell-context";
 
 /**
@@ -133,10 +133,10 @@ function changeScopedItem(
     return {
       ...base,
       link: linkFor(context.changeId),
-      ...(context.changeGoal
+      ...(context.changeTitle
         ? {
-            subtitle: `for: ${context.changeGoal}`,
-            title: `${base.label} of: ${context.changeGoal}`,
+            subtitle: `for: ${context.changeTitle}`,
+            title: `${base.label} of: ${context.changeGoal ?? context.changeTitle}`,
           }
         : {}),
     };
@@ -145,7 +145,7 @@ function changeScopedItem(
     return {
       ...base,
       link: linkFor(context.latestChange.id),
-      subtitle: `for: ${context.latestChange.goal}`,
+      subtitle: `for: ${changeLabel(context.latestChange)}`,
       title: `${base.label} of the newest Change: ${context.latestChange.goal}`,
     };
   }
@@ -169,6 +169,7 @@ function navItems(context: ShellContext, projectId: string): NavItem[] {
       link: { to: "/projects/$projectId", params: { projectId } },
     },
     { label: "Changes", icon: GitDiff, section: "changes", link: changesLink(projectId) },
+    projectPageItem(projectId, "board", Kanban),
     changeScopedItem(
       context,
       projectId,
@@ -201,7 +202,7 @@ function navItems(context: ShellContext, projectId: string): NavItem[] {
 }
 
 /** Number of skeleton rows while the Project of a Change or Candidate loads. */
-const SKELETON_ROWS = 13;
+const SKELETON_ROWS = 14;
 
 function Sidebar({ context }: { context: ShellContext }) {
   const [open, setOpen] = useState(false);
@@ -377,14 +378,21 @@ function SignedInIdentity() {
       <span className="grid size-7 shrink-0 place-items-center">
         <UserButton />
       </span>
-      <div className="grid min-w-0">
+      {/* The Account page: the user's own monthly budget and spend across Projects. */}
+      <Link
+        to="/account"
+        activeOptions={EXACT}
+        title="Account"
+        className="-mx-1 grid min-w-0 px-1 py-0.5 hover:bg-kumo-faint"
+      >
         <span className="truncate text-[13px] font-semibold">{name ?? "Signed in"}</span>
         {name && user?.fullName && (
           <span className="truncate font-mono text-[11px] text-kumo-subtle">
             {user.primaryEmailAddress?.emailAddress}
           </span>
         )}
-      </div>
+        <span className="sr-only">, account</span>
+      </Link>
     </div>
   );
 }
@@ -403,11 +411,10 @@ function Header({ context }: { context: ShellContext }) {
         <Breadcrumbs crumbs={crumbs} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {/* Left of the toggles: when it appears after sign-in, nothing to its right moves. */}
+        {/* Left of the mode toggle: when it appears after sign-in, nothing to its right moves. */}
         <Show when="signed-in">
           <NotificationBell />
         </Show>
-        {VIEW_SECTIONS.has(context.section) && <ViewToggle />}
         <ModeToggle />
       </div>
     </header>
@@ -491,51 +498,6 @@ function Breadcrumbs({ crumbs }: { crumbs: Crumb[] }) {
         })}
       </ol>
     </nav>
-  );
-}
-
-const VIEWS: { value: ViewMode; label: string; title: string }[] = [
-  { value: "product", label: "Product", title: "Product View: user outcomes" },
-  {
-    value: "systems",
-    label: "Systems",
-    title:
-      "Systems View: K2 and Queue flow, Durable Object ownership, model routes, Sandboxes, cost",
-  },
-];
-
-const VIEW_HELP =
-  "Product view shows outcomes; Systems view shows queues, Durable Objects, model routes. Set the default in project Settings.";
-
-/**
- * Product View / Systems View (AGENTS.md 38.7). Segmented control (8.2), selected in ink. Shown
- * only on pages that render differently per view (`VIEW_SECTIONS`).
- */
-function ViewToggle() {
-  const view = useViewMode();
-  return (
-    <fieldset className="flex border border-kumo-divider" title={VIEW_HELP}>
-      <legend className="sr-only">View. {VIEW_HELP}</legend>
-      {VIEWS.map(({ value, label, title }, index) => {
-        const selected = view === value;
-        return (
-          <button
-            key={value}
-            type="button"
-            title={title}
-            aria-pressed={selected}
-            onClick={() => setViewMode(value)}
-            className={cn(
-              "flex h-7 items-center px-3 text-[13px] transition-colors duration-(--rh-dur-ui) focus-visible:outline-offset-[-2px] pointer-coarse:h-11",
-              index > 0 && "border-l border-kumo-divider",
-              selected ? "bg-kumo-ink text-kumo-inverse" : "hover:bg-kumo-tint",
-            )}
-          >
-            {label}
-          </button>
-        );
-      })}
-    </fieldset>
   );
 }
 

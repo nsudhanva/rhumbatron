@@ -1,54 +1,44 @@
 import { cn } from "@cloudflare/kumo";
 import { formatNumber } from "../../lib/format";
-import { FAMILIES, type FamilyKey } from "./feed-model";
+import { EVENT_GROUPS, type EventGroup } from "../dag/model";
 
 /**
- * Filter chips by event family (DESIGN.md 8.3 filter chip, 9.9): 12px, 1px rule border, selected
- * in ink with inverse text, a trailing mono count at 70%. No selection means every family.
- * Counts cover the loaded events only; the stream says so next to the chips.
+ * Filter chips by event type group (DESIGN.md 8.3 filter chip, 9.9): 12px, 1px rule border,
+ * selected in ink with inverse text, a trailing mono count at 70%. "All" clears the group.
+ * Counts cover the loaded events that pass the other filters.
  */
-export function EventFilters({
+export function EventGroupChips({
   counts,
   total,
   selected,
   onChange,
 }: {
-  counts: Map<FamilyKey, number>;
+  counts: ReadonlyMap<EventGroup | "other", number>;
   total: number;
-  selected: ReadonlySet<FamilyKey>;
-  onChange: (next: Set<FamilyKey>) => void;
+  selected: EventGroup | null;
+  onChange: (next: EventGroup | null) => void;
 }) {
-  const other = counts.get("other") ?? 0;
-  const keys: FamilyKey[] =
-    other > 0 || selected.has("other") ? [...FAMILIES, "other"] : [...FAMILIES];
-  const toggle = (key: FamilyKey) => {
-    const next = new Set(selected);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    onChange(next);
-  };
+  const groups = Object.entries(EVENT_GROUPS) as [EventGroup, { label: string }][];
   return (
-    <fieldset className="flex min-w-0 flex-wrap gap-1.5">
-      <legend className="sr-only">Filter events by family</legend>
-      <Chip
-        label="All"
-        count={total}
-        pressed={selected.size === 0}
-        onClick={() => onChange(new Set())}
-      />
-      {keys.map((key) => (
+    <fieldset className="flex min-w-0 flex-wrap items-center gap-1.5">
+      <legend className="sr-only">Event type</legend>
+      <span aria-hidden className="mr-1 text-[11px] tracking-[0.08em] text-kumo-subtle uppercase">
+        Type
+      </span>
+      <Chip label="All" count={total} pressed={selected === null} onClick={() => onChange(null)} />
+      {groups.map(([key, group]) => (
         <Chip
           key={key}
-          label={key}
+          label={group.label}
           count={counts.get(key) ?? 0}
-          pressed={selected.has(key)}
-          onClick={() => toggle(key)}
+          pressed={selected === key}
+          onClick={() => onChange(selected === key ? null : key)}
         />
       ))}
     </fieldset>
   );
 }
-EventFilters.displayName = "EventFilters";
+EventGroupChips.displayName = "EventGroupChips";
 
 function Chip({
   label,

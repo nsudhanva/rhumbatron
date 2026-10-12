@@ -4,9 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { deleteProject, getProjectMembers, removeProjectMember } from "../../lib/api";
+import { can } from "../../lib/permissions";
 
 /**
- * "Delete project" for the owner (typed name confirms) and "Leave project" for a collaborator.
+ * "Delete project" for the owner (typed name confirms) and "Leave project" for everyone else.
  * Both end on the projects list. Deleting is irreversible; leaving keeps the person's past
  * requests with the Project and cancels the ones still open.
  */
@@ -24,7 +25,7 @@ export function ProjectRemove({
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
   const [mismatch, setMismatch] = useState(false);
-  const isOwner = role === "owner";
+  const isOwner = can(role, "project.delete");
 
   const members = useQuery({
     queryKey: ["project-members", projectId],
@@ -49,9 +50,9 @@ export function ProjectRemove({
     onSuccess: done,
   });
 
-  if (role !== "owner" && role !== "collaborator") return null;
+  if (!isOwner && !can(role, "project.leave")) return null;
   const label = isOwner ? "Delete project" : "Leave project";
-  // A collaborator needs their own member ID; it loads with the members list.
+  // Leaving needs the person's own member ID; it loads with the members list.
   const waitingForSelf = !isOwner && members.isPending;
   const confirm = () => {
     if (isOwner && typed !== projectName) {
