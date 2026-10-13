@@ -23,6 +23,7 @@ import {
 import {
   isMaintenanceTick,
   isReleaseSweepTick,
+  queueIndexPurges,
   queueMaintenance,
   queueReleaseRecovery,
   queueStuckChanges,
@@ -432,6 +433,12 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
         if (settled.stuck > 0) log({ event: "router.change_sweep", ...settled });
       } catch (error) {
         log({ event: "router.change_sweep_failed", ...errorInfo(error) });
+      }
+      try {
+        const purged = await queueIndexPurges(this.env, controller.scheduledTime);
+        if (purged.purges > 0) log({ event: "router.index_purge_sweep", ...purged });
+      } catch (error) {
+        log({ event: "router.index_purge_sweep_failed", ...errorInfo(error) });
       }
     }
     const count = parseStreamIds(this.env.K2_STREAM_IDS).length;

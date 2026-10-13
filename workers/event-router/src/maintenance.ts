@@ -64,18 +64,9 @@ export async function queueMaintenance(
   )
     .bind(MAX_INDEX_BACKFILLS_PER_DAY)
     .all<{ id: string }>();
-  // Archived Projects whose cleanup is done but whose index rows remain: `purgeIndex` deletes those
-  // rows last, so their presence means the vectors or index objects may still exist.
-  const unpurged = await env.DB.prepare(
-    `SELECT p.id FROM projects p WHERE p.status = 'archived' AND p.cleaned_at IS NOT NULL
-       AND (EXISTS (SELECT 1 FROM project_indexes i WHERE i.project_id = p.id)
-            OR EXISTS (SELECT 1 FROM project_vectors v WHERE v.project_id = p.id))
-     ORDER BY p.archived_at LIMIT ?`,
-  )
-    .bind(MAX_CLEANUPS_PER_DAY)
-    .all<{ id: string }>();
+  const unpurged = await unpurgedProjects(env.DB, MAX_CLEANUPS_PER_DAY);
   const indexing: CommandEnvelope<Record<string, never>>[] = [
-    ...[...(rows.results ?? []), ...(unpurged.results ?? [])].map((row) => ({
+    ...[...(rows.results ?? []), ...unpurged].map((row) => ({
       commandId: `cmd_${row.id.slice(5)}_index-purge_${day}`,
       commandType: "index.purge",
       projectId: row.id,
@@ -213,4 +204,51 @@ export async function queueStuckChanges(
     })),
   );
   return { stuck: stuck.length };
+}
+
+/**
+ * Archived Projects whose cleanup is done but whose index rows remain: `purgeIndex` deletes those
+ * rows last, so their presence means the Vectorize vectors or `index/` objects may still exist.
+ */
+async function unpurgedProjects(db: D1Database, limit: number) {
+  const rows = await db
+    .prepare(
+      `SELECT p.id FROM projects p WHERE p.status = 'archived' AND p.cleaned_at IS NOT NULL
+         AND (EXISTS (SELECT 1 FROM project_indexes i WHERE i.project_id = p.id)
+              OR EXISTS (SELECT 1 FROM project_vectors v WHERE v.project_id = p.id))
+       ORDER BY p.archived_at LIMIT ?`,
+    )
+    .bind(limit)
+    .all<{ id: string }>();
+  return rows.results ?? [];
+}
+
+/**
+ * Index purge sweep, on the stuck-release tick: a deleted Project loses its vectors and index
+ * objects within 5 minutes of its cleanup, not at the next daily maintenance. One `index.purge`
+ * per Project, at most 10 per sweep; the indexer deletes the rows last, so the sweep stops.
+ * Cost: 288 D1 reads per day; Queue messages only for deleted Projects.
+ */
+export async function queueIndexPurges(
+  env: Pick<Env, "DB" | "INDEXING">,
+  scheduledTime: number,
+): Promise<{ purges: number }> {
+  const rows = await unpurgedProjects(env.DB, MAX_CLEANUPS_PER_DAY);
+  if (rows.length === 0) return { purges: 0 };
+  const createdAt = new Date(scheduledTime).toISOString();
+  const tick = createdAt.slice(0, 16).replace(/[-:T]/g, "");
+  await env.INDEXING.sendBatch(
+    rows.map((row) => ({
+      body: {
+        commandId: `cmd_${row.id.slice(5)}_index-purge_${tick}`,
+        commandType: "index.purge",
+        projectId: row.id,
+        attempt: 0,
+        createdAt,
+        payload: {},
+      } satisfies CommandEnvelope<Record<string, never>>,
+      contentType: "json" as const,
+    })),
+  );
+  return { purges: rows.length };
 }

@@ -41,7 +41,7 @@ flowchart TB
   d1 --> shards[Purge 32 ResourceShardDO shards]
   shards --> done[Delete KV policy, scrub name and slug,<br/>set cleaned_at]
   cron[Daily maintenance 04:17 UTC] -.->|re-queue leftovers| q
-  cron -.->|index.purge| idx[Indexer: vectors, index objects, index rows]
+  sweep[Event router, every 5 minutes] -.->|index.purge after cleaned_at| idx[Indexer: vectors, index objects, index rows]
 ```
 
 Cleanup skips a Project that is not `archived`. Each queue message does a bounded part of the work. The next delivery continues where the last one stopped. Every step is safe to repeat. Cleanup does the steps in this order:
@@ -56,7 +56,7 @@ Cleanup skips a Project that is not `archived`. Each queue message does a bounde
 8. Purge the 32 `ResourceShardDO` shards (Claims, Intents, Challenges, outbox). This step is last, so a late Claim cannot fill a shard again.
 9. Delete the KV policy copy. Set the name to `Deleted project` and the slug to `deleted-<id>`. Set `cleaned_at`.
 
-The indexer Worker deletes the Vectorize vectors, the `index/` objects, and the `project_indexes` and `project_vectors` rows (`index.purge`). The daily maintenance sends `index.purge` for an archived Project until no index row remains.
+The indexer Worker deletes the Vectorize vectors, the `index/` objects, and the `project_indexes` and `project_vectors` rows (`index.purge`). Every 5 minutes, the event router sends `index.purge` for each archived Project that has `cleaned_at` and still has an index row. The daily maintenance also sends it. The indexer deletes the rows last, so the sweep stops when the purge is complete.
 
 Cleanup keeps these records.
 
