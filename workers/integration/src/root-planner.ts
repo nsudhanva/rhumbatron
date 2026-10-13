@@ -259,7 +259,10 @@ export function parsePlan(
   const checked = checkWorkGraph(parsed.data.tasks);
   if (!checked.ok) return checked;
   // The repair only adds edges between Tasks with no path between them: still acyclic.
-  const { tasks, linked } = linkUiToApi(parsed.data.tasks);
+  const ui = linkUiToApi(parsed.data.tasks);
+  const surface = serializeSameSurface(ui.tasks);
+  const { tasks } = surface;
+  const linked = [...ui.linked, ...surface.linked];
   const plan = { ...parsed.data, tasks };
   const graph = checkWorkGraph(tasks);
   if (!graph.ok) return graph;
@@ -267,6 +270,55 @@ export function parsePlan(
   return bootstrap.length > 0
     ? { ok: false, errors: bootstrap }
     : { ok: true, plan, order: graph.order, linked };
+}
+
+/**
+ * Deterministic plan repair, no model call, after `linkUiToApi`: every UI Task edits the one page
+ * `public/index.html`, and every API Task edits `src/app.ts` (APP_CONVENTIONS). Two Tasks of one
+ * kind built in parallel on one base never merge, and a re-run on the other's work follows. So
+ * Tasks of one kind with no dependency path between them run in plan order: the later key gets an
+ * edge to the earlier one. A UI Task and an API Task still run in parallel. The edge goes from a
+ * later key to an earlier key only when no path leads from the earlier to the later: still acyclic.
+ */
+function serializeSameSurface(tasks: readonly PlannedTask[]): {
+  tasks: PlannedTask[];
+  linked: string[];
+} {
+  const deps = new Map(tasks.map((t) => [t.key, [...t.dependsOn]]));
+  const reaches = (from: string, to: string) => {
+    const seen = new Set<string>();
+    const queue = [...(deps.get(from) ?? [])];
+    while (queue.length > 0) {
+      const next = queue.shift() as string;
+      if (next === to) return true;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push(...(deps.get(next) ?? []));
+    }
+    return false;
+  };
+  const isApi = (t: PlannedTask) => t.semanticResources.some((r) => API_SEGMENT.test(last(r)));
+  const isUi = (t: PlannedTask) =>
+    !isApi(t) &&
+    (t.semanticResources.some((r) => UI_SEGMENT.test(last(r))) || UI_TITLE.test(t.title));
+  const order = (key: string) => Number(key.replace(/\D/g, "")) || 0;
+  const linked: string[] = [];
+  for (const kind of [isUi, isApi]) {
+    const group = tasks.filter(kind).sort((a, b) => order(a.key) - order(b.key));
+    for (let j = 1; j < group.length; j++) {
+      const later = group[j] as PlannedTask;
+      for (let i = j - 1; i >= 0; i--) {
+        const earlier = group[i] as PlannedTask;
+        if (reaches(later.key, earlier.key) || reaches(earlier.key, later.key)) continue;
+        deps.get(later.key)?.push(earlier.key);
+        linked.push(`${later.key}->${earlier.key}`);
+      }
+    }
+  }
+  return {
+    tasks: tasks.map((t) => ({ ...t, dependsOn: deps.get(t.key) ?? t.dependsOn })),
+    linked,
+  };
 }
 
 /** At most two model calls: the plan, then one repair turn with the validation errors. */

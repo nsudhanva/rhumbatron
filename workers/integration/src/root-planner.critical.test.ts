@@ -147,7 +147,8 @@ describe("UI -> API dependency repair", () => {
         titled("t3", "Cart UI", ["cart:ui"]),
       ]),
     );
-    expect(byTitle).toMatchObject({ ok: true, linked: ["t2->t1"] });
+    // The two UI Tasks share public/index.html: the later one runs after the earlier one.
+    expect(byTitle).toMatchObject({ ok: true, linked: ["t2->t1", "t3->t2"] });
     // A path already exists (t3 -> t2 -> t1): nothing to add.
     const ordered = parsePlan(
       plan([
@@ -157,6 +158,33 @@ describe("UI -> API dependency repair", () => {
       ]),
     );
     expect(ordered).toMatchObject({ ok: true, linked: [] });
+  });
+});
+
+// Seen on prod: two UI Tasks built in parallel both edited public/index.html and did not merge.
+describe("same-surface ordering", () => {
+  const titled = (key: string, title: string, resources: string[], dependsOn: string[] = []) => ({
+    ...task(key, dependsOn),
+    title,
+    semanticResources: resources,
+  });
+  it("runs Tasks of one kind in plan order and keeps a UI and an API Task in parallel", () => {
+    const outcome = parsePlan(
+      plan([
+        titled("t1", "Bootstrap the app", ["app:bootstrap"]),
+        titled("t2", "Laws API", ["laws:api"], ["t1"]),
+        titled("t3", "Votes API", ["votes:api"], ["t1"]),
+        titled("t4", "Laws page", ["laws:ui"], ["t2"]),
+        titled("t5", "Constitution page", ["constitution:ui"], ["t2"]),
+      ]),
+      { emptyRepository: true },
+    );
+    if (!outcome.ok) throw new Error("expected a plan");
+    const deps = Object.fromEntries(outcome.plan.tasks.map((t) => [t.key, t.dependsOn]));
+    expect(deps.t3).toEqual(["t1", "t2"]);
+    expect(deps.t5).toEqual(["t2", "t4"]);
+    // The laws page and the votes API share no file: no edge between them.
+    expect(deps.t4).toEqual(["t2"]);
   });
 });
 

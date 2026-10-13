@@ -17,6 +17,7 @@ import {
   RiskTier,
   VerificationPlan,
 } from "@rhumbatron/protocol";
+import { requestAcceptanceRepair } from "./acceptance-repair.ts";
 import { hasLiveApp } from "./app-release.ts";
 import { candidateFork } from "./candidate-sandbox.ts";
 import { pendingSiblings } from "./candidate-selection.ts";
@@ -581,5 +582,12 @@ export async function decideApproval(
       { key: row.id, actor: { kind: "user", id: input.approverUserId } },
     ),
   ]);
+  // A rejection with a reason asks for changes: one repair Task applies them (acceptance-repair.ts).
+  if (stored.decision === "rejected" && input.reason?.trim())
+    await requestAcceptanceRepair(env, {
+      candidateId: row.id,
+      reason: input.reason,
+      trigger: "approver",
+    });
   return { status: "recorded", approval: toApprovalView(stored), repeated: false };
 }

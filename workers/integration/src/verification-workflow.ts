@@ -34,6 +34,7 @@ import {
   judgeAcceptance,
   takeDailyCall,
 } from "./acceptance-check.ts";
+import { requestAcceptanceRepair } from "./acceptance-repair.ts";
 import { APP_BUILD_COMMAND, appBuildOutcome } from "./app-build.ts";
 import {
   canonicalCommitOf,
@@ -1017,6 +1018,9 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     const decision = await step.do("settle change", async () => {
       // ADR 0026: acceptance gates auto-promotion, not promotability. A shortfall or a gap holds
       // the Candidate for a person, whatever the risk tier.
+      // Criteria clearly not met: one repair Task first, then a person (acceptance-repair.ts).
+      if (await requestAcceptanceRepair(this.env, { candidateId, trigger: "acceptance" }))
+        return { kind: "manual" as const, reason: "acceptance_incomplete" as const };
       const held = await holdForAcceptance(this.env, candidateId);
       if (held) return { kind: "manual" as const, reason: "acceptance_incomplete" as const };
       const [change, candidate] = await Promise.all([
