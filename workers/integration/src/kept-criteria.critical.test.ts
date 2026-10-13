@@ -32,7 +32,12 @@ function db() {
       }),
     }),
   } as unknown as D1Database;
-  return { change, promoted, d1 };
+  const conflict = (a: string, b: string) =>
+    sqlite
+      .prepare(`INSERT INTO request_conflicts (id, project_id, change_a, change_b, verdict, policy, created_at)
+        VALUES (?, 'proj_k', ?, ?, 'conflicting', 'first_come', '2026-10-13T10:00:00Z')`)
+      .run(`rc_${a}_${b}`, a, b);
+  return { change, promoted, conflict, d1 };
 }
 
 describe("criteria kept from requests that went live meanwhile", () => {
@@ -54,6 +59,19 @@ describe("criteria kept from requests that went live meanwhile", () => {
       "A toggle switches between the 8-bit and 16-bit palettes",
     ]);
     expect(await loadKeptCriteria(h.d1, "chg_live")).toEqual([]);
+  });
+
+  it("does not keep a live request that this one conflicts with and replaces", async () => {
+    const h = db();
+    h.change("chg_me", "2026-10-13T10:00:00Z", [
+      "A law passes with a simple majority and a quorum",
+    ]);
+    h.change("chg_two", "2026-10-13T09:59:00Z", [
+      "A law passes only with two thirds of the votes cast",
+    ]);
+    h.promoted("chg_two", "2026-10-13T10:05:00Z");
+    h.conflict("chg_me", "chg_two");
+    expect(await loadKeptCriteria(h.d1, "chg_me")).toEqual([]);
   });
 
   it("recognizes a quality-gate-only criterion and caps the list", () => {

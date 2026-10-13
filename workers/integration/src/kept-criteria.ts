@@ -4,6 +4,8 @@
  * that holds their work must keep every one of them working. The agents get them in the Task
  * instruction (context-compiler `keep`), and the acceptance check judges them with the request's
  * own criteria. Criteria that only restate the quality gate are left out: other checks cover them.
+ * A live request that conflicts with this one (a first-come or same-requester conflict) is not
+ * kept: this request was chosen to replace it.
  */
 
 /**
@@ -53,6 +55,11 @@ export async function loadKeptCriteria(db: D1Database, changeId: string): Promis
        JOIN changes ch ON ch.project_id = me.project_id AND ch.id != me.id
        JOIN candidates c ON c.change_id = ch.id AND c.status = 'promoted'
        WHERE me.id = ? AND c.updated_at > me.created_at
+         -- A request that conflicts with this one was replaced by it (first come, apply theirs):
+         -- its criteria cannot hold together with this request's, so they are not kept.
+         AND NOT EXISTS (SELECT 1 FROM request_conflicts rc
+           WHERE rc.verdict = 'conflicting' AND rc.policy IN ('first_come', 'same_requester')
+             AND ((rc.change_a = ch.id AND rc.change_b = me.id) OR (rc.change_a = me.id AND rc.change_b = ch.id)))
        ORDER BY c.updated_at DESC LIMIT 10`,
     )
     .bind(changeId)

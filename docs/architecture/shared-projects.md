@@ -548,7 +548,7 @@ The inbox tells the later requester "Your request builds on <name>'s request".
 
 When a request plans or re-runs after other requests went live, it keeps their work (`kept-criteria.ts` in `workers/integration/src`):
 
-- The kept criteria are the acceptance criteria of the other requests of the Project whose Candidate promoted after this request was created, newest first, at most 12. Criteria that only restate the quality gate and the request's own criteria are left out.
+- The kept criteria are the acceptance criteria of the other requests of the Project whose Candidate promoted after this request was created, newest first, at most 12. Criteria that only restate the quality gate and the request's own criteria are left out. A live request that conflicts with this one (first come or same requester) is left out: this request was chosen to replace it.
 - The Task instruction lists them: keep every one of them working, and do not remove, replace, or hide them.
 - The acceptance check judges them with the request's own criteria, each marked "Keep (from an earlier request)". A kept criterion that is not met holds the Candidate for a person, like any unmet criterion.
 
