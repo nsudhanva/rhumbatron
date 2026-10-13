@@ -53,6 +53,10 @@ resource "cloudflare_worker_version" "docs" {
     workers_tag     = substr(local.docs.bundle.bundle_sha256, 0, 25)
     workers_message = "terraform bundle ${local.docs.bundle.bundle_sha256}"
   }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "cloudflare_workers_deployment" "docs" {
@@ -64,6 +68,10 @@ resource "cloudflare_workers_deployment" "docs" {
     version_id = cloudflare_worker_version.docs.id
     percentage = 100
   }]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "cloudflare_workers_custom_domain" "docs" {

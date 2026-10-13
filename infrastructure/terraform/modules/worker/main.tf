@@ -61,6 +61,12 @@ resource "cloudflare_worker_version" "this" {
     workers_tag     = substr(var.bundle_sha256, 0, 25)
     workers_message = "terraform bundle ${var.bundle_sha256}"
   }
+
+  # A new version and its deployment exist before the old ones leave state, so an apply that
+  # stops halfway never leaves the Worker without a deployed version.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # 100 percent of traffic. Add percentage splits only when canary rollout is required.
@@ -73,6 +79,10 @@ resource "cloudflare_workers_deployment" "this" {
     version_id = cloudflare_worker_version.this.id
     percentage = 100
   }]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "cloudflare_workers_custom_domain" "this" {
