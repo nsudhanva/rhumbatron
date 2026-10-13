@@ -140,7 +140,7 @@ Notes:
 
 - Only Task kinds `implement`, `migrate`, and `test` get a workspace. Other kinds get read-only file tools.
 - A Task with dependencies starts on a stacked workspace: canonical plus the dependency ChangeSets. See [Agents and models](agents-and-models.md#stacked-workspaces).
-- Conflict detection is deterministic and runs before `task.completed`. A model review (Sonnet tier, then Opus tier) runs later from a durable schedule and stays off the run path.
+- Conflict detection is deterministic and runs before `task.completed`. Two Tasks joined by a Work Graph path, in either direction and through any number of edges, are never compared: the later Task runs on a workspace that holds the earlier Task's work, so they are not rival designs. A later Task that breaks the earlier work fails the Candidate's checks instead. A model review (Sonnet tier, then Opus tier) runs later from a durable schedule and stays off the run path.
 - Conflict detection and conflict review read protected resources from the Project policy row (D1 `project_policies`, `protectedResources`). A Project without a row, or with a row that does not parse, has no protected resources there.
 - When the last Task completes, AgentDO moves the Change to `verifying` and records `verification.started` with reason `work_graph_completed`.
 

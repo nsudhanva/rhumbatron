@@ -84,11 +84,26 @@ function isPlausible(intent: Intent): boolean {
   );
 }
 
+/**
+ * True when a Work Graph path joins the two Tasks, in either direction. The later Task runs on a
+ * workspace that holds the earlier Task's ChangeSet, so the pair is never two rival designs: a
+ * later Task that breaks the earlier work fails the Candidate's checks instead.
+ */
 function ordered(a: Intent, b: Intent, dependsOn: DetectOptions["dependsOn"]): boolean {
-  return (
-    (dependsOn?.[a.taskId]?.includes(b.taskId) ?? false) ||
-    (dependsOn?.[b.taskId]?.includes(a.taskId) ?? false)
-  );
+  if (!dependsOn) return false;
+  const reaches = (from: string, to: string) => {
+    const seen = new Set<string>();
+    const queue = [...(dependsOn[from] ?? [])];
+    while (queue.length > 0) {
+      const next = queue.shift() as string;
+      if (next === to) return true;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push(...(dependsOn[next] ?? []));
+    }
+    return false;
+  };
+  return reaches(a.taskId, b.taskId) || reaches(b.taskId, a.taskId);
 }
 
 type SharedResource = { resource: string; overlap: "exact" | "prefix"; refs: string[] };
@@ -279,6 +294,8 @@ function classify(
 }
 
 function comparePair(a: Intent, b: Intent, options: DetectOptions): ConflictReport | null {
+  // A Work Graph path between the two Tasks: one builds on the other, never a rival design.
+  if (ordered(a, b, options.dependsOn)) return null;
   const shared = sharedResources(a, b);
   const files = sharedFiles(a, b);
   const contracts = compareContracts(a, b);
@@ -293,8 +310,8 @@ function comparePair(a: Intent, b: Intent, options: DetectOptions): ConflictRepo
     return null;
   }
 
-  // Overlap that only adds, or that follows a Work Graph edge, is expected and benign.
-  const expected = (isAdditive(a) && isAdditive(b)) || ordered(a, b, options.dependsOn);
+  // Overlap that only adds is expected and benign.
+  const expected = isAdditive(a) && isAdditive(b);
   const signals: ConflictSignal[] = [...contracts, ...data, ...compareAssumptions(a, b)];
   if (shared.length > 0) {
     signals.push({

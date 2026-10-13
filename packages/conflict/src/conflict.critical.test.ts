@@ -506,3 +506,27 @@ describe("integrationFor", () => {
     });
   });
 });
+
+// Seen on prod: a repair Task built on a UI Task was forked against it as a rival design.
+describe("Tasks joined by a Work Graph path", () => {
+  it("never conflict, also through several edges, in either order", () => {
+    const ui = intent({
+      intentId: "int-ui",
+      taskId: "task-ui",
+      semanticResources: ["laws:comments:ui"],
+      expectedFiles: ["public/index.html"],
+      assumptions: ["Comments render below each law"],
+    });
+    const repair = intent({
+      intentId: "int-repair",
+      taskId: "task-repair",
+      semanticResources: ["laws:comments:ui"],
+      expectedFiles: ["public/index.html"],
+      assumptions: ["Comments render in a side panel"],
+    });
+    const dependsOn = { "task-repair": ["task-mid"], "task-mid": ["task-ui"] };
+    expect(detectConflicts([ui, repair], { dependsOn })).toEqual([]);
+    expect(detectConflicts([repair, ui], { dependsOn })).toEqual([]);
+    expect(detectConflicts([ui, repair]).length).toBeGreaterThan(0);
+  });
+});
