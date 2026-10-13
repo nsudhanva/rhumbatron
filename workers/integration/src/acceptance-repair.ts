@@ -10,7 +10,7 @@ import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts
  * Change returns to `running`, and the next Candidate holds the repair. At most one repair per
  * Change: a second shortfall goes to a person.
  *
- * Deterministic: no model call decides. One D1 batch; the Decision Receipt is the lock.
+ * Deterministic: no model call decides. One D1 batch; the repair Task row is the lock.
  */
 
 const ACTOR = { kind: "system", id: "acceptance-repair" } as const;
@@ -140,10 +140,8 @@ export async function requestAcceptanceRepair(
       ? "the acceptance check found that the code does not meet these criteria"
       : "a person reviewed it and asked for changes"
   }. Read the current code and change it so each one holds exactly as written. Keep every other feature working.\n- ${goals.join("\n- ")}`;
-  const owned = `EXISTS (SELECT 1 FROM decision_receipts WHERE id = ? AND json_extract(receipt_json, '$.token') = ?)`;
   const receipt = {
     decisionType: "ACCEPTANCE_REPAIR",
-    token,
     changeId,
     candidateId: input.candidateId,
     trigger: input.trigger,
@@ -153,19 +151,15 @@ export async function requestAcceptanceRepair(
     dependsOn: built.map((t) => t.id),
     createdAt: now,
   };
+  // The repair Task is the lock (one ID per Change); the receipt references it, so it comes after.
+  const owned = `EXISTS (SELECT 1 FROM tasks WHERE id = ? AND json_extract(route_json, '$.repair.token') = ?)`;
   const [taken] = await env.DB.batch([
-    env.DB.prepare(
-      `INSERT OR IGNORE INTO decision_receipts (id, task_id, agent_id, decision_type, decided_by,
-         selected_tier, receipt_json, created_at)
-       SELECT ?, ?, ?, 'ACCEPTANCE_REPAIR', 'rules', 'sonnet', ?, ?
-       WHERE EXISTS (SELECT 1 FROM changes WHERE id = ? AND status IN ('verifying', 'awaiting_approval'))`,
-    ).bind(receiptId, taskId, ACTOR.id, JSON.stringify(receipt), now, changeId),
     env.DB.prepare(
       `INSERT OR IGNORE INTO tasks (id, change_id, kind, semantic_resource, status, complexity,
          risk_tier, model_policy, task_key, title, objective, acceptance_criteria_json,
          semantic_resources_json, route_json, created_at, updated_at)
        SELECT ?, ?, 'implement', ?, 'pending', 'small', ?, 'policy-1', 'repair', ?, ?, ?, ?, ?, ?, ?
-       WHERE ${owned}`,
+       WHERE EXISTS (SELECT 1 FROM changes WHERE id = ? AND status IN ('verifying', 'awaiting_approval'))`,
     ).bind(
       taskId,
       changeId,
@@ -175,17 +169,23 @@ export async function requestAcceptanceRepair(
       objective,
       JSON.stringify(goals),
       JSON.stringify(resources),
-      JSON.stringify({ repair: { candidateId: input.candidateId, trigger: input.trigger } }),
+      JSON.stringify({
+        repair: { candidateId: input.candidateId, trigger: input.trigger, token },
+      }),
       now,
       now,
-      receiptId,
-      token,
+      changeId,
     ),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO decision_receipts (id, task_id, agent_id, decision_type, decided_by,
+         selected_tier, receipt_json, created_at)
+       SELECT ?, ?, ?, 'ACCEPTANCE_REPAIR', 'rules', 'sonnet', ?, ? WHERE ${owned}`,
+    ).bind(receiptId, taskId, ACTOR.id, JSON.stringify(receipt), now, taskId, token),
     ...built.map((t) =>
       env.DB.prepare(
         `INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_task_id)
          SELECT ?, ? WHERE ${owned}`,
-      ).bind(taskId, t.id, receiptId, token),
+      ).bind(taskId, t.id, taskId, token),
     ),
     env.DB.prepare(
       `UPDATE candidates SET status = 'rejected', status_reason = ?, updated_at = ?
@@ -194,12 +194,12 @@ export async function requestAcceptanceRepair(
       `Replaced: a repair Task ${input.trigger === "acceptance" ? "meets the unmet criteria" : "applies the requested changes"}.`,
       now,
       input.candidateId,
-      receiptId,
+      taskId,
       token,
     ),
     env.DB.prepare(
       `UPDATE changes SET status = 'running', updated_at = ? WHERE id = ? AND ${owned}`,
-    ).bind(now, changeId, receiptId, token),
+    ).bind(now, changeId, taskId, token),
   ]);
   if ((taken?.meta.changes ?? 0) === 0) return false;
   const ctx: ChangeContext = {

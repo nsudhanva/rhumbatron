@@ -20,12 +20,13 @@ const ACCEPTANCE = JSON.stringify([
 ]);
 
 function harness(changeStatus = "verifying", candidateStatus = "verified") {
-  const db = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false });
+  const db = new DatabaseSync(":memory:", { enableForeignKeyConstraints: true });
   for (const file of readdirSync(MIGRATIONS)
     .filter((f) => f.endsWith(".sql"))
     .sort())
     db.exec(readFileSync(join(MIGRATIONS, file), "utf8"));
-  db.exec(`INSERT INTO projects (id, org_id, name, slug, status, canonical_generation, created_at, updated_at)
+  db.exec(`INSERT INTO organizations (id, name, created_at, updated_at) VALUES ('org', 'Org', '${T}', '${T}');
+    INSERT INTO projects (id, org_id, name, slug, status, canonical_generation, created_at, updated_at)
     VALUES ('proj_rep', 'org', 'P', 'p', 'active', 0, '${T}', '${T}');
     INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd, created_by, created_at, updated_at)
     VALUES ('${CHANGE}', 'proj_rep', 'g', '${changeStatus}', 0, 3, 'u', '${T}', '${T}');`);
