@@ -16,6 +16,7 @@ import {
 } from "@rhumbatron/protocol";
 import { z } from "zod";
 import type { CheckOutcome } from "./candidate-composer.ts";
+import { KEEP_PREFIX } from "./kept-criteria.ts";
 
 /**
  * Acceptance check (ADR 0026). One Haiku call judges each Change
@@ -257,16 +258,26 @@ export function validateAcceptance(
   return out;
 }
 
-/** Evidence outcome: pass only when every criterion is met with a valid citation. */
+/**
+ * Evidence outcome: pass when every criterion of the request is met with a valid citation and
+ * no kept criterion (KEEP_PREFIX, work of requests that went live meanwhile) is `not_met`. A
+ * kept criterion is regression protection: `unclear` there means no regression was found.
+ */
 export function acceptanceOutcome(results: readonly AcceptanceResult[]): CheckOutcome {
   const met = results.filter((r) => r.status === "met").length;
   const total = results.length;
   const metrics = { criteriaMet: met, criteriaTotal: total };
-  if (met === total) {
+  const kept = (r: AcceptanceResult) => r.criterion.startsWith(KEEP_PREFIX);
+  const short = results.filter((r) => r.status !== "met" && !(kept(r) && r.status === "unclear"));
+  if (short.length === 0) {
+    const unclearKept = total - met;
     return {
       status: "pass",
       coverage: "checked_supported",
-      summary: `${met} of ${total} criteria met, each with a cited quote.`,
+      summary:
+        unclearKept === 0
+          ? `${met} of ${total} criteria met, each with a cited quote.`
+          : `${met} of ${total} criteria met, each with a cited quote; ${unclearKept} kept criteria unclear, no regression found.`,
       metrics,
     };
   }

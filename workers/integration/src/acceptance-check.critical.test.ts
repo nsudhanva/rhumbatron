@@ -2,6 +2,7 @@
 // quote that code finds in a patch or composed file the model received; removed patch lines and
 // short quotes prove nothing; code already in the base can be cited from the composed file;
 // malformed output (wrong criterion count) is invalid; only all-met passes.
+
 import { describe, expect, it } from "vitest";
 import {
   acceptanceOutcome,
@@ -10,6 +11,7 @@ import {
   composedFileOrder,
   validateAcceptance,
 } from "./acceptance-check.ts";
+import { KEEP_PREFIX } from "./kept-criteria.ts";
 
 const PATCH = [
   "diff --git a/src/calendar.tsx b/src/calendar.tsx",
@@ -208,5 +210,19 @@ describe("acceptance citations", () => {
     ).toEqual([
       { criterion: "A", status: "met", citations: [{ path: "src/calendar.tsx", quote }] },
     ]);
+  });
+
+  it("passes with unclear kept criteria, but never with a kept criterion that is not met", () => {
+    const own = { criterion: "A", status: "met" as const, citations: [] };
+    const keep = (status: "unclear" | "not_met") => ({
+      criterion: `${KEEP_PREFIX}Search filters the list`,
+      status,
+      citations: [],
+    });
+    expect(acceptanceOutcome([own, keep("unclear")])).toMatchObject({ status: "pass" });
+    expect(acceptanceOutcome([own, keep("not_met")])).toMatchObject({ status: "fail" });
+    expect(
+      acceptanceOutcome([{ ...own, status: "unclear" as const }, keep("unclear")]),
+    ).toMatchObject({ status: "fail" });
   });
 });
