@@ -1,3 +1,4 @@
+import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { releaseRequestScope } from "./change-commands.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
@@ -9,8 +10,10 @@ import { recoverSourceConflicts } from "./rebase.ts";
  * - A Task fails with `dependency_merge_conflict`: two of its dependencies were built in parallel
  *   on the same base, and their ChangeSets do not merge. The dependency that did not merge gets
  *   Work Graph edges to the dependencies before it and re-runs on a workspace stacked on their
- *   ChangeSets, with the Tasks built on it. Same mechanism as integrate.ts. At most
- *   MAX_TASK_RESTACKS per Change.
+ *   ChangeSets, with the Tasks built on it. Same mechanism as integrate.ts. When the ChangeSet
+ *   does not merge with the canonical base (another request promoted while this Change ran), it
+ *   and the Tasks built on it re-run on the current canonical state instead, and the Change takes
+ *   the new base generation. At most MAX_TASK_RESTACKS of both per Change.
  * - Any other failed Task, or a restack that is not possible: when no Task is pending, ready,
  *   assigned, or running, the Change ends `failed` with the Task's reason, and `change.failed`
  *   records it. A `verifying` Change whose Candidates are all rejected by a merge that no rebase
@@ -61,15 +64,21 @@ export function planTaskRestack(
   ontoTaskIds: readonly string[],
   edges: readonly Edge[],
 ): { rerunTaskIds: string[]; onto: string[] } | null {
+  const rerun = withDependents(rootTaskId, edges);
+  const onto = [...new Set(ontoTaskIds)].filter((t) => !rerun.includes(t)).sort();
+  if (onto.length === 0) return null;
+  return { rerunTaskIds: rerun, onto };
+}
+
+/** The Task and every Task built on it, sorted. */
+function withDependents(rootTaskId: string, edges: readonly Edge[]): string[] {
   const rerun = new Set([rootTaskId]);
   let size = 0;
   while (size !== rerun.size) {
     size = rerun.size;
     for (const e of edges) if (rerun.has(e.depends_on_task_id)) rerun.add(e.task_id);
   }
-  const onto = [...new Set(ontoTaskIds)].filter((t) => !rerun.has(t)).sort();
-  if (onto.length === 0) return null;
-  return { rerunTaskIds: [...rerun].sort(), onto };
+  return [...rerun].sort();
 }
 
 type ChangeRow = {
@@ -188,11 +197,22 @@ async function restack(
   const byId = new Map((sets.results ?? []).map((s) => [s.id, s]));
   const root = byId.get(conflict.changeSetId)?.task_id;
   if (!root) return false;
-  const plan = planTaskRestack(
-    root,
-    conflict.before.flatMap((id) => byId.get(id)?.task_id ?? []),
-    edges,
-  );
+  // No ChangeSet before it: the ChangeSet does not merge with the canonical base, which moved.
+  let rebase: { fromGeneration: number; toGeneration: number } | null = null;
+  let plan: { rerunTaskIds: string[]; onto: string[] } | null;
+  if (conflict.before.length === 0) {
+    const roots = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
+    const canonical = await roots.get(roots.idFromName(change.project_id)).getCanonical();
+    if (!canonical || canonical.generation <= change.base_generation) return false;
+    rebase = { fromGeneration: change.base_generation, toGeneration: canonical.generation };
+    plan = { rerunTaskIds: withDependents(root, edges), onto: [] };
+  } else {
+    plan = planTaskRestack(
+      root,
+      conflict.before.flatMap((id) => byId.get(id)?.task_id ?? []),
+      edges,
+    );
+  }
   if (!plan?.rerunTaskIds.includes(failedTaskId)) return false;
   const count = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM decision_receipts WHERE decision_type = 'TASK_RESTACK'
@@ -221,6 +241,7 @@ async function restack(
     dependsOnTaskIds: plan.onto,
     rerunTaskIds: plan.rerunTaskIds,
     rejectedChangeSetIds: rejected,
+    ...(rebase ? { rebase } : {}),
     reason,
     createdAt: now,
   };
@@ -261,28 +282,56 @@ async function restack(
       receiptId,
       token,
     ),
-    // The stacked Task gets the integrate instruction (agents agent-do.ts `integrateInput`).
-    env.DB.prepare(
-      `UPDATE tasks SET route_json = json_set(json_remove(COALESCE(route_json, '{}'), '$.rebase'),
-         '$.integrate', json(?)) WHERE id = ? AND change_id = ? AND ${owned}`,
-    ).bind(JSON.stringify({ withTaskId, reason: why }), root, change.id, receiptId, token),
+    // Instructions (agents agent-do.ts): a moved base gives every re-run Task the rebase
+    // instruction; a stack gives the root the integrate instruction.
+    ...(rebase
+      ? [
+          env.DB.prepare(
+            `UPDATE tasks SET route_json = json_set(json_remove(COALESCE(route_json, '{}'), '$.integrate'),
+               '$.rebase', json(?)) WHERE change_id = ? AND id IN (SELECT value FROM json_each(?)) AND ${owned}`,
+          ).bind(JSON.stringify(rebase), change.id, rerun, receiptId, token),
+        ]
+      : [
+          env.DB.prepare(
+            `UPDATE tasks SET route_json = json_set(json_remove(COALESCE(route_json, '{}'), '$.rebase'),
+               '$.integrate', json(?)) WHERE id = ? AND change_id = ? AND ${owned}`,
+          ).bind(JSON.stringify({ withTaskId, reason: why }), root, change.id, receiptId, token),
+        ]),
     ...plan.rerunTaskIds.map((id) =>
       env.DB.prepare(
         `UPDATE tasks SET status = 'pending', assigned_agent_id = NULL, wake_sent_at = NULL,
            attempts_reset_at = ?, blocked_limit = NULL, blocked_reason = NULL,
-           route_json = ${id === root ? "route_json" : "json_remove(COALESCE(route_json, '{}'), '$.integrate', '$.rebase')"},
+           route_json = ${rebase || id === root ? "route_json" : "json_remove(COALESCE(route_json, '{}'), '$.integrate', '$.rebase')"},
            updated_at = ?
          WHERE id = ? AND change_id = ? AND ${owned}`,
       ).bind(now, now, id, change.id, receiptId, token),
     ),
-    env.DB.prepare(`UPDATE changes SET updated_at = ? WHERE id = ? AND ${owned}`).bind(
-      now,
-      change.id,
-      receiptId,
-      token,
-    ),
+    env.DB.prepare(
+      `UPDATE changes SET base_generation = ?, updated_at = ? WHERE id = ? AND ${owned}`,
+    ).bind(rebase?.toGeneration ?? change.base_generation, now, change.id, receiptId, token),
   ]);
   if ((taken?.meta.changes ?? 0) === 0) return false;
+  if (rebase) {
+    const moved = { ...ctx, baseGeneration: rebase.toGeneration };
+    await appendChangeEvents(env.RESOURCE_SHARD, moved, [
+      await changeEvent(
+        moved,
+        "candidate.rebase_requested",
+        {
+          trigger: "dependency_merge_conflict",
+          reason,
+          status: "running",
+          taskIds: plan.rerunTaskIds,
+          baseGeneration: rebase.toGeneration,
+          rebaseCount: n + 1,
+          maxRebases: MAX_TASK_RESTACKS,
+        },
+        { taskId: root, key: receiptId, actor: ACTOR },
+      ),
+    ]);
+    await dispatchReadyTasks(env, moved, change.budget_usd);
+    return true;
+  }
   await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
     await changeEvent(
       ctx,

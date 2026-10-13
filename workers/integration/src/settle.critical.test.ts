@@ -62,6 +62,7 @@ function harness() {
   const events = new Map<string, EventEnvelope>();
   const wakes: { taskId: string }[] = [];
   const released: string[] = [];
+  let generation = 0;
   const statement = (sql: string, params: unknown[] = []) => ({
     bind: (...next: unknown[]) => statement(sql, next),
     first: async () => db.prepare(sql).get(...(params as never[])) ?? null,
@@ -94,7 +95,7 @@ function harness() {
     },
     PROJECT_ROOT: namespace({
       release: async (id: string) => void released.push(id),
-      getCanonical: async () => ({ generation: 0, artifactRef: "artifacts://place" }),
+      getCanonical: async () => ({ generation, artifactRef: "artifacts://place" }),
     }),
     RESOURCE_SHARD: namespace({
       appendEvents: async (list: EventEnvelope[]) => {
@@ -115,7 +116,10 @@ function harness() {
   const change = () =>
     db.prepare("SELECT * FROM changes WHERE id = ?").get(CHANGE) as Record<string, unknown>;
   const types = () => [...events.values()].map((e) => e.eventType);
-  return { db, env, wakes, released, row, change, types };
+  const setGeneration = (g: number) => {
+    generation = g;
+  };
+  return { db, env, wakes, released, row, change, types, setGeneration };
 }
 
 describe("settle a failed Task", () => {
@@ -163,6 +167,38 @@ describe("settle a failed Task", () => {
     // A repeat while t3 works changes nothing.
     h.db.exec("UPDATE tasks SET status = 'running' WHERE id = 'tsk_t3'");
     expect(await settleChange(h.env, CHANGE)).toBe("waiting");
+  });
+
+  it("re-runs the Tasks on the moved canonical base when another request promoted meanwhile", async () => {
+    const h = harness();
+    const base =
+      "dependency_merge_conflict: cs_t1_1 does not merge with the canonical base (src/app.ts, package.json). The dependencies of this Task conflict, so it cannot start from their work.";
+    h.db
+      .prepare("UPDATE task_runs SET outcome_json = ? WHERE id = 'run_t4_1'")
+      .run(JSON.stringify({ reason: base }));
+    // The base did not move: nothing to re-run on, so the Change ends with its reason.
+    const still = harness();
+    still.db
+      .prepare("UPDATE task_runs SET outcome_json = ? WHERE id = 'run_t4_1'")
+      .run(JSON.stringify({ reason: base }));
+    expect(await settleChange(still.env, CHANGE)).toBe("failed");
+
+    h.setGeneration(1);
+    expect(await settleChange(h.env, CHANGE)).toBe("restacked");
+    expect(h.change()).toMatchObject({ status: "running", base_generation: 1 });
+    expect(h.row("t1").status).toBe("ready");
+    for (const t of ["t2", "t3", "t4", "t5"]) expect(h.row(t).status).toBe("pending");
+    expect(JSON.parse(String(h.row("t3").route_json)).rebase).toEqual({
+      fromGeneration: 0,
+      toGeneration: 1,
+    });
+    expect(
+      h.db.prepare("SELECT COUNT(*) AS n FROM changesets WHERE status = 'proposed'").get(),
+    ).toEqual({
+      n: 0,
+    });
+    expect(h.types()).toEqual(["candidate.rebase_requested", "task.ready"]);
+    expect(h.wakes.map((w) => w.taskId)).toEqual(["tsk_t1"]);
   });
 
   it("ends the Change failed with the reason after the restack bound, and releases its scope", async () => {
