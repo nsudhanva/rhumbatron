@@ -289,6 +289,37 @@ describe("request selection by the system on real SQLite", () => {
       n: 0,
     });
   });
+  it("queues a later request that builds on the earlier one, with no question to anyone", async () => {
+    const h = harness();
+    const a = request("chg_a", "alice");
+    const b = request("chg_b", "bob");
+    h.add(a);
+    h.add(b);
+    const builds = async () =>
+      reply("review_requests", {
+        verdict: "builds_on",
+        conflicts: [],
+        builds: [{ a: "c1", b: "c1", why: "B changes the list A creates" }],
+      });
+    expect(await checkRequestPair(h.env, ctx, a, b, builds)).toMatchObject({
+      stop: "awaiting_choice",
+    });
+    expect(h.row("chg_a").status).toBe("compiling");
+    expect(h.row("chg_b").status).toBe("queued");
+    expect(h.db.prepare("SELECT * FROM request_choices").all()).toMatchObject([
+      {
+        first_change_id: "chg_a",
+        later_change_id: "chg_b",
+        choice: "apply_theirs",
+        chosen_by: "system:builds_on",
+      },
+    ]);
+    expect(h.db.prepare("SELECT policy, verdict FROM request_conflicts").all()).toEqual([
+      { policy: "follow", verdict: "builds_on" },
+    ]);
+    // After the wait, the stored choice lets the later request plan without a second review.
+    expect(await checkRequestPair(h.env, ctx, a, b, builds)).toEqual({ costUsd: 0, stop: null });
+  });
   it("does not repeat a provider call when saving its result fails, and asks the later requester", async () => {
     const h = harness();
     const a = request("chg_a", "alice");

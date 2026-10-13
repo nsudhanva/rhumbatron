@@ -231,6 +231,22 @@ describe("settle a failed Task", () => {
     );
   });
 
+  it("ends a verifying Change with its newest Candidate's reason, not an older merge rejection", async () => {
+    const h = harness();
+    h.db.exec(`UPDATE changes SET status = 'verifying', updated_at = '${T}';
+      UPDATE tasks SET status = 'completed';
+      INSERT INTO candidates (id, change_id, base_generation, status, status_reason, change_set_ids_json, created_at, updated_at)
+      VALUES ('cand_old', '${CHANGE}', 0, 'rejected', 'file_conflict: cs_t1_1 does not merge', '["cs_t1_1"]', '2026-10-10T00:00:00.000Z', '${T}'),
+        ('cand_new', '${CHANGE}', 1, 'rejected', 'Preview check failed: GET /api/canvas returned 500.', '["cs_t2_1"]', '2026-10-10T00:05:00.000Z', '${T}')`);
+    h.db.exec(
+      'UPDATE candidates SET score_json = \'{"rebase":{"requested":true,"delivered":true}}\' WHERE id = \'cand_old\'',
+    );
+    expect(await settleChange(h.env, CHANGE)).toBe("failed");
+    expect(h.change().blocked_reason).toBe(
+      "No Candidate passed its required checks: Preview check failed: GET /api/canvas returned 500. Submit the request again.",
+    );
+  });
+
   it("ends a verifying Change whose only Candidate failed a merge that no rebase can re-run", async () => {
     const h = harness();
     h.db.exec(`UPDATE changes SET status = 'verifying', updated_at = '${T}';

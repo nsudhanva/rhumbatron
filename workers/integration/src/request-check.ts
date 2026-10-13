@@ -16,6 +16,8 @@ import {
 const SAME_REQUESTER = "system:same_requester";
 /** A question to the later requester (unconfirmed review, or a cited duplicate). */
 const SYSTEM_REVIEW = "system:request_review";
+/** The system's choice for a later request that builds on an earlier one. */
+const FOLLOW = "system:builds_on";
 
 export const requestRoot = (env: Pick<Env, "PROJECT_ROOT">, projectId: string) => {
   const roots = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
@@ -131,6 +133,9 @@ const pairId = (first: string, second: string, round = 0, sequence = 0) =>
  * Persist the review first; retries use it and never call a model again for the same pair round.
  *
  * - `independent` or `compatible`: both go on.
+ * - `builds_on` (cited): `b` uses or changes what `a` creates. Nobody chooses: the system records
+ *   `apply_theirs`, `b` waits (`queued`) and plans after `a` promoted or ended, on the tree that
+ *   has the work of `a`. No duplicate build of the same feature runs in parallel.
  * - `duplicate` (cited and quoted): `b` waits for its requester (`needs_input`, kind `duplicate`).
  * - `conflicting`, unsupported or past the review limit: `b` waits (kind `conflict`).
  * - `conflicting`, supported, same requester: the later request replaces the earlier one.
@@ -220,7 +225,10 @@ export async function checkRequestPair(
   const outcome: PairOutcome = { costUsd, stop: null };
   const now = () => new Date().toISOString();
 
-  if (policy === "first_come") {
+  if (policy === "follow") {
+    await followEarlier(env, ctx, id, a, b, options.instanceId ?? b.changeId);
+    outcome.stop = "awaiting_choice";
+  } else if (policy === "first_come") {
     // Who asked first decides, and only about their own request. No model and no role decides.
     const choice =
       decided === undefined
@@ -292,6 +300,56 @@ export async function checkRequestPair(
     ),
   ]);
   return outcome;
+}
+
+/**
+ * The later request builds on the earlier one: the system records the choice `apply_theirs`, so
+ * the first-come wait (`advanceFirstCome`) queues the later request and plans it after the earlier
+ * request promoted or ended. The earlier requester gets no question.
+ */
+async function followEarlier(
+  env: Env,
+  ctx: ChangeContext,
+  conflictId: string,
+  a: RequestInput,
+  b: RequestInput,
+  workflowInstanceId: string,
+) {
+  const id = `rw_${a.changeId}_${b.changeId}`;
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO request_choices
+         (id, project_id, first_change_id, later_change_id, conflict_id, asked_user_id, choice,
+          chosen_by, chosen_at, workflow_instance_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'apply_theirs', ?, ?, ?, ?)`,
+    ).bind(
+      id,
+      ctx.projectId,
+      a.changeId,
+      b.changeId,
+      conflictId,
+      a.requesterUserId,
+      FOLLOW,
+      now,
+      workflowInstanceId,
+      now,
+    ),
+    env.DB.prepare(
+      "UPDATE changes SET status = 'queued', updated_at = ? WHERE id = ? AND status = 'compiling'",
+    ).bind(now, b.changeId),
+    env.DB.prepare(
+      "UPDATE request_conflicts SET policy = 'follow', winner_change_id = ?, loser_change_id = NULL, decided_by = ?, decided_at = COALESCE(decided_at, ?) WHERE id = ?",
+    ).bind(a.changeId, FOLLOW, now, conflictId),
+  ]);
+  await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
+    await changeEvent(
+      ctx,
+      "change.choice.made",
+      { choiceId: id, firstChangeId: a.changeId, choice: "apply_theirs", status: "queued" },
+      { actor: { kind: "system", id: FOLLOW }, key: id },
+    ),
+  ]);
 }
 
 /**

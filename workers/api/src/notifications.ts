@@ -680,11 +680,13 @@ ORDER BY w.created_at DESC LIMIT ${PER_KIND}`;
 
 /**
  * request_choice_made: the later requester, within the window, after the earlier requester chose
- * "apply theirs". "Keep mine" ends the request: `request_not_selected` covers it. `?2` = since.
+ * "apply theirs", or after the system queued a request that builds on the earlier one
+ * (`chosen_by` = `system:builds_on`). "Keep mine" ends the request: `request_not_selected` covers
+ * it. `?2` = since.
  */
 const CHOICE_MADE_SQL = `
 SELECT w.id, w.later_change_id, l.project_id, p.name AS project_name, l.goal, l.title,
-       w.chosen_at AS updated_at, uf.display_name, uf.email, r.read_at
+       w.chosen_at AS updated_at, w.chosen_by, uf.display_name, uf.email, r.read_at
 FROM request_choices w
 CROSS JOIN changes l ON l.id = w.later_change_id
 ${MINE("l.project_id")}
@@ -702,6 +704,7 @@ type ChoiceRow = Base & {
   updated_at: string;
   display_name: string | null;
   email: string | null;
+  chosen_by?: string | null;
 };
 const personOf = (row: ChoiceRow) =>
   row.display_name ?? (row.email ? (row.email.split("@")[0] ?? null) : null);
@@ -727,13 +730,16 @@ function choiceNeededItem(row: ChoiceRow): NotificationView {
 
 function choiceMadeItem(row: ChoiceRow): NotificationView {
   const who = personOf(row) ?? "The first requester";
+  const follows = row.chosen_by === "system:builds_on";
   return {
     ...project(row),
     changeId: row.later_change_id,
     id: `request_choice_made:${row.id}`,
     kind: "request_choice_made",
     severity: "info",
-    title: `${who} will apply your request after theirs`,
+    title: follows
+      ? `Your request builds on ${who === "The first requester" ? "an earlier request" : `${who}'s request`}`
+      : `${who} will apply your request after theirs`,
     body: joinParts("It plans when their request finishes", changeTitle(row.title, row.goal)),
     href: `/changes/${row.later_change_id}`,
     createdAt: row.updated_at,

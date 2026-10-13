@@ -192,4 +192,21 @@ describe("acceptance citations", () => {
     ).toBeNull();
     expect(validateAcceptance({ verdict: "ok" }, criteria, source)).toBeNull();
   });
+
+  it("reads a citation's `text` field as its quote", () => {
+    const quote = "export function CalendarView()";
+    expect(
+      validateAcceptance(
+        {
+          results: [
+            { criterion: 1, status: "met", citations: [{ path: "src/calendar.tsx", text: quote }] },
+          ],
+        },
+        ["A"],
+        source,
+      ),
+    ).toEqual([
+      { criterion: "A", status: "met", citations: [{ path: "src/calendar.tsx", quote }] },
+    ]);
+  });
 });

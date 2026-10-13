@@ -84,6 +84,9 @@ export type ChooseOutcome = z.infer<typeof ChooseOutcome>;
  * or model preference takes part.
  *
  * - `none`: independent or compatible; both requests go on.
+ * - `follow`: the later request builds on what the earlier request creates. It waits (`queued`)
+ *   and plans on the tree that has the earlier work. Nobody chooses: the later request is
+ *   applied after the earlier one.
  * - `duplicate`: a cited duplicate; the later requester gets a question.
  * - `ask_requester`: the review could not confirm compatibility; the later requester gets a question.
  * - `same_requester`: one person asked twice; the later request replaces the earlier one.
@@ -91,19 +94,21 @@ export type ChooseOutcome = z.infer<typeof ChooseOutcome>;
  */
 export type ConflictPolicy =
   | "none"
+  | "follow"
   | "duplicate"
   | "ask_requester"
   | "same_requester"
   | "first_come";
 
 export function conflictPolicy(input: {
-  verdict: "independent" | "compatible" | "conflicting" | "duplicate";
+  verdict: "independent" | "compatible" | "builds_on" | "conflicting" | "duplicate";
   supported: boolean;
   earlierRequesterUserId: string;
   laterRequesterUserId: string;
 }): ConflictPolicy {
   if (input.verdict === "independent" || input.verdict === "compatible") return "none";
   if (!input.supported) return "ask_requester";
+  if (input.verdict === "builds_on") return "follow";
   if (input.verdict === "duplicate") return "duplicate";
   return input.earlierRequesterUserId === input.laterRequesterUserId
     ? "same_requester"

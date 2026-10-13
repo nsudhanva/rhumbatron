@@ -82,6 +82,7 @@ import { classifyBrowser, classifySecurity } from "./check-semantics.ts";
 import { storeTreeCode, walkTree } from "./code-store.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import { type EvidenceRow, toRecord } from "./evidence-rows.ts";
+import { KEEP_PREFIX, loadKeptCriteria } from "./kept-criteria.ts";
 import { policyForRun } from "./policy.ts";
 import { runPreviewSmoke } from "./preview-smoke.ts";
 import { promoteCandidate } from "./promotion.ts";
@@ -744,7 +745,13 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
                     ctx,
                     candidateId,
                     { fork, commit, tree, files: sources.flatMap((s) => s.files) },
-                    acceptanceCriteriaToJudge(loaded.acceptanceCriteria),
+                    [
+                      ...acceptanceCriteriaToJudge(loaded.acceptanceCriteria),
+                      // Requests that went live while this one ran: their work must still hold.
+                      ...acceptanceCriteriaToJudge(
+                        await loadKeptCriteria(this.env.DB, ctx.changeId),
+                      ).map((criterion) => `${KEEP_PREFIX}${criterion}`),
+                    ],
                     check,
                   );
                 }

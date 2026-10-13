@@ -59,6 +59,11 @@ export type CompileInput = {
   /** A source conflict reopened this Task on the current canonical files. */
   rebase?: { fromGeneration: number; toGeneration: number };
   /**
+   * Acceptance criteria of other requests that went live while this request ran. The current
+   * files hold their work, and the Task must keep every one of them working.
+   */
+  keep?: string[];
+  /**
    * A conflict with a complementary Task reopened this Task on a workspace that includes that
    * Task's ChangeSet (integrate path, packages/conflict integrate.ts).
    */
@@ -138,7 +143,7 @@ export function compilePacket(input: CompileInput): ContextPacket {
       sourceVersion: task.updatedAt,
       capturedAt: now,
       title: `Your Task ${task.key} (${task.kind}, risk ${task.riskTier}): ${task.title}`,
-      body: `Objective: ${task.objective}${input.rebase ? `\n\nThe base moved from S${input.rebase.fromGeneration} to S${input.rebase.toGeneration}, and the previous source change could not merge. Read the current files and re-apply your objective while preserving the newer changes.` : ""}${input.integrate ? `\n\nYour previous result did not fit Task ${input.integrate.withTaskKey} (${input.integrate.withTitle}): ${input.integrate.reason}. Your workspace now includes that Task's ChangeSet. Read its files and build against its real routes, field names, and data shapes; do not re-create or change them.` : ""}\n\nSemantic resources:\n${bullets(task.semanticResources)}\n\nAcceptance criteria:\n${bullets(task.acceptanceCriteria)}`,
+      body: `Objective: ${task.objective}${input.rebase ? `\n\nThe base moved from S${input.rebase.fromGeneration} to S${input.rebase.toGeneration}, and the previous source change could not merge. Read the current files and re-apply your objective while preserving the newer changes.` : ""}${input.keep?.length ? `\n\nOther requests went live while this request ran, and the current files hold their work. Keep every one of these working. Do not remove, replace, or hide them; build your objective next to them:\n${bullets(input.keep)}` : ""}${input.integrate ? `\n\nYour previous result did not fit Task ${input.integrate.withTaskKey} (${input.integrate.withTitle}): ${input.integrate.reason}. Your workspace now includes that Task's ChangeSet. Read its files and build against its real routes, field names, and data shapes; do not re-create or change them.` : ""}\n\nSemantic resources:\n${bullets(task.semanticResources)}\n\nAcceptance criteria:\n${bullets(task.acceptanceCriteria)}`,
     },
   ];
   const emptyRepository = !!input.repository && !input.repository.files.includes("package.json");

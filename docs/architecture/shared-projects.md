@@ -369,8 +369,10 @@ A pair with no overlap gets the verdict `independent`, with cost 0 and the recei
 ### Review and citation validation
 
 An overlapping pair gets one Sonnet review with the tool `review_requests`.
-The verdict is `independent`, `compatible`, `conflicting`, or `duplicate`.
+The verdict is `independent`, `compatible`, `builds_on`, `conflicting`, or `duplicate`.
 
+- `compatible` means that each request can be built from the current code alone, and neither needs or changes what the other creates.
+- `builds_on` means that the later request adds to, changes, or uses something that the earlier request creates: a feature, page, route, setting, or data shape. `builds` lists each such criterion of the later Change with the earlier criterion that it builds on and a short reason.
 - Each conflict cites one criterion ID of each Change and a short reason.
 - For `duplicate`, `covered` maps each criterion of the later Change to the earlier criterion that delivers it, with a quote.
 
@@ -380,6 +382,7 @@ The verdict is `independent`, `compatible`, `conflicting`, or `duplicate`.
 - A conflict cites an ID that is not a criterion of that Change.
 - The verdict is `conflicting` and the conflict list is empty, or the verdict is not `conflicting` and the conflict list is not empty.
 - The verdict is `duplicate` and `covered` is empty, or the verdict is not `duplicate` and `covered` is not empty.
+- The verdict is `builds_on` and `builds` is empty, or the verdict is not `builds_on` and `builds` is not empty, or a `builds` entry cites an unknown criterion.
 - A `covered` entry cites an unknown criterion, or its quote is not text of the cited earlier criterion.
 
 A rejected answer, a provider error, and an abstention all become `unconfirmedReview`: verdict `conflicting`, `supported: false`, no cited criteria.
@@ -399,6 +402,7 @@ No role, rank, or model preference takes part.
 | Review | Requesters | Policy | Result |
 |---|---|---|---|
 | `independent` or `compatible` | Any | `none` | Both requests continue. |
+| `builds_on`, cited | Any | `follow` | A continues. The system records the choice `apply_theirs` (`chosen_by` `system:builds_on`). B is `queued` and plans after A promoted or ended, on the tree that has A's work. Nobody gets a question. |
 | `duplicate`, cited and quoted | Any | `duplicate` | B: `needs_input`, kind `duplicate`. |
 | `conflicting`, unsupported, or the review limit | Any | `ask_requester` | B: `needs_input`, kind `conflict`. |
 | `conflicting`, supported | The same person | `same_requester` | B replaces A. |
@@ -411,6 +415,7 @@ flowchart TB
   R -->|"no, or review limit"| ASK["B: needs_input, kind conflict"]
   R -->|"independent or compatible"| IND
   R -->|"duplicate"| DUP["B: needs_input, kind duplicate"]
+  R -->|"builds_on"| Q
   R -->|"conflicting"| SR{"Same requester?"}
   SR -->|"yes"| PR{"A has a promoted<br/>Candidate?"}
   PR -->|"yes"| KEEP["Keep A.<br/>B: outcome replaces"]
@@ -535,10 +540,17 @@ The overlap pass can miss a contradiction.
 Two requests can use unrelated words and touch unrelated resources.
 Then no model reads the pair, and both Changes build.
 The Change that promotes later builds on the tree of the earlier one.
-No check protects the tests of the earlier Change from edits by a later Agent.
+The acceptance check of the later Change judges the kept criteria of the earlier one (below).
 
 A compatible later request plans at the same time as the earlier one.
-On an empty repository, both can plan a bootstrap Task.
+A later request that builds on the earlier one waits and plans on the earlier work, so the two requests never build the same feature twice.
+The inbox tells the later requester "Your request builds on <name>'s request".
+
+When a request plans or re-runs after other requests went live, it keeps their work (`kept-criteria.ts` in `workers/integration/src`):
+
+- The kept criteria are the acceptance criteria of the other requests of the Project whose Candidate promoted after this request was created, newest first, at most 12. Criteria that only restate the quality gate and the request's own criteria are left out.
+- The Task instruction lists them: keep every one of them working, and do not remove, replace, or hide them.
+- The acceptance check judges them with the request's own criteria, each marked "Keep (from an earlier request)". A kept criterion that is not met holds the Candidate for a person, like any unmet criterion.
 
 ## Examples
 

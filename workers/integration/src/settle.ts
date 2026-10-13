@@ -370,11 +370,13 @@ async function settleVerifying(
   const candidates = rows.results ?? [];
   if (candidates.length === 0 || candidates.some((c) => LIVE_CANDIDATE.has(c.status)))
     return "waiting";
-  const merge = candidates.find((c) =>
-    /^(?:file_conflict|source_conflict):/.test(c.status_reason ?? ""),
-  );
-  if (!merge) return "nothing";
-  const reason = `The agents' work did not merge (${merge.status_reason}). Submit the request again.`;
+  // The newest Candidate says why the Change ends; an earlier merge rejection may be repaired.
+  const newest = candidates[0] as { status: string; status_reason: string | null };
+  const why = (newest.status_reason ?? "rejected").replace(/\.$/, "");
+  const text = /^(?:file_conflict|source_conflict):/.test(why)
+    ? `The agents' work did not merge (${why})`
+    : `No Candidate passed its required checks: ${why}`;
+  const reason = `${text.length > 400 ? `${text.slice(0, 399)}…` : text}. Submit the request again.`;
   return endFailed(env, ctx, "verifying", reason, "verification");
 }
 

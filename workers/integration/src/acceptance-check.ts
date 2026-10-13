@@ -181,9 +181,24 @@ export function citationValid(source: AcceptanceSource, citation: AcceptanceCita
   return source.files.some((f) => f.path === citation.path && searchable(f).includes(quote));
 }
 
+/** The tool schema the model receives: each citation is a `path` and a `quote`. */
+const ToolInput = z.object({
+  results: z
+    .array(
+      z.object({
+        criterion: z.number().int().min(1),
+        status: AcceptanceStatus,
+        citations: z.array(z.object({ path: z.string(), quote: z.string() })).max(5),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+
 /**
  * Tool output as the model sends it. Extra fields are ignored and a criterion number sent as text
- * is read as a number: only the criterion, status and citations decide the result.
+ * is read as a number: only the criterion, status and citations decide the result. Haiku and
+ * Sonnet sometimes name the quote field `text`; it is read as the quote.
  */
 const ModelOutput = z.object({
   results: z
@@ -192,7 +207,15 @@ const ModelOutput = z.object({
         criterion: z.coerce.number().int().min(1),
         status: AcceptanceStatus,
         citations: z
-          .array(z.object({ path: z.string(), quote: z.string() }))
+          .array(
+            z.preprocess(
+              (c) =>
+                c && typeof c === "object" && !("quote" in c) && "text" in c
+                  ? { ...c, quote: (c as { text: unknown }).text }
+                  : c,
+              z.object({ path: z.string(), quote: z.string() }),
+            ),
+          )
           .max(5)
           .default([]),
       }),
@@ -304,7 +327,7 @@ const TOOL = {
   function: {
     name: "record_acceptance",
     description: "Record whether each acceptance criterion is met, with cited quotes",
-    parameters: z.toJSONSchema(ModelOutput) as Record<string, unknown>,
+    parameters: z.toJSONSchema(ToolInput) as Record<string, unknown>,
   },
 };
 

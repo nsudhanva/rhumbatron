@@ -14,6 +14,7 @@ import {
   type ChangeContext,
   changeEvent,
 } from "@rhumbatron/integration/events";
+import { loadKeptCriteria } from "@rhumbatron/integration/kept-criteria";
 import {
   AGENT_DAILY_CALL_CAP,
   anthropicMonthlyBudgetUsd,
@@ -695,6 +696,9 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       }
     }
 
+    // Requests that went live while this one ran: the Task keeps their work (kept-criteria.ts).
+    const keep = await loadKeptCriteria(this.env.DB, input.changeId);
+
     // Context Packet: deterministic, stored in R2 by hash before the model runs.
     // Indexed retrieval: exact indexes of the canonical tree first, Vectorize last.
     const intents = await this.intentsFor(input.changeId, task);
@@ -745,6 +749,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
           }
         : {}),
       ...integrateInput(task, stackTasks),
+      ...(keep.length > 0 ? { keep } : {}),
       ...(compacted.compaction ? { compaction: compacted.compaction } : {}),
       ...(source ? { repository: { commit: source.commit, files: source.files } } : {}),
       inheritedChangeSets: stack.map((s) => ({

@@ -7,7 +7,7 @@ const at = (days: number) => Date.parse(asked) + days * day;
 
 describe("who decides a conflict between two requests", () => {
   const pair = (
-    verdict: "independent" | "compatible" | "conflicting" | "duplicate",
+    verdict: "independent" | "compatible" | "builds_on" | "conflicting" | "duplicate",
     supported: boolean,
     later = "bob",
   ) =>
@@ -19,6 +19,11 @@ describe("who decides a conflict between two requests", () => {
     });
   it("asks the earlier requester when two people conflict", () => {
     expect(pair("conflicting", true)).toBe("first_come");
+  });
+  it("queues a later request that builds on the earlier one, for anyone, without a question", () => {
+    expect(pair("builds_on", true)).toBe("follow");
+    expect(pair("builds_on", true, "alice")).toBe("follow");
+    expect(pair("builds_on", false)).toBe("ask_requester");
   });
   it("lets the same person's later request replace the earlier one", () => {
     expect(pair("conflicting", true, "alice")).toBe("same_requester");

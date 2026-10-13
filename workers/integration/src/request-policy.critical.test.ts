@@ -80,6 +80,23 @@ describe("request compatibility boundaries", () => {
       });
     }
   });
+  it("accepts builds_on only with cited criteria of both sides, and fails closed otherwise", () => {
+    const builds = {
+      verdict: "builds_on",
+      conflicts: [],
+      builds: [{ a: "c1", b: "c1", why: "B adds a palette option to the canvas A creates" }],
+    };
+    expect(validateRequestReview(builds, a.criteria, b.criteria)).toMatchObject({
+      verdict: "builds_on",
+      supported: true,
+    });
+    for (const raw of [
+      { verdict: "builds_on", conflicts: [] },
+      { ...builds, builds: [{ a: "c99", b: "c1", why: "no such criterion" }] },
+      { verdict: "compatible", conflicts: [], builds: builds.builds },
+    ])
+      expect(validateRequestReview(raw, a.criteria, b.criteria).supported).toBe(false);
+  });
   it("accepts a duplicate only when every covered quote is text of the cited earlier criterion", () => {
     const covered = (quote: string, aId = "c1", bId = "c1") => ({
       verdict: "duplicate",
