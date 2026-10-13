@@ -117,7 +117,7 @@ The same every-minute cron runs two bounded sweeps (`workers/event-router/src/ma
 | Tick | Work |
 |---|---|
 | 04:17 UTC, once a day | Queues one `forks.sweep`. Queues `project.cleanup` and `index.purge` for up to 10 archived Projects. Queues an `index.build` backfill for up to 10 active Projects without a ready index. Deletes at most 5,000 `processed_events` rows older than 14 days. |
-| Minute 4, 9, 14 ... of each hour | Queues one `release.recover` for each Change still `releasing` 45 minutes after promotion, at most 10 per sweep. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release). |
+| Minute 4, 9, 14 ... of each hour | Queues one `release.recover` for each Change still `releasing` 45 minutes after promotion, at most 10 per sweep. Queues one `change.settle` for each open Change that is quiet for 3 minutes to 6 hours and cannot move on its own, at most 10 per sweep. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release). |
 
 ## Causal routing
 
@@ -133,6 +133,7 @@ flowchart TB
   INF -->|"no"| TYPE{"Event type"}
   TYPE -->|"task.completed"| READY["Newly ready Tasks:<br/>change.dispatch"]
   TYPE -->|"verification.started<br/>(work_graph_completed)"| COMP["candidate.create"]
+  TYPE -->|"task.failed"| SETTLE["change.settle"]
   TYPE -->|"canonical.advanced"| CA["Wake active agents,<br/>mark older Candidates stale,<br/>candidates.recompose"]
   TYPE -->|"resource Event"| OV{"Resource overlap<br/>with an active agent"}
   OV -->|"exact"| WAKE["agent.wake"]
@@ -142,6 +143,7 @@ flowchart TB
   OV -->|"none"| NONE
   READY --> CAP{"1,000 commands per Change per day"}
   COMP --> CAP
+  SETTLE --> CAP
   WAKE --> CAP
 ```
 
@@ -149,7 +151,7 @@ Notes:
 
 - Resource Events are `intent.declared`, `intent.changed`, `challenge.created`, `changeset.proposed`, `claim.released`, and `claim.expired`.
 - Clef-flash abstains below a probability of 0.7. An abstention wakes the Agent.
-- The 1,000-command cap counts `change.dispatch`, `candidate.create`, and `agent.wake`. The router logs the dropped commands as errors.
+- The 1,000-command cap counts `change.dispatch`, `candidate.create`, `change.settle`, and `agent.wake`. The router logs the dropped commands as errors.
 - `artifact.promoted` and `canonical.advanced` both queue `index.build` for the indexer. The cap does not count `index.build` or `candidates.recompose`.
 - After `canonical.advanced`, the router marks the promoted Candidate `promoted` and every other open Candidate on an older base `stale`. A Change in `awaiting_approval` with no verified Candidate returns to `verifying`. The `candidates.recompose` command then settles each stale Candidate. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release).
 - `task.completed` and `task.failed` free an Agent slot. When a ready Task waits at the 8-agent limit, the router dispatches the Change again.
@@ -176,7 +178,7 @@ flowchart LR
 
   INT -->|"agent.wake"| WQ
   ER -->|"agent.wake"| WQ
-  ER -->|"change.dispatch, candidate.create,<br/>candidates.recompose, forks.sweep,<br/>project.cleanup, release.recover"| IQ
+  ER -->|"change.dispatch, candidate.create,<br/>change.settle, candidates.recompose,<br/>forks.sweep, project.cleanup,<br/>release.recover"| IQ
   API -->|"project.provision, project.cleanup,<br/>app.provision, app.remove"| IQ
   ER -->|"index.build, index.purge"| XQ
   INT -->|"verification.start,<br/>candidate.create after a rebase"| VQ

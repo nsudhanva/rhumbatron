@@ -186,6 +186,24 @@ export function composeCommand(
 }
 
 /**
+ * Settle request after a failed Task (integration settle.ts): the Task's dependency that did not
+ * merge re-runs on the others, or the Change ends `failed` when no Task can run. The command ID
+ * derives from the event, so a redelivery settles once. Deterministic: no model call.
+ */
+function settleCommand(event: EventEnvelope): CommandEnvelope<Record<string, never>> | null {
+  if (event.eventType !== "task.failed" || !event.changeId) return null;
+  return {
+    commandId: `cmd_${event.eventId.slice(4)}_settle`,
+    commandType: "change.settle",
+    projectId: event.projectId,
+    changeId: event.changeId,
+    attempt: 0,
+    createdAt: new Date().toISOString(),
+    payload: {},
+  };
+}
+
+/**
  * Stale Candidate settlement. The `canonical.advanced` sweep below marks older-base Candidates
  * stale but does not compose. This command asks the integration Worker to settle each one: composed
  * again on the new canonical state, its Change blocked, or nothing for a closed Change. The command
@@ -333,7 +351,7 @@ export async function routeCausalBatch(
 
   const dispatches = new Map<string, CommandEnvelope<Record<string, never>>>();
   const composes = relevant
-    .map(composeCommand)
+    .flatMap((e) => [composeCommand(e), settleCommand(e)])
     .filter((c): c is CommandEnvelope<Record<string, never>> => c !== null);
   const readmitted = new Set<string>();
   const commands: CommandEnvelope<AgentWakePayload>[] = [];

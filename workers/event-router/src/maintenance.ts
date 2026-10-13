@@ -158,3 +158,59 @@ export async function queueReleaseRecovery(
   );
   return { stuck: stuck.length };
 }
+
+/**
+ * Stuck-Change sweep, on the stuck-release tick. One indexed read finds open Changes quiet for
+ * STUCK_CHANGE_AFTER_MS, and quiet for less than STUCK_CHANGE_WINDOW_MS, that cannot move on their own: `running` with a failed Task and no Task
+ * at work, `running` with Tasks to run and none at work (a lost wake), or `verifying` with no live
+ * Candidate. It queues one `change.settle` per Change; the integration Worker re-checks and
+ * re-runs, dispatches, or ends the Change (settle.ts).
+ * The window bounds the repeats: a Change that settle cannot move gets at most 72 messages.
+ * Cost: 288 D1 reads per day; at most 720 Queue messages per day. Subrequests: at most 2.
+ */
+const STUCK_CHANGE_AFTER_MS = 3 * 60_000;
+const STUCK_CHANGE_WINDOW_MS = 6 * 60 * 60_000;
+const MAX_CHANGE_SETTLES_PER_SWEEP = 10;
+
+export async function queueStuckChanges(
+  env: Pick<Env, "DB" | "INTEGRATION_COMMANDS">,
+  scheduledTime: number,
+): Promise<{ stuck: number }> {
+  const cutoff = new Date(scheduledTime - STUCK_CHANGE_AFTER_MS).toISOString();
+  const oldest = new Date(scheduledTime - STUCK_CHANGE_WINDOW_MS).toISOString();
+  const rows = await env.DB.prepare(
+    `SELECT ch.id, ch.project_id FROM changes ch WHERE ch.status IN ('running', 'verifying')
+       AND ch.updated_at < ? AND ch.updated_at >= ?
+       AND (
+         (ch.status = 'running' AND EXISTS (SELECT 1 FROM tasks t WHERE t.change_id = ch.id
+           AND t.status IN ('failed', 'pending', 'ready'))
+           AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.change_id = ch.id
+             AND t.status IN ('assigned', 'running')))
+         OR (ch.status = 'verifying' AND NOT EXISTS (SELECT 1 FROM candidates c
+           WHERE c.change_id = ch.id
+             AND c.status IN ('composing', 'composed', 'verifying', 'verified', 'promoted', 'stale')))
+       )
+     ORDER BY ch.updated_at LIMIT ?`,
+  )
+    .bind(cutoff, oldest, MAX_CHANGE_SETTLES_PER_SWEEP)
+    .all<{ id: string; project_id: string }>();
+  const stuck = rows.results ?? [];
+  if (stuck.length === 0) return { stuck: 0 };
+  const createdAt = new Date(scheduledTime).toISOString();
+  const tick = createdAt.slice(0, 16).replace(/[-:T]/g, "");
+  await env.INTEGRATION_COMMANDS.sendBatch(
+    stuck.map((row) => ({
+      body: {
+        commandId: `cmd_${row.id.slice(4)}_settle_${tick}`,
+        commandType: "change.settle",
+        projectId: row.project_id,
+        changeId: row.id,
+        attempt: 0,
+        createdAt,
+        payload: {},
+      } satisfies CommandEnvelope<Record<string, never>>,
+      contentType: "json" as const,
+    })),
+  );
+  return { stuck: stuck.length };
+}

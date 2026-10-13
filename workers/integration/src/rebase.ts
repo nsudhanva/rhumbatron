@@ -5,7 +5,7 @@ import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts
 
 const MAX_REBASE_RERUNS = 2;
 export const REBASE_BLOCKED_REASON =
-  "The request could not be merged with newer changes twice. Submit it again.";
+  "The work of this request did not merge after two re-runs. Submit it again.";
 type RebaseEnv = Pick<Env, "DB" | "PROJECT_ROOT" | "RESOURCE_SHARD" | "AGENT_WAKEUPS">;
 type Receipt = {
   token: string;
@@ -24,6 +24,7 @@ type Row = {
   status: string;
   status_reason: string | null;
   score_json: string | null;
+  change_set_ids_json: string | null;
   recomposed_from: string | null;
   rollback_of_generation: number | null;
   change_status: string;
@@ -45,7 +46,7 @@ export function failedMergeChangeSet(reason: string | null): string | null {
 
 const load = (env: RebaseEnv, candidateId: string) =>
   env.DB.prepare(`SELECT c.id, c.change_id, c.status, c.status_reason, c.score_json,
-    c.recomposed_from, c.rollback_of_generation, ch.status AS change_status, ch.outcome,
+    c.change_set_ids_json, c.recomposed_from, c.rollback_of_generation, ch.status AS change_status, ch.outcome,
     ch.project_id, ch.budget_usd, p.status AS project_status, p.org_id, p.slug
     FROM candidates c JOIN changes ch ON ch.id = c.change_id JOIN projects p ON p.id = ch.project_id
     WHERE c.id = ?`)
@@ -103,9 +104,6 @@ export async function requestCandidateRebase(
     const canonical = await roots.get(roots.idFromName(row.project_id)).getCanonical();
     if (!canonical || canonical.artifactRef === "unassigned")
       return { status: "skipped", reason: "no_source" };
-    // Also handles first Candidates whose Tasks were built on an older canonical base.
-    if (!row.recomposed_from && failed.base_generation >= canonical.generation)
-      return { status: "skipped", reason: "base_not_moved" };
     const affected = new Set([failed.task_id]);
     const dependencies = (edges?.results ?? []) as {
       task_id: string;
@@ -115,6 +113,23 @@ export async function requestCandidateRebase(
     while (size !== affected.size) {
       size = affected.size;
       for (const e of dependencies) if (affected.has(e.depends_on_task_id)) affected.add(e.task_id);
+    }
+    // Same base: the failed ChangeSet does not merge with sibling work of this Change built in
+    // parallel. A rerun on the same base gives the same conflict, so the failed Task re-runs on a
+    // workspace stacked on the sibling ChangeSets of this Candidate (new Work Graph edges).
+    // Siblings that depend on the failed Task are left out: an edge to them closes a cycle.
+    let onto: string[] = [];
+    if (!row.recomposed_from && failed.base_generation >= canonical.generation) {
+      const inCandidate = new Set(JSON.parse(row.change_set_ids_json ?? "[]") as string[]);
+      onto = [
+        ...new Set(
+          sources
+            .filter((s) => s.id !== failedId && inCandidate.has(s.id) && s.status === "proposed")
+            .map((s) => s.task_id)
+            .filter((t) => !affected.has(t)),
+        ),
+      ].sort();
+      if (onto.length === 0) return { status: "skipped", reason: "base_not_moved" };
     }
     const taskIds = [...affected].sort();
     const changeId = row.change_id;
@@ -148,6 +163,7 @@ export async function requestCandidateRebase(
           resetAt: now,
           taskIds,
           reason: row.status_reason,
+          ...(onto.length > 0 ? { onto } : {}),
         }),
         MAX_REBASE_RERUNS,
         MAX_REBASE_RERUNS,
@@ -173,19 +189,38 @@ export async function requestCandidateRebase(
         token,
         row.id,
       ),
+      ...onto.map((dependsOn) =>
+        env.DB.prepare(`INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_task_id)
+          SELECT ?, ? WHERE ${requested}`).bind(
+          failed.task_id,
+          dependsOn,
+          rejectedId,
+          token,
+          rejectedId,
+        ),
+      ),
       ...taskIds.map((id) =>
         env.DB.prepare(`UPDATE tasks SET status = ?, assigned_agent_id = NULL,
         wake_sent_at = NULL, attempts_reset_at = ?, blocked_limit = NULL, blocked_reason = NULL,
-        route_json = json_set(json_remove(COALESCE(route_json, '{}'), '$.integrate'), '$.rebase', json(?)), updated_at = ?
+        route_json = ${
+          // The stacked Task gets the integrate instruction (agents agent-do.ts `integrateInput`).
+          id === failed.task_id && onto.length > 0
+            ? `json_set(json_remove(COALESCE(route_json, '{}'), '$.rebase'), '$.integrate', json(?))`
+            : `json_set(json_remove(COALESCE(route_json, '{}'), '$.integrate'), '$.rebase', json(?))`
+        }, updated_at = ?
         WHERE id = ? AND change_id = ? AND ${requested}`).bind(
           dependencies.some((e) => e.task_id === id && affected.has(e.depends_on_task_id))
             ? "pending"
             : "ready",
           now,
-          JSON.stringify({
-            fromGeneration: failed.base_generation,
-            toGeneration: canonical.generation,
-          }),
+          JSON.stringify(
+            id === failed.task_id && onto.length > 0
+              ? {
+                  withTaskId: onto[onto.length - 1],
+                  reason: `its ChangeSet did not merge with the parallel work of ${onto.length === 1 ? "that Task" : `${onto.length} other Tasks`}; build on top of it`,
+                }
+              : { fromGeneration: failed.base_generation, toGeneration: canonical.generation },
+          ),
           now,
           id,
           changeId,

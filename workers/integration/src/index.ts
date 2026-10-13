@@ -57,6 +57,7 @@ import { recoverSourceConflicts } from "./rebase.ts";
 import { settleStaleBehind } from "./recompose.ts";
 import { injectReleaseFailure, recoverStuckRelease } from "./release.ts";
 import { requestRollback } from "./rollback.ts";
+import { settleChange } from "./settle.ts";
 import { seedSourceIfUnassigned } from "./source-seed.ts";
 import { startWorkflow, workflowStartFor } from "./workflow-commands.ts";
 
@@ -168,6 +169,15 @@ async function handleCommand(
       JSON.stringify({ event: "forks.sweep", ...result, ...previews, rebases, sessions }),
     );
     return result.more ? "continue" : undefined;
+  }
+  // A failed Task or a Change with nothing left to run (event router `task.failed` and sweep).
+  if (command.data.commandType === "change.settle") {
+    if (!command.data.changeId) return;
+    const outcome = await settleChange(env, command.data.changeId);
+    console.warn(
+      JSON.stringify({ event: "change.settle", changeId: command.data.changeId, outcome }),
+    );
+    return;
   }
   // A Change stuck in `releasing` (event router sweep). Bounded: one Change per command.
   if (command.data.commandType === "release.recover") {

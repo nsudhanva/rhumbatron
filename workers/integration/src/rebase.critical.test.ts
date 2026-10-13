@@ -339,7 +339,7 @@ describe("rebase by rerun", () => {
     },
   );
 
-  it("recovers a first Candidate with older Task source, but never retries a current-base conflict or check failure", async () => {
+  it("recovers a first Candidate with older Task source, but never retries a check failure", async () => {
     const h = harness();
     h.db.exec("UPDATE candidates SET recomposed_from = NULL");
     expect(await requestCandidateRebase(h.env, "cand_conflict")).toMatchObject({
@@ -357,11 +357,33 @@ describe("rebase by rerun", () => {
       });
       expect(other.wakes).toHaveLength(0);
     }
-    const current = harness();
-    current.db.exec(
+  });
+
+  it("re-runs a current-base conflict stacked on the sibling work it did not merge with", async () => {
+    const h = harness();
+    h.db.exec(
       "UPDATE candidates SET recomposed_from = NULL; UPDATE changesets SET base_generation = 3",
     );
-    expect(await requestCandidateRebase(current.env, "cand_conflict")).toEqual({
+    expect(await requestCandidateRebase(h.env, "cand_conflict")).toMatchObject({
+      status: "running",
+      taskIds: ["tsk_conflict", "tsk_dependent", "tsk_grandchild"],
+    });
+    // The sibling becomes a dependency; a sibling built on the failed Task would close a cycle.
+    expect(
+      h.db
+        .prepare("SELECT depends_on_task_id FROM task_dependencies WHERE task_id = 'tsk_conflict'")
+        .all(),
+    ).toEqual([{ depends_on_task_id: "tsk_keep" }]);
+    const route = JSON.parse(String(h.task("conflict").route_json));
+    expect(route.integrate).toMatchObject({ withTaskId: "tsk_keep" });
+    expect(route.rebase).toBeUndefined();
+    expect(h.task("keep").status).toBe("completed");
+    expect(h.change()).toMatchObject({ status: "running" });
+
+    const alone = harness();
+    alone.db.exec(`UPDATE candidates SET recomposed_from = NULL,
+      change_set_ids_json = '["cs_conflict_1", "cs_dependent_1"]'; UPDATE changesets SET base_generation = 3`);
+    expect(await requestCandidateRebase(alone.env, "cand_conflict")).toEqual({
       status: "skipped",
       reason: "base_not_moved",
     });

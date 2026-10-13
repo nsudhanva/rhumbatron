@@ -25,6 +25,7 @@ import {
   isReleaseSweepTick,
   queueMaintenance,
   queueReleaseRecovery,
+  queueStuckChanges,
 } from "./maintenance.ts";
 import { batchKey, countBatchFailure, deadLetterBatch, shouldSkipBatch } from "./poison-batch.ts";
 import { decodeEnvelope, groupByProject, planProjects, toViewDelta } from "./projector.ts";
@@ -425,6 +426,12 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
         if (swept.stuck > 0) log({ event: "router.release_sweep", ...swept });
       } catch (error) {
         log({ event: "router.release_sweep_failed", ...errorInfo(error) });
+      }
+      try {
+        const settled = await queueStuckChanges(this.env, controller.scheduledTime);
+        if (settled.stuck > 0) log({ event: "router.change_sweep", ...settled });
+      } catch (error) {
+        log({ event: "router.change_sweep_failed", ...errorInfo(error) });
       }
     }
     const count = parseStreamIds(this.env.K2_STREAM_IDS).length;

@@ -1154,7 +1154,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     }
 
     await this.env.DB.batch([runUpdate]);
-    // Conflicting dependency ChangeSets do not merge on any retry or tier: fail the Task now.
+    // Conflicting dependency ChangeSets do not merge on any retry or tier: fail the Task now. The
+    // integration Worker re-runs the dependency that did not merge on the others (settle.ts).
     if (result.kind === "dependency_merge_conflict") {
       log({
         event: "agent.run_failed",

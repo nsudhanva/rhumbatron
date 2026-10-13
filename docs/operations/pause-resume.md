@@ -27,7 +27,7 @@ stateDiagram-v2
    ```hcl
    cron_schedules = local.paused ? [] : ["* * * * *"]
    ```
-   The cron runs the 1-minute safety-net sweep of the K2 streams. The same cron runs the daily maintenance at 04:17 UTC ([cleanup.md](./cleanup.md)) and the stuck-release sweep every 5 minutes ([release.md](./release.md)). None of them runs while paused.
+   The cron runs the 1-minute safety-net sweep of the K2 streams. The same cron runs the daily maintenance at 04:17 UTC ([cleanup.md](./cleanup.md)) and the stuck-release and stuck-Change sweeps every 5 minutes ([release.md](./release.md)). None of them runs while paused.
 2. Sandbox containers.
    ```hcl
    max_instances = local.paused ? 0 : 1
