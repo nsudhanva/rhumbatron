@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { EventEnvelope } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
 import { MAX_RECOMPOSES } from "./app-release-model.ts";
+import { createCandidate } from "./candidate-create.ts";
 import { raiseChangeBudget } from "./change-commands.ts";
 import {
   recomposeQuietly,
@@ -326,6 +327,19 @@ describe("stale sweep after canonical.advanced (prod chg_5154e643)", () => {
         UPDATE changes SET status = 'cancelled';`);
       expect(await settleStaleBehind(h.env, PROJECT, 4)).toEqual([]);
       expect(h.candidates()).toHaveLength(1);
+    } finally {
+      h.db.close();
+    }
+  });
+
+  it("create a new Candidate recomposes a Change blocked with an older bound reason", async () => {
+    const h = harness();
+    try {
+      h.db.exec(`UPDATE candidates SET recompose_count = 2;
+        UPDATE changes SET status = 'blocked', blocked_reason = 'Newer changes landed again after this request was rebuilt 2 times. Submit it again.'`);
+      const outcome = await createCandidate(h.env, { changeId: CHANGE });
+      expect(outcome).toMatchObject({ status: "created" });
+      expect(h.change()).toMatchObject({ status: "verifying", blocked_reason: null });
     } finally {
       h.db.close();
     }

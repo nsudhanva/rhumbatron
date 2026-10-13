@@ -155,7 +155,7 @@ export async function recomposeStaleCandidate(
   await env.DB.prepare(
     `UPDATE changes SET status = 'verifying', blocked_reason = NULL, updated_at = ?
      WHERE id = ? AND status = 'blocked' AND blocked_limit IS NULL
-       AND (blocked_reason IN (SELECT value FROM json_each(?)) OR blocked_reason LIKE 'Newer changes landed again after this request was rebuilt %')`,
+       AND (blocked_reason IN (SELECT value FROM json_each(?)) OR instr(blocked_reason, 'Newer changes landed again after this request was rebuilt ') = 1)`,
   )
     .bind(now, row.change_id, JSON.stringify(STALE_BLOCKED_REASONS))
     .run();
@@ -194,7 +194,10 @@ export const STALE_BLOCKED_REASON =
   "Newer changes landed while this request was checked, and it could not be rebuilt on them. Raise the budget (the same amount is fine) to try again, or submit it again.";
 /** Change reason when the stale Candidate already reached the recomposition bound. */
 export const STALE_BOUND_REASON = `Newer changes landed again after this request was rebuilt ${MAX_RECOMPOSES} times. Submit it again.`;
-/** A stale block this module set. The bound reason names the bound, so older text also matches by prefix. */
+/**
+ * A stale block this module set. The bound reason names the bound, so older text also matches by
+ * prefix (`instr`: D1 refuses a LIKE pattern this long).
+ */
 const STALE_BLOCKED_REASONS = [STALE_BLOCKED_REASON, STALE_BOUND_REASON];
 
 /**
@@ -419,7 +422,7 @@ export async function recoverStaleCandidates(env: Env, changeId: string) {
     `SELECT c.id FROM candidates c JOIN changes ch ON ch.id = c.change_id
      WHERE ch.id = ? AND c.status = 'stale'
        AND (ch.status = 'verifying' OR (ch.status = 'blocked' AND ch.blocked_limit IS NULL
-         AND (ch.blocked_reason IN (SELECT value FROM json_each(?)) OR ch.blocked_reason LIKE 'Newer changes landed again after this request was rebuilt %')))
+         AND (ch.blocked_reason IN (SELECT value FROM json_each(?)) OR instr(ch.blocked_reason, 'Newer changes landed again after this request was rebuilt ') = 1)))
        AND NOT EXISTS (SELECT 1 FROM candidates s WHERE s.change_id = ch.id
          AND s.status IN ('composing', 'composed', 'verifying', 'verified', 'promoted'))
      ORDER BY c.created_at DESC, c.id DESC LIMIT 1`,
