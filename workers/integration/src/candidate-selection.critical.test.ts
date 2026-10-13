@@ -180,6 +180,26 @@ function harness() {
 }
 
 describe("single selector on D1", () => {
+  // Seen on prod: a repair added a Candidate after the group was decided, and nobody selected it.
+  it("starts a new round when a Candidate joins a decided group", async () => {
+    const h = harness();
+    try {
+      h.addCandidate("cand_a", "rejected", "2026-10-11T00:00:01.000Z", 1);
+      h.addCandidate("cand_b", "rejected", "2026-10-11T00:00:02.000Z", 2);
+      h.db.exec(
+        `UPDATE candidates SET selection_json = '{"status":"decided","winnerCandidateId":"cand_b"}'`,
+      );
+      h.addCandidate("cand_c", "verified", "2026-10-11T00:00:03.000Z", 3);
+      const prep = await prepareSelection(h.env.DB, "cand_c");
+      expect(prep.kind).toBe("ranked");
+      if (prep.kind !== "ranked") return;
+      expect(prep.anchorId).toBe("cand_c");
+      expect(prep.ranking).toMatchObject({ kind: "winner", winner: "cand_c" });
+    } finally {
+      h.db.close();
+    }
+  });
+
   it("waits for a verifying sibling, then lets exactly one run select; a retry is safe", async () => {
     const h = harness();
     try {

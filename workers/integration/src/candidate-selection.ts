@@ -350,7 +350,14 @@ export async function prepareSelection(db: Db, candidateId: string): Promise<Sel
   if (group.length <= 1) return { kind: "single" };
   const pending = group.filter((g) => PENDING.has(g.status)).map((g) => g.id);
   if (pending.length > 0) return { kind: "waiting", pending };
-  const anchor = group[0] as GroupRow;
+  // A decided record belongs to an earlier round: a repair or a recompose can add a Candidate
+  // to the group after it. The new round claims on the oldest Candidate that no round decided.
+  const open = group.filter((g) => {
+    const record = parse(SelectionRecord, g.selection_json);
+    return !record || record.status === "claimed";
+  });
+  if (open.length === 0) return { kind: "not_mine" };
+  const anchor = open[0] as GroupRow;
   const now = new Date().toISOString();
   await db
     .prepare("UPDATE candidates SET selection_json = ? WHERE id = ? AND selection_json IS NULL")
