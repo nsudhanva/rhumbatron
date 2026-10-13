@@ -1,3 +1,4 @@
+import { BudgetStopError, type CompletionResult, ModelCallError } from "@rhumbatron/model-router";
 import { describe, expect, it } from "vitest";
 import { recomposeDecision } from "./app-release-model.ts";
 import {
@@ -53,6 +54,38 @@ describe("request compatibility boundaries", () => {
     expect(calls).toBe(0);
     expect(result.review.verdict).toBe("independent");
   });
+  it("retries a failed review call once, and never retries a budget stop", async () => {
+    let calls = 0;
+    const reply = {
+      toolCalls: [
+        {
+          function: {
+            name: "review_requests",
+            arguments: JSON.stringify({ verdict: "compatible", conflicts: [] }),
+          },
+        },
+      ],
+      costUsd: 0.01,
+      model: "claude-sonnet-5-5",
+      inputTokens: 1,
+      outputTokens: 1,
+      gatewayLogId: null,
+    } as unknown as CompletionResult;
+    const flaky = await reviewRequests(a, b, async () => {
+      calls++;
+      if (calls === 1) throw new ModelCallError("transient", "connection reset", null);
+      return reply;
+    });
+    expect(calls).toBe(2);
+    expect(flaky.review).toMatchObject({ verdict: "compatible", supported: true });
+    calls = 0;
+    const stopped = await reviewRequests(a, b, async () => {
+      calls++;
+      throw new BudgetStopError({ limit: "change_budget" } as never);
+    });
+    expect(calls).toBe(1);
+    expect(stopped.receipt).toMatchObject({ supported: false, failure: "budget:change_budget" });
+  }, 10_000);
   it("validates citations by side and fails closed on malformed, empty, or abstaining output", () => {
     const valid = {
       verdict: "conflicting",

@@ -1,4 +1,9 @@
-import type { CompletionRequest, CompletionResult } from "@rhumbatron/model-router";
+import {
+  BudgetStopError,
+  type CompletionRequest,
+  type CompletionResult,
+  ModelCallError,
+} from "@rhumbatron/model-router";
 import { z } from "zod";
 import { quoteSupported } from "./intake.ts";
 import type { Criterion } from "./intake-context.ts";
@@ -106,7 +111,42 @@ export async function reviewRequests(
       costUsd: 0,
       receipt: { method: "deterministic", verdict: "independent" },
     };
-  try {
+  // One retry after a failed call: several requests reviewed at once can hit a transient
+  // provider error. A budget stop is final. The error kind goes to the receipt, never a reason text.
+  let failure = "unknown";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 3000));
+    try {
+      return await reviewOnce(a, b, complete);
+    } catch (error) {
+      failure =
+        error instanceof BudgetStopError
+          ? `budget:${error.limit}`
+          : error instanceof ModelCallError
+            ? error.kind
+            : "error";
+      if (error instanceof BudgetStopError) break;
+    }
+  }
+  return {
+    review: unconfirmedReview(),
+    costUsd: 0,
+    receipt: {
+      method: "sonnet",
+      verdict: "conflicting",
+      supported: false,
+      reason: "review could not confirm compatibility",
+      failure,
+    },
+  };
+}
+
+async function reviewOnce(
+  a: RequestInput,
+  b: RequestInput,
+  complete: (request: CompletionRequest) => Promise<CompletionResult>,
+): Promise<{ review: RequestReview; costUsd: number; receipt: Record<string, unknown> }> {
+  {
     const result = await complete({
       tier: "sonnet",
       maxOutputTokens: 1200,
@@ -157,17 +197,6 @@ export async function reviewRequests(
         outputTokens: result.outputTokens,
         costUsd: result.costUsd,
         gatewayLogId: result.gatewayLogId,
-      },
-    };
-  } catch {
-    return {
-      review: unconfirmedReview(),
-      costUsd: 0,
-      receipt: {
-        method: "sonnet",
-        verdict: "conflicting",
-        supported: false,
-        reason: "review could not confirm compatibility",
       },
     };
   }
