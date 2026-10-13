@@ -76,6 +76,9 @@ describe("criteria kept from requests that went live meanwhile", () => {
 
   it("recognizes a quality-gate-only criterion and caps the list", () => {
     expect(isQualityGate("typecheck, test and contract all pass")).toBe(true);
+    expect(isQualityGate("Existing tests are updated and typecheck, test and contract pass")).toBe(
+      true,
+    );
     expect(isQualityGate("A test page lists the posts")).toBe(false);
     const many = Array.from({ length: 20 }, (_, i) => `Feature ${i} works`);
     expect(keptCriteria([many], [])).toHaveLength(12);
