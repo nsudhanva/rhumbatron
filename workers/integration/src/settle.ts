@@ -1,4 +1,5 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
+import { requestAcceptanceRepair } from "./acceptance-repair.ts";
 import { releaseRequestScope } from "./change-commands.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
@@ -370,6 +371,23 @@ async function settleVerifying(
   const candidates = rows.results ?? [];
   if (candidates.length === 0 || candidates.some((c) => LIVE_CANDIDATE.has(c.status)))
     return "waiting";
+  // A person rejected the newest Candidate with a reason: its repair runs before any end.
+  const asked = await env.DB.prepare(
+    `SELECT a.candidate_id, a.reason FROM approvals a JOIN candidates c ON c.id = a.candidate_id
+     WHERE c.change_id = ? AND a.decision = 'rejected' AND COALESCE(a.reason, '') != ''
+     ORDER BY c.created_at DESC LIMIT 1`,
+  )
+    .bind(change.id)
+    .first<{ candidate_id: string; reason: string }>();
+  if (
+    asked &&
+    (await requestAcceptanceRepair(env, {
+      candidateId: asked.candidate_id,
+      reason: asked.reason,
+      trigger: "approver",
+    }))
+  )
+    return "restacked";
   // The newest Candidate says why the Change ends; an earlier merge rejection may be repaired.
   const newest = candidates[0] as { status: string; status_reason: string | null };
   const why = (newest.status_reason ?? "rejected").replace(/\.$/, "");

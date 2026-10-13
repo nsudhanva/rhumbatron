@@ -583,11 +583,20 @@ export async function decideApproval(
     ),
   ]);
   // A rejection with a reason asks for changes: one repair Task applies them (acceptance-repair.ts).
+  // The stuck-Change sweep retries it (settle.ts), so a failure here never blocks the decision.
   if (stored.decision === "rejected" && input.reason?.trim())
     await requestAcceptanceRepair(env, {
       candidateId: row.id,
       reason: input.reason,
       trigger: "approver",
-    });
+    }).catch((error: unknown) =>
+      console.error(
+        JSON.stringify({
+          event: "acceptance_repair.failed",
+          candidateId: row.id,
+          message: String(error).slice(0, 300),
+        }),
+      ),
+    );
   return { status: "recorded", approval: toApprovalView(stored), repeated: false };
 }
