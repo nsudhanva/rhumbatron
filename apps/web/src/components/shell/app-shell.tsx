@@ -93,7 +93,9 @@ export function AppShell({ build, children }: { build: BuildInfo; children: Reac
       <div
         id="content"
         tabIndex={-1}
-        className="col-start-2 row-start-2 min-h-0 overflow-y-auto outline-none max-[720px]:col-start-1 max-[720px]:row-start-3"
+        // `relative`: absolutely positioned page elements (sr-only text, hidden form inputs)
+        // stay inside this scroll box. Without it they extend the document below the status bar.
+        className="relative col-start-2 row-start-2 min-h-0 overflow-y-auto outline-none max-[720px]:col-start-1 max-[720px]:row-start-3"
       >
         {children}
       </div>

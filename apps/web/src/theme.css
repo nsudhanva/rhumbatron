@@ -353,6 +353,13 @@
   box-shadow: var(--rh-shadow-overlay);
 }
 
+/* Kumo's popover and tooltip positioners have no z-index. Lift them above the sticky page bars
+   (z-40) and the full-screen timeline (z-100). */
+:has(> .kumo-popover-popup),
+:has(> .kumo-tooltip-popup) {
+  z-index: 200;
+}
+
 @layer base {
   /* Zero radius everywhere. `!important` in @layer base outranks every later layer and any
      inline radius, including Clerk widgets and xyflow nodes. */
