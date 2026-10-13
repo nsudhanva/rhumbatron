@@ -176,7 +176,7 @@ flowchart LR
 
 | Tier | Model | Thinking | Pi output cap |
 |---|---|---|---|
-| haiku | `claude-haiku-5-5` | Off in `complete()`. Adaptive, low effort in Pi. | 4,000 tokens |
+| haiku | `claude-haiku-5-5` | Off in `complete()`. Adaptive, low effort in Pi. | 8,000 tokens: one `write_file` call holds a whole page file |
 | sonnet | `claude-sonnet-5-5` | Adaptive, medium effort, text omitted | 8,000 tokens |
 | opus | `claude-sonnet-5-5` while Opus is off. `claude-opus-5-5` when `ALLOW_OPUS` is `"true"`. | Adaptive, high effort, text omitted | 8,000 tokens |
 

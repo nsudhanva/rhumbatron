@@ -23,9 +23,13 @@ import type { ModelTier } from "@rhumbatron/protocol";
 
 export const PROVIDER_ID = "rhumbatron";
 
-/** Bounded context per call keeps the per-call reservation and spend small. */
+/**
+ * Bounded context per call keeps the per-call reservation and spend small. One `write_file` call
+ * holds a whole file: at 4,000 output tokens Haiku's call stopped inside the file of a page, and
+ * the run ended with no outcome. 8,000 fits the app's page and route files on every tier.
+ */
 const TIER_LIMITS: Record<ModelTier, { contextWindow: number; maxTokens: number }> = {
-  haiku: { contextWindow: 200_000, maxTokens: 4000 },
+  haiku: { contextWindow: 200_000, maxTokens: 8000 },
   sonnet: { contextWindow: 200_000, maxTokens: 8000 },
   opus: { contextWindow: 200_000, maxTokens: 8000 },
 };
