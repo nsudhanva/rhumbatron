@@ -211,9 +211,9 @@ describe("rebase by rerun", () => {
     expect(h.wakes).toHaveLength(1);
   });
 
-  it("shares the two-rerun bound across Candidates and then blocks with the plain reason", async () => {
+  it("shares the four-rerun bound across Candidates and then blocks with the plain reason", async () => {
     const h = harness();
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 5; attempt++) {
       if (attempt > 1) {
         h.db.exec(`UPDATE tasks SET status = 'completed'; UPDATE changes SET status = 'verifying'`);
         h.source("conflict", attempt, 3);
@@ -224,16 +224,16 @@ describe("rebase by rerun", () => {
         attempt === 1 ? "cand_conflict" : `cand_${attempt}`,
       );
       expect(result).toMatchObject({
-        count: Math.min(attempt, 2),
-        status: attempt === 3 ? "blocked" : "running",
+        count: Math.min(attempt, 4),
+        status: attempt === 5 ? "blocked" : "running",
       });
     }
     expect(h.change()).toMatchObject({ status: "blocked", blocked_reason: REBASE_BLOCKED_REASON });
-    expect(h.wakes).toHaveLength(2);
+    expect(h.wakes).toHaveLength(4);
     const reset = h.task("conflict").attempts_reset_at;
-    await requestCandidateRebase(h.env, "cand_3");
+    await requestCandidateRebase(h.env, "cand_5");
     expect(h.task("conflict").attempts_reset_at).toBe(reset);
-    expect(h.wakes).toHaveLength(2);
+    expect(h.wakes).toHaveLength(4);
   });
 
   it("never reopens a not_selected, cancelled, needs_input, or promoted request", async () => {

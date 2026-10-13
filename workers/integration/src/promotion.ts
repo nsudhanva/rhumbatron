@@ -213,7 +213,8 @@ async function recordPromoted(env: Env, row: CandidateRow, generation: number) {
          updated_at = ? WHERE id = ?`,
     ).bind(generation, now, row.id),
     env.DB.prepare(
-      `UPDATE changes SET status = ?, updated_at = ?
+      // A promotion ends every earlier block of the Change: its reason no longer applies.
+      `UPDATE changes SET status = ?, blocked_limit = NULL, blocked_reason = NULL, updated_at = ?
        WHERE id = ? AND status IN (SELECT value FROM json_each(?))`,
     ).bind(next, now, row.change_id, JSON.stringify(PROMOTABLE_FROM)),
     env.DB.prepare(

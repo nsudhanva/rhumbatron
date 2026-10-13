@@ -218,7 +218,7 @@ Notes:
   4. A Project with a live app but no release row gets a `failed` release row, and the Change becomes `failed`.
   The generation stays promoted. The next promotion releases as usual.
 - After `canonical.advanced`, the causal router marks every other `composing`, `verifying`, or `verified` Candidate on an older base `stale`. The router does not compose. It queues one `candidates.recompose` command. Promotion runs the same sweep (`settleStaleBehind` in `workers/integration/src/recompose.ts`). The sweep takes each `verified` Candidate on an older base. It also takes each `stale` Candidate whose Change has no other active Candidate and none on a newer base. The order of the two sweeps has no effect.
-- Every stale Candidate ends in one of three states: a new Candidate on the new canonical state, a `blocked` Change with a plain reason, or a closed Change. A lineage recomposes at most 2 times (`MAX_RECOMPOSES`). A Change never waits in `verifying` with nothing running.
+- Every stale Candidate ends in one of three states: a new Candidate on the new canonical state, a `blocked` Change with a plain reason, or a closed Change. A lineage recomposes at most 6 times (`MAX_RECOMPOSES`): each recomposition follows a promotion of another request, so a request that waits behind up to 6 others still lands. A Change never waits in `verifying` with nothing running.
 
 ## Status state machines
 
@@ -254,7 +254,7 @@ stateDiagram-v2
   budget_blocked --> running: person raises the budget
   running --> verifying: last Task completed
   verifying --> running: Tasks re-run after a merge conflict or an integration
-  verifying --> blocked: merge conflict after 2 re-runs, or stale Candidate not rebuilt
+  verifying --> blocked: merge conflict after 4 re-runs, or stale Candidate not rebuilt
   blocked --> verifying: budget raise recomposes the stale Candidate
   verifying --> failed: no Candidate can ship
   verifying --> awaiting_approval: winner needs a person
@@ -276,7 +276,7 @@ The pure rules are in `workers/integration/src/change-status.ts`.
 | Only an owner or admin moves a `proposed` Change: include to `created`, decline to `declined`. Each update has a guard on `proposed`. A repeat returns the stored result. | `includeChange`, `declineChange` in `change-commands.ts` |
 | A later conflicting request of the same requester makes the earlier Change `not_selected` from any of these statuses, and also from `failed` or `completed`, when the earlier Change has no promoted Candidate. See [Shared Projects](shared-projects.md#the-same-requester-asks-twice). | `request-check.ts` |
 | Only the earlier requester chooses for an `awaiting_choice` Change. The system records `expired` after 7 days, or `moot` when the earlier request ends without a build. The later requester can withdraw the Change. `advanceFirstCome` applies each step with a guard on `awaiting_choice` or `queued`. See [Shared Projects](shared-projects.md#first-come-requests-of-two-people). | `firstComeStep`, `advanceFirstCome` in `first-come.ts` |
-| A merge conflict makes the Change re-run the conflicting Tasks: on the new base, or on top of the sibling work when the base did not move. After 2 re-runs the Change is `blocked` with the reason "The work of this request did not merge after two re-runs. Submit it again." | `MAX_REBASE_RERUNS` in `rebase.ts` |
+| A merge conflict makes the Change re-run the conflicting Tasks: on the new base, or on top of the sibling work when the base did not move. After 4 re-runs the Change is `blocked` with the reason "The work of this request did not merge after four re-runs. Submit it again." | `MAX_REBASE_RERUNS` in `rebase.ts` |
 | A `running` Change with a failed Task and no Task ready, assigned, or running ends as `failed`. `blocked_reason` names the Task and its reason. A `verifying` Change with no live Candidate, whose re-runs are used up, ends as `failed` with the reason of its newest Candidate: "No Candidate passed its required checks: ...", or "The agents' work did not merge (...)" when the newest rejection is a merge. Both end with "Submit the request again." | `settleChange` in `settle.ts` |
 | The Change ends as `failed` when every Candidate on the newest base is `rejected` for a reason other than a merge conflict or a cancel, and no Candidate of the Change is `composing`, `verifying`, `verified`, or `promoted`. `blocked_reason` starts with "No Candidate passed its required checks:" and quotes the Candidate reasons. `change.failed` records it with `phase: "verification"`. | `verificationDeadEnd` |
 | A refused compare-and-swap returns the Change to its status before `promoting`. | `leavePromoting` in `promotion.ts` |

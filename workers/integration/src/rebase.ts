@@ -3,9 +3,10 @@ import { requestCannotShip } from "./app-release-model.ts";
 import { dispatchReadyTasks } from "./dispatch.ts";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 
-const MAX_REBASE_RERUNS = 2;
+/** Each re-run follows a promotion of other work, so a request behind several others still lands. */
+const MAX_REBASE_RERUNS = 4;
 export const REBASE_BLOCKED_REASON =
-  "The work of this request did not merge after two re-runs. Submit it again.";
+  "The work of this request did not merge after four re-runs. Submit it again.";
 type RebaseEnv = Pick<Env, "DB" | "PROJECT_ROOT" | "RESOURCE_SHARD" | "AGENT_WAKEUPS">;
 type Receipt = {
   token: string;

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { EventEnvelope } from "@rhumbatron/protocol";
 import { describe, expect, it } from "vitest";
+import { MAX_RECOMPOSES } from "./app-release-model.ts";
 import { raiseChangeBudget } from "./change-commands.ts";
 import {
   recomposeQuietly,
@@ -171,7 +172,7 @@ describe("stale Candidate of a verifying Change (prod chg_2ed2e016)", () => {
   it("the recomposition bound blocks the Change, not only the Candidate", async () => {
     const h = harness();
     try {
-      h.db.prepare("UPDATE candidates SET recompose_count = 2").run();
+      h.db.prepare(`UPDATE candidates SET recompose_count = ${MAX_RECOMPOSES}`).run();
       expect(await recomposeQuietly(h.env, STALE)).toMatchObject({ status: "blocked" });
       expect(h.change()).toMatchObject({ status: "blocked", blocked_reason: STALE_BOUND_REASON });
     } finally {
@@ -307,7 +308,7 @@ describe("stale sweep after canonical.advanced (prod chg_5154e643)", () => {
   it("blocks the Change visibly when the stale Candidate cannot be composed again", async () => {
     const h = harness();
     try {
-      h.db.prepare("UPDATE candidates SET recompose_count = 2").run();
+      h.db.prepare(`UPDATE candidates SET recompose_count = ${MAX_RECOMPOSES}`).run();
       expect(await settleStaleBehind(h.env, PROJECT, 4)).toEqual([STALE]);
       expect(h.change()).toMatchObject({ status: "blocked", blocked_reason: STALE_BOUND_REASON });
     } finally {

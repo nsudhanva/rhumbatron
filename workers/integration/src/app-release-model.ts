@@ -258,8 +258,13 @@ export function rollbackPlan(input: {
 /* Stale Candidate recomposition                                                               */
 /* ------------------------------------------------------------------------------------------ */
 
-/** Recompositions per Candidate lineage; then the Candidate is blocked (needs a person). */
-export const MAX_RECOMPOSES = 2;
+/**
+ * Recompositions per Candidate lineage; then the Candidate is blocked (needs a person). Each
+ * recomposition follows a promotion of another request, so a request that waits behind up to
+ * this many others still lands. A recomposition makes no agent model call: one merge, the
+ * checks, and the acceptance call.
+ */
+export const MAX_RECOMPOSES = 6;
 
 const CLOSED_CHANGE: ReadonlySet<string> = new Set([
   "cancelled",
