@@ -14,7 +14,7 @@ import { planVectors, vectorMetadata } from "./vectors.ts";
  *
  * - `index.build` {treeSha}: from the Causal Router on `artifact.promoted` (provisioned source)
  *   and `canonical.advanced` (promotion). Builds only the current canonical tree, once.
- * - `index.purge`: from the daily maintenance tick for archived Projects. Deletes the Project's
+ * - `index.purge`: from the 5-minute sweep and the daily maintenance for deleted Projects. Deletes the Project's
  *   vectors and `index/<project>/` objects.
  *
  * Exact indexes are the product; Vectorize is optional. A Vectorize or Workers AI failure leaves
