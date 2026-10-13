@@ -65,7 +65,7 @@ export function unmetCriteria(acceptanceJson: string | null): string[] {
 }
 
 /** Pure: the repair Task's semantic resources: those of the Tasks that own an unmet criterion. */
-export function repairResources(tasks: readonly TaskRow[], criteria: readonly string[]): string[] {
+function repairResources(tasks: readonly TaskRow[], criteria: readonly string[]): string[] {
   const wanted = new Set(criteria.map(norm));
   const owners = tasks.filter((t) => {
     try {
