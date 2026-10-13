@@ -11,6 +11,7 @@ import {
   loadIntegratedPairs,
   pickIntegration,
 } from "./integrate.ts";
+import { recoverStaleCandidates } from "./recompose.ts";
 import {
   requestWorkflowStart,
   startWorkflowOnce,
@@ -499,6 +500,21 @@ export async function createCandidate(
 ): Promise<CreateCandidateOutcome> {
   const change = await openChange(env, input.changeId);
   if ("reason" in change) return change;
+  // A Change blocked by a stale Candidate: compose that Candidate again on the current canonical
+  // state, as its block reason tells the person to do (recompose.ts).
+  if (!input.changeSetIds && change.status === "blocked") {
+    const recovered = await recoverStaleCandidates(env, change.id);
+    if (recovered?.status === "recomposed") {
+      const row = await env.DB.prepare("SELECT change_set_ids_json FROM candidates WHERE id = ?")
+        .bind(recovered.candidateId)
+        .first<{ change_set_ids_json: string | null }>();
+      return {
+        status: "created",
+        candidateId: recovered.candidateId,
+        changeSetIds: JSON.parse(row?.change_set_ids_json ?? "[]") as string[],
+      };
+    }
+  }
   const proposed = (await loadProposed(env, change.id)).map((c) => c.id);
   const wanted = input.changeSetIds;
   if (wanted?.some((id) => !proposed.includes(id))) {
