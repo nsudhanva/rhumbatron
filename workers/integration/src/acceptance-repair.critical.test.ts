@@ -159,4 +159,19 @@ describe("acceptance repair", () => {
       String(h.one("SELECT objective FROM tasks WHERE task_key = 'repair'").objective),
     ).toContain("A reviewer asked: Count only the votes cast");
   });
+
+  it("makes a request fit the current app when its recomposed Candidate fails a required check", async () => {
+    const h = harness("verifying", "rejected");
+    expect(
+      await requestAcceptanceRepair(h.env, {
+        candidateId: "cand_rep",
+        trigger: "checks",
+        reason: "Required checks not satisfied: unit (failed)",
+      }),
+    ).toBe(true);
+    const task = h.one("SELECT title, objective FROM tasks WHERE task_key = 'repair'");
+    expect(task.title).toBe("Fit the current app");
+    expect(String(task.objective)).toContain("its required checks fail");
+    expect(String(task.objective)).toContain("Required checks not satisfied: unit (failed)");
+  });
 });

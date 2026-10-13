@@ -174,6 +174,13 @@ async function handleCommand(
   if (command.data.commandType === "change.settle") {
     if (!command.data.changeId) return;
     const outcome = await settleChange(env, command.data.changeId);
+    // A settle that ran supersedes the earlier settle commands of this Change that failed.
+    await env.DB.prepare(
+      `UPDATE dead_letters SET resolved_at = ?, resolved_by = 'system', resolution = 'superseded'
+       WHERE resolved_at IS NULL AND command_type = 'change.settle' AND change_id = ?`,
+    )
+      .bind(new Date().toISOString(), command.data.changeId)
+      .run();
     console.warn(
       JSON.stringify({ event: "change.settle", changeId: command.data.changeId, outcome }),
     );

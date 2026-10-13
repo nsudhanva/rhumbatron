@@ -252,3 +252,21 @@ export async function queueIndexPurges(
   );
   return { purges: rows.length };
 }
+
+/**
+ * Dead letters of a Change that ended (completed, failed, cancelled, not selected, or declined)
+ * ask for no decision any more: the sweep closes them as `superseded`. One indexed write per tick.
+ */
+export async function closeEndedDeadLetters(
+  env: Pick<Env, "DB">,
+  scheduledTime: number,
+): Promise<{ closed: number }> {
+  const result = await env.DB.prepare(
+    `UPDATE dead_letters SET resolved_at = ?, resolved_by = 'system', resolution = 'superseded'
+     WHERE resolved_at IS NULL AND change_id IN (SELECT id FROM changes
+       WHERE status IN ('completed', 'failed', 'cancelled', 'not_selected', 'declined'))`,
+  )
+    .bind(new Date(scheduledTime).toISOString())
+    .run();
+  return { closed: result.meta.changes ?? 0 };
+}

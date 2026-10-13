@@ -21,6 +21,7 @@ import {
   sweepStreamIndex,
 } from "./k2-consumer.ts";
 import {
+  closeEndedDeadLetters,
   isMaintenanceTick,
   isReleaseSweepTick,
   queueIndexPurges,
@@ -433,6 +434,12 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
         if (settled.stuck > 0) log({ event: "router.change_sweep", ...settled });
       } catch (error) {
         log({ event: "router.change_sweep_failed", ...errorInfo(error) });
+      }
+      try {
+        const closed = await closeEndedDeadLetters(this.env, controller.scheduledTime);
+        if (closed.closed > 0) log({ event: "router.dead_letters_closed", ...closed });
+      } catch (error) {
+        log({ event: "router.dead_letters_close_failed", ...errorInfo(error) });
       }
       try {
         const purged = await queueIndexPurges(this.env, controller.scheduledTime);

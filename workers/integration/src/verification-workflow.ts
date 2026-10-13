@@ -204,6 +204,23 @@ async function endWithoutShippableCandidate(env: Env, candidateId: string): Prom
     })),
   );
   if (!reason) return false;
+  // A recomposed Candidate (newer requests went live meanwhile) that fails a required check: one
+  // repair Task makes this request fit the current app before the Change ends.
+  const own = await env.DB.prepare(
+    "SELECT recomposed_from, status_reason FROM candidates WHERE id = ?",
+  )
+    .bind(candidateId)
+    .first<{ recomposed_from: string | null; status_reason: string | null }>();
+  if (
+    own?.recomposed_from &&
+    (own.status_reason ?? "").startsWith("Required checks not satisfied") &&
+    (await requestAcceptanceRepair(env, {
+      candidateId,
+      trigger: "checks",
+      reason: own.status_reason,
+    }))
+  )
+    return false;
   const [, after] = await env.DB.batch([
     env.DB.prepare(
       `UPDATE changes SET status = 'failed', blocked_reason = ?, updated_at = ?

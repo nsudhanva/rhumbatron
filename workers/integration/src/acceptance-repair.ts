@@ -14,6 +14,11 @@ import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts
  */
 
 const ACTOR = { kind: "system", id: "acceptance-repair" } as const;
+const REPAIR_TITLE = {
+  acceptance: "Meet the unmet criteria",
+  approver: "Apply the requested changes",
+  checks: "Fit the current app",
+} as const;
 const MAX_CRITERIA = 8;
 
 type Row = {
@@ -88,7 +93,11 @@ export function repairResources(tasks: readonly TaskRow[], criteria: readonly st
  */
 export async function requestAcceptanceRepair(
   env: Pick<Env, "DB" | "RESOURCE_SHARD" | "AGENT_WAKEUPS">,
-  input: { candidateId: string; reason?: string | null; trigger: "acceptance" | "approver" },
+  input: {
+    candidateId: string;
+    reason?: string | null;
+    trigger: "acceptance" | "approver" | "checks";
+  },
 ): Promise<boolean> {
   const row = await env.DB.prepare(
     `SELECT c.status, c.acceptance_json, c.change_set_ids_json, c.change_id, ch.status AS change_status, ch.project_id,
@@ -103,7 +112,7 @@ export async function requestAcceptanceRepair(
   const candidateOk =
     input.trigger === "acceptance" ? row.status === "verified" : row.status === "rejected";
   if (!open || !candidateOk) return false;
-  const criteria = unmetCriteria(row.acceptance_json);
+  const criteria = input.trigger === "checks" ? [] : unmetCriteria(row.acceptance_json);
   const reason = input.reason?.trim() || null;
   if (criteria.length === 0 && !reason) return false;
 
@@ -134,12 +143,18 @@ export async function requestAcceptanceRepair(
   const taskId = `tsk_${changeId.slice(4)}_repair`;
   const receiptId = `rcpt_rep_${changeId.slice(4)}`;
   const resources = repairResources(built, criteria);
-  const goals = [...criteria, ...(reason ? [`A reviewer asked: ${reason}`] : [])];
-  const objective = `The composed app passes its checks, but ${
-    input.trigger === "acceptance"
-      ? "the acceptance check found that the code does not meet these criteria"
-      : "a person reviewed it and asked for changes"
-  }. Read the current code and change it so each one holds exactly as written. Keep every other feature working.\n- ${goals.join("\n- ")}`;
+  const goals = [
+    ...criteria,
+    ...(reason ? [input.trigger === "approver" ? `A reviewer asked: ${reason}` : reason] : []),
+  ];
+  const objective =
+    input.trigger === "checks"
+      ? `Newer requests went live while this request ran, and on the current code its required checks fail. Run them, find the failures, and change this request's code and tests so they pass with the current behavior of the app. Keep every feature of the newer requests working.\n- ${goals.join("\n- ")}`
+      : `The composed app passes its checks, but ${
+          input.trigger === "acceptance"
+            ? "the acceptance check found that the code does not meet these criteria"
+            : "a person reviewed it and asked for changes"
+        }. Read the current code and change it so each one holds exactly as written. Keep every other feature working.\n- ${goals.join("\n- ")}`;
   const receipt = {
     decisionType: "ACCEPTANCE_REPAIR",
     changeId,
@@ -165,7 +180,7 @@ export async function requestAcceptanceRepair(
       changeId,
       resources[0] ?? null,
       built.find((t) => t.risk_tier === "high")?.risk_tier ?? "medium",
-      input.trigger === "acceptance" ? "Meet the unmet criteria" : "Apply the requested changes",
+      REPAIR_TITLE[input.trigger],
       objective,
       JSON.stringify(goals),
       JSON.stringify(resources),
@@ -191,7 +206,7 @@ export async function requestAcceptanceRepair(
       `UPDATE candidates SET status = 'rejected', status_reason = ?, updated_at = ?
        WHERE id = ? AND status IN ('verified', 'rejected') AND ${owned}`,
     ).bind(
-      `Replaced: a repair Task ${input.trigger === "acceptance" ? "meets the unmet criteria" : "applies the requested changes"}.`,
+      `Replaced: a repair Task (${REPAIR_TITLE[input.trigger].toLowerCase()}).`,
       now,
       input.candidateId,
       taskId,
@@ -215,10 +230,7 @@ export async function requestAcceptanceRepair(
       "task.created",
       {
         key: "repair",
-        title:
-          input.trigger === "acceptance"
-            ? "Meet the unmet criteria"
-            : "Apply the requested changes",
+        title: REPAIR_TITLE[input.trigger],
         kind: "implement",
         dependsOn: built.map((t) => t.id),
         trigger: `${input.trigger}_repair`,

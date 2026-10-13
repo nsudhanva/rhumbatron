@@ -63,7 +63,7 @@ const OperatorView = z.object({
 
 const ResolutionView = z.object({
   id: z.string(),
-  resolution: z.enum(["retried", "dismissed", "succeeded"]),
+  resolution: z.enum(["retried", "dismissed", "succeeded", "superseded"]),
   commandId: z.string(),
   queue: z.string(),
 });
