@@ -139,14 +139,17 @@ test.describe("Project overview", () => {
 
   test("new Change form: default budget pre-filled, inline errors", async ({ page }) => {
     const goal = page.getByRole("textbox", { name: "Goal" });
-    const budget = page.getByRole("spinbutton", { name: "Budget (USD)" });
+    const budget = page.getByRole("spinbutton", { name: "Spending limit (USD)" });
     await expect(goal).toBeVisible();
-    // Focus opens the collapsed box.
+    // Focus opens the collapsed box. The spending limit is one summary line until "Change".
     await goal.focus();
+    await expect(page.getByText(/for this request \(Project default\)/)).toBeVisible();
+    await expect(budget).toHaveCount(0);
+    await page.getByRole("button", { name: "Change spending limit" }).click();
     // The Project default (Settings, else the built-in default).
     await expect(budget).not.toHaveValue("");
     expect(Number(await budget.inputValue())).toBeGreaterThan(0);
-    await expect(page.getByText(/The Project's default/)).toBeVisible();
+    await expect(page.getByText(/The amount is the Project's default/)).toBeVisible();
 
     await goal.fill("");
     await page.getByRole("button", { name: "Submit change" }).click();
@@ -160,12 +163,12 @@ test.describe("Project overview", () => {
     await goal.fill("test goal that is never submitted");
     await budget.fill("0");
     await page.getByRole("button", { name: "Submit change" }).click();
-    await expect(page.getByRole("alert")).toHaveText("Set a budget above $0.00.", {
+    await expect(page.getByRole("alert")).toHaveText("Set a spending limit above $0.00.", {
       timeout: 5_000,
     });
     await budget.fill("");
     await page.getByRole("button", { name: "Submit change" }).click();
-    await expect(page.getByRole("alert")).toHaveText("Set a budget above $0.00.", {
+    await expect(page.getByRole("alert")).toHaveText("Set a spending limit above $0.00.", {
       timeout: 5_000,
     });
     // Nothing was submitted: still on the overview.

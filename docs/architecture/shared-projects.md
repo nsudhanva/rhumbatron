@@ -522,7 +522,7 @@ The insert in `recomposeStaleCandidate` (`workers/integration/src/recompose.ts`)
 
   A member or viewer sees the values as read-only, with the line "Only the project owner or an admin can change these."
 - The Account page (`/account`, in the sidebar footer under the person's name) sets "My monthly budget" (1 to 100 USD) and shows this month's spend across Projects.
-- The New change form has a Budget selector: "This request" with an amount, "Project budget" (only when the Project has a monthly budget), and "My budget" (only when the person set one). Each pool shows the money left this month. See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
+- The New change form shows the spending limit on one line, for example "Spending limit: $3.00 for this request (Project default)". "Change" opens the choices in place: "This request only" with an amount, "Project budget" (only when the Project has a monthly budget), and "My budget" (only when the person set one). Each pool shows the money left this month. An amount that is not valid keeps the choices open. See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
 - The home page has a `Shared with you` section and the pending invitations.
 - The inbox shows `request_proposed` to the owner and admins ("<requester> proposed <title>", with Include and Decline links to the Change), and `request_included` and `request_declined` to the requester.
 - The inbox shows `request_choice_needed` to the earlier requester only. It reads "<name>'s request conflicts with yours" and links to their own Change, where they make the choice. The later requester gets `request_choice_made` ("<name> will apply your request after theirs").

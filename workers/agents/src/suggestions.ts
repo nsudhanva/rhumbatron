@@ -15,18 +15,18 @@ import { takeQuota } from "./limits.ts";
 
 /** Goals for a Project with no app code yet. */
 export const START_GOALS = [
-  "Make me a todo app",
-  "Make a notes app with search",
-  "Make a shared shopping list",
-  "Make a simple blog with posts",
-  "Make a habit tracker",
-  "Make a poll where people vote",
-  "Make a guestbook page",
-  "Make a link-in-bio page",
-  "Make a recipe collection",
-  "Make an event RSVP page",
-  "Make a team kanban board",
-  "Make a personal wishlist with share links",
+  "Make a shared 16-step drum machine",
+  "Make a pixel canvas everyone paints live",
+  "Make a tiny parliament that votes on laws",
+  "Make a story game where each player sees one line",
+  "Make a silent auction with live bids",
+  "Make a time capsule that opens on a set date",
+  "Make a play-money prediction market",
+  "Make a live Q&A where people upvote questions",
+  "Make a murder mystery game for a party",
+  "Make one-time secret notes that self-destruct",
+  "Make a haiku chain that checks syllables",
+  "Make a chat room that forgets after 24 hours",
 ] as const;
 
 /** Goals for a Project that already has app code. */

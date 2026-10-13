@@ -1,5 +1,5 @@
 import { Show, SignInButton } from "@clerk/tanstack-react-start";
-import { Button, cn, Input, InputArea } from "@cloudflare/kumo";
+import { Button, cn, InputArea } from "@cloudflare/kumo";
 import { SignIn } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
@@ -623,6 +623,7 @@ function RiskCell({ risk }: { risk: string | null }) {
  */
 type ChangeDraft = { goal: string; budget: string | null; scope: BudgetScope };
 const SCOPES: readonly BudgetScope[] = ["change", "project", "account"];
+const BUDGET_INVALID = "Set a spending limit above $0.00.";
 /** Used only until the Project settings load (the API applies the same built-in default). */
 const FALLBACK_BUDGET = "3";
 /** Unsent drafts live outside the component so a remount (auth refresh, route re-render) keeps them. */
@@ -799,7 +800,7 @@ function NewChange({
         onSubmit={(event) => {
           event.preventDefault();
           if (!goal.trim()) setInvalid("Describe the goal before you submit.");
-          else if (scope === "change" && !(budgetUsd > 0)) setInvalid("Set a budget above $0.00.");
+          else if (scope === "change" && !(budgetUsd > 0)) setInvalid(BUDGET_INVALID);
           else create.mutate();
         }}
       >
@@ -843,24 +844,11 @@ function NewChange({
             onScope={(next) => update({ scope: next })}
             pools={pools}
             canSetProjectBudget={can(project.data?.role, "settings.edit")}
-            amountField={
-              <Input
-                label="Budget (USD)"
-                description={
-                  draft.budget === null && settings.data
-                    ? "The Project's default. New expensive work stops at this limit."
-                    : "New expensive work stops at this limit."
-                }
-                ref={budgetRef}
-                type="number"
-                min={0.1}
-                step={0.1}
-                className="font-mono"
-                value={budget}
-                onChange={(e) => setBudget(e.target.value)}
-                required
-              />
-            }
+            amount={budget}
+            onAmount={setBudget}
+            amountRef={budgetRef}
+            isDefault={draft.budget === null && settings.data !== undefined}
+            forceOpen={invalid === BUDGET_INVALID}
           />
         )}
         {invalid && (
