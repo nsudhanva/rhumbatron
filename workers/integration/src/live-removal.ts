@@ -38,7 +38,10 @@ type LiveRequest = {
   criteria: Criterion[];
 };
 
-/** Live requests of other people: a promoted Candidate, newest first, at most 10. */
+/**
+ * Live requests of other people: a promoted Candidate, newest first, at most 10. A request that a
+ * decided conflict replaced is left out, as in the kept criteria.
+ */
 async function loadLiveRequests(
   db: D1Database,
   input: { projectId: string; changeId: string; requesterUserId: string },
@@ -50,6 +53,11 @@ async function loadLiveRequests(
        FROM changes ch JOIN candidates c ON c.change_id = ch.id AND c.status = 'promoted'
        LEFT JOIN users u ON u.id = ch.created_by
        WHERE ch.project_id = ?1 AND ch.id != ?2 AND ch.created_by != ?3
+         -- A conflict that was already decided (first come, same requester) replaced that request:
+         -- its requester or the system chose already, so nobody is asked again.
+         AND NOT EXISTS (SELECT 1 FROM request_conflicts rc
+           WHERE rc.verdict = 'conflicting' AND rc.policy IN ('first_come', 'same_requester')
+             AND ((rc.change_a = ch.id AND rc.change_b = ?2) OR (rc.change_a = ?2 AND rc.change_b = ch.id)))
        GROUP BY ch.id ORDER BY live_at DESC LIMIT 10`,
     )
     .bind(input.projectId, input.changeId, input.requesterUserId)

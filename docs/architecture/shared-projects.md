@@ -548,7 +548,7 @@ The inbox tells the later requester "Your request builds on <name>'s request".
 
 A request can also remove features that were live before it was made, for example "simplify the home page to a plain list". Before any Task is built, `checkLiveRemovals` (`workers/integration/src/live-removal.ts`) checks for that:
 
-- It runs only when the goal or a planned criterion uses words of removal or replacement (remove, replace, simplify, only, no longer, instead, rewrite, hide, and similar), and other people's requests are live (a promoted Candidate). Otherwise it spends nothing.
+- It runs only when the goal or a planned criterion uses words of removal or replacement (remove, replace, simplify, only, no longer, instead, rewrite, hide, and similar), and other people's requests are live (a promoted Candidate). A live request that a decided conflict replaced (first come or same requester) does not count: that choice was already made. Otherwise it spends nothing.
 - One Sonnet review lists the live criteria, without quality-gate criteria, and cites by ID each one the request would remove, hide, disable, or replace. An invented ID makes the answer invalid.
 - When it cites any, the requester gets one question (`needs_input`, question `keep_live`). It names each feature and whose request it came from. The options are "Keep them, and build the rest of my request around them" and "Remove them". The planner reads the answer like every clarification answer. The question is asked once per request.
 - A failed or abstaining review asks nothing. The acceptance check still judges the build.

@@ -59,7 +59,7 @@ function harness() {
       status: string;
       clarification_json: string | null;
     };
-  return { env, events, change };
+  return { env, events, change, db };
 }
 
 const reply = (removed: unknown[]) =>
@@ -112,5 +112,18 @@ describe("live-feature removal check", () => {
       }),
     ).toEqual({ costUsd: 0, stop: null });
     expect(h.change().status).toBe("compiling");
+  });
+
+  it("asks nothing about a request that a decided conflict already replaced", async () => {
+    const h = harness();
+    h.db.exec(`INSERT INTO request_conflicts (id, project_id, change_a, change_b, verdict, policy, created_at)
+      VALUES ('rc_1', 'proj_q', 'chg_simplify', 'chg_board', 'conflicting', 'first_come', '${T}')`);
+    let calls = 0;
+    const outcome = await checkLiveRemovals(h.env, ctx, input, async () => {
+      calls++;
+      return reply([{ criterion: "L1c1", why: "x" }]);
+    });
+    expect(calls).toBe(0);
+    expect(outcome).toEqual({ costUsd: 0, stop: null });
   });
 });
