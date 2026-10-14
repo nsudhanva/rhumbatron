@@ -87,6 +87,7 @@ async function review(options: {
   clef: DecisionModel | null;
   replies: Record<string, CompletionResult[]>;
   targets?: RelatedItem[];
+  appFiles?: () => Promise<{ path: string; text: string }[] | null>;
 }) {
   const calls: string[] = [];
   const packet = buildPacket(options.request, options.targets ?? [c1], UNKNOWN_CANONICAL);
@@ -105,6 +106,7 @@ async function review(options: {
     {
       clef: options.clef,
       canSpend: () => true,
+      ...(options.appFiles ? { appFiles: options.appFiles } : {}),
       complete: async (req) => {
         const name = req.tools?.[0]?.function.name ?? "";
         calls.push(name);
@@ -174,6 +176,72 @@ describe("intake duplicate cascade", () => {
       replies: { coverage_review: [covered("already_covered"), covered("extends")] },
     });
     expect(outcome.clarification).toMatchObject({ kind: "unclear", relatedChangeId: "chg_c1" });
+  });
+
+  it("confirms a live request against the current app before calling it a duplicate", async () => {
+    const live = { ...c1, status: "completed" };
+    const app = [{ path: "public/index.html", text: '<ul id="units"></ul>\n<p>Plain list</p>' }];
+    const stillLive = (present: boolean, quote?: string) =>
+      reply("still_live", {
+        results: [
+          {
+            sourceId: "chg_c1:c1",
+            present,
+            ...(quote ? { path: "public/index.html", quote } : {}),
+          },
+        ],
+      });
+    const all = {
+      item_0: ["duplicate", 0.99] as [string, number],
+      buildable: ["buildable", 0.95] as [string, number],
+    };
+    // A later request removed the feature: no question, the request plans.
+    const gone = await review({
+      request: "Add a kanban list with todo, doing and done to each calendar day",
+      clef: clef(all),
+      targets: [live],
+      appFiles: async () => app,
+      replies: {
+        coverage_review: [covered("duplicate"), covered("duplicate")],
+        still_live: [stillLive(false)],
+      },
+    });
+    expect(gone.calls).toEqual(["coverage_review", "coverage_review", "still_live"]);
+    expect(gone.outcome.decision).toBe("plan");
+    expect(gone.outcome.receipt.noLongerLive).toEqual(["chg_c1"]);
+    // "present" needs a code quote that is in the file; an invented one counts as gone.
+    const invented = await review({
+      request: "Add a kanban list with todo, doing and done to each calendar day",
+      clef: clef(all),
+      targets: [live],
+      appFiles: async () => app,
+      replies: {
+        coverage_review: [covered("duplicate"), covered("duplicate")],
+        still_live: [stillLive(true, "renderKanbanColumns(day)")],
+      },
+    });
+    expect(invented.outcome.decision).toBe("plan");
+    // Still in the code: ask as before.
+    const present = await review({
+      request: "Add a kanban list with todo, doing and done to each calendar day",
+      clef: clef(all),
+      targets: [live],
+      appFiles: async () => app,
+      replies: {
+        coverage_review: [covered("duplicate"), covered("duplicate")],
+        still_live: [stillLive(true, '<ul id="units"></ul>')],
+      },
+    });
+    expect(present.outcome.clarification).toMatchObject({ kind: "duplicate" });
+    // A request still in flight is not confirmed against the app.
+    const open = await review({
+      request: "Add a kanban list with todo, doing and done to each calendar day",
+      clef: clef(all),
+      appFiles: async () => app,
+      replies: { coverage_review: [covered("duplicate"), covered("duplicate")] },
+    });
+    expect(open.calls).toEqual(["coverage_review", "coverage_review"]);
+    expect(open.outcome.clarification).toMatchObject({ kind: "duplicate" });
   });
 
   it("drops an invented quote: a covered verdict without packet text counts for nothing", async () => {

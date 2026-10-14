@@ -247,6 +247,13 @@ Sonnet runs twice: once with the new request first, once with the other items fi
 
 The question quotes the covering text: "This looks covered by "<goal>": "<quote>". What is different in your request?"
 
+A `completed` request describes the app when it went live. A later request can remove what it built, for example "simplify the home page to a plain list".
+So before a `completed` request asks anything, one Sonnet call (`still_live`) reads the current app's entry files (`readCanonicalAppFiles`: `public/index.html`, the scripts and styles it references, `src/app.ts`, `src/worker.ts`, at most 24,000 characters).
+For each cited criterion, it says whether the code still delivers it.
+A "still delivered" answer counts only with a quote of at least 8 characters that occurs in the named file.
+When no cited criterion is still delivered, the target is dropped and the next one is checked; the receipt lists it in `noLongerLive`.
+When the call fails or the source cannot be read, the question is asked as before.
+
 ### Clarity
 
 The clarity check reads the request as a change to the current app.

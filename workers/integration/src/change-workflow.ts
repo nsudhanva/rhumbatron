@@ -22,6 +22,7 @@ import {
   intakeMayAsk,
   loadRelatedRequests,
   parseAnswers,
+  readCanonicalAppFiles,
   readCanonicalSummary,
   type StoredAnswer,
 } from "./intake-context.ts";
@@ -163,6 +164,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
         clef: clefModel(ai, this.env.DB),
         complete: (req) => this.complete(req, ctx.changeId),
         canSpend: (spentUsd) => spentUsd < remainingUsd,
+        appFiles: () => readCanonicalAppFiles(this.env, ctx.projectId),
       },
     );
     const verdict = String(outcome.receipt.verdict ?? outcome.decision);

@@ -1,5 +1,6 @@
 import type { ProjectRootDO } from "@rhumbatron/coordinator";
 import { codeBlobKey, codeManifestKey } from "@rhumbatron/protocol";
+import { referencedAssets } from "./acceptance-check.ts";
 import { readTreeFiles } from "./code-store.ts";
 
 /**
@@ -167,6 +168,54 @@ export function summarizeCanonical(
     description: facts.description ?? null,
     readme: facts.readme ?? null,
   };
+}
+
+/** Text read from the current app for one duplicate confirmation. */
+const APP_TEXT_CAP = 24_000;
+
+/**
+ * The current app's entry files (public/index.html, the scripts and styles it references,
+ * src/app.ts, src/worker.ts), at most APP_TEXT_CAP characters in all. A duplicate of a request
+ * that went live is confirmed against this text: later requests may have removed its features.
+ * Null when the source cannot be read.
+ */
+export async function readCanonicalAppFiles(
+  env: Pick<Env, "PROJECT_ROOT" | "EVIDENCE">,
+  projectId: string,
+): Promise<{ path: string; text: string }[] | null> {
+  try {
+    const roots = env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
+    const canonical = await roots.get(roots.idFromName(projectId)).getCanonical();
+    if (!canonical || canonical.artifactRef === "unassigned") return null;
+    const manifest = await env.EVIDENCE.get(codeManifestKey(projectId, canonical.treeSha));
+    if (!manifest) return null;
+    const entries =
+      ((await manifest.json()) as { entries?: { path: string; blob: string }[] }).entries ?? [];
+    const read = async (path: string) => {
+      const entry = entries.find((e) => e.path === path);
+      if (!entry) return null;
+      const blob = await env.EVIDENCE.get(codeBlobKey(projectId, entry.blob));
+      return blob ? blob.text() : null;
+    };
+    const index = await read("public/index.html");
+    const paths = [
+      ...(index === null ? [] : ["public/index.html", ...referencedAssets(index)]),
+      "src/app.ts",
+      "src/worker.ts",
+    ];
+    const out: { path: string; text: string }[] = [];
+    let room = APP_TEXT_CAP;
+    for (const path of [...new Set(paths)]) {
+      if (room <= 0) break;
+      const text = path === "public/index.html" ? index : await read(path);
+      if (text === null) continue;
+      out.push({ path, text: text.slice(0, room) });
+      room -= text.length;
+    }
+    return out;
+  } catch {
+    return null;
+  }
 }
 
 /** The current canonical tree as a summary. Unknown when ProjectRootDO or the source fails. */
