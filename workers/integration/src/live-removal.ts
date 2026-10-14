@@ -3,7 +3,7 @@ import type { ChangeClarification } from "@rhumbatron/protocol";
 import { z } from "zod";
 import { appendChangeEvents, type ChangeContext, changeEvent } from "./events.ts";
 import type { Criterion } from "./intake-context.ts";
-import { isQualityGate } from "./kept-criteria.ts";
+import { isQualityGate, KEEP_LIVE_QUESTION, REMOVE_LIVE_ANSWER } from "./kept-criteria.ts";
 
 /**
  * Live-feature removal check. Kept criteria protect work that goes live while a request runs; a
@@ -12,15 +12,16 @@ import { isQualityGate } from "./kept-criteria.ts";
  * of removal and other people's requests are live, one Sonnet review names the live criteria
  * that the request would remove, hide, or replace, each cited by ID. The requester then answers
  * one question: keep them and build the rest around them, or remove them. The answer reaches the
- * planner like every clarification answer. A failed or abstaining review asks nothing: the
+ * planner like every clarification answer. The named requests go to `live_removals`: after
+ * "Remove them", their criteria are not kept for this request. A failed or abstaining review asks nothing: the
  * acceptance check and the kept criteria still apply.
  */
 
-/** The question ID; an answered one is never asked again. */
-export const KEEP_LIVE_QUESTION = "keep_live";
+export { KEEP_LIVE_QUESTION };
+
 const KEEP_LIVE_OPTIONS = [
   "Keep them, and build the rest of my request around them",
-  "Remove them",
+  REMOVE_LIVE_ANSWER,
 ] as const;
 
 /** Words of removal or replacement. Without one, no review runs and nothing is spent. */
@@ -236,6 +237,13 @@ export async function checkLiveRemovals(
     .bind(JSON.stringify(clarification), now, input.changeId)
     .run();
   if ((updated.meta.changes ?? 0) === 0) return { costUsd: review.costUsd, stop: null };
+  // What a "Remove them" answer lets go: kept-criteria.ts reads these rows.
+  for (const changeId of new Set(review.removed.map((r) => r.request.changeId)))
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO live_removals (change_id, removed_change_id, project_id, created_at) VALUES (?, ?, ?, ?)",
+    )
+      .bind(input.changeId, changeId, ctx.projectId, now)
+      .run();
   await appendChangeEvents(env.RESOURCE_SHARD, ctx, [
     await changeEvent(
       ctx,

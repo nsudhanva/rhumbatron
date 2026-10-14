@@ -52,7 +52,7 @@ Cleanup skips a Project that is not `archived`. Each queue message does a bounde
 4. Delete every object in the evidence bucket under these prefixes, each followed by the Project ID: `source/`, `context/`, `apps/`, `app-previews/`, `evidence/`, `work-graphs/`, and `workspace/`.
 5. Wait until `removeApp` on the apps Worker clears the app data stores.
 6. For each batch of 25 Tasks, purge the `AgentDO` of each Task, then delete the `task_dependencies`, `decision_receipts`, `task_runs`, and `tasks` rows.
-7. Delete the rows of `evidence_index`, `approvals`, `conflicts`, `changesets`, `candidates`, `change_decisions`, `changes`, `request_conflicts`, `goal_suggestions`, `project_policies`, `project_members`, `project_invitations`, `agents`, `dead_letters`, `releases`, `project_events`, `code_session_files`, `code_session_commands`, `code_sessions`, and `sandbox_awake`. Each statement deletes at most 500 rows. Each message runs at most 40 statements.
+7. Delete the rows of `evidence_index`, `approvals`, `conflicts`, `changesets`, `candidates`, `change_decisions`, `live_removals`, `changes`, `request_conflicts`, `goal_suggestions`, `project_policies`, `project_members`, `project_invitations`, `agents`, `dead_letters`, `releases`, `project_events`, `code_session_files`, `code_session_commands`, `code_sessions`, and `sandbox_awake`. Each statement deletes at most 500 rows. Each message runs at most 40 statements.
 8. Purge the 32 `ResourceShardDO` shards (Claims, Intents, Challenges, outbox). This step is last, so a late Claim cannot fill a shard again.
 9. Delete the KV policy copy. Set the name to `Deleted project` and the slug to `deleted-<id>`. Set `cleaned_at`.
 

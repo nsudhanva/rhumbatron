@@ -127,6 +127,7 @@ export const CONTENT_TABLES: readonly { table: string; where: string }[] = [
   { table: "changesets", where: `change_id IN (${CHANGES})` },
   { table: "candidates", where: `change_id IN (${CHANGES})` },
   { table: "change_decisions", where: `change_id IN (${CHANGES})` },
+  { table: "live_removals", where: "project_id = ?" },
   { table: "changes", where: "project_id = ?" },
   { table: "request_conflicts", where: "project_id = ?" },
   { table: "request_choices", where: "project_id = ?" },

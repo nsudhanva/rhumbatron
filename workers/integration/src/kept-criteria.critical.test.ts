@@ -15,11 +15,12 @@ function db() {
     sqlite.exec(readFileSync(join(MIGRATIONS, file), "utf8"));
   sqlite.exec(`INSERT INTO projects (id, org_id, name, slug, status, canonical_generation, created_at, updated_at)
     VALUES ('proj_k', 'org', 'K', 'k', 'active', 2, '2026-10-13T00:00:00Z', '2026-10-13T00:00:00Z')`);
-  const change = (id: string, createdAt: string, criteria: string[]) =>
+  // Each Change has its own requester unless one is named.
+  const change = (id: string, createdAt: string, criteria: string[], by = `usr_${id}`) =>
     sqlite
       .prepare(`INSERT INTO changes (id, project_id, goal, status, base_generation, budget_usd, created_by,
-        created_at, updated_at, acceptance_criteria_json) VALUES (?, 'proj_k', 'g', 'running', 0, 3, 'u', ?, ?, ?)`)
-      .run(id, createdAt, createdAt, JSON.stringify(criteria));
+        created_at, updated_at, acceptance_criteria_json) VALUES (?, 'proj_k', 'g', 'running', 0, 3, ?, ?, ?, ?)`)
+      .run(id, by, createdAt, createdAt, JSON.stringify(criteria));
   const promoted = (changeId: string, at: string) =>
     sqlite
       .prepare(`INSERT INTO candidates (id, change_id, base_generation, status, created_at, updated_at)
@@ -37,7 +38,20 @@ function db() {
       .prepare(`INSERT INTO request_conflicts (id, project_id, change_a, change_b, verdict, policy, created_at)
         VALUES (?, 'proj_k', ?, ?, 'conflicting', 'first_come', '2026-10-13T10:00:00Z')`)
       .run(`rc_${a}_${b}`, a, b);
-  return { change, promoted, conflict, d1 };
+  const removal = (me: string, removed: string, answer: string | null) => {
+    sqlite
+      .prepare(`INSERT OR IGNORE INTO live_removals (change_id, removed_change_id, project_id, created_at)
+        VALUES (?, ?, 'proj_k', '2026-10-13T10:02:00Z')`)
+      .run(me, removed);
+    if (answer)
+      sqlite
+        .prepare("UPDATE changes SET clarification_answers_json = ? WHERE id = ?")
+        .run(
+          JSON.stringify([{ round: 1, action: "answers", questionId: "keep_live", text: answer }]),
+          me,
+        );
+  };
+  return { change, promoted, conflict, removal, d1 };
 }
 
 describe("criteria kept from requests that went live meanwhile", () => {
@@ -71,6 +85,22 @@ describe("criteria kept from requests that went live meanwhile", () => {
     ]);
     h.promoted("chg_two", "2026-10-13T10:05:00Z");
     h.conflict("chg_me", "chg_two");
+    expect(await loadKeptCriteria(h.d1, "chg_me")).toEqual([]);
+  });
+
+  it("does not keep the requester's own requests, or ones they chose to remove", async () => {
+    const h = db();
+    h.change("chg_me", "2026-10-13T10:00:00Z", ["Events can never change"], "usr_m");
+    h.change("chg_edit", "2026-10-13T09:59:00Z", ["A resident edits an event"], "usr_m");
+    h.change("chg_undo", "2026-10-13T09:59:30Z", ["A resident undoes the last event"]);
+    h.promoted("chg_edit", "2026-10-13T10:03:00Z");
+    h.promoted("chg_undo", "2026-10-13T10:04:00Z");
+    // Named by the live-removal check, not answered yet: still kept.
+    h.removal("chg_me", "chg_undo", null);
+    expect(await loadKeptCriteria(h.d1, "chg_me")).toEqual(["A resident undoes the last event"]);
+    h.removal("chg_me", "chg_undo", "Keep them, and build the rest of my request around them");
+    expect(await loadKeptCriteria(h.d1, "chg_me")).toEqual(["A resident undoes the last event"]);
+    h.removal("chg_me", "chg_undo", "Remove them");
     expect(await loadKeptCriteria(h.d1, "chg_me")).toEqual([]);
   });
 

@@ -5,8 +5,15 @@
  * instruction (context-compiler `keep`), and the acceptance check judges them with the request's
  * own criteria. Criteria that only restate the quality gate are left out: other checks cover them.
  * A live request that conflicts with this one (a first-come or same-requester conflict) is not
- * kept: this request was chosen to replace it.
+ * kept: this request was chosen to replace it. A live request that the live-removal check named,
+ * when the requester answered "Remove them", is not kept either. The requester's own requests are
+ * not kept: the newer request states that person's current intent.
  */
+
+/** The live-removal question ID (`live-removal.ts`); an answered one is never asked again. */
+export const KEEP_LIVE_QUESTION = "keep_live";
+/** The answer that lets the named live requests go. */
+export const REMOVE_LIVE_ANSWER = "Remove them";
 
 /**
  * A criterion that only restates the quality gate ("typecheck, test and contract all pass", "all
@@ -98,15 +105,19 @@ export async function loadKeptCriteria(db: D1Database, changeId: string): Promis
        FROM changes me
        JOIN changes ch ON ch.project_id = me.project_id AND ch.id != me.id
        JOIN candidates c ON c.change_id = ch.id AND c.status = 'promoted'
-       WHERE me.id = ? AND c.updated_at > me.created_at
+       WHERE me.id = ?1 AND c.updated_at > me.created_at AND ch.created_by != me.created_by
          -- A request that conflicts with this one was replaced by it (first come, apply theirs):
          -- its criteria cannot hold together with this request's, so they are not kept.
          AND NOT EXISTS (SELECT 1 FROM request_conflicts rc
            WHERE rc.verdict = 'conflicting' AND rc.policy IN ('first_come', 'same_requester')
              AND ((rc.change_a = ch.id AND rc.change_b = me.id) OR (rc.change_a = me.id AND rc.change_b = ch.id)))
+         -- The requester chose to remove it (live-removal check, answer "Remove them").
+         AND NOT (EXISTS (SELECT 1 FROM live_removals lr WHERE lr.change_id = me.id AND lr.removed_change_id = ch.id)
+           AND EXISTS (SELECT 1 FROM json_each(COALESCE(me.clarification_answers_json, '[]')) a
+             WHERE json_extract(a.value, '$.questionId') = ?2 AND json_extract(a.value, '$.text') = ?3))
        ORDER BY c.updated_at DESC LIMIT 10`,
     )
-    .bind(changeId)
+    .bind(changeId, KEEP_LIVE_QUESTION, REMOVE_LIVE_ANSWER)
     .all<{ acceptance_criteria_json: string | null; own: string | null }>();
   const results = rows.results ?? [];
   if (results.length === 0) return [];

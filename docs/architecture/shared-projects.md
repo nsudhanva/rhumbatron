@@ -12,6 +12,7 @@ Main source files:
 | `migrations/d1/0029_roles_and_request_review.sql` | The roles `owner`, `admin`, `member`, `viewer`; invitation roles; `projects.member_request_review`; the `review_*` columns on `changes` |
 | `migrations/d1/0032_change_assumptions.sql` | `changes.assumptions_json`: the details that the Root Planner decided |
 | `migrations/d1/0033_first_come_choices.sql` | `request_choices`: one first-come question per earlier and later request |
+| `migrations/d1/0040_live_removals.sql` | `live_removals`: the live requests that the live-removal check named for a request |
 | `migrations/d1/0035_platform_admin_and_access.sql` | `users.access_status`, `platform_settings`, `admin_audit` |
 | `workers/api/src/access.ts` | The access gate, `isPlatformAdmin`, and the admin audit rows |
 | `workers/api/src/admin.ts` | The `/v1/admin/*` routes |
@@ -557,12 +558,12 @@ A request can also remove features that were live before it was made, for exampl
 
 - It runs only when the goal or a planned criterion uses words of removal or replacement (remove, replace, simplify, only, no longer, instead, rewrite, hide, and similar), and other people's requests are live (a promoted Candidate). A live request that a decided conflict replaced (first come or same requester) does not count: that choice was already made. Otherwise it spends nothing.
 - One Sonnet review lists the live criteria, without quality-gate criteria, and cites by ID each one the request would remove, hide, disable, or replace. An invented ID makes the answer invalid.
-- When it cites any, the requester gets one question (`needs_input`, question `keep_live`). It names each feature and whose request it came from. The options are "Keep them, and build the rest of my request around them" and "Remove them". The planner reads the answer like every clarification answer. The question is asked once per request.
+- When it cites any, the requester gets one question (`needs_input`, question `keep_live`). It names each feature and whose request it came from. The options are "Keep them, and build the rest of my request around them" and "Remove them". The planner reads the answer like every clarification answer. The question is asked once per request. The named requests go to `live_removals`, so the kept criteria of the request leave them out after "Remove them".
 - A failed or abstaining review asks nothing. The acceptance check still judges the build.
 
 When a request plans or re-runs after other requests went live, it keeps their work (`kept-criteria.ts` in `workers/integration/src`):
 
-- The kept criteria are the acceptance criteria of the other requests of the Project whose Candidate promoted after this request was created, newest first, at most 12. Criteria that only restate the quality gate and the request's own criteria are left out. A live request that conflicts with this one (first come or same requester) is left out: this request was chosen to replace it.
+- The kept criteria are the acceptance criteria of the other requests of the Project whose Candidate promoted after this request was created, newest first, at most 12. Criteria that only restate the quality gate and the request's own criteria are left out. A live request that conflicts with this one (first come or same requester) is left out: this request was chosen to replace it. A live request that the live-removal check named (`live_removals`) is left out after the requester answers "Remove them". The requester's own earlier requests are left out: the newer request states that person's current intent.
 - The Task instruction lists them: keep every one of them working, and do not remove, replace, or hide them.
 - The acceptance check judges them with the request's own criteria, each marked "Keep (from an earlier request)". A kept criterion that is not met holds the Candidate for a person, like any unmet criterion.
 
