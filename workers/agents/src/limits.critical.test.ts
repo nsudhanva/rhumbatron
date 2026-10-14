@@ -294,7 +294,7 @@ describe("max model attempts per Task at one tier", () => {
   it("names the exact limit for a budget stop, and none for an ordinary failure", () => {
     expect(limitStop("max_attempts_per_tier")).toMatchObject({ limit: "max_attempts_per_tier" });
     expect(limitStop("two_failures_at_opus")?.text).toContain("failed 2 times");
-    expect(limitStop("budget_exhausted")?.text).toContain("400 model calls");
+    expect(limitStop("budget_exhausted")?.text).toContain("1000 model calls");
     expect(limitStop("repeated_transport_failure")).toBeNull();
   });
 });

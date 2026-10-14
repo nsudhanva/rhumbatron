@@ -320,6 +320,17 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       budgetUsd: number;
       meterOwners?: MeterOwners;
     };
+    // A cancelled Change cancels its Tasks: send no further request (the run check ends the run).
+    const task = await this.env.DB.prepare("SELECT status FROM tasks WHERE id = ?")
+      .bind(input.taskId)
+      .first<{ status: string }>();
+    if (task?.status === "cancelled") {
+      this.ctx.storage.sql.exec(
+        "UPDATE agent_runs SET outcome = 'budget_exhausted' WHERE run_id = ?",
+        run.run_id,
+      );
+      throw new Error("task cancelled");
+    }
     const budget = checkRunBudget({
       tier,
       callsSoFar: run.calls,
