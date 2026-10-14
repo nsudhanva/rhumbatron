@@ -18,7 +18,7 @@ import { isQualityGate } from "./kept-criteria.ts";
 
 /** The question ID; an answered one is never asked again. */
 export const KEEP_LIVE_QUESTION = "keep_live";
-export const KEEP_LIVE_OPTIONS = [
+const KEEP_LIVE_OPTIONS = [
   "Keep them, and build the rest of my request around them",
   "Remove them",
 ] as const;
@@ -83,7 +83,7 @@ const Review = z
   .strict();
 
 /** Pure: the cited live criteria, or null when the output is not usable. */
-export function validateRemovals(
+function validateRemovals(
   raw: unknown,
   live: readonly LiveRequest[],
 ): { request: LiveRequest; criterion: Criterion; why: string }[] | null {
@@ -148,7 +148,7 @@ async function reviewRemovals(
 }
 
 /** Pure: the question that names what would go and whose it is. */
-export function removalQuestion(
+function removalQuestion(
   removed: readonly { request: LiveRequest; criterion: Criterion }[],
   round: number,
   askedAt: string,
