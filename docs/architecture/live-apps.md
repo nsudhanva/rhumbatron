@@ -107,6 +107,7 @@ A failed preview build marks only the preview row. It does not change the verifi
 Every Project with a live app has a required `preview-smoke` check (kind `smoke`).
 The check runs the release probes on the exact preview host through `AppBuilder.probe`.
 It does not touch production or the production data store.
+The home page must answer 2xx or 3xx with the app's own page. Each `GET` route of the contract (no parameters) must answer 2xx, 400, 401, 403, or 422: a route that checks its input or its caller is deployed. A 404 (not deployed) or a 5xx (crashed) fails the check.
 A missing or failed preview is a gap, and the Candidate cannot promote.
 Sibling Candidates of one Change each get a preview. Only the selection winner promotes and releases (ADR 0026).
 

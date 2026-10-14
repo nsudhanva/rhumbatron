@@ -149,7 +149,7 @@ export async function requestAcceptanceRepair(
   ];
   const objective =
     input.trigger === "checks"
-      ? `Newer requests went live while this request ran, and on the current code its required checks fail. Run them, find the failures, and change this request's code and tests so they pass with the current behavior of the app. Keep every feature of the newer requests working.\n- ${goals.join("\n- ")}`
+      ? `On the current code, the app's required checks fail with this request's work: its own defect, or requests that went live while it ran. Reproduce the failure (run the tests, call the failing route), fix this request's code and tests so the checks pass with the current behavior of the app, and keep every other feature working.\n- ${goals.join("\n- ")}`
       : `The composed app passes its checks, but ${
           input.trigger === "acceptance"
             ? "the acceptance check found that the code does not meet these criteria"

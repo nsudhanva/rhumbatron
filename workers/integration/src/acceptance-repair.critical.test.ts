@@ -171,7 +171,7 @@ describe("acceptance repair", () => {
     ).toBe(true);
     const task = h.one("SELECT title, objective FROM tasks WHERE task_key = 'repair'");
     expect(task.title).toBe("Fit the current app");
-    expect(String(task.objective)).toContain("its required checks fail");
+    expect(String(task.objective)).toContain("the app's required checks fail");
     expect(String(task.objective)).toContain("Required checks not satisfied: unit (failed)");
   });
 });

@@ -142,7 +142,9 @@ export function judgeProbe(probe: Probe, status: number, body: string): ProbeRes
       : { probe, status, ok: true, detail: `${status}` };
   }
   if (probe.expect === "exists") {
-    const ok = (status >= 200 && status < 300) || status === 401 || status === 403;
+    // A route that needs a parameter answers a bare GET with a validation error (400, 422): it is
+    // deployed and checks its input. 404 (not deployed) and 5xx (crashed) fail.
+    const ok = (status >= 200 && status < 300) || [400, 401, 403, 422].includes(status);
     return {
       probe,
       status,

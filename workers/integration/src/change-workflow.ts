@@ -25,6 +25,7 @@ import {
   readCanonicalSummary,
   type StoredAnswer,
 } from "./intake-context.ts";
+import { checkLiveRemovals, KEEP_LIVE_QUESTION } from "./live-removal.ts";
 import {
   checkRequestPair,
   loadRequest,
@@ -600,6 +601,35 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
           waitsForFirst = true;
           break;
         }
+      }
+      // Live features of other people that this request would remove: ask once (live-removal.ts).
+      if (
+        !askedInCompare &&
+        !waitsForFirst &&
+        mayAsk &&
+        !JSON.stringify(answers).includes(`"${KEEP_LIVE_QUESTION}"`)
+      ) {
+        const asking = registrant;
+        const plannedCriteria = planned.criteria;
+        const removal = await step.do(
+          `check live removals${tag}`,
+          { retries: { limit: 1, delay: "15 seconds", backoff: "constant" }, timeout: "4 minutes" },
+          () =>
+            checkLiveRemovals(
+              this.env,
+              ctx,
+              {
+                changeId,
+                goal,
+                criteria: plannedCriteria,
+                requesterUserId: asking.requesterUserId,
+                round: answered,
+              },
+              (req) => this.complete(req, changeId),
+            ),
+        );
+        spent += removal.costUsd;
+        if (removal.stop === "needs_input") askedInCompare = true;
       }
       if (waitsForFirst) {
         const waiting = planned;

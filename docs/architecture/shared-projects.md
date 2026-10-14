@@ -546,6 +546,13 @@ A compatible later request plans at the same time as the earlier one.
 A later request that builds on the earlier one waits and plans on the earlier work, so the two requests never build the same feature twice.
 The inbox tells the later requester "Your request builds on <name>'s request".
 
+A request can also remove features that were live before it was made, for example "simplify the home page to a plain list". Before any Task is built, `checkLiveRemovals` (`workers/integration/src/live-removal.ts`) checks for that:
+
+- It runs only when the goal or a planned criterion uses words of removal or replacement (remove, replace, simplify, only, no longer, instead, rewrite, hide, and similar), and other people's requests are live (a promoted Candidate). Otherwise it spends nothing.
+- One Sonnet review lists the live criteria, without quality-gate criteria, and cites by ID each one the request would remove, hide, disable, or replace. An invented ID makes the answer invalid.
+- When it cites any, the requester gets one question (`needs_input`, question `keep_live`). It names each feature and whose request it came from. The options are "Keep them, and build the rest of my request around them" and "Remove them". The planner reads the answer like every clarification answer. The question is asked once per request.
+- A failed or abstaining review asks nothing. The acceptance check still judges the build.
+
 When a request plans or re-runs after other requests went live, it keeps their work (`kept-criteria.ts` in `workers/integration/src`):
 
 - The kept criteria are the acceptance criteria of the other requests of the Project whose Candidate promoted after this request was created, newest first, at most 12. Criteria that only restate the quality gate and the request's own criteria are left out. A live request that conflicts with this one (first come or same requester) is left out: this request was chosen to replace it.
