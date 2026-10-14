@@ -238,6 +238,7 @@ Rules:
 - The daily call cap and the monthly, Project, user, and request budgets stop the Task at once. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit.
 - `replan` is a budget stop with limit `max_attempts_per_tier`. No automatic re-plan runs. The Task becomes `blocked`, and the Change becomes `budget_blocked`.
 - `limitAttempts` allows at most 2 attempts per tier and counts every earlier run at that tier.
+- A promotion advances the generation, then writes the new tree's file index. A Task that starts in between waits up to 12 seconds for the index. If it is still missing, the start fails and the wake Queue delivers it again; the Task never reads "no source repository" for a Project that has one.
 - Conflicting dependency ChangeSets fail the Task at once (`dependency_merge_conflict`). The integration Worker then re-runs the dependency that did not merge on top of the others. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release).
 - When a Task fails or stops, its pending dependents become `blocked`.
 - The Decision Receipt of the next run records an escalation (reason `two_failures_at_<tier>` or `max_attempts_at_<tier>`).

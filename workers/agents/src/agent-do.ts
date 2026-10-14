@@ -198,6 +198,10 @@ function integrateInput(
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+/** The new tree's file index follows a promotion by seconds: wait up to 6 x 2 s for it. */
+const SOURCE_INDEX_WAITS = 6;
+const SOURCE_INDEX_WAIT_MS = 2000;
+
 /** Prompt tokens assumed when a Pi call is reserved on the monthly meter (ADR 0021). */
 const PI_RESERVE_PROMPT_TOKENS = 40_000;
 
@@ -1748,12 +1752,21 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     const root = this.env.PROJECT_ROOT as DurableObjectNamespace<ProjectRootDO>;
     const canonical = await root.get(root.idFromName(projectId)).getCanonical();
     if (!canonical || canonical.artifactRef === "unassigned") return null;
-    const index = await this.env.EVIDENCE.get(
-      `source/${projectId}/${canonical.treeSha}/index.json`,
-    );
-    if (!index) return null;
-    const parsed = (await index.json()) as { commit: string; files: string[] };
-    return { commit: parsed.commit, files: parsed.files };
+    // A promotion advances the generation first and writes the new tree's file index right after
+    // (integration canonical-source.ts). A Task that starts in between waits for the index: the
+    // repository exists, so "no source" would be wrong. Still missing: a transient error, so the
+    // wake is retried.
+    for (let attempt = 0; attempt < SOURCE_INDEX_WAITS; attempt++) {
+      const index = await this.env.EVIDENCE.get(
+        `source/${projectId}/${canonical.treeSha}/index.json`,
+      );
+      if (index) {
+        const parsed = (await index.json()) as { commit: string; files: string[] };
+        return { commit: parsed.commit, files: parsed.files };
+      }
+      await new Promise((resolve) => setTimeout(resolve, SOURCE_INDEX_WAIT_MS));
+    }
+    throw new Error(`source index of S${canonical.generation} is not written yet`);
   }
 
   private runSource(): {
