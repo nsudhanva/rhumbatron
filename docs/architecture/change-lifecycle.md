@@ -289,7 +289,7 @@ The pure rules are in `workers/integration/src/change-status.ts`.
 2. A cancel during `compiling` stores the planned Tasks as `cancelled` and records no compile.
 3. A running CandidateVerificationWorkflow checks the Change at each step boundary. It stops before it uses more Sandbox or Browser Run time.
 4. Dispatch runs only for a `running` Change.
-5. An active Agent run stops at its next run check (every 60 s).
+5. An active Agent run stops at once: `cancelChange` calls `AgentDO.stopIfCancelled` for each Task that was `assigned` or `running`. It aborts the model call in flight and releases the Claims and the Sandbox. If that call fails, the run stops at its next run check (every 60 s). A cancelled Task stays `cancelled`: its run ends with no retry, no escalation, and no `task.failed` event.
 
 `POST /v1/changes/:changeId/budget` raises `budget_usd`. The budget cannot go down.
 

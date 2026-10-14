@@ -1174,6 +1174,14 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     }
 
     await this.env.DB.batch([runUpdate]);
+    // A cancelled Task stays cancelled: no retry, no escalation, and no `task.failed`.
+    const current = await this.env.DB.prepare("SELECT status FROM tasks WHERE id = ?")
+      .bind(input.taskId)
+      .first<{ status: string }>();
+    if (current?.status === "cancelled") {
+      log({ event: "agent.run_cancelled", taskId: input.taskId, runId: run.run_id });
+      return "Task cancelled. Stop now.";
+    }
     // Conflicting dependency ChangeSets do not merge on any retry or tier: fail the Task now. The
     // integration Worker re-runs the dependency that did not merge on the others (settle.ts).
     if (result.kind === "dependency_merge_conflict") {
@@ -1373,6 +1381,22 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   async resume(runId: string, event: AgentResumeEvent): Promise<AgentRunResult> {
     log({ event: "agent.resume_ignored", runId, kind: event.kind, eventId: event.eventId });
     return { runId, accepted: false, state: await this.getState(runId) };
+  }
+
+  /**
+   * Stops the active run at once when its Task was cancelled (cancelChange calls this), so no
+   * model call in flight finishes and no new one starts. A no-op otherwise.
+   */
+  async stopIfCancelled(): Promise<{ stopped: boolean }> {
+    const run = this.activeRun();
+    if (!run) return { stopped: false };
+    const input = JSON.parse(run.input_json) as AgentRunInput;
+    const task = await this.env.DB.prepare("SELECT status FROM tasks WHERE id = ?")
+      .bind(input.taskId)
+      .first<{ status: string }>();
+    if (task?.status !== "cancelled") return { stopped: false };
+    await this.cancel(run.run_id);
+    return { stopped: true };
   }
 
   async cancel(runId: string): Promise<void> {

@@ -95,9 +95,15 @@ const recorded = (
 /**
  * Cancels a Change before promotion starts. Open Tasks become `cancelled`, so no new dispatch or
  * wake starts them (dispatch.ts reads only `running` Changes; a wake for a cancelled Task is stale),
- * and a running agent run stops at its next run check. Open Candidates become `rejected`, so none
+ * and a running agent run is stopped at once (`AgentDO.stopIfCancelled`; its next run check stops
+ * it if that call fails). Open Candidates become `rejected`, so none
  * can pass the promotion preconditions. History stays: nothing is deleted.
  */
+/** The AgentDO method that stops a cancelled Task's run (`workers/agents`). */
+type AgentStopper = Rpc.DurableObjectBranded & {
+  stopIfCancelled(): Promise<{ stopped: boolean }>;
+};
+
 export async function cancelChange(
   env: Env,
   input: { changeId: string; actorUserId: string },
@@ -140,6 +146,12 @@ export async function cancelChange(
     };
   }
   const now = new Date().toISOString();
+  // Agents working now: they are stopped at once after the cancel commits.
+  const working = await env.DB.prepare(
+    "SELECT id FROM tasks WHERE change_id = ? AND status IN ('assigned', 'running')",
+  )
+    .bind(row.id)
+    .all<{ id: string }>();
   // One batch is one transaction. The Task and Candidate updates apply only once the Change is
   // cancelled, so a lost race against promotion changes nothing.
   const cancelled = `EXISTS (SELECT 1 FROM changes WHERE id = ? AND status = '${target}')`;
@@ -211,6 +223,12 @@ export async function cancelChange(
   ]);
   // A proposed request was never admitted to ProjectRootDO: nothing to release.
   if (row.status !== "proposed") await releaseRequestScope(env, row.project_id, row.id);
+  await Promise.allSettled(
+    (working.results ?? []).map(async (task) => {
+      const agents = env.AGENT as unknown as DurableObjectNamespace<AgentStopper>;
+      return agents.get(agents.idFromName(`agt_${task.id.slice(4)}`)).stopIfCancelled();
+    }),
+  );
   return recorded(after, false);
 }
 
