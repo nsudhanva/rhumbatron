@@ -21,10 +21,12 @@ import { KEEP_PREFIX } from "./kept-criteria.ts";
 /**
  * Acceptance check (ADR 0026). One Haiku call judges each Change
  * acceptance criterion against the Candidate patch and the full text of the relevant files of the
- * composed tree; one Sonnet call follows only when the Haiku output is invalid. A criterion that
- * code already in the base satisfies is `met` with a quote of the composed file. The model output
- * is a hypothesis: application code validates every citation (the path is a file the model
- * received and the quote occurs in it), and a `met` without a valid citation counts as `unclear`.
+ * composed tree; one Sonnet call follows when the Haiku output is invalid or leaves a criterion of
+ * the request `unclear`. A criterion that code already in the base satisfies is `met` with a quote
+ * of the composed file; a removal is `met` with a quote of a removed line that no file still holds.
+ * The model output is a hypothesis: application code validates every citation (the path is a file
+ * the model received and the quote occurs in it), and a `met` without a valid citation counts as
+ * `unclear`.
  * Only "every criterion met with a valid citation" passes. The check is optional for the gate: it
  * ranks siblings and gates auto-promotion only.
  */
@@ -36,6 +38,8 @@ const MIN_QUOTE_CHARS = 8;
 const MAX_OUTPUT_TOKENS = 6_000;
 /** Composed files read for one check: bounds Artifacts reads. */
 const MAX_COMPOSED_FILES = 24;
+/** Lines of a deleted file the model gets: enough to quote what the deletion removed. */
+const DELETED_FILE_LINES = 40;
 
 /**
  * One text the model received: the patch hunks of a changed file (`patch`), or the full content
@@ -81,11 +85,24 @@ function capFiles(files: readonly SourceFile[], room: number) {
   return { files: out, used, truncated };
 }
 
-/** Patch entries: one per changed text file, hunks only. */
+/**
+ * Patch entries: one per changed text file, hunks only. A deleted file keeps its first
+ * DELETED_FILE_LINES lines, so a removal can be cited.
+ */
 function patchFiles(patch: string, truncated: boolean): SourceFile[] {
   return splitPatch(patch, truncated)
-    .filter((f) => !f.binary && f.status !== "deleted" && f.patch.length > 0)
-    .map((f) => ({ kind: "patch" as const, path: f.path, text: f.patch }));
+    .filter((f) => !f.binary && f.patch.length > 0)
+    .map((f) => {
+      const lines = f.patch.split("\n");
+      if (f.status !== "deleted" || lines.length <= DELETED_FILE_LINES)
+        return { kind: "patch" as const, path: f.path, text: f.patch };
+      return {
+        kind: "patch" as const,
+        path: f.path,
+        text: lines.slice(0, DELETED_FILE_LINES).join("\n"),
+        truncated: true as const,
+      };
+    });
 }
 
 /**
@@ -163,22 +180,40 @@ function searchable(file: SourceFile): string {
   );
 }
 
-/** A quote as the model may write it: with or without the patch `+` marker on each line. */
-const normalizeQuote = (quote: string) =>
+/** Removed lines of a patch, without their marker. */
+function removedText(file: SourceFile): string {
+  if (file.kind !== "patch") return "";
+  return collapse(
+    file.text
+      .split("\n")
+      .filter((line) => line.startsWith("-"))
+      .map((line) => line.slice(1))
+      .join("\n"),
+  );
+}
+
+/** A quote as the model may write it: with or without the patch marker on each line. */
+const normalizeQuote = (quote: string, marker: "+" | "-" = "+") =>
   collapse(
     quote
       .split("\n")
-      .map((line) => line.replace(/^\+/, ""))
+      .map((line) => (line.startsWith(marker) ? line.slice(1) : line))
       .join("\n"),
   );
 
 /**
  * True when the path is a file the model received (its patch or its composed text) and the quote
- * occurs in that text.
+ * occurs in that text. A `removed` citation proves a removal: the quote is a removed line of that
+ * file's patch, and no text the model received still contains it.
  */
 export function citationValid(source: AcceptanceSource, citation: AcceptanceCitation): boolean {
-  const quote = normalizeQuote(citation.quote);
+  const quote = normalizeQuote(citation.quote, citation.removed ? "-" : "+");
   if (quote.length < MIN_QUOTE_CHARS) return false;
+  if (citation.removed)
+    return (
+      source.files.some((f) => f.path === citation.path && removedText(f).includes(quote)) &&
+      !source.files.some((f) => searchable(f).includes(quote))
+    );
   return source.files.some((f) => f.path === citation.path && searchable(f).includes(quote));
 }
 
@@ -189,7 +224,9 @@ const ToolInput = z.object({
       z.object({
         criterion: z.number().int().min(1),
         status: AcceptanceStatus,
-        citations: z.array(z.object({ path: z.string(), quote: z.string() })).max(5),
+        citations: z
+          .array(z.object({ path: z.string(), quote: z.string(), removed: z.boolean().optional() }))
+          .max(5),
       }),
     )
     .min(1)
@@ -214,7 +251,7 @@ const ModelOutput = z.object({
                 c && typeof c === "object" && !("quote" in c) && "text" in c
                   ? { ...c, quote: (c as { text: unknown }).text }
                   : c,
-              z.object({ path: z.string(), quote: z.string() }),
+              z.object({ path: z.string(), quote: z.string(), removed: z.boolean().optional() }),
             ),
           )
           .max(5)
@@ -251,7 +288,13 @@ export function validateAcceptance(
       out.push({ criterion, status: "unclear", citations: [] });
       continue;
     }
-    const citations = result.citations.filter((c) => citationValid(source, c));
+    const citations = result.citations
+      .map(({ path, quote, removed }) => ({
+        path,
+        quote,
+        ...(removed ? { removed: true as const } : {}),
+      }))
+      .filter((c) => citationValid(source, c));
     const status = result.status === "met" && citations.length === 0 ? "unclear" : result.status;
     out.push({ criterion, status, citations: status === "met" ? citations : [] });
   }
@@ -317,7 +360,9 @@ function messages(criteria: readonly string[], source: AcceptanceSource) {
         "when the code existed before this change. Call record_acceptance once with one result " +
         "per criterion number. Use met only when the code shown implements the criterion, and " +
         "cite 1 to 3 quotes: the file path exactly as shown and an exact substring of that patch " +
-        "or file (one line or consecutive lines, without the leading + of a patch line). Use " +
+        "or file (one line or consecutive lines, without the leading + of a patch line). When a " +
+        "criterion asks to remove something, cite a removed patch line (without its leading -) " +
+        "with removed set to true; it counts only when no file shown still contains it. Use " +
         "not_met when the code clearly lacks it, and unclear when the code shown cannot tell. " +
         "Do not include reasoning.",
     },

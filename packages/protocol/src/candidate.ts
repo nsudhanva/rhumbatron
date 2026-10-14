@@ -147,7 +147,12 @@ export const CandidateStatus = z.enum([
 export type CandidateStatus = z.infer<typeof CandidateStatus>;
 
 /** Result of the acceptance check for one criterion (`candidates.acceptance_json`). */
-export const AcceptanceCitation = z.object({ path: z.string(), quote: z.string() });
+/** A quote of the app; `removed` quotes a deleted line that the app no longer contains. */
+export const AcceptanceCitation = z.object({
+  path: z.string(),
+  quote: z.string(),
+  removed: z.literal(true).optional(),
+});
 export type AcceptanceCitation = z.infer<typeof AcceptanceCitation>;
 
 export const AcceptanceStatus = z.enum(["met", "not_met", "unclear"]);

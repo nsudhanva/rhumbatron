@@ -227,6 +227,43 @@ describe("acceptance citations", () => {
     ).toMatchObject({ status: "fail" });
   });
 
+  it("meets a removal with a removed line that nothing the model read still contains", () => {
+    const patch = [
+      "diff --git a/public/calendar.html b/public/calendar.html",
+      "deleted file mode 100644",
+      "--- a/public/calendar.html",
+      "+++ /dev/null",
+      "@@ -1,2 +0,0 @@",
+      "-<h1>Building calendar</h1>",
+      '-<div id="calendar-days"></div>',
+      "diff --git a/public/index.html b/public/index.html",
+      "--- a/public/index.html",
+      "+++ b/public/index.html",
+      "@@ -1,2 +1 @@",
+      '-<a href="/calendar.html">Calendar</a>',
+      " <h1>Quiet Hours</h1>",
+      "",
+    ].join("\n");
+    const read = acceptanceSource({ text: patch, truncated: false }, [
+      { path: "public/index.html", text: "<h1>Quiet Hours</h1>\n<h1>Building calendar</h1>\n" },
+    ]);
+    const removed = (path: string, quote: string) =>
+      citationValid(read, { path, quote, removed: true });
+    expect(removed("public/calendar.html", '<div id="calendar-days"></div>')).toBe(true);
+    expect(removed("public/index.html", '-<a href="/calendar.html">Calendar</a>')).toBe(true);
+    // Still in a file the model read: not removed.
+    expect(removed("public/calendar.html", "<h1>Building calendar</h1>")).toBe(false);
+    // Not a removed line of that path.
+    expect(removed("public/index.html", "<h1>Quiet Hours</h1>")).toBe(false);
+    // Without the flag a removed line proves nothing.
+    expect(
+      citationValid(read, {
+        path: "public/calendar.html",
+        quote: '<div id="calendar-days"></div>',
+      }),
+    ).toBe(false);
+  });
+
   it("asks Sonnet about criteria Haiku left unclear, and only then", async () => {
     const src = {
       files: [{ path: "src/calendar.tsx", kind: "patch" as const, text: PATCH }],
