@@ -123,7 +123,7 @@ sequenceDiagram
   A->>SBX: git clone into /workspace/run (read token)
   A->>SBX: check out base, merge stacked ChangeSets, bun install
   loop agent tools
-    A->>SBX: read_file, write_file, run_command (allowlist, 180 s)
+    A->>SBX: read_file, edit_file, write_file, run_command (allowlist, 180 s)
   end
   A->>Art: write token (600 s)
   A->>SBX: git commit, push to ws-run

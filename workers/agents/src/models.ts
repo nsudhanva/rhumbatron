@@ -25,13 +25,14 @@ export const PROVIDER_ID = "rhumbatron";
 
 /**
  * Bounded context per call keeps the per-call reservation and spend small. One `write_file` call
- * holds a whole file: at 4,000 output tokens Haiku's call stopped inside the file of a page, and
- * the run ended with no outcome. 8,000 fits the app's page and route files on every tier.
+ * holds a whole file; agents change existing files with `edit_file`, so most calls stay small.
+ * Sonnet and Opus write the larger files of a grown app: 16,000 tokens holds a 40,000-character
+ * file. Output is billed as used, so the limit costs nothing until a call needs it.
  */
 const TIER_LIMITS: Record<ModelTier, { contextWindow: number; maxTokens: number }> = {
   haiku: { contextWindow: 200_000, maxTokens: 8000 },
-  sonnet: { contextWindow: 200_000, maxTokens: 8000 },
-  opus: { contextWindow: 200_000, maxTokens: 8000 },
+  sonnet: { contextWindow: 200_000, maxTokens: 16_000 },
+  opus: { contextWindow: 200_000, maxTokens: 16_000 },
 };
 
 /** Largest prompt one Pi call can send: the reservation estimate before each call. */

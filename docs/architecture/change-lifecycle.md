@@ -126,7 +126,7 @@ sequenceDiagram
   loop Pi tool loop (max 16 model calls on haiku, 32 on sonnet and opus)
     A->>GW: model call
     A->>Art: fork canonical as ws-{run} (first workspace tool call)
-    A->>SBX: read_file, write_file, run_command in /workspace/{run suffix}
+    A->>SBX: read_file, edit_file, write_file, run_command in /workspace/{run suffix}
   end
   A->>SBX: git commit and push to ws-{run}
   A->>D1: changesets (proposed), task completed

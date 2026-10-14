@@ -77,7 +77,7 @@ sequenceDiagram
     A-->>Pi: allow and reserve on the monthly meter, or throw at a cap
     Pi->>GW: Messages API call (Anthropic)
     GW-->>Pi: tool call
-    Pi->>T: list_files, read_file, write_file, delete_file, or run_command
+    Pi->>T: list_files, read_file, write_file, edit_file, delete_file, or run_command
     T->>SBX: read source, write file, run allowlisted command
     SBX-->>T: output (max 12,000 characters)
     T-->>Pi: result plus remaining model calls
@@ -87,9 +87,11 @@ sequenceDiagram
   A->>SBX: publish ChangeSet, close workspace
 ```
 
-The Task tools are `list_files`, `read_file`, `write_file`, `delete_file`, `run_command`, `complete_task`, and `fail_task`.
+The Task tools are `list_files`, `read_file`, `write_file`, `edit_file`, `delete_file`, `run_command`, `complete_task`, and `fail_task`.
+`read_file` returns a file from its start, at most 40,000 characters, cut at a line boundary (`fileWindow` in `task-tools.ts`). A longer file ends with a note that names the next line, and `fromLine` reads on from there.
+`edit_file` changes an existing file with exact replacements (`applyEdits`): each `oldText` must occur exactly once, in order. If one edit does not match, nothing is written and the result names the edit. The agents change existing files with `edit_file`, so a model response stays small as the app grows.
 Only Task kinds `implement`, `migrate`, and `test` get a workspace.
-For other kinds, `write_file`, `delete_file`, and `run_command` return "This Task has no workspace".
+For other kinds, `write_file`, `edit_file`, `delete_file`, and `run_command` return "This Task has no workspace".
 The first workspace tool call forks the canonical Artifact and opens a Sandbox checkout.
 A Project without source gets only `complete_task` and `fail_task`.
 
@@ -99,7 +101,7 @@ Caps inside one run:
 |---|---|---|
 | Model calls per run | haiku 16, sonnet 32, opus 32 | `MAX_CALLS_PER_RUN` in `packages/model-router/src/budget.ts` |
 | Run spend | At most the Task budget | `checkRunBudget` in `budget.ts` |
-| File reads per run | 12 reads, 24,000 characters each | `agent-do.ts` |
+| File reads per run | 12 reads, 40,000 characters each (`fromLine` reads on) | `agent-do.ts`, `task-tools.ts` |
 | Command output | 12,000 characters, 180 s timeout | `workspace.ts` |
 | Open Sandboxes per Change | 4 | `CHANGE_LIMITS` in `limits.ts` |
 | Pi retries | 1 retry for a transient error, 2 s base delay | `agent-do.ts` |
@@ -177,8 +179,8 @@ flowchart LR
 | Tier | Model | Thinking | Pi output cap |
 |---|---|---|---|
 | haiku | `claude-haiku-5-5` | Off in `complete()`. Adaptive, low effort in Pi. | 8,000 tokens: one `write_file` call holds a whole page file |
-| sonnet | `claude-sonnet-5-5` | Adaptive, medium effort, text omitted | 8,000 tokens |
-| opus | `claude-sonnet-5-5` while Opus is off. `claude-opus-5-5` when `ALLOW_OPUS` is `"true"`. | Adaptive, high effort, text omitted | 8,000 tokens |
+| sonnet | `claude-sonnet-5-5` | Adaptive, medium effort, text omitted | 16,000 tokens: a 40,000-character file fits one `write_file` call |
+| opus | `claude-sonnet-5-5` while Opus is off. `claude-opus-5-5` when `ALLOW_OPUS` is `"true"`. | Adaptive, high effort, text omitted | 16,000 tokens |
 
 Two call paths use the same gateway, headers, prices, and meter:
 

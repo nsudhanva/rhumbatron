@@ -21,6 +21,7 @@ import {
   sandboxLimitReason,
 } from "./limits.ts";
 import { type StackSource, stackedOn } from "./stack.ts";
+import { applyEdits, type FileEdit } from "./task-tools.ts";
 
 /**
  * Task Workspace: all file tools and commands run on a checkout in the Sandbox container.
@@ -36,6 +37,7 @@ const WORKSPACE_TOOLS = [
   "list_files",
   "read_file",
   "write_file",
+  "edit_file",
   "delete_file",
   "run_command",
   "complete_task",
@@ -544,7 +546,27 @@ export async function readWorkspaceFile(
   const restored = await ensureCheckout(env, ws);
   const file = await sandboxFor(env, ws.projectId).readFile(`${ws.dir}/${clean}`);
   const content = "content" in file ? String(file.content) : "";
-  return `${restored ? RESTORED_NOTE : ""}${clip(content)}`;
+  // The whole file: the caller returns it in windows (task-tools.ts `fileWindow`).
+  return `${restored ? RESTORED_NOTE : ""}${content}`;
+}
+
+/** Applies exact edits to one workspace file (`applyEdits`); nothing is written on an error. */
+export async function editWorkspaceFile(
+  env: WorkspaceEnv,
+  ws: WorkspaceRef,
+  path: string,
+  edits: FileEdit[],
+): Promise<string> {
+  const clean = safePath(path);
+  const restored = await ensureCheckout(env, ws);
+  const sandbox = sandboxFor(env, ws.projectId);
+  const file = await sandbox.readFile(`${ws.dir}/${clean}`).catch(() => null);
+  if (!file || !("content" in file))
+    return `${restored ? RESTORED_NOTE : ""}No such file: ${clean}. Use write_file for a new file.`;
+  const result = applyEdits(String(file.content), edits);
+  if (!result.ok) return `${restored ? RESTORED_NOTE : ""}${result.error} Nothing was changed.`;
+  await sandbox.writeFile(`${ws.dir}/${clean}`, result.text);
+  return `${restored ? RESTORED_NOTE : ""}edited ${clean}: ${edits.length} edit(s), now ${result.text.length} chars`;
 }
 
 export async function deleteWorkspaceFile(

@@ -53,6 +53,12 @@ const ReadFileArgs = Type.Object({
     maxLength: 300,
     description: "Repository-relative file path.",
   }),
+  fromLine: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      description: "First line to return (1 by default). A long file says where it continues.",
+    }),
+  ),
 });
 const ListFilesArgs = Type.Object({
   prefix: Type.Optional(
@@ -68,6 +74,80 @@ const WriteFileArgs = Type.Object({
   }),
   content: Type.String({ maxLength: 60_000, description: "The complete new file content." }),
 });
+const EditFileArgs = Type.Object({
+  path: Type.String({
+    minLength: 1,
+    maxLength: 300,
+    description: "Repository-relative path of an existing file.",
+  }),
+  edits: Type.Array(
+    Type.Object({
+      oldText: Type.String({
+        minLength: 1,
+        maxLength: 20_000,
+        description:
+          "Exact current text, found exactly once in the file. Include enough lines to be unique.",
+      }),
+      newText: Type.String({ maxLength: 60_000, description: "The replacement text." }),
+    }),
+    { minItems: 1, maxItems: 20, description: "Applied in order." },
+  ),
+});
+export type FileEdit = { oldText: string; newText: string };
+
+/** Characters of a file one read returns; a longer file continues with `fromLine`. */
+const READ_FILE_CHARS = 40_000;
+
+/**
+ * Pure: the lines of a file from `fromLine`, at most `cap` characters, cut at a line boundary.
+ * A cut ends with a note that says where the file continues.
+ */
+export function fileWindow(text: string, fromLine = 1, cap = READ_FILE_CHARS): string {
+  const lines = text.split("\n");
+  if (fromLine > lines.length) return `The file has ${lines.length} lines.`;
+  const out: string[] = [];
+  let used = 0;
+  let line = fromLine;
+  for (; line <= lines.length; line++) {
+    const next = lines[line - 1] ?? "";
+    if (used + next.length + 1 > cap && out.length > 0) break;
+    out.push(next);
+    used += next.length + 1;
+  }
+  const head = fromLine > 1 ? `(lines ${fromLine} to ${line - 1} of ${lines.length})\n` : "";
+  const tail =
+    line <= lines.length
+      ? `\n… (the file continues at line ${line} of ${lines.length}: call read_file with fromLine ${line})`
+      : "";
+  return `${head}${out.join("\n")}${tail}`;
+}
+
+/**
+ * Pure: applies exact edits in order. Each `oldText` must occur exactly once in the text as it is
+ * after the earlier edits; otherwise nothing is applied and the error names the edit.
+ */
+export function applyEdits(
+  text: string,
+  edits: readonly FileEdit[],
+): { ok: true; text: string } | { ok: false; error: string } {
+  let current = text;
+  for (const [i, edit] of edits.entries()) {
+    const at = current.indexOf(edit.oldText);
+    if (at === -1)
+      return {
+        ok: false,
+        error: `Edit ${i + 1}: oldText was not found. Read the file again and copy the exact text.`,
+      };
+    if (current.indexOf(edit.oldText, at + 1) !== -1)
+      return {
+        ok: false,
+        error: `Edit ${i + 1}: oldText occurs more than once. Include more surrounding lines.`,
+      };
+    current = current.slice(0, at) + edit.newText + current.slice(at + edit.oldText.length);
+  }
+  return { ok: true, text: current };
+}
+
 const DeleteFileArgs = Type.Object({
   path: Type.String({
     minLength: 1,
@@ -90,8 +170,9 @@ const RunCommandArgs = Type.Object({
  */
 export type SourceReader = {
   listFiles(prefix?: string): Promise<string>;
-  readFile(path: string): Promise<string>;
+  readFile(path: string, fromLine?: number): Promise<string>;
   writeFile(path: string, content: string): Promise<string>;
+  editFile(path: string, edits: FileEdit[]): Promise<string>;
   deleteFile(path: string): Promise<string>;
   runCommand(command: string): Promise<string>;
 };
@@ -119,11 +200,13 @@ export function taskExtension(
   const readFile: ToolRegistration<typeof ReadFileArgs> = {
     name: "read_file",
     description:
-      "Read one repository file at the canonical commit. Read before you plan changes to it.",
+      "Read one repository file at the canonical commit. Read before you plan changes to it. A long file is returned in parts: continue with fromLine.",
     parameters: ReadFileArgs,
     replay: "safe",
     async execute(args) {
-      return { content: [{ type: "text", text: await source.readFile(args.path) }] };
+      return {
+        content: [{ type: "text", text: await source.readFile(args.path, args.fromLine) }],
+      };
     },
   };
   const complete: ToolRegistration<typeof IntentArgs> = {
@@ -147,11 +230,22 @@ export function taskExtension(
   };
   const writeFile: ToolRegistration<typeof WriteFileArgs> = {
     name: "write_file",
-    description: "Create or replace one file in your Task workspace. Write the complete content.",
+    description:
+      "Create a new file, or replace a small one, in your Task workspace. Write the complete content. To change an existing file, use edit_file.",
     parameters: WriteFileArgs,
     replay: "safe",
     async execute(args) {
       return { content: [{ type: "text", text: await source.writeFile(args.path, args.content) }] };
+    },
+  };
+  const editFile: ToolRegistration<typeof EditFileArgs> = {
+    name: "edit_file",
+    description:
+      "Change an existing file in your Task workspace with exact replacements: each oldText must occur once. Prefer this to write_file for existing files: it keeps your output small.",
+    parameters: EditFileArgs,
+    replay: "safe",
+    async execute(args) {
+      return { content: [{ type: "text", text: await source.editFile(args.path, args.edits) }] };
     },
   };
   const deleteFile: ToolRegistration<typeof DeleteFileArgs> = {
@@ -176,6 +270,6 @@ export function taskExtension(
   return {
     name: "rhumbatron-task",
     sections: [{ key: "task", render: prompt, tag: false }],
-    tools: [listFiles, readFile, writeFile, deleteFile, runCommand, complete, fail],
+    tools: [listFiles, readFile, writeFile, editFile, deleteFile, runCommand, complete, fail],
   } as unknown as Extension;
 }

@@ -75,10 +75,11 @@ import type {
   AgentRuntime,
 } from "./runtime.ts";
 import { type ChangeSetRowForStack, type StackSource, stackFor } from "./stack.ts";
-import { taskExtension } from "./task-tools.ts";
+import { type FileEdit, fileWindow, taskExtension } from "./task-tools.ts";
 import {
   closeWorkspace,
   deleteWorkspaceFile,
+  editWorkspaceFile,
   listWorkspaceFiles,
   openWorkspace,
   type Published,
@@ -134,7 +135,6 @@ const MAX_READS_PER_RUN = 12;
 
 /** Task kinds that change code and so get a workspace (fork + Sandbox). */
 const WORKSPACE_KINDS = new Set(["implement", "migrate", "test"]);
-const MAX_FILE_CHARS = 24_000;
 
 /** Run checks happen once a minute; after this many the run is treated as stuck. */
 const MAX_RUN_CHECKS = 15;
@@ -281,10 +281,12 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         {
           listFiles: (prefix) =>
             this.withBudget(this.noteStep("list_files", prefix ?? "", this.listFiles(prefix))),
-          readFile: (path) =>
-            this.withBudget(this.noteStep("read_file", path, this.readSourceFile(path))),
+          readFile: (path, fromLine) =>
+            this.withBudget(this.noteStep("read_file", path, this.readSourceFile(path, fromLine))),
           writeFile: (path, content) =>
             this.withBudget(this.noteStep("write_file", path, this.writeSourceFile(path, content))),
+          editFile: (path, edits) =>
+            this.withBudget(this.noteStep("edit_file", path, this.editSourceFile(path, edits))),
           deleteFile: (path) =>
             this.withBudget(this.noteStep("delete_file", path, this.deleteSourceFile(path))),
           runCommand: (command) =>
@@ -780,7 +782,15 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       allowedTools: !source
         ? ["complete_task", "fail_task"]
         : WORKSPACE_KINDS.has(task.kind)
-          ? ["list_files", "read_file", "write_file", "run_command", "complete_task", "fail_task"]
+          ? [
+              "list_files",
+              "read_file",
+              "write_file",
+              "edit_file",
+              "run_command",
+              "complete_task",
+              "fail_task",
+            ]
           : ["list_files", "read_file", "complete_task", "fail_task"],
       budget: { maxModelCalls: MAX_CALLS_PER_RUN[tier], budgetUsd },
       maxTokens: 12_000,
@@ -1743,6 +1753,11 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     return typeof ws === "string" ? ws : writeWorkspaceFile(this.env, ws, path, content);
   }
 
+  private async editSourceFile(path: string, edits: FileEdit[]): Promise<string> {
+    const ws = await this.workspace();
+    return typeof ws === "string" ? ws : editWorkspaceFile(this.env, ws, path, edits);
+  }
+
   private async deleteSourceFile(path: string): Promise<string> {
     const ws = await this.workspace();
     return typeof ws === "string" ? ws : deleteWorkspaceFile(this.env, ws, path);
@@ -1865,7 +1880,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
   }
 
   /** Reads one file at the run's canonical commit. Capped per run to protect Artifacts operations. */
-  private async readSourceFile(path: string): Promise<string> {
+  private async readSourceFile(path: string, fromLine = 1): Promise<string> {
     const source = this.runSource();
     if (!source) return NO_SOURCE;
     let ws = this.workspaceRef(source.run.run_id);
@@ -1876,7 +1891,8 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
       ws = opened;
     }
     if (ws)
-      return readWorkspaceFile(this.env, ws, path).catch(
+      return readWorkspaceFile(this.env, ws, path).then(
+        (text) => fileWindow(text, fromLine),
         (e) => `Cannot read ${path}: ${String(e).slice(0, 120)}`,
       );
     const clean = path.replace(/^\.?\//, "");
@@ -1897,8 +1913,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
     using repo = await this.env.ARTIFACTS.get(at.fork);
     const blob = await repo.readFile({ ref: at.commit, path: clean });
     if (!blob) return `No such file at ${at.commit.slice(0, 12)}: ${clean}`;
-    const text = await blob.text();
-    return text.length > MAX_FILE_CHARS ? `${text.slice(0, MAX_FILE_CHARS)}\n… (truncated)` : text;
+    return fileWindow(await blob.text(), fromLine);
   }
 
   private changeContext(input: AgentRunInput): ChangeContext {
@@ -1916,7 +1931,7 @@ const AGENT_PREAMBLE = [
   "You are a Rhumbatron software agent working on exactly one Task of a larger Change.",
   "Other agents handle the other Tasks in parallel. Stay inside your Task's scope.",
   "Design, review, and document Tasks read the repository and deliver a precise Intent: files, contracts, data,",
-  "Implement, migrate, and test Tasks also change code: write files with write_file, check with run_command",
+  "Implement, migrate, and test Tasks also change code: change existing files with edit_file, create files with write_file, check with run_command",
   "(bun test, bun run typecheck), and complete_task commits your changes as a ChangeSet on your own fork.",
   "Keep changes small and focused on your Task. Never change behavior protected by an invariant.",
   "Your Intent must still list the files, contracts, and data you changed,",
