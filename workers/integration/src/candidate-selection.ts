@@ -52,6 +52,11 @@ export type SelectionEntry = {
   /** Required-check gaps plus optional checks without a passing result. */
   gaps: number;
   passingChecks: number;
+  /**
+   * Why a rejected Candidate cannot ship when its checks are not the reason (a person's
+   * rejection replaced by a repair, a merge conflict): its `status_reason`.
+   */
+  notShippable?: string;
 };
 
 export type Ranking =
@@ -82,7 +87,10 @@ export function rankCandidates(entries: readonly SelectionEntry[]): Ranking {
 
 /** The deciding difference between `winner` and `other`, with `other` named as given. */
 function difference(winner: SelectionEntry, other: SelectionEntry, name: string, judged: boolean) {
-  if (!other.promotable) return `${name} did not pass its required checks.`;
+  if (!other.promotable)
+    return other.notShippable
+      ? `${name} cannot ship: ${other.notShippable.replace(/\.$/, "")}.`
+      : `${name} did not pass its required checks.`;
   if (winner.criteriaMet !== other.criteriaMet) {
     return `met ${winner.criteriaMet} of ${winner.criteriaTotal} criteria, ${name} met ${other.criteriaMet} of ${other.criteriaTotal}.`;
   }
@@ -207,6 +215,7 @@ type GroupRow = {
   plan_json: string | null;
   acceptance_json: string | null;
   selection_json: string | null;
+  status_reason: string | null;
 };
 
 /** Stored on every group member; the anchor also holds the claim and the judge cost. */
@@ -258,6 +267,11 @@ function entryFor(row: GroupRow, records: readonly EvidenceRecord[]): SelectionE
     criteriaTotal: acceptance.length,
     gaps,
     passingChecks: [...latest.values()].filter(passes).length,
+    ...(row.status === "rejected" &&
+    row.status_reason &&
+    !/^(?:Required checks not satisfied|Preview check failed)/.test(row.status_reason)
+      ? { notShippable: row.status_reason.slice(0, 160) }
+      : {}),
   };
 }
 
@@ -306,7 +320,7 @@ async function loadContext(db: Db, candidateId: string) {
 async function loadGroup(db: Db, changeId: string, baseGeneration: number) {
   const rows = await db
     .prepare(
-      `SELECT id, status, created_at, score_json, plan_json, acceptance_json, selection_json
+      `SELECT id, status, created_at, score_json, plan_json, acceptance_json, selection_json, status_reason
        FROM candidates WHERE change_id = ? AND base_generation = ? ORDER BY created_at, id`,
     )
     .bind(changeId, baseGeneration)
