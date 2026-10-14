@@ -79,7 +79,11 @@ describe("criteria kept from requests that went live meanwhile", () => {
     expect(isQualityGate("Existing tests are updated and typecheck, test and contract pass")).toBe(
       true,
     );
+    expect(isQualityGate("All existing API routes and tests continue to pass")).toBe(true);
+    expect(isQualityGate("typecheck, test and contract pass")).toBe(true);
     expect(isQualityGate("A test page lists the posts")).toBe(false);
+    expect(isQualityGate("Votes on a closed law do not pass")).toBe(false);
+    expect(isQualityGate("The checkout API routes work for guests")).toBe(false);
     const many = Array.from({ length: 20 }, (_, i) => `Feature ${i} works`);
     expect(keptCriteria([many], [])).toHaveLength(12);
   });

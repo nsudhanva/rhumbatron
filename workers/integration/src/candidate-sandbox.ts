@@ -12,6 +12,7 @@ import {
 import type { CheckOutcome, CheckRun, ComposeSource } from "./candidate-composer.ts";
 import { recordSourceConflict } from "./rebase.ts";
 import { candidateFork } from "./repo-names.ts";
+import { reserveSandboxSeconds, settleSandboxUse } from "./sandbox-meter.ts";
 
 export { candidateFork };
 
@@ -21,22 +22,8 @@ export { candidateFork };
  * tokens are short-lived, passed as environment variables, and never written to git config.
  */
 
-/**
- * Hard stop at the monthly Sandbox hours. Same meter as Task workspaces. ADR 0017 sets 20
- * hours through the `SANDBOX_MONTHLY_SECONDS` binding; this is the fallback when the binding is
- * absent.
- */
-const MONTHLY_SECONDS = 36_000;
-
-/** This environment's monthly Sandbox cap: the binding when it is a positive integer, else 36,000. */
-const monthlySeconds = (configured?: string) => {
-  const n = Number(configured);
-  return configured && Number.isInteger(n) && n > 0 ? n : MONTHLY_SECONDS;
-};
 /** Reserved before the Sandbox opens: composition plus every check timeout, rounded up. */
 const RESERVATION_SECONDS = 900;
-/** Idle time billed after the last command, until the Sandbox sleeps. */
-const SLEEP_TAIL_SECONDS = 120;
 const GIT_TIMEOUT_MS = 120_000;
 const INSTALL_TIMEOUT_MS = 180_000;
 const MAX_OUTPUT_CHARS = 64_000;
@@ -51,43 +38,25 @@ type CandidateEnv = {
   VERIFICATION_COMMANDS?: Env["VERIFICATION_COMMANDS"];
 };
 
-const month = () => new Date().toISOString().slice(0, 7);
+/** Reserves Sandbox seconds on the shared monthly meter (sandbox-meter.ts). False at the cap. */
+export const reserveSandbox = (db: D1Database, configuredMonthlySeconds?: string) =>
+  reserveSandboxSeconds(db, RESERVATION_SECONDS, configuredMonthlySeconds);
 
-/** Reserves Sandbox seconds on the shared monthly meter. False when the cap would be exceeded. */
-export async function reserveSandbox(
+/**
+ * Settles the reservation: charges the awake time from the reservation to the last Sandbox use
+ * that this run adds to the Project's container (overlapping uses count once).
+ */
+export const settleSandbox = (
   db: D1Database,
-  /** The `SANDBOX_MONTHLY_SECONDS` binding (ADR 0017). */
-  configuredMonthlySeconds?: string,
-): Promise<boolean> {
-  const row = await db
-    .prepare(
-      `INSERT INTO usage_counters (day, counter, count) VALUES (?, 'sandbox-seconds', ?)
-       ON CONFLICT (day, counter) DO UPDATE SET count = count + ? WHERE count + ? <= ?
-       RETURNING count`,
-    )
-    .bind(
-      month(),
-      RESERVATION_SECONDS,
-      RESERVATION_SECONDS,
-      RESERVATION_SECONDS,
-      monthlySeconds(configuredMonthlySeconds),
-    )
-    .first<{ count: number }>();
-  return row !== null;
-}
-
-/** Settles the reservation to wall time plus the idle tail. Never settles below zero use. */
-export async function settleSandbox(db: D1Database, reservedAt: number) {
-  const used = Math.ceil((Date.now() - reservedAt) / 1000) + SLEEP_TAIL_SECONDS;
-  const delta = used - RESERVATION_SECONDS;
-  if (delta === 0) return;
-  await db
-    .prepare(
-      "UPDATE usage_counters SET count = MAX(0, count + ?) WHERE day = ? AND counter = 'sandbox-seconds'",
-    )
-    .bind(delta, month())
-    .run();
-}
+  projectId: string,
+  use: { startedAt: number; endedAt: number },
+) =>
+  settleSandboxUse(db, {
+    projectId,
+    startedAt: use.startedAt,
+    endedAt: Math.max(use.startedAt, use.endedAt),
+    reservedSeconds: RESERVATION_SECONDS,
+  });
 
 const sandboxFor = (env: CandidateEnv, projectId: string) =>
   getSandbox(

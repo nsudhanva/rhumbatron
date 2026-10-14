@@ -1,5 +1,11 @@
 import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
 import {
+  refundSandboxSeconds,
+  reserveSandboxSeconds,
+  SANDBOX_SLEEP_TAIL_SECONDS,
+  settleSandboxUse,
+} from "@rhumbatron/integration/sandbox-meter";
+import {
   boundPatch,
   changeSetPatchKey,
   patchCommand,
@@ -20,21 +26,10 @@ import { type StackSource, stackedOn } from "./stack.ts";
  * Task Workspace: all file tools and commands run on a checkout in the Sandbox container.
  */
 
-/**
- * Hard stop at the monthly Sandbox hours, counted conservatively. ADR 0017 sets prod at 20
- * hours: the `SANDBOX_MONTHLY_SECONDS` binding sets the meter. This is the fallback when the binding is absent.
- */
-const MONTHLY_SECONDS = 36_000;
-
-/** This environment's monthly Sandbox cap: the binding when it is a positive integer, else 36,000. */
-const monthlySeconds = (configured?: string) => {
-  const n = Number(configured);
-  return configured && Number.isInteger(n) && n > 0 ? n : MONTHLY_SECONDS;
-};
 /** Charged when a session opens; the rest is settled when it closes. */
 const OPEN_RESERVATION_SECONDS = 300;
 /** Idle time billed after the last command, until the Sandbox sleeps. Below the open reservation. */
-const SLEEP_TAIL_SECONDS = 120;
+const SLEEP_TAIL_SECONDS = SANDBOX_SLEEP_TAIL_SECONDS;
 /** Increment when ALLOWED, FIXED_SCRIPTS, RUN_SCRIPT, or FORBIDDEN_CHARS changes. */
 const COMMAND_ALLOWLIST_VERSION = 3;
 const WORKSPACE_TOOLS = [
@@ -97,30 +92,6 @@ export function commandAllowed(cmd: string, scripts: readonly string[] = []): bo
 
 /** True for `bun run build` and `bun run build:<x>`: their output files are not kept. */
 export const isBuildCommand = (cmd: string) => BUILD_SCRIPT.test(runScriptName(cmd) ?? "");
-
-const month = () => new Date().toISOString().slice(0, 7);
-
-/** Reserves Sandbox seconds. False when the monthly cap would be exceeded. */
-async function reserveSeconds(env: WorkspaceEnv, seconds: number): Promise<boolean> {
-  const row = await env.DB.prepare(
-    `INSERT INTO usage_counters (day, counter, count) VALUES (?, 'sandbox-seconds', ?)
-       ON CONFLICT (day, counter) DO UPDATE SET count = count + ? WHERE count + ? <= ?
-       RETURNING count`,
-  )
-    .bind(month(), seconds, seconds, seconds, monthlySeconds(env.SANDBOX_MONTHLY_SECONDS))
-    .first<{ count: number }>();
-  return row !== null;
-}
-
-async function settleSeconds(db: D1Database, seconds: number) {
-  if (seconds === 0) return;
-  await db
-    .prepare(
-      "UPDATE usage_counters SET count = count + ? WHERE day = ? AND counter = 'sandbox-seconds'",
-    )
-    .bind(seconds, month())
-    .run();
-}
 
 export type WorkspaceRef = {
   projectId: string;
@@ -361,7 +332,10 @@ export async function openWorkspace(
       message: `${sandboxLimitReason()} Declare your Intent without code changes, or call fail_task.`,
     };
   }
-  if (!(await reserveSeconds(env, OPEN_RESERVATION_SECONDS))) {
+  // Hard stop at the monthly Sandbox hours (ADR 0017, integration sandbox-meter.ts).
+  if (
+    !(await reserveSandboxSeconds(env.DB, OPEN_RESERVATION_SECONDS, env.SANDBOX_MONTHLY_SECONDS))
+  ) {
     await releaseSandbox(env.DB, input.runId, now);
     return {
       refused: "monthly_sandbox_seconds",
@@ -370,7 +344,7 @@ export async function openWorkspace(
   }
   const undo = async () => {
     await env.ARTIFACTS.delete?.(fork)?.catch(() => false);
-    await settleSeconds(env.DB, -OPEN_RESERVATION_SECONDS);
+    await refundSandboxSeconds(env.DB, OPEN_RESERVATION_SECONDS);
     await releaseSandbox(env.DB, input.runId, new Date().toISOString());
   };
   let prepared: Prepared;
@@ -727,8 +701,13 @@ export async function closeWorkspace(env: WorkspaceEnv, ws: WorkspaceRef) {
     await writeManifest(env, ws);
   }
 
-  const elapsed = Math.ceil((Date.now() - ws.openedAt) / 1000) + SLEEP_TAIL_SECONDS;
-  await settleSeconds(env.DB, elapsed - OPEN_RESERVATION_SECONDS);
+  // Charges only the awake time this session adds to the Project's container (overlaps once).
+  await settleSandboxUse(env.DB, {
+    projectId: ws.projectId,
+    startedAt: ws.openedAt,
+    endedAt: Date.now(),
+    reservedSeconds: OPEN_RESERVATION_SECONDS,
+  });
   await releaseSandbox(env.DB, ws.runId, new Date().toISOString());
   try {
     await sandboxFor(env, ws.projectId).exec(`rm -rf ${ws.dir}`);

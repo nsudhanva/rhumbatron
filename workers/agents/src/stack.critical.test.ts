@@ -164,7 +164,13 @@ function fakeD1() {
     INSERT INTO task_runs (id, task_id, agent_id, attempt, tier, status, started_at)
       VALUES ('run_t4_1', 'tsk_t4', 'agt', 1, 'sonnet', 'running', '${NOW}');
   `);
-  return { db, d1: { prepare: (sql: string) => statement(sql) } as unknown as D1Database };
+  return {
+    db,
+    d1: {
+      prepare: (sql: string) => statement(sql),
+      batch: async (list: ReturnType<typeof statement>[]) => Promise.all(list.map((x) => x.run())),
+    } as unknown as D1Database,
+  };
 }
 
 const repos = { forks: new Set<string>(), deleted: [] as string[], tokens: 0, revoked: 0 };

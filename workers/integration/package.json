@@ -32,6 +32,7 @@
     ".": "./src/index.ts",
     "./events": "./src/events.ts",
     "./dead-letters": "./src/dead-letters.ts",
-    "./kept-criteria": "./src/kept-criteria.ts"
+    "./kept-criteria": "./src/kept-criteria.ts",
+    "./sandbox-meter": "./src/sandbox-meter.ts"
   }
 }

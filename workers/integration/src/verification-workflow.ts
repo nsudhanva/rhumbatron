@@ -809,7 +809,10 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
       if (halt) return await stop(halt);
     } finally {
       await step.do("settle sandbox", async () => {
-        await settleSandbox(this.env.DB, reservation.at);
+        await settleSandbox(this.env.DB, ctx.projectId, {
+          startedAt: reservation.at,
+          endedAt: lastSandboxAt,
+        });
         if (Date.now() - lastSandboxAt < AWAKE_MS) {
           await removeCandidateDir(this.env, ctx.projectId, candidateId);
         }

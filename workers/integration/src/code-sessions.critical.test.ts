@@ -105,7 +105,7 @@ describe("terminal commands and the Sandbox meter", () => {
     expect(box.commands).toEqual([]);
     const reserve = fake.runs.find((r) => r.sql.includes("INSERT INTO usage_counters"));
     // 480 s reserved against the 72,000 s binding.
-    expect(reserve?.args).toEqual([expect.stringMatching(/^\d{4}-\d{2}$/), 480, 480, 480, 72000]);
+    expect(reserve?.args).toEqual([expect.stringMatching(/^\d{4}-\d{2}$/), 480, 72000]);
     expect(fake.runs.some((r) => r.sql.includes("SET exec_started_at = NULL"))).toBe(true);
     expect(fake.runs.some((r) => r.sql.includes("code_session_commands"))).toBe(false);
   });

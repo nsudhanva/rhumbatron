@@ -42,6 +42,11 @@ import {
   type HumanFileOp,
   recordHumanChange,
 } from "./human-edit.ts";
+import {
+  reserveSandboxSeconds,
+  SANDBOX_SLEEP_TAIL_SECONDS,
+  settleSandboxUse,
+} from "./sandbox-meter.ts";
 
 /**
  * Code page edit sessions (ADR 0029). The owner or an admin opens
@@ -65,7 +70,7 @@ import {
  */
 
 /** Idle time billed after the last command, until the Sandbox sleeps. */
-const SLEEP_TAIL_SECONDS = 120;
+const SLEEP_TAIL_SECONDS = SANDBOX_SLEEP_TAIL_SECONDS;
 /** Checkout setup (clone, install) plus the command timeout plus the idle tail, rounded up. */
 const EXEC_RESERVATION_SECONDS = 480;
 const SETUP_TIMEOUT_MS = 120_000;
@@ -74,8 +79,6 @@ const GIT_TIMEOUT_MS = 60_000;
 const EXEC_LOCK_MS = 7 * 60_000;
 /** Overdue sessions closed per sweep call. */
 const SWEEP_LIMIT = 50;
-/** Fallback when the binding is absent (ADR 0017 sets the binding). */
-const MONTHLY_SECONDS = 36_000;
 const SHA = /^[0-9a-f]{40}$/;
 
 type SessionEnv = Env;
@@ -131,29 +134,12 @@ async function gitBlobId(content: string): Promise<string> {
 /* Sandbox meter                                                                               */
 /* ------------------------------------------------------------------------------------------ */
 
-const month = () => new Date().toISOString().slice(0, 7);
-
-const monthlyCap = (configured?: string) => {
-  const n = Number(configured);
-  return configured && Number.isInteger(n) && n > 0 ? n : MONTHLY_SECONDS;
-};
-
-/** Reserves seconds on the shared monthly Sandbox meter. False when the cap would be passed. */
-export async function reserveSessionSeconds(
+/** Reserves seconds on the shared monthly Sandbox meter (sandbox-meter.ts). False at the cap. */
+export const reserveSessionSeconds = (
   db: D1Database,
   seconds: number,
   configuredMonthlySeconds?: string,
-): Promise<boolean> {
-  const row = await db
-    .prepare(
-      `INSERT INTO usage_counters (day, counter, count) VALUES (?, 'sandbox-seconds', ?)
-       ON CONFLICT (day, counter) DO UPDATE SET count = count + ? WHERE count + ? <= ?
-       RETURNING count`,
-    )
-    .bind(month(), seconds, seconds, seconds, monthlyCap(configuredMonthlySeconds))
-    .first<{ count: number }>();
-  return row !== null;
-}
+) => reserveSandboxSeconds(db, seconds, configuredMonthlySeconds);
 
 /**
  * Seconds one command adds to the Sandbox awake time: from its start (or the end of the time
@@ -168,16 +154,6 @@ export function awakeSeconds(input: {
   const awakeUntil = input.endedAt + SLEEP_TAIL_SECONDS * 1000;
   const from = Math.max(input.startedAt, input.awakeUntil ?? 0);
   return { seconds: Math.max(0, Math.ceil((awakeUntil - from) / 1000)), awakeUntil };
-}
-
-async function settleSessionSeconds(db: D1Database, delta: number) {
-  if (delta === 0) return;
-  await db
-    .prepare(
-      "UPDATE usage_counters SET count = MAX(0, count + ?) WHERE day = ? AND counter = 'sandbox-seconds'",
-    )
-    .bind(delta, month())
-    .run();
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -288,12 +264,12 @@ async function endSession(
         { timeoutMs: GIT_TIMEOUT_MS },
       );
       // The call keeps the Sandbox awake for another idle tail.
-      const billed = awakeSeconds({
+      await settleSandboxUse(env.DB, {
+        projectId: row.project_id,
         startedAt: now,
         endedAt: now,
-        awakeUntil: row.sandbox_awake_until,
+        reservedSeconds: 0,
       });
-      await settleSessionSeconds(env.DB, billed.seconds);
     } catch {
       // A lost or sleeping Sandbox already dropped the directory.
     }
@@ -1373,8 +1349,14 @@ export async function execCodeSessionCommand(
           );
     } finally {
       const endedAt = Date.now();
+      // The session row keeps its own awake time; the meter charges the container's (shared).
       const billed = awakeSeconds({ startedAt, endedAt, awakeUntil: row.sandbox_awake_until });
-      await settleSessionSeconds(env.DB, billed.seconds - EXEC_RESERVATION_SECONDS);
+      await settleSandboxUse(env.DB, {
+        projectId: row.project_id,
+        startedAt,
+        endedAt,
+        reservedSeconds: EXEC_RESERVATION_SECONDS,
+      });
       await env.DB.batch([
         env.DB.prepare(
           "UPDATE code_sessions SET sandbox_awake_until = ?, last_used_at = ? WHERE id = ?",

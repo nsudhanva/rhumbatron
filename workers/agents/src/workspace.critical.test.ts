@@ -47,7 +47,7 @@ function setup() {
   };
   const env = {
     SANDBOX: {},
-    DB: { prepare: () => statement },
+    DB: { prepare: () => statement, batch: async () => [] },
     ARTIFACTS: { get: async () => repo },
     EVIDENCE: {
       put,

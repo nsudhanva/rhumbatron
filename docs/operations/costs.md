@@ -54,8 +54,10 @@ flowchart LR
 - Cap: `72000` seconds (20 hours) per UTC calendar month. This value is 80 % of the 25 included basic-instance hours.
 - One container instance (`max_instances = 1`), instance type `basic`.
 - Agent Workspaces (`workers/agents/src/workspace.ts`), Candidate checks (`workers/integration/src/candidate-sandbox.ts`), and Code page edit session commands (`workers/integration/src/code-sessions.ts`, ADR 0029) share the meter. All sleep after 2 idle minutes.
-- A code edit session starts the Sandbox only at its first command. Each command reserves 480 s, runs at most 120 s, and settles to its time plus a 120 s idle tail. A session ends after 10 idle minutes or 2 hours.
+- A code edit session starts the Sandbox only at its first command. Each command reserves 480 s and runs at most 120 s. A session ends after 10 idle minutes or 2 hours.
 - Each use reserves seconds before the container starts. A reservation that passes the cap is refused.
+- The meter charges the awake time of each Project's container, as Cloudflare bills it (`workers/integration/src/sandbox-meter.ts`). When a use ends, it refunds its reservation and charges only the time it adds to the container's awake block (D1 `sandbox_awake`), plus one 120 s idle tail. Agents, checks, and commands that overlap in one container count once.
+- Cloudflare's container analytics (GraphQL `containersMetricsAdaptiveGroups`: `allocatedMemory`, `allocatedCpu`, `allocatedDisk`) give the billed usage. On a `basic` instance, allocated vCPU-seconds divided by 0.25 is the awake time.
 
 ### Browser Run (`BROWSER_DAILY_SECONDS`)
 

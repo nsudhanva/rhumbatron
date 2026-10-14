@@ -128,7 +128,7 @@ sequenceDiagram
   A->>Art: write token (600 s)
   A->>SBX: git commit, push to ws-run
   A->>Art: revoke token
-  A->>D1: settle: wall time + 120 s sleep tail
+  A->>D1: settle: awake time this session adds to the container (overlaps once, 120 s tail)
   A->>SBX: remove the run directory
   Note over SBX: Sleeps after 2 idle minutes
 ```
@@ -144,7 +144,7 @@ After `bun run build` (or `bun run build:<x>`), the workspace discards the files
 | Idle tail before sleep | 120 s (`sleepAfter` 2 min) | 120 s (`sleepAfter` 2 min) | 120 s (`sleepAfter` 2 min) |
 | Concurrency | 4 open workspaces per Change | Checks run one after another in one workflow | One command at a time in each session, one open session per person per Project |
 | Command user | root, allowlisted commands | root | An unprivileged user of the session, any command, 120 s timeout |
-| Monthly meter | `SANDBOX_MONTHLY_SECONDS`: 72,000 s (20 h) | Same meter | Same meter. At the cap: 429 `sandbox_cap`. |
+| Monthly meter | `SANDBOX_MONTHLY_SECONDS`: 72,000 s (20 h). A settle charges only the awake time the use adds to the Project's container (`sandbox-meter.ts`). | Same meter | Same meter. At the cap: 429 `sandbox_cap`. |
 
 A code edit session (ADR 0029) starts the Sandbox only at its first command. After each command, and when the session ends while the Sandbox is awake, a kill as the session user stops every process of the session. The end also removes the session directory. The Sandbox then sleeps after 2 idle minutes.
 

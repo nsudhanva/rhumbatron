@@ -141,6 +141,8 @@ export const CONTENT_TABLES: readonly { table: string; where: string }[] = [
   { table: "code_session_files", where: `session_id IN (${CODE_SESSIONS})` },
   { table: "code_session_commands", where: `session_id IN (${CODE_SESSIONS})` },
   { table: "code_sessions", where: "project_id = ?" },
+  // The Sandbox meter's awake block of the Project's container (sandbox-meter.ts).
+  { table: "sandbox_awake", where: "container = 'proj-' || substr(?, 6)" },
 ];
 
 export type CleanupResult = {

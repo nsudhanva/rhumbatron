@@ -9,20 +9,47 @@
  */
 
 /**
- * A criterion that only restates the quality gate ("typecheck, test and contract all pass"). The
- * planner adds one to most Changes. Checks other than the acceptance check cover it.
+ * A criterion that only restates the quality gate ("typecheck, test and contract all pass", "all
+ * existing API routes and tests continue to pass"). The planner adds one to most Changes. The
+ * build, unit, and contract checks cover it, so the acceptance check does not judge it. It names a
+ * check and a passing word, and every other word is generic: no product noun is left.
  */
-const GATE_WORDS = new Set(
+const CHECK_WORDS = new Set([
+  "typecheck",
+  "test",
+  "tests",
+  "contract",
+  "contracts",
+  "lint",
+  "build",
+  "checks",
+]);
+const PASS_WORDS = new Set([
+  "pass",
+  "passes",
+  "passing",
+  "succeed",
+  "succeeds",
+  "green",
+  "work",
+  "works",
+  "working",
+]);
+const GENERIC_WORDS = new Set(
   (
-    "typecheck type check checks test tests unit contract lint build bun run npm all and or the " +
-    "pass passes passing succeed succeeds green must should still existing are is with no errors " +
-    "script scripts suite suites check checks updated update new added cover covers covered"
+    "type check suite suites script scripts unit api apis route routes endpoint endpoints existing " +
+    "all and or the a an of in to for with on are is be must should still continue continues keep " +
+    "keeps remain remains stay stays updated update new added cover covers covered no errors error " +
+    "bun run npm app current every each"
   ).split(" "),
 );
-const CHECK_WORDS = new Set(["typecheck", "test", "tests", "contract", "lint", "build"]);
 export function isQualityGate(text: string): boolean {
   const words = text.toLowerCase().match(/[a-z]+/g) ?? [];
-  return words.some((w) => CHECK_WORDS.has(w)) && words.every((w) => GATE_WORDS.has(w));
+  return (
+    words.some((w) => CHECK_WORDS.has(w)) &&
+    words.some((w) => PASS_WORDS.has(w)) &&
+    words.every((w) => CHECK_WORDS.has(w) || PASS_WORDS.has(w) || GENERIC_WORDS.has(w))
+  );
 }
 
 /** At most this many kept criteria: the newest live requests first. */
