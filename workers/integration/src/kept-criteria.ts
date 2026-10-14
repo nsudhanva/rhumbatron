@@ -10,9 +10,11 @@
 
 /**
  * A criterion that only restates the quality gate ("typecheck, test and contract all pass", "all
- * existing API routes and tests continue to pass"). The planner adds one to most Changes. The
- * build, unit, and contract checks cover it, so the acceptance check does not judge it. It names a
- * check and a passing word, and every other word is generic: no product noun is left.
+ * existing API routes and tests continue to pass") or only guards against accidental breakage
+ * ("other pages and API routes behave as before"). The planner adds one to most Changes. The
+ * build, unit, contract, and preview checks cover it. It names a check and a passing word, or a
+ * guard word, and every other word is generic: no product noun is left. The acceptance check does
+ * not judge such a criterion, and it never makes a conflict with another request.
  */
 const CHECK_WORDS = new Set([
   "typecheck",
@@ -40,15 +42,30 @@ const GENERIC_WORDS = new Set(
     "type check suite suites script scripts unit api apis route routes endpoint endpoints existing " +
     "all and or the a an of in to for with on are is be must should still continue continues keep " +
     "keeps remain remains stay stays updated update new added cover covers covered no errors error " +
-    "bun run npm app current every each"
+    "bun run npm app current every each other page pages rest everything else feature features as " +
+    "same way nothing"
   ).split(" "),
 );
+const GUARD_WORDS = new Set([
+  "behave",
+  "behaves",
+  "before",
+  "unchanged",
+  "regress",
+  "regression",
+  "regressions",
+  "break",
+  "broken",
+  "breaks",
+]);
 export function isQualityGate(text: string): boolean {
   const words = text.toLowerCase().match(/[a-z]+/g) ?? [];
+  const known = (w: string) =>
+    CHECK_WORDS.has(w) || PASS_WORDS.has(w) || GUARD_WORDS.has(w) || GENERIC_WORDS.has(w);
   return (
-    words.some((w) => CHECK_WORDS.has(w)) &&
-    words.some((w) => PASS_WORDS.has(w)) &&
-    words.every((w) => CHECK_WORDS.has(w) || PASS_WORDS.has(w) || GENERIC_WORDS.has(w))
+    ((words.some((w) => CHECK_WORDS.has(w)) && words.some((w) => PASS_WORDS.has(w))) ||
+      words.some((w) => GUARD_WORDS.has(w))) &&
+    words.every(known)
   );
 }
 

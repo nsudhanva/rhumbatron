@@ -84,6 +84,10 @@ describe("criteria kept from requests that went live meanwhile", () => {
     expect(isQualityGate("A test page lists the posts")).toBe(false);
     expect(isQualityGate("Votes on a closed law do not pass")).toBe(false);
     expect(isQualityGate("The checkout API routes work for guests")).toBe(false);
+    expect(isQualityGate("Other pages and API routes behave as before")).toBe(true);
+    expect(isQualityGate("Everything else works unchanged")).toBe(true);
+    expect(isQualityGate("Keep existing cart behavior unchanged")).toBe(false);
+    expect(isQualityGate("The calendar page behaves as before")).toBe(false);
     const many = Array.from({ length: 20 }, (_, i) => `Feature ${i} works`);
     expect(keptCriteria([many], [])).toHaveLength(12);
   });

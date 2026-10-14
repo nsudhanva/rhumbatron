@@ -102,6 +102,26 @@ describe("request compatibility boundaries", () => {
     expect(calls).toBe(1);
     expect(stopped.receipt).toMatchObject({ supported: false, failure: "budget:change_budget" });
   }, 10_000);
+  it("never shows the review a breakage-guard or quality-gate criterion", async () => {
+    let sent = "";
+    await reviewRequests(
+      {
+        ...a,
+        criteria: [
+          ...a.criteria,
+          { id: "g1", text: "Other pages and API routes behave as before" },
+        ],
+      },
+      { ...b, criteria: [...b.criteria, { id: "g2", text: "typecheck, test and contract pass" }] },
+      async (req) => {
+        sent = JSON.stringify(req.messages);
+        throw new BudgetStopError({ limit: "change_budget" } as never);
+      },
+    );
+    expect(sent).not.toContain("behave as before");
+    expect(sent).not.toContain("contract pass");
+    expect(sent).toContain(a.criteria[0]?.text.slice(0, 20));
+  });
   it("validates citations by side and fails closed on malformed, empty, or abstaining output", () => {
     const valid = {
       verdict: "conflicting",

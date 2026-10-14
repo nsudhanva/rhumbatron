@@ -167,11 +167,19 @@ export async function reviewRequests(
 }
 
 async function reviewOnce(
-  a: RequestInput,
-  b: RequestInput,
+  first: RequestInput,
+  second: RequestInput,
   complete: (request: CompletionRequest) => Promise<CompletionResult>,
 ): Promise<{ review: RequestReview; costUsd: number; receipt: Record<string, unknown> }> {
   {
+    // Quality-gate and breakage-guard criteria ("other pages behave as before") protect each
+    // request from accidents; they never make two requests conflict, so the review never sees them.
+    const own = (criteria: readonly Criterion[]) => {
+      const kept = criteria.filter((criterion) => !isQualityGate(criterion.text));
+      return kept.length > 0 ? kept : [...criteria];
+    };
+    const a = { ...first, criteria: own(first.criteria) };
+    const b = { ...second, criteria: own(second.criteria) };
     const result = await complete({
       tier: "sonnet",
       maxOutputTokens: 1200,

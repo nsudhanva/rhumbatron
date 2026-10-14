@@ -368,7 +368,7 @@ A pair with no overlap gets the verdict `independent`, with cost 0 and the recei
 
 ### Review and citation validation
 
-An overlapping pair gets one Sonnet review with the tool `review_requests`.
+An overlapping pair gets one Sonnet review with the tool `review_requests`. The review does not get quality-gate criteria ("typecheck, test and contract pass") or criteria that only guard against breakage ("other pages and API routes behave as before"). These criteria protect each request from accidents, so they never make two requests conflict.
 The verdict is `independent`, `compatible`, `builds_on`, `conflicting`, or `duplicate`.
 
 - `compatible` means that each request can be built from the current code alone, and neither needs or changes what the other creates.
