@@ -9,6 +9,7 @@ import {
   acceptanceSource,
   citationValid,
   composedFileOrder,
+  judgeAcceptance,
   validateAcceptance,
 } from "./acceptance-check.ts";
 import { KEEP_PREFIX } from "./kept-criteria.ts";
@@ -224,5 +225,50 @@ describe("acceptance citations", () => {
     expect(
       acceptanceOutcome([{ ...own, status: "unclear" as const }, keep("unclear")]),
     ).toMatchObject({ status: "fail" });
+  });
+
+  it("asks Sonnet about criteria Haiku left unclear, and only then", async () => {
+    const src = {
+      files: [{ path: "src/calendar.tsx", kind: "patch" as const, text: PATCH }],
+      truncated: false,
+    };
+    const call = (results: unknown[]) =>
+      ({
+        toolCalls: [
+          { function: { name: "record_acceptance", arguments: JSON.stringify({ results }) } },
+        ],
+        model: "m",
+        tier: "haiku",
+        inputTokens: 1,
+        outputTokens: 1,
+        costUsd: 0.01,
+        gatewayLogId: null,
+      }) as never;
+    const quote = { path: "src/calendar.tsx", quote: "export function CalendarView()" };
+    const tiers: string[] = [];
+    const judged = await judgeAcceptance(["A calendar view exists", "B"], src, async (req) => {
+      tiers.push(req.tier);
+      return req.tier === "haiku"
+        ? call([
+            { criterion: 1, status: "unclear" },
+            { criterion: 2, status: "not_met" },
+          ])
+        : call([
+            { criterion: 1, status: "met", citations: [quote] },
+            { criterion: 2, status: "met", citations: [quote] },
+          ]);
+    });
+    expect(tiers).toEqual(["haiku", "sonnet"]);
+    // Sonnet decides only what Haiku left unclear.
+    expect(judged).toMatchObject({
+      kind: "judged",
+      results: [{ status: "met" }, { status: "not_met" }],
+    });
+    tiers.length = 0;
+    await judgeAcceptance([`${KEEP_PREFIX}Kept thing`], src, async (req) => {
+      tiers.push(req.tier);
+      return call([{ criterion: 1, status: "unclear" }]);
+    });
+    expect(tiers).toEqual(["haiku"]);
   });
 });

@@ -343,8 +343,11 @@ const TOOL = {
 };
 
 /**
- * Haiku first; Sonnet once when the Haiku output is invalid. A model error (budget, timeout,
- * gateway) ends the check without a result: the caller records a gap, never a pass.
+ * Haiku first. Sonnet once when the Haiku output is invalid, or when Haiku left a criterion of the
+ * request itself `unclear`: Sonnet reads the same patch and files and often finds the quote (a
+ * test, a route), so a person is asked only when Sonnet cannot tell either. Sonnet's answer
+ * replaces only the `unclear` results. A model error (budget, timeout, gateway) ends the check
+ * without a result, unless a valid Haiku result exists: then that result stands.
  */
 export async function judgeAcceptance(
   criteria: readonly string[],
@@ -352,6 +355,9 @@ export async function judgeAcceptance(
   complete: (request: CompletionRequest) => Promise<CompletionResult>,
 ): Promise<AcceptanceJudgement> {
   const calls: AcceptanceCall[] = [];
+  let first: AcceptanceResult[] | null = null;
+  const ownUnclear = (results: readonly AcceptanceResult[]) =>
+    results.some((r) => r.status === "unclear" && !r.criterion.startsWith(KEEP_PREFIX));
   for (const tier of ["haiku", "sonnet"] as ModelTier[]) {
     let result: CompletionResult;
     try {
@@ -363,6 +369,7 @@ export async function judgeAcceptance(
         metadata: { source: "acceptance-check", tier },
       });
     } catch (error) {
+      if (first) return { kind: "judged", results: first, calls };
       // A budget stop names the budget that ran out (ADR 0030).
       const kind =
         error instanceof BudgetStopError
@@ -389,8 +396,16 @@ export async function judgeAcceptance(
       gatewayLogId: result.gatewayLogId,
       valid: results !== null,
     });
-    if (results) return { kind: "judged", results, calls };
+    if (first) {
+      // Second opinion: Sonnet decides only what Haiku left unclear.
+      if (!results) return { kind: "judged", results: first, calls };
+      const merged = first.map((r, i) => (r.status === "unclear" ? (results[i] ?? r) : r));
+      return { kind: "judged", results: merged, calls };
+    }
+    if (results && !ownUnclear(results)) return { kind: "judged", results, calls };
+    if (results) first = results;
   }
+  if (first) return { kind: "judged", results: first, calls };
   return { kind: "error", reason: "model output was invalid at Haiku and Sonnet", calls };
 }
 
