@@ -361,7 +361,7 @@ If the scope is still unscoped, the pair counts as overlapping.
 It returns `true` if one of the two Changes is not scoped.
 Otherwise it compares two sets:
 
-- Resource tokens. The code removes the `project:<slug>` prefix, splits on `:` and `-`, and drops the words `app`, `api`, `ui`, `project`, `frontend`, `backend`, `web`, and `src`. One shared token is an overlap.
+- Resource tokens. The code removes the `project:<slug>` prefix, splits on `:` and `-`, drops the words `app`, `api`, `ui`, `project`, `frontend`, `backend`, `web`, and `src`, and reduces each word to a plain stem (`gifts`, `gifting`, and `gifted` are all `gift`). One shared token is an overlap.
 - HTTP routes. The code finds the strings that start with `/` in the criteria text. One shared route is an overlap.
 
 A pair with no overlap gets the verdict `independent`, with cost 0 and the receipt method `deterministic`.
@@ -388,7 +388,7 @@ The verdict is `independent`, `compatible`, `builds_on`, `conflicting`, or `dupl
 A rejected answer, a provider error, and an abstention all become `unconfirmedReview`: verdict `conflicting`, `supported: false`, no cited criteria.
 A review that cannot confirm compatibility never lets both requests proceed without a question.
 
-Each comparison round of a Change makes at most 4 reviews, and only while its model spend is below the Change budget.
+Each comparison round of a Change makes at most 8 reviews (`MAX_PAIR_REVIEWS`), and only while its model spend is below the Change budget.
 Past that limit, an overlapping pair gets the same unconfirmed result (receipt method `review-limit`).
 
 `checkRequestPair` inserts the `request_conflicts` row with an unconfirmed receipt (`review-interrupted`) before it calls the model.

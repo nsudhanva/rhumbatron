@@ -7,6 +7,7 @@ import {
   requestsOverlap,
   resourceTokens,
   reviewRequests,
+  stem,
   validateRequestReview,
 } from "./request-policy.ts";
 
@@ -30,6 +31,21 @@ describe("request compatibility boundaries", () => {
     expect(resourceTokens(["project:shop-name:api:product-order", "ui:cart"])).toEqual(
       new Set(["product", "order", "cart"]),
     );
+    // Seen on prod: "gifts" and "gifting" named one feature, and the pair was never reviewed.
+    expect(
+      requestsOverlap(
+        { ...a, resources: ["project:quiet-hours:units:gifts"] },
+        { ...b, resources: ["project:quiet-hours:minutes:gifting"] },
+      ),
+    ).toBe(true);
+    expect(["votes", "voting", "vote", "swapping", "swaps", "gifted"].map(stem)).toEqual([
+      "vot",
+      "vot",
+      "vot",
+      "swap",
+      "swap",
+      "gift",
+    ]);
     expect(requestsOverlap(a, { ...b, resources: ["ui:product-display"] })).toBe(true);
     expect(requestsOverlap(a, { ...b, resources: ["cart:checkout"] })).toBe(true);
     expect(

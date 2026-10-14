@@ -22,12 +22,37 @@ export type RequestInput = {
 };
 
 const GENERIC = new Set(["app", "api", "ui", "project", "frontend", "backend", "web", "src"]);
+
+/**
+ * A plain stem, so word forms of one feature meet: gifts, gifting, gifted -> gift; votes, voting,
+ * vote -> vot; swaps, swapping -> swap. Not a full stemmer: it only has to make two names of one
+ * thing equal.
+ */
+export function stem(word: string): string {
+  let w = word.toLowerCase();
+  for (const suffix of ["ing", "ed"]) {
+    if (w.length > suffix.length + 2 && w.endsWith(suffix)) {
+      w = w.slice(0, -suffix.length);
+      if (w.length > 2 && w.at(-1) === w.at(-2) && !"aeiou".includes(w.at(-1) ?? ""))
+        w = w.slice(0, -1);
+      break;
+    }
+  }
+  if (w.length > 3 && w.endsWith("ies")) w = `${w.slice(0, -3)}y`;
+  else if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) w = w.slice(0, -1);
+  if (w.length > 3 && w.endsWith("e")) w = w.slice(0, -1);
+  return w;
+}
+
 export function resourceTokens(resources: readonly string[]): Set<string> {
   return new Set(
     resources.flatMap((resource) => {
       const parts = resource.toLowerCase().split(":");
       if (parts[0] === "project") parts.splice(0, 2);
-      return parts.flatMap((part) => part.split("-")).filter((part) => part && !GENERIC.has(part));
+      return parts
+        .flatMap((part) => part.split("-"))
+        .filter((part) => part && !GENERIC.has(part))
+        .map(stem);
     }),
   );
 }

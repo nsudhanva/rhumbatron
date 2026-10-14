@@ -58,6 +58,12 @@ const ANSWER_DAYS = 7;
  */
 const FIRST_COME_CHECKS = 150;
 const WAITING_FIRST = ["awaiting_choice", "queued"];
+/**
+ * Model reviews of overlapping request pairs per comparison round. A pair past the limit asks the
+ * later requester, so the limit stays above the open requests a busy Project has. Each review is
+ * one small Sonnet call.
+ */
+const MAX_PAIR_REVIEWS = 8;
 const MAX_ROUNDS = 3;
 type WorkersAi = { run(model: string, input: unknown): Promise<unknown> };
 type AnswerState = { status: string; answers: StoredAnswer[]; expired: boolean };
@@ -579,7 +585,7 @@ export class ChangeWorkflow extends WorkflowEntrypoint<Env, ChangeWorkflowParams
               a,
               registrant,
               (req) => this.complete(req, changeId),
-              !overlaps || (reviews < 4 && affordable),
+              !overlaps || (reviews < MAX_PAIR_REVIEWS && affordable),
               { round: answered, mayAsk, sequence: resumed, instanceId },
             ),
         );
