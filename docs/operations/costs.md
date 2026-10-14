@@ -40,7 +40,7 @@ flowchart LR
     ps[Sandbox 20 h per month]
     pb[Browser Run 960 s per day]
     pv[Anthropic 100 USD per month]
-    ac[400 agent model calls per day<br/>200 Clef-flash calls per day<br/>60 app builds per day]
+    ac[1,000 agent model calls per day<br/>200 Clef-flash calls per day<br/>60 app builds per day]
   end
   subgraph account[account]
     ab[Budget alerts 10, 25, 100 USD]
@@ -98,7 +98,7 @@ A person selects the budget that pays for a request ([ADR 0030](../adr/0030-budg
 
 ### Model call quotas and routing
 
-- Agent model calls: 400 per UTC day (`AGENT_DAILY_CALL_CAP` in `packages/model-router/src/budget.ts`).
+- Agent model calls: 1,000 per UTC day (`AGENT_DAILY_CALL_CAP` in `packages/model-router/src/budget.ts`).
 - Model calls per Task run: 16 for Haiku, 32 for Sonnet and Opus (`MAX_CALLS_PER_RUN`).
 - Clef-flash on Workers AI: 200 calls per UTC day on the shared counter `clef-flash`. The event router, the agents, and the intake gate use it. Workers AI includes 10,000 Neurons per day.
 - `ALLOW_OPUS`: `false`. The opus tier runs on Sonnet 5.5, and the Decision Receipt records the downgrade. Set `allow_opus = true` only with the owner's approval.
@@ -116,7 +116,7 @@ A person selects the budget that pays for a request ([ADR 0030](../adr/0030-budg
 | Request budget (`change_budget`) | The Change meter refuses the reservation, or a Task's share of the request budget runs out. The Change is `budget_blocked`. | An owner or admin raises the request budget on the Change page. |
 | Project monthly budget (`project_budget`) | The Project meter refuses the reservation. Every Change of the Project that calls a model stops. | An owner or admin raises or removes the Project monthly budget in Settings. The stopped Changes resume. The meter starts again at the next UTC calendar month. |
 | User monthly budget (`account_budget`) | The requester meter refuses the reservation. Every Change of that requester stops, in every Project. | The requester raises or removes their monthly budget on the Account page. The stopped Changes resume. |
-| Agent model calls (400 per day) | The Task stops. The Change is `budget_blocked` with the limit `daily_model_calls`. | Look for looping Tasks. The meter starts again at 00:00 UTC. A person can raise the Change budget to resume. |
+| Agent model calls (1,000 per day) | The Task stops. The Change is `budget_blocked` with the limit `daily_model_calls`. | Look for looping Tasks. The meter starts again at 00:00 UTC. A person can raise the Change budget to resume. |
 | Sandbox (72,000 s per month) | New Sandbox starts are refused. An agent gets "The monthly Sandbox budget is used up". Candidate checks that need the Sandbox do not run. A Code page terminal command gets 429 `sandbox_cap`; file edits and submit still work. | Look for long tests or open containers. The meter starts again at the next UTC calendar month. To stop all Sandbox starts, set `paused = true`. |
 | Browser Run (960 s per day) | The browser check does not start. It records `not_checked`, a gap for the required check, so the Candidate cannot promote. | Wait for the next UTC day, then verify the Candidate again. |
 | App builds (60 per day) | The build is refused with "The daily app build cap (60) is reached." | Wait for the next UTC day. |

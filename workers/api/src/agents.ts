@@ -29,7 +29,7 @@ type AppEnv = { Bindings: Env; Variables: AuthVariables };
 const ProjectIdParam = z.object({ projectId: z.string().regex(/^proj_[a-z0-9-]+$/) });
 
 /** Mirrors AGENT_DAILY_CALL_CAP in packages/model-router budget.ts (account-wide, per UTC day). */
-const AGENT_DAILY_CALL_CAP = 400;
+const AGENT_DAILY_CALL_CAP = 1000;
 /** Newest Tasks with an agent read per request. */
 const TASK_LIMIT = 200;
 /** Active agents listed one by one. */

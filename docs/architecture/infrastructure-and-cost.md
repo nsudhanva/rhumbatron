@@ -141,7 +141,7 @@ flowchart TB
   L3["3. Causal caps<br/>1,000 commands per Change per day,<br/>Clef-flash 200 calls per day"]
   L4["4. Change limits<br/>8 agents, 4 Sandboxes, 3 Candidates,<br/>2 attempts per tier, 2 browser runs"]
   L5["5. Queue and K2 bounds<br/>3 retries, then dead-letter,<br/>K2 batch skipped after 5 failures"]
-  L6["6. Metered caps in D1<br/>Sandbox 20 h per month,<br/>Browser Run 960 s per day,<br/>400 agent model calls per day,<br/>Anthropic $100 per month"]
+  L6["6. Metered caps in D1<br/>Sandbox 20 h per month,<br/>Browser Run 960 s per day,<br/>1,000 agent model calls per day,<br/>Anthropic $100 per month"]
   L7["7. AI Gateway<br/>20 requests per minute,<br/>Anthropic spend limit (best effort)"]
   L8["8. Account budget alerts<br/>email at $10, $25, $100"]
   L9["Pause switch<br/>locals.paused"]
@@ -159,7 +159,7 @@ flowchart TB
 | Coding Sandboxes | 4 open per Change, 1 container instance | `limits.ts`, Terraform `max_instances` |
 | Candidates | 3 per Change | `workers/integration/src/candidate-create.ts` |
 | Attempts | 2 per Task per tier | `limits.ts` |
-| Model calls | 16 per run (Haiku) or 32 per run (Sonnet, Opus), 400 agent calls per day | `packages/model-router/src/budget.ts` |
+| Model calls | 16 per run (Haiku) or 32 per run (Sonnet, Opus), 1,000 agent calls per day | `packages/model-router/src/budget.ts` |
 | Change budget | `budgetUsd`, default 3 USD, max 100 USD | `packages/protocol/src/project.ts` |
 | Queues | 3 retries, then `rhumbatron-dead-letter`. The indexing Queue has no dead-letter Queue and records the failure in D1. | `envs/prod/main.tf` queue consumers |
 | K2 batches | A batch that fails 5 times is skipped and recorded | `workers/event-router/src/poison-batch.ts` |

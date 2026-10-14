@@ -183,7 +183,7 @@ Thinking effort is low for haiku, medium for sonnet, and high for opus.
 Routed Agent steps cap output at 4,000 tokens for haiku and 8,000 tokens for sonnet and opus.
 Two failures at one tier move the Task up one tier. Two failures at the top tier stop the Task with limit `max_attempts_per_tier`, and the Change becomes `budget_blocked`.
 A transport failure retries once at the same tier and never escalates (`packages/model-router/src/escalation.ts`).
-The caps are 400 agent model calls per day and an Anthropic budget of 100 USD per calendar month (`packages/model-router/src/budget.ts`, Terraform `anthropic_monthly_budget_usd`).
+The caps are 1,000 agent model calls per day and an Anthropic budget of 100 USD per calendar month (`packages/model-router/src/budget.ts`, Terraform `anthropic_monthly_budget_usd`).
 
 ## Stack decisions
 

@@ -12,7 +12,7 @@ import type { ModelTier } from "@rhumbatron/protocol";
 export const MAX_CALLS_PER_RUN: Record<ModelTier, number> = { haiku: 16, sonnet: 32, opus: 32 };
 
 /** Daily cap on agent model calls. */
-export const AGENT_DAILY_CALL_CAP = 400;
+export const AGENT_DAILY_CALL_CAP = 1000;
 
 /**
  * Fallback for the `ANTHROPIC_MONTHLY_BUDGET_USD` binding: a low safe budget ($10 per calendar

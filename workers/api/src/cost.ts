@@ -24,7 +24,7 @@ type AppEnv = { Bindings: Env; Variables: AuthVariables };
  * Mirrors packages/model-router/src/budget.ts (AGENT_DAILY_CALL_CAP, MAX_CALLS_PER_RUN,
  * ANTHROPIC_MONTHLY_BUDGET_FALLBACK_USD) and the `usage_counters` keys in provider.ts (ADR 0021).
  */
-const AGENT_DAILY_CALL_CAP = 400;
+const AGENT_DAILY_CALL_CAP = 1000;
 const MAX_CALLS_PER_RUN = { haiku: 16, sonnet: 32, opus: 32 } as const;
 /** Mirrors CLEF_DAILY_CAP in workers/event-router/src/causal.ts. */
 const CLEF_DAILY_CAP = 200;
