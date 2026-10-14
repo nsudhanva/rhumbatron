@@ -364,10 +364,10 @@ async function settleVerifying(
   const outcomes = await recoverSourceConflicts(env, change.id);
   if (outcomes.some((o) => o.status !== "skipped")) return "rebased";
   const rows = await env.DB.prepare(
-    "SELECT status, status_reason FROM candidates WHERE change_id = ? ORDER BY created_at DESC",
+    "SELECT id, status, status_reason FROM candidates WHERE change_id = ? ORDER BY created_at DESC",
   )
     .bind(change.id)
-    .all<{ status: string; status_reason: string | null }>();
+    .all<{ id: string; status: string; status_reason: string | null }>();
   const candidates = rows.results ?? [];
   if (candidates.length === 0 || candidates.some((c) => LIVE_CANDIDATE.has(c.status)))
     return "waiting";
@@ -389,7 +389,17 @@ async function settleVerifying(
   )
     return "restacked";
   // The newest Candidate says why the Change ends; an earlier merge rejection may be repaired.
-  const newest = candidates[0] as { status: string; status_reason: string | null };
+  const newest = candidates[0] as { id: string; status: string; status_reason: string | null };
+  // A failed required check or preview: one repair Task fixes it before the Change ends.
+  if (
+    /^(?:Required checks not satisfied|Preview check failed)/.test(newest.status_reason ?? "") &&
+    (await requestAcceptanceRepair(env, {
+      candidateId: newest.id,
+      reason: newest.status_reason,
+      trigger: "checks",
+    }))
+  )
+    return "restacked";
   const why = (newest.status_reason ?? "rejected").replace(/\.$/, "");
   const text = /^(?:file_conflict|source_conflict):/.test(why)
     ? `The agents' work did not merge (${why})`

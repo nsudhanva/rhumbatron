@@ -191,4 +191,14 @@ describe("verificationDeadEnd: a Change with no Candidate left that can ship", (
     expect(verificationDeadEnd([c("rejected", "source_conflict: cs_x does not merge")])).toBeNull();
     expect(verificationDeadEnd([c("rejected", "change cancelled")])).toBeNull();
   });
+
+  it("ends when the re-run after a source conflict failed its checks", () => {
+    const merge = "file_conflict: cs_x does not merge";
+    const contract = "Required checks not satisfied: contract (failed)";
+    expect(verificationDeadEnd([c("rejected", merge, 10), c("rejected", contract, 10)])).toContain(
+      contract,
+    );
+    // The re-run has not produced its Candidate yet: wait.
+    expect(verificationDeadEnd([c("rejected", contract, 10), c("rejected", merge, 10)])).toBeNull();
+  });
 });

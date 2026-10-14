@@ -192,7 +192,7 @@ async function endWithoutShippableCandidate(env: Env, candidateId: string): Prom
     }>();
   if (!head) return false;
   const rows = await env.DB.prepare(
-    "SELECT status, status_reason, base_generation FROM candidates WHERE change_id = ?",
+    "SELECT status, status_reason, base_generation FROM candidates WHERE change_id = ? ORDER BY created_at, id",
   )
     .bind(head.change_id)
     .all<{ status: string; status_reason: string | null; base_generation: number }>();

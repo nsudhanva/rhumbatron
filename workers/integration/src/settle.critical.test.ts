@@ -231,7 +231,7 @@ describe("settle a failed Task", () => {
     );
   });
 
-  it("ends a verifying Change with its newest Candidate's reason, not an older merge rejection", async () => {
+  it("repairs a failed preview once, then ends with its newest Candidate's reason, not an older merge rejection", async () => {
     const h = harness();
     h.db.exec(`UPDATE changes SET status = 'verifying', updated_at = '${T}';
       UPDATE tasks SET status = 'completed';
@@ -241,6 +241,11 @@ describe("settle a failed Task", () => {
     h.db.exec(
       'UPDATE candidates SET score_json = \'{"rebase":{"requested":true,"delivered":true}}\' WHERE id = \'cand_old\'',
     );
+    expect(await settleChange(h.env, CHANGE)).toBe("restacked");
+    // The one repair Task of the Change ran and its Candidate failed again: the Change ends.
+    h.db.exec(`UPDATE changes SET status = 'verifying', updated_at = '${T}'; UPDATE tasks SET status = 'completed';
+      INSERT INTO candidates (id, change_id, base_generation, status, status_reason, change_set_ids_json, created_at, updated_at)
+      VALUES ('cand_rep', '${CHANGE}', 1, 'rejected', 'Preview check failed: GET /api/canvas returned 500.', '["cs_t2_1"]', '2026-10-10T00:09:00.000Z', '${T}')`);
     expect(await settleChange(h.env, CHANGE)).toBe("failed");
     expect(h.change().blocked_reason).toBe(
       "No Candidate passed its required checks: Preview check failed: GET /api/canvas returned 500. Submit the request again.",

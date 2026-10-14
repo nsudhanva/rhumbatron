@@ -156,7 +156,9 @@ const SOURCE_CONFLICT = /^(?:file_conflict|source_conflict):/;
 /**
  * Why a `verifying` Change can never ship, or null while it still can. Its Candidates on the
  * newest base are all `rejected`, none of the Change's Candidates is live, and no rejection is a
- * source conflict (rebase.ts re-runs those) or a cancel. A `stale` Candidate on the newest base
+ * cancel. A source conflict (rebase.ts re-runs its Tasks) waits only while it is the newest
+ * Candidate of the group: a later Candidate on that base is the re-run's result. The candidates
+ * come in creation order. A `stale` Candidate on the newest base
  * waits for its recompose. Without this end, the Change would show `verifying` with nothing
  * left to verify; the planning failure path ends the same way (`failed`, `change.failed`).
  */
@@ -169,10 +171,8 @@ export function verificationDeadEnd(
   const group = candidates.filter((c) => c.baseGeneration === newest);
   if (!group.every((c) => c.status === "rejected")) return null;
   if (
-    group.some(
-      (c) =>
-        SOURCE_CONFLICT.test(c.statusReason ?? "") || c.statusReason === CHANGE_CANCELLED_REASON,
-    )
+    group.some((c) => c.statusReason === CHANGE_CANCELLED_REASON) ||
+    SOURCE_CONFLICT.test(group.at(-1)?.statusReason ?? "")
   ) {
     return null;
   }
