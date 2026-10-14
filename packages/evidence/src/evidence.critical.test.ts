@@ -561,6 +561,14 @@ describe("contract route parsing", () => {
       'Added GET /api/version API route returning {"name":"acme-shop","version":"1"}';
     expect(contractKey(declared)).toBe(contractKey("GET /api/version"));
     expect(diffContract([], ["GET /api/version"], [declared]).undeclared).toEqual([]);
+    // A query string in the declaration is not part of the route.
+    expect(
+      diffContract(
+        [],
+        ["GET /api/report"],
+        ["New route GET /api/report?month=YYYY-MM -> {month, weeks}"],
+      ).undeclared,
+    ).toEqual([]);
     expect(contractKey("Expose a new endpoint (POST /api/wishlists/:id/share).")).toBe(
       contractKey("POST /api/wishlists/:id/share"),
     );

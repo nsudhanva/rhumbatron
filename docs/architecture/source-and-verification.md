@@ -325,7 +325,7 @@ Integrate rule (applied before the fork rule, `workers/integration/src/integrate
 - The dependent Task re-runs once on a stacked workspace that includes the ChangeSet of the other Task. Its instruction is to use the real routes, field names, and data shapes of that ChangeSet. No Candidate composes until the re-run completes and the Change records `verification.started` again. The Candidate then holds both ChangeSets.
 - An integration occurs once per Task pair. A later conflict on an integrated pair follows the fork rule. Only Tasks on overlapping semantic resources with incompatible designs are fork alternatives.
 
-Contract declarations: `parseContractChange` (`packages/conflict/src/declaration.ts`) converts the contract lines of an Agent into typed contract changes.
+Contract declarations: `parseContractChange` (`packages/conflict/src/declaration.ts`) converts the contract lines of an Agent into typed contract changes. A route in a declaration keeps only its path: trailing punctuation and a query string (`GET /api/report?month=YYYY-MM`) are not part of the route.
 HTTP method names (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) are part of a route. They are never change verbs. `DELETE /api/todos/:id -> {ok:true}` changes that route. Only wording such as "Removes DELETE /api/todos/:id" is a removal.
 A line that says "None" or "No change", or that only uses, consumes, or calls routes, is not a contract change. Its routes go to the `consumedContracts` of the Intent. Conflict detection never compares them.
 

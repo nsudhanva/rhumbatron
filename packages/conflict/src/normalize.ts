@@ -33,9 +33,10 @@ type HttpRoute = { route: string; match: string };
 
 function routeOf(m: RegExpExecArray | RegExpMatchArray): HttpRoute | null {
   if (!m[1] || !m[2]) return null;
-  // Sentence punctuation after a path ("... DELETE /api/cards/:id.") is not part of the route.
+  // Sentence punctuation after a path ("... DELETE /api/cards/:id.") and a query string
+  // ("GET /api/report?month=YYYY-MM") are not part of the route.
   const path =
-    m[2]
+    (m[2].split(/[?#]/)[0] ?? "")
       .toLowerCase()
       .replace(/[.:]+$/, "")
       .replace(/\/+$/, "") || "/";

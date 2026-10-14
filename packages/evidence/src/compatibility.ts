@@ -71,9 +71,9 @@ function tokens(text: string): string[] {
     .filter(Boolean);
 }
 
-/** Route path segments without `api`, version, or parameter segments. */
+/** Route path segments without `api`, version, parameter segments, or a query string. */
 function routeSegments(path: string): string[] {
-  return path
+  return (path.split(/[?#]/)[0] ?? "")
     .toLowerCase()
     .split("/")
     .filter(
