@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreBinaries": ["gitleaks"],
+  "ignoreBinaries": ["gitleaks", "cf"],
   "workspaces": {
     ".": {
       "entry": ["scripts/*.ts", "services/*/*.ts", "services/*/src/main.ts", "services/*/test/*.ts"]

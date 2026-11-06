@@ -72,6 +72,7 @@ Every long-running service has `restart: unless-stopped`.
 | `https://rhumbatron.localhost` | `web`. The path `/live/*` goes to `core`. |
 | `https://api.rhumbatron.localhost` | `core` |
 | `https://docs.rhumbatron.localhost` | The docs site in `edge` |
+| `https://rhumbatron.com` | The public docs site: the Cloudflare Worker `rhumbatron-docs`, with static assets only |
 | `https://<slug>.rhumbatron.localhost`, `https://<previewId>--<slug>.rhumbatron.localhost` | `apps` |
 
 ### Networks
@@ -129,6 +130,7 @@ Each module has a tracked `src/bindings.d.ts` with the binding types that it com
 
 Only model calls to the Anthropic API cost money.
 All other services run on the local computer without a usage charge.
+The public docs site at `https://rhumbatron.com` is a Cloudflare Worker with static assets only. Requests for static assets are free.
 
 | Item | Limit | Where |
 |---|---|---|

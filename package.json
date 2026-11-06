@@ -24,6 +24,7 @@
     "stack:logs": "docker compose logs -f --tail 100",
     "stack:trust": "bun scripts/trust-local-ca.ts",
     "smoke": "bun scripts/smoke.ts",
+    "docs:deploy": "bun scripts/deploy-docs.ts",
     "test:critical": "turbo test:critical && vitest run --dir scripts",
     "check": "bun run lint && bun run typecheck && bun run check:guardrails && bun run check:migrations && bun run check:deps && bun run check:secrets",
     "check:guardrails": "bun scripts/check-guardrails.ts",

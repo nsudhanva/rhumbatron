@@ -69,7 +69,7 @@ NODE_EXTRA_CA_CERTS=.local-ca.crt bun run smoke local
 |---|---|
 | `https://rhumbatron.localhost` | `web`. Caddy sends `/live/*` to `core`. |
 | `https://api.rhumbatron.localhost` | `core` (the API). |
-| `https://docs.rhumbatron.localhost` | The docs site. The `edge` image builds it from `docs/`. |
+| `https://docs.rhumbatron.localhost` | The docs site. The `edge` image builds it from `docs/`. The public copy is at `https://rhumbatron.com` ([Docs site](#11-docs-site)). |
 | `https://<slug>.rhumbatron.localhost` | `apps`: the live app of a Project. |
 | `https://<previewId>--<slug>.rhumbatron.localhost` | `apps`: a Candidate preview or a kept version. |
 
@@ -171,3 +171,24 @@ Then run `bun run stack:up` and `bun run stack:trust` on the server.
 ## 10. Continuous integration
 
 `.github/workflows/ci.yml` runs the repository checks on each pull request and on each push to `main`. It uses no secrets. It deploys nothing. The stack runs only where an operator starts it.
+
+## 11. Docs site
+
+The public docs site is at `https://rhumbatron.com`. It is a Cloudflare Worker with static assets only, named `rhumbatron-docs`. Requests for static assets are free.
+
+To publish the current `docs/` folder:
+
+```sh
+bun run docs:deploy
+```
+
+`scripts/deploy-docs.ts` does these steps:
+
+1. It builds `apps/docs` with `DOCS_SITE=https://rhumbatron.com`.
+2. It copies the build and the Worker configuration to a deploy folder in the system temporary folder.
+3. It installs `cf` and `wrangler` in that folder and runs `cf deploy`.
+4. It makes sure that `https://rhumbatron.com` returns `200`.
+
+The `cf` CLI must be logged in to the Cloudflare account. The Worker has the custom domain `rhumbatron.com`. Unknown paths get the `404.html` page of the site.
+
+The docs site is the only part of Rhumbatron on Cloudflare. CI does not publish it. An operator runs `bun run docs:deploy` after a change to `docs/`.

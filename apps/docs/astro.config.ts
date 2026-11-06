@@ -1,10 +1,11 @@
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 
-// Static docs site for docs.rhumbatron.localhost. The edge (Caddy) serves the build output.
+// Static docs site. The edge (Caddy) serves the build at docs.rhumbatron.localhost, and
+// `bun run docs:deploy` publishes it to Cloudflare Pages at rhumbatron.com (DOCS_SITE).
 // Pages are generated from the repository docs/ folder by scripts/sync-docs.ts.
 export default defineConfig({
-  site: "https://docs.rhumbatron.localhost",
+  site: process.env.DOCS_SITE ?? "https://docs.rhumbatron.localhost",
   integrations: [
     starlight({
       title: "Rhumbatron",

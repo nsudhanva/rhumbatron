@@ -87,7 +87,7 @@ The [architecture guide](docs/architecture/README.md) gives the details.
 
 ## Documentation
 
-The stack serves this documentation at `https://docs.rhumbatron.localhost`.
+The documentation is public at [rhumbatron.com](https://rhumbatron.com). The local stack also serves it at `https://docs.rhumbatron.localhost`.
 
 | Topic | Page |
 |---|---|
