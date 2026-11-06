@@ -40,11 +40,11 @@ bun run stack:trust
 
 Caddy (the `edge` service) creates its own certificate authority on its first start. It signs the certificates for `rhumbatron.localhost` and every subdomain. A browser does not accept these certificates until the system trusts the CA.
 
-`scripts/trust-local-ca.ts` copies the root certificate out of the `edge` container to `.local-ca.crt`. On macOS, it adds the certificate to the System keychain. This step asks for your password once. Restart the browser if it was open. On Linux, the script prints the commands that add the certificate to the system trust store.
+Without this step, browsers refuse every `https://*.rhumbatron.localhost` page: Caddy signs them with its own local CA, which the operating system does not know. `scripts/trust-local-ca.ts` copies the root certificate out of the `edge` container to `.local-ca.crt`. On macOS, it adds the certificate to your login keychain as a trusted root, and macOS asks for your password once. The script does nothing when the CA is already trusted. Restart the browser if it was open. The CA lives in the `caddy-data` volume, so run the script again after `docker compose down -v`. On Linux, the script prints the commands that add the certificate to the system trust store.
 
 Run the command again after `docker compose down -v`, because a new `caddy-data` volume holds a new CA.
 
-Bun and Node scripts do not read the System keychain. Give them the certificate file:
+Bun and Node scripts do not read the keychain. Give them the certificate file:
 
 ```sh
 NODE_EXTRA_CA_CERTS=.local-ca.crt bun run smoke local

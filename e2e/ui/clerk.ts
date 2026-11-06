@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 /**
- * Signs the Clerk prod smoke user into a browser page with a one-time sign-in token.
+ * Signs the Clerk smoke user into a browser page with a one-time sign-in token.
  * CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID come from the environment only.
  */
 import type { Page } from "@playwright/test";
@@ -11,7 +11,7 @@ function env() {
   const secretKey = process.env.CLERK_SECRET_KEY;
   const userId = process.env.CLERK_SMOKE_USER_ID;
   if (!secretKey || !userId) {
-    throw new Error("CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID are required (prod Clerk instance).");
+    throw new Error("CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID are required.");
   }
   return { secretKey, userId };
 }

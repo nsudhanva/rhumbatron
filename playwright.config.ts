@@ -19,10 +19,8 @@ export default defineConfig({
     storageState: "e2e/.auth/smoke.json",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
-    launchOptions: {
-      // Local DNS blocks the Cloudflare analytics beacon on this machine.
-      args: ["--host-resolver-rules=MAP static.cloudflareinsights.com 104.16.80.73"],
-    },
+    // Caddy signs the local hosts with its own CA. `bun run stack:trust` trusts it for browsers.
+    ignoreHTTPSErrors: true,
   },
   projects: [
     {

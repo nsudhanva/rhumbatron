@@ -83,9 +83,10 @@ services:
       INTERNAL_TOKEN: ${INTERNAL_TOKEN}
       APPS_DOMAIN: rhumbatron.localhost
     volumes: [apps-data:/data]
-    # workerd resolves the core address once, at start.
+    # workerd resolves the core address once, at start. A new core container gets a new address,
+    # so Compose restarts apps whenever it recreates or restarts core.
     depends_on:
-      core: { condition: service_healthy }
+      core: { condition: service_healthy, restart: true }
 
   git:
     <<: *restart

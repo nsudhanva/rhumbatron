@@ -19,7 +19,7 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "stack:env": "bun scripts/local-env.ts",
-    "stack:up": "bun scripts/local-env.ts && docker compose up -d --build",
+    "stack:up": "bun scripts/local-env.ts && docker compose up -d --build && bun scripts/trust-local-ca.ts --check",
     "stack:down": "docker compose down",
     "stack:logs": "docker compose logs -f --tail 100",
     "stack:trust": "bun scripts/trust-local-ca.ts",
