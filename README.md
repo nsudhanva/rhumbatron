@@ -1,7 +1,5 @@
 # Rhumbatron
 
-**[rhumbatron.com](https://rhumbatron.com)** · [Documentation](https://docs.rhumbatron.com)
-
 Rhumbatron lets a team of people and AI agents change one codebase at the same time. You describe an outcome in plain language. Agents do the work in parallel. Before their work merges, Rhumbatron finds conflicts between their plans. It then builds and tests each version, and it deploys only a version that passes all of its tests.
 
 Made by [Sudhanva Narayana](https://sudhanva.me) and [Maanasa Narayan](https://maanasa.dev) for the Cloudflare competition *Build the Next-Gen Git Platform on Cloudflare*.
@@ -13,7 +11,7 @@ flowchart LR
   goal[Request in plain language] --> intake[Intake check<br/>clear? duplicate?]
   intake --> plan[Work Graph<br/>Tasks + dependencies]
   plan --> wake[Causal wake-up<br/>only ready Tasks]
-  wake --> agents[Agents in parallel<br/>one Artifacts fork each]
+  wake --> agents[Agents in parallel<br/>one Git fork each]
   agents --> intents[Typed Intents and Claims<br/>on semantic resources]
   intents --> conflict{Semantic<br/>conflict?}
   conflict -->|no| compose[Compose one Candidate]
@@ -22,7 +20,7 @@ flowchart LR
   fork --> verify
   verify --> select[Select by evidence]
   select --> promote[Compare-and-swap promotion<br/>S41 → S42]
-  promote --> live[Live app on<br/>Dynamic Workers]
+  promote --> live[Live app on<br/>workerd]
 ```
 
 ## Key Features
@@ -34,84 +32,91 @@ flowchart LR
 - **Teams.** Owner, admin, member, and viewer roles. A Board shows each request by person and by stage.
 - **Cost control.** Budgets for each request, Project, and person. Small Tasks use less expensive models.
 
-## Built on Cloudflare
+## Components
 
-| Cloudflare product | What Rhumbatron uses it for |
-|---|---|
-| [Workers](https://developers.cloudflare.com/workers/) | Runs all server code in ten Workers: web, API, coordinator, agents, event router, integration, indexer, Sandbox host, live apps, and docs. |
-| [Artifacts](https://developers.cloudflare.com/artifacts/) | Keeps the Git repository of each Project. Each agent Task, Candidate, and code edit session works in its own fork. |
-| [Durable Objects](https://developers.cloudflare.com/durable-objects/) | `ProjectRootDO` keeps the Canonical Generation and does the compare-and-swap promotion. `ResourceShardDO` keeps Claims and Intents. `ProjectViewDO` sends live updates over WebSockets. `AgentDO` keeps agent state. `AppDataDO` keeps the data of each live app. |
-| [Sandbox](https://developers.cloudflare.com/sandbox/) | Runs agent shell commands, `bun install`, builds, and Candidate tests in a Linux container. |
-| [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/) | Loads and runs the bundle of each live app and Candidate preview at `<project>.rhumbatron.com`. |
-| [Workflows](https://developers.cloudflare.com/workflows/) | Runs three long processes: `ChangeWorkflow` plans a Change, `CandidateVerificationWorkflow` runs the checks, and `ReleaseWorkflow` deploys the live app. |
-| [Queues](https://developers.cloudflare.com/queues/) | Carries commands between Workers: agent wake-ups, integration, verification, indexing, release, and failed commands. |
-| [K2](https://developers.cloudflare.com/k2/) | Keeps all Events in order in eight streams. Durable Objects write each Event to an outbox first. |
-| [D1](https://developers.cloudflare.com/d1/) | Keeps the product data in SQL tables: Projects, Changes, Tasks, Candidates, check summaries, members, and usage meters. |
-| [R2](https://developers.cloudflare.com/r2/) | Keeps large files: check reports and logs, context packets, patches, app bundles, and the event archive. |
-| [Workers KV](https://developers.cloudflare.com/kv/) | Keeps a copy of each Project policy for fast reads. |
-| [Vectorize](https://developers.cloudflare.com/vectorize/) | Keeps embeddings of the code and of previous Changes. Agents search it after the exact dependency lookup. |
-| [Workers AI](https://developers.cloudflare.com/workers-ai/) | Runs `bge-small-en-v1.5` to make embeddings and `bge-reranker-base` to rank related requests at intake. |
-| [Clef-flash](https://developers.cloudflare.com/workers-ai/models/clef-flash/) | Makes small decisions: the model tier for a step, whether an Event wakes an agent, and whether a request is clear and new. Rhumbatron uses a decision only when its confidence is high enough. Clef-flash also writes the goal suggestions for a new Project. |
-| [AI Gateway](https://developers.cloudflare.com/ai-gateway/) | Sends all Claude calls to Anthropic, records the usage, and stops calls at the monthly spend limit. |
-| [Browser Run](https://developers.cloudflare.com/browser-run/) | Opens Candidate previews in a headless browser and saves screenshots as evidence. |
+Rhumbatron runs as one Docker Compose stack behind Caddy at `https://rhumbatron.localhost` ([ADR 0034](docs/adr/0034-docker-compose-stack.md)). Every component is open source. Only the model calls to Anthropic cost money.
 
-Terraform manages all Cloudflare resources. The agents use Claude Sonnet 5.5 and Claude Haiku 5.5.
+| Function | Component | What Rhumbatron uses it for |
+|---|---|---|
+| Edge, TLS, routing | Caddy 2.11 (`edge`) | Issues certificates from its own local CA. Routes `rhumbatron.localhost`, `api.`, `docs.`, and each app subdomain. Serves the docs site. |
+| Web app | TanStack Start on Bun (`web`) | The UI. Server functions call the API. |
+| API and back end | One Bun process (`core`) | Runs the API, the coordinator, the agents, integration, the event router, and the indexer. Calls between them are in-process calls. |
+| Actors | The actor host in `packages/platform` | `ProjectRootDO` keeps the Canonical Generation and does the compare-and-swap promotion. `ResourceShardDO` keeps Claims and Intents. `ProjectViewDO` sends live updates over WebSockets. `AgentDO` keeps agent state. Each actor has its own SQLite file. |
+| Workflows | The workflow engine in `packages/platform` | Runs `ChangeWorkflow` (plans a Change), `CandidateVerificationWorkflow` (runs the checks), and `ReleaseWorkflow` (deploys the live app). |
+| Commands and Events | NATS JetStream 2.15 (`nats`) | One work-queue stream carries the commands: agent wake-ups, integration, verification, indexing, release, and failed commands. Eight streams keep all Events in order. Actors write each Event to an outbox first. |
+| Product data | SQLite in `core` | Projects, Changes, Tasks, Candidates, check summaries, members, usage meters, the policy copies, the vectors, and the metrics. |
+| Large files | versitygw 1.10 (`objects`) | An S3 bucket for check reports and logs, context packets, patches, app bundles, and the event archive. |
+| Source | The git service (`git`) | One bare Git repository per Project. Each agent Task, Candidate, and code edit session works in its own fork. |
+| Sandboxes | `sandboxd` with sibling containers | Runs agent shell commands, `bun install`, builds, and Candidate tests in an isolated Linux container with an egress allowlist. |
+| Live apps | `workerd` with the Worker Loader (`apps`) | Loads and runs the bundle of each live app at `<slug>.rhumbatron.localhost` and each Candidate preview. Loaded apps have no network. `AppDataDO` keeps the data of each app. |
+| Browser checks | Playwright 1.64 server (`browser`) | Opens Candidate previews in a headless browser and saves screenshots as Evidence. |
+| Embeddings and rerank | llama.cpp (`embed`, `rerank`) | `bge-small-en-v1.5` makes embeddings. `bge-reranker-base` ranks related requests at intake. |
+| Small decisions (Clef-flash) | Claude Haiku with a forced tool call | Picks the model tier for a step, decides whether an Event wakes an agent, and checks whether a request is clear and new. Rhumbatron uses a decision only when its confidence is high enough. It also writes the goal suggestions for a new Project. |
+| Model calls | The Anthropic API | All Claude calls. An in-app meter reserves and settles each call and stops calls at the monthly budget. |
+| Sign-in | Clerk development instance | Accepts `rhumbatron.localhost`. |
+
+The agents use Claude Sonnet 5.5 and Claude Haiku 5.5.
 
 ```mermaid
 flowchart LR
-  user[Browser] --> web[rhumbatron-web]
-  web --> api[rhumbatron-api]
-  api --> cw[ChangeWorkflow<br/>planner]
-  cw --> router[event router<br/>causal wake-ups]
-  router -->|ready Tasks| agent[AgentDO<br/>agent loop]
-  agent -->|fork, commit| art[(Artifacts)]
-  agent -->|shell| sbx[Sandbox]
-  agent -->|ChangeSet| integ[integration<br/>compose + verify]
-  integ --> ev[(Evidence<br/>D1 + R2)]
-  integ -->|compare-and-swap| root[ProjectRootDO]
-  root -->|outbox| k2[(K2 events)]
-  k2 --> router
-  router --> view[ProjectViewDO] --> web
-  integ -->|release| apps[Dynamic Workers<br/>live apps]
+  user[Browser] --> edge[Caddy]
+  edge --> web[web]
+  edge --> core
+  subgraph core[core]
+    api[API] --> cw[ChangeWorkflow<br/>planner]
+    cw --> router[event router<br/>causal wake-ups]
+    router -->|ready Tasks| agent[AgentDO<br/>agent loop]
+    agent -->|ChangeSet| integ[integration<br/>compose + verify]
+    integ -->|compare-and-swap| root[ProjectRootDO]
+    router --> view[ProjectViewDO]
+  end
+  web --> api
+  agent -->|fork, commit| git[(git)]
+  agent -->|shell| sbx[sandboxd]
+  integ --> ev[(Evidence<br/>SQLite + objects)]
+  root -->|outbox| js[(JetStream events)]
+  js --> router
+  integ -->|release| apps[apps<br/>workerd]
+  edge --> apps
 ```
 
-The [architecture guide](https://docs.rhumbatron.com/architecture/) gives the details.
+The [architecture guide](docs/architecture/README.md) gives the details.
 
 ## Documentation
 
+The stack serves this documentation at `https://docs.rhumbatron.localhost`.
+
 | Topic | Page |
 |---|---|
-| How a request becomes a release | [Change lifecycle](https://docs.rhumbatron.com/architecture/change-lifecycle/) |
-| Agents, models, and model routing | [Agents and models](https://docs.rhumbatron.com/architecture/agents-and-models/) |
-| Git workspaces, Candidates, and checks | [Source and verification](https://docs.rhumbatron.com/architecture/source-and-verification/) |
-| Events, Queues, and the outbox | [Events and commands](https://docs.rhumbatron.com/architecture/events-and-commands/) |
-| Roles, request review, and the Board | [Shared Projects](https://docs.rhumbatron.com/architecture/shared-projects/) |
-| Live apps on Dynamic Workers | [Live apps](https://docs.rhumbatron.com/architecture/live-apps/) |
-| API routes and schemas | [Protocols](https://docs.rhumbatron.com/protocols/) |
-| Deployment and cost limits | [Deploy](https://docs.rhumbatron.com/operations/deploy/), [Costs](https://docs.rhumbatron.com/operations/costs/) |
-| Design decisions | [Architecture decision records](https://docs.rhumbatron.com/adr/) |
+| How a request becomes a release | [Change lifecycle](docs/architecture/change-lifecycle.md) |
+| Agents, models, and model routing | [Agents and models](docs/architecture/agents-and-models.md) |
+| Git workspaces, Candidates, and checks | [Source and verification](docs/architecture/source-and-verification.md) |
+| Events, commands, and the outbox | [Events and commands](docs/architecture/events-and-commands.md) |
+| Roles, request review, and the Board | [Shared Projects](docs/architecture/shared-projects.md) |
+| Live apps on workerd | [Live apps](docs/architecture/live-apps.md) |
+| API routes and schemas | [Protocols](docs/protocols/README.md) |
+| Running the stack and cost limits | [Local stack](docs/operations/local-stack.md), [Costs](docs/operations/costs.md) |
+| Design decisions | [Architecture decision records](docs/adr/README.md) |
 
-## Try it
+## Quick start
 
-1. Open [rhumbatron.com](https://rhumbatron.com) and sign in with Google.
-2. Create a Project and describe an app under **New change**.
-3. Look at the agents on the Change page. When the Candidate promotes, open the live app.
-
-## Run it yourself
-
-Requirements: [Bun](https://bun.sh) 1.3.14 and [Terraform](https://developer.hashicorp.com/terraform) 1.16 or later.
+Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/) and [Bun](https://bun.sh) 1.3.14.
 
 ```sh
 git clone https://github.com/nsudhanva/rhumbatron.git
 cd rhumbatron
-bun install
-cp apps/web/.env.example apps/web/.env.local
-bun run dev
+cp apps/web/.env.example apps/web/.env.local   # add your Clerk development keys
+bun run stack:up                               # writes .env, builds, and starts the stack
+bun run stack:trust                            # trusts the local CA; asks for your password once
 ```
 
-Add your Clerk development keys to `apps/web/.env.local`. The web app runs on `localhost:5173` and the API on `localhost:8787`.
+Put your Anthropic API key in the macOS Keychain item `rhumbatron-anthropic-api-key`, or set `ANTHROPIC_API_KEY` before `bun run stack:up`.
 
-`bun run dev` runs the web app and the API on your computer, with no Cloudflare account. Wrangler keeps local copies of the database, the file storage, and the queues in the `.wrangler` folder. The agents cannot build apps on your computer, because they need Artifacts, K2, and Workers AI, which run only on Cloudflare. To use the agents, deploy to your own Cloudflare account with the [deployment runbook](https://docs.rhumbatron.com/operations/deploy/).
+1. Open `https://rhumbatron.localhost` and sign in.
+2. Create a Project and describe an app under **New change**.
+3. Look at the agents on the Change page. When the Candidate promotes, open the live app at `https://<slug>.rhumbatron.localhost`.
+
+`bun run stack:down` stops the stack and keeps the data. The [local stack runbook](docs/operations/local-stack.md) covers the settings, the logs, the data volumes, and a Linux server.
 
 ## Team
 

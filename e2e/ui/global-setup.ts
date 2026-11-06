@@ -6,7 +6,7 @@ import { signInPage } from "./clerk";
 /** Signs the smoke user in once and saves the session for every test. */
 export default async function globalSetup(config: FullConfig) {
   const use = config.projects[0]?.use ?? {};
-  const baseURL = use.baseURL ?? "https://rhumbatron.com";
+  const baseURL = use.baseURL ?? "https://rhumbatron.localhost";
   mkdirSync("e2e/.auth", { recursive: true });
   const browser = await chromium.launch({ args: use.launchOptions?.args ?? [] });
   const page = await browser.newPage();

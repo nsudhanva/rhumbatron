@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.wrangler
+.git
+.claude
+.env
+**/.env.local
+**/.dev.vars
+e2e
+infrastructure

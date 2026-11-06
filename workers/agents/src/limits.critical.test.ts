@@ -29,7 +29,7 @@ vi.mock("@rhumbatron/integration/events", () => ({
   appendChangeEvents: spies.appendChangeEvents,
   changeEvent: async (_ctx: unknown, eventType: string) => ({ eventType }),
 }));
-vi.mock("@cloudflare/sandbox", () => ({ getSandbox: spies.getSandbox }));
+vi.mock("@rhumbatron/platform/sandbox", () => ({ getSandbox: spies.getSandbox }));
 
 const {
   admitAgent,
@@ -373,8 +373,7 @@ describe("monthly Anthropic budget", () => {
     const error = await meteredComplete(
       { db: d1, budgetUsd: 10 },
       {
-        accountId: "a",
-        gatewayId: "g",
+        baseUrl: "https://anthropic.test",
         apiKey: "k",
         workspaceId: "w",
         fetch: async () => {

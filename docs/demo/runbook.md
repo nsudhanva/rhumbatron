@@ -1,16 +1,16 @@
 # Demo runbook
 
-This runbook maps the Rhumbatron demo to the prod UI (`https://rhumbatron.com`) and the API (`https://api.rhumbatron.com`).
+This runbook maps the Rhumbatron demo to the web app (`https://rhumbatron.localhost`) and the API (`https://api.rhumbatron.localhost`) of the local stack.
 
 The demo starts from a blank Project. Rhumbatron has no templates: the Project gets an empty repository, and the agents build the app. Two people use the Project at the same time. Alice owns the Project. Bob is a member. They build a play-money prediction market. The demo shows parallel requests, one real design conflict, one duplicate request, one unclear request, and one change that needs approval.
 
-Prod is the only remote environment. [deploy.md](../operations/deploy.md) describes the deployment. The design of shared Projects is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
+[local-stack.md](../operations/local-stack.md) tells how to start the stack. The design of shared Projects is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
 
 ## Before the demo
 
-1. Make sure that `locals.paused = false` in `infrastructure/terraform/envs/prod/main.tf`. If prod is paused, resume it ([pause-resume.md](../operations/pause-resume.md)).
-2. Run `bun run smoke:prod`.
-3. Run `bun run cost:report` ([costs.md](../operations/costs.md)). The caps are 20 Sandbox hours per month, 960 Browser Run seconds per day, and 100 USD of Anthropic spend per calendar month. The demo builds about five requests. Each build uses about 15 model calls and a few Sandbox minutes.
+1. Start the stack with `bun run stack:up`. Run `bun run stack:trust` once, so the browsers accept the local certificates ([local-stack.md](../operations/local-stack.md)).
+2. Run `NODE_EXTRA_CA_CERTS=.local-ca.crt bun run smoke local`.
+3. Read the meters on `/admin` ([costs.md](../operations/costs.md)). The caps are 20 Sandbox hours per month, 960 browser check seconds per day, and 100 USD of Anthropic spend per calendar month. The demo builds about five requests. Each build uses about 15 model calls and a few Sandbox minutes.
 4. Prepare two accounts with different email addresses, and two browser profiles. Alice uses one profile. Bob uses the other profile.
 5. Optional: to remove smoke Projects, run `bun run cleanup:projects --dry-run`, then `bun run cleanup:projects`. The command keeps every Project that is not a smoke Project.
 
@@ -33,17 +33,17 @@ R2 and R3 change different parts of the app, so they build in parallel. R4 and R
 
 | # | Step | Who | Where | What to show |
 |---|---|---|---|---|
-| 1 | Open `rhumbatron.com` | Alice | `/` | The Projects table and the notification bell. |
+| 1 | Open `https://rhumbatron.localhost` | Alice | `/` | The Projects table and the notification bell. |
 | 2 | Create the Project `Prediction Market` | Alice | `/`, "New project" | The Project opens at Canonical Generation `S0`. The repository has one commit with a `.gitignore`. The live app host shows "Nothing built yet". |
 | 3 | Share the Project with Bob | Alice | `/projects/$projectId`, Share | The Share dialog shows a pending invitation for Bob. |
 | 4 | Accept the invitation | Bob | `/`, "Shared with you" | The Project opens and shows Members, not Share. Bob sees no Approve, Promote, Share, or Remove button. |
 | 5 | Turn off member review | Alice | `/projects/$projectId/settings` | Turn off "Member requests need review", so the requests of Bob go to the system at once (ADR 0028). |
 | 6 | Send R1 | Alice | `/projects/$projectId`, "New change" | The New change box is at the top of the Overview. The Project has no Changes, so the box is open and shows goal suggestions under the goal. Send R1. |
 | 7 | Show the Work Graph | Alice | `/changes/$changeId` | "Acceptance criteria" and "Protected invariants" from the Root Planner. The first Task bootstraps the app, and every other Task depends on it (ADR 0022). |
-| 8 | Show the agents | Alice | `/changes/$changeId/flight` | Only ready Tasks have active lanes. Pending Tasks stay idle. Each active Task has one Artifacts fork. |
+| 8 | Show the agents | Alice | `/changes/$changeId/flight` | Only ready Tasks have active lanes. Pending Tasks stay idle. Each active Task has one fork on the git service. |
 | 9 | Show Candidate verification | Alice | `/candidates/$candidateId` | The Evidence rows: build, unit, contract, and preview smoke. A check that did not run is a gap, never a pass. |
 | 10 | Promote R1 | Alice | `/candidates/$candidateId` | Policy promotes a low or medium risk Candidate. Otherwise click "Promote S0 → S1". `ProjectRootDO` runs the compare-and-swap. The Canonical Generation advances to `S1`. |
-| 11 | Open the live app | Alice | `<slug>.rhumbatron.com` | Click "Open app" on the Project overview. Create a market and bet coins. |
+| 11 | Open the live app | Alice | `https://<slug>.rhumbatron.localhost` | Click "Open app" on the Project overview. Create a market and bet coins. |
 | 12 | Send R2 and R3 at the same time | Alice sends R2. Bob sends R3. | `/projects/$projectId`, "New change" | Two Changes build in parallel. The "Requested by" column names each requester. |
 | 13 | Show the parallel work | Alice | `/projects/$projectId/board` | Both Changes move through the Board. The request comparison finds no conflict. |
 | 14 | Show both features | Alice | The live app | The leaderboard and the probability chart. Each promotion advances the Canonical Generation by one. |
@@ -80,18 +80,18 @@ If Bob calls a route for the owner and the admins, the API returns 403. Bob cann
 
 ## Troubleshooting
 
-- Rhumbatron moves a failed Queue command to the dead-letter Queue. The Project shows the command with Retry and Dismiss.
+- Rhumbatron moves a failed command to the dead-letter queue. The Project shows the command with Retry and Dismiss.
 - Change limits: 8 active Agents and 4 Sandboxes per Change, and 2 attempts per model tier (`workers/agents/src/limits.ts`).
 - Claims are advisory. A Claim shows an Intent on a semantic resource and blocks no other Agent.
 - When another Candidate advances the Canonical State first, the compare-and-swap rejects the promotion. The Candidate becomes `stale`, and Rhumbatron composes it again.
 - A check that did not run or timed out is `not_checked`. It never counts as a pass.
 - The intake gate asks at most one round for a request. A Change gets at most 3 rounds of questions in total. Rhumbatron cancels a Change that gets no answer for 7 days.
-- To find active resources and spend, run `bun run cost:report`.
+- To find spend, open `/admin`. To find running Sandboxes, run `docker ps --filter label=rhumbatron.sandbox`.
 
 ## Cleanup
 
 1. Sign in as Alice. Open the Share dialog. Remove Bob from the members list.
 2. Revoke each invitation that is still pending.
 3. Delete the demo Project when you do not need it. Only the owner can do this ([cleanup.md](../operations/cleanup.md)).
-4. Run `bun run cost:report`. Make sure that no compute is active.
-5. Pause prod if you do not need it.
+4. Open `/admin` and read the spend.
+5. Run `bun run stack:down` if you do not need the stack. The data stays in the volumes.

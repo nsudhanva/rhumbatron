@@ -2,7 +2,7 @@
 
 This runbook shows two people who change one live Project at the same time. Alice owns the Project. Bob is a member. Before the demo, Alice turns off "Member requests need review" in Settings, so Bob's requests go to the system at once (ADR 0028). Five requests run in parallel. One pair conflicts, and one request repeats another. No role decides between the requests. The system compares them, and in a conflict between two people the earlier requester chooses (ADR 0025, ADR 0032). The design is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
 
-Use prod (`https://rhumbatron.com`). You need two accounts with different email addresses and two browser profiles. Alice must own a Project whose live app is a daily planner, with one section per day and checklist items in each section.
+Use the local stack (`https://rhumbatron.localhost`, [local-stack.md](../operations/local-stack.md)). You need two accounts with different email addresses and two browser profiles. Alice must own a Project whose live app is a daily planner, with one section per day and checklist items in each section.
 
 ```mermaid
 sequenceDiagram
@@ -88,11 +88,11 @@ The intake gate asks at most one round for a request. A Change gets at most 3 ro
 - Each request gets the Project default budget. That budget is 3 USD when the Project sets none ([protocols](../protocols/README.md#project-settings)).
 - The intake gate makes one Clef-flash call per request. For each related request that Clef-flash does not clear, it adds two Sonnet coverage runs, one in each order. A request that Clef-flash does not clear as buildable adds one Sonnet clarity call.
 - A Sonnet review runs for each pair of overlapping requests, at most 4 for each Change. A conflict between two people adds no model call. "Apply theirs after mine" adds one plan of C2.
-- Model spend counts against the prod cap of 100 USD per calendar month (ADR 0021). Run `bun run cost:report` before and after the demo ([costs.md](../operations/costs.md)).
+- Model spend counts against the cap of 100 USD per calendar month (`ANTHROPIC_MONTHLY_BUDGET_USD`, ADR 0021). Read the meters on `/admin` before and after the demo ([costs.md](../operations/costs.md)).
 
 ## Cleanup
 
 1. Sign in as Alice. Open the Share dialog. Remove Bob from the members list.
 2. Revoke each invitation that is still pending.
 3. Delete the demo Project when you do not need it. Only the owner can do this.
-4. Run `bun run cost:report`. Make sure that no compute is active.
+4. Open `/admin` and read the spend. Run `bun run stack:down` if you do not need the stack.

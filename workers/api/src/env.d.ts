@@ -9,6 +9,6 @@ interface Env {
   BROWSER_DAILY_SECONDS?: string;
   /** This environment's Anthropic budget in USD per calendar month (ADR 0021). Default 10. */
   ANTHROPIC_MONTHLY_BUDGET_USD?: string;
-  /** Live apps zone (ADR 0020), for example `rhumbatron.com`. Prod only, while app routing is on. */
+  /** Live apps domain (ADR 0020), for example `rhumbatron.localhost`. */
   APPS_DOMAIN?: string;
 }

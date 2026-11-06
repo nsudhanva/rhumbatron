@@ -22,8 +22,23 @@ function entryLoader(src: string): string {
   return `<script>(function(s){var d=0;function go(){if(d)return;d=1;var l=document.querySelectorAll('link[rel="${HELD_PRELOAD}"]');for(var i=0;i<l.length;i++)l[i].rel="modulepreload";var m=document.createElement("script");m.type="module";m.setAttribute("async","");m.src=${JSON.stringify(src)};s.replaceWith(m)}function h(){if(document.visibilityState==="hidden")go()}h();document.addEventListener("visibilitychange",h);var P=window.PerformanceObserver;if(P&&P.supportedEntryTypes&&P.supportedEntryTypes.indexOf("paint")>=0){new P(function(e,o){if(e.getEntriesByName("first-contentful-paint").length){o.disconnect();go()}}).observe({type:"paint",buffered:true})}else{requestAnimationFrame(function(){setTimeout(go,0)})}setTimeout(go,5000)})(document.currentScript)</script>`;
 }
 
-function deferEntryScript(response: Response): Response {
+/**
+ * Bun's HTMLRewriter cannot read a JavaScript ReadableStream body, so the rewriter works on the
+ * complete document: the page is sent when its render stream ends.
+ */
+async function deferEntryScript(response: Response): Promise<Response> {
   if (!response.headers.get("content-type")?.startsWith("text/html")) return response;
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  const html = await response.text();
+  return new Response(entryRewriter().transform(html), {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function entryRewriter(): HTMLRewriter {
   return new HTMLRewriter()
     .on('link[rel="modulepreload"]', {
       element(element) {
@@ -35,13 +50,12 @@ function deferEntryScript(response: Response): Response {
         const src = element.getAttribute("src");
         if (src) element.replace(entryLoader(src), { html: true });
       },
-    })
-    .transform(response);
+    });
 }
 
 /**
- * Server entry. `www.` hosts redirect permanently to the apex (ADR 0017): the Worker serves
- * `www.rhumbatron.com` itself, so the zone needs no redirect ruleset.
+ * Server entry, run by serve.ts. `www.` hosts redirect permanently to the apex, so the proxy
+ * needs no redirect rule.
  */
 export default createServerEntry({
   async fetch(request: Request, ...rest: unknown[]) {

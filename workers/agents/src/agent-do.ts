@@ -239,8 +239,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
         storage,
         {
           models: createTierModels({
-            accountId: this.env.AI_ACCOUNT_ID,
-            gatewayId: this.env.AI_GATEWAY_ID,
+            baseUrl: this.env.ANTHROPIC_BASE_URL,
             apiKey: this.env.ANTHROPIC_API_KEY,
             workspaceId: this.env.ANTHROPIC_WORKSPACE_ID,
             beforeCall: (tier) => this.beforeModelCall(tier),
@@ -1654,8 +1653,7 @@ export class AgentDO extends Agent<Env> implements AgentRuntime {
               meters: await this.meters(input.changeId),
             },
             {
-              accountId: this.env.AI_ACCOUNT_ID,
-              gatewayId: this.env.AI_GATEWAY_ID,
+              baseUrl: this.env.ANTHROPIC_BASE_URL,
               apiKey: this.env.ANTHROPIC_API_KEY,
               workspaceId: this.env.ANTHROPIC_WORKSPACE_ID,
               allowOpus: opusAllowed(this.env.ALLOW_OPUS),

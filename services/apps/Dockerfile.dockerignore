@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.wrangler
+**/worker-configuration.d.ts
+.git
+.claude
+docs
+e2e
+infrastructure

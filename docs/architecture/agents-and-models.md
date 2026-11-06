@@ -5,22 +5,22 @@ This page covers the Agent Plane: AgentDO, the Pi harness loop, model routing, t
 Main source files:
 
 - `workers/agents/src/agent-do.ts`: AgentDO, run start, run end, budgets.
-- `workers/agents/src/wake-consumer.ts`: the `rhumbatron-agent-wakeups` consumer.
+- `workers/agents/src/wake-consumer.ts`: the `agent-wakeups` queue consumer.
 - `workers/agents/src/limits.ts`: Change limits and budget-stop text.
 - `workers/agents/src/workspace.ts`: the Task workspace and the command allowlist.
-- `packages/model-router/src`: routing rules, Clef-flash routing, escalation, budgets, prices, the spend meter, and the gateway client.
+- `packages/model-router/src`: routing rules, Clef-flash routing, escalation, budgets, prices, the spend meter, and the Anthropic client (`gateway-client.ts`).
 - `packages/context-compiler/src`: Context Packet assembly and retrieval order.
 
 ## AgentDO
 
-AgentDO is one durable logical Agent.
+AgentDO is one durable logical Agent. The actor host in `packages/platform` runs it (ADR 0034).
 It extends the Agents SDK `Agent` class and implements the `AgentRuntime` interface (`start`, `resume`, `cancel`, `getState`).
 `resume` records the event and starts no work.
 Pi types stay inside `agent-do.ts`, `models.ts`, and `task-tools.ts` in `workers/agents/src`.
 There is one Agent per Task. The Agent ID is `agt_<task>`.
 
-AgentDO keeps its run state in DO SQLite (`agent_runs`, `run_tool_logs`, `run_meter`, `run_workspaces`).
-D1 holds the shared view (`tasks`, `task_runs`, `decision_receipts`).
+AgentDO keeps its run state in its own actor SQLite file (`agent_runs`, `run_tool_logs`, `run_meter`, `run_workspaces`).
+The product database holds the shared view (`tasks`, `task_runs`, `decision_receipts`).
 AgentDO sleeps when no run is active.
 While a run is active, an interval schedule checks it every 60 seconds.
 After 15 checks, AgentDO treats the run as stuck and ends it as `timeout`.
@@ -43,8 +43,8 @@ flowchart TB
   ESC --> CMP
   CMP --> PROV["Monthly Anthropic budget:<br/>room for one call?<br/>Opus off: opus runs on Sonnet"]
   PROV --> STACK["Dependency stack:<br/>ChangeSets to merge"]
-  STACK --> PKT["compilePacket,<br/>store in R2 by hash"]
-  PKT --> REC["D1 batch: Decision Receipt,<br/>task_runs row, status running"]
+  STACK --> PKT["compilePacket,<br/>store in the object store by hash"]
+  PKT --> REC["Database batch: Decision Receipt,<br/>task_runs row, status running"]
   REC --> CLM["Advisory Claims on<br/>the Task resources"]
   CLM --> PI["Pi: reset session,<br/>set model, submit"]
 ```
@@ -67,15 +67,15 @@ sequenceDiagram
   autonumber
   participant A as AgentDO
   participant Pi as PiHarness
-  participant GW as AI Gateway
+  participant GW as Anthropic API
   participant T as Task tools
-  participant SBX as Sandbox and Artifacts
+  participant SBX as Sandbox and git service
 
   A->>Pi: submit(prompt from Context Packet)
   loop until complete_task or fail_task
     Pi->>A: beforeModelCall(tier)
     A-->>Pi: allow and reserve on the monthly meter, or throw at a cap
-    Pi->>GW: Messages API call (Anthropic)
+    Pi->>GW: Messages API call
     GW-->>Pi: tool call
     Pi->>T: list_files, read_file, write_file, edit_file, delete_file, or run_command
     T->>SBX: read source, write file, run allowlisted command
@@ -92,7 +92,7 @@ The Task tools are `list_files`, `read_file`, `write_file`, `edit_file`, `delete
 `edit_file` changes an existing file with exact replacements (`applyEdits`): each `oldText` must occur exactly once, in order. If one edit does not match, nothing is written and the result names the edit. The agents change existing files with `edit_file`, so a model response stays small as the app grows.
 Only Task kinds `implement`, `migrate`, and `test` get a workspace.
 For other kinds, `write_file`, `edit_file`, `delete_file`, and `run_command` return "This Task has no workspace".
-The first workspace tool call forks the canonical Artifact and opens a Sandbox checkout.
+The first workspace tool call forks the canonical repository and opens a Sandbox checkout.
 A Project without source gets only `complete_task` and `fail_task`.
 
 Caps inside one run:
@@ -117,9 +117,9 @@ With `bun run build`, an agent checks that its UI builds. The workspace then dis
 ## Model routing
 
 The code uses three tier names: `haiku`, `sonnet`, and `opus`.
-Every tier calls Anthropic Claude through the AI Gateway (ADR 0021).
+Every tier calls Anthropic Claude directly through the Messages API at `ANTHROPIC_BASE_URL` (default `https://api.anthropic.com`, ADR 0021).
 Opus is off by default. The `opus` tier runs on Sonnet unless `ALLOW_OPUS` is `"true"`.
-Terraform sets `ALLOW_OPUS` from `var.allow_opus` (default `false`).
+Compose sets `ALLOW_OPUS` from `.env` (default `false`).
 
 ### Deterministic rules, then Clef-flash
 
@@ -151,7 +151,7 @@ flowchart TB
 The floor also applies on the rule path.
 Billing and non-trivial authorization raise the tier to at least `sonnet`.
 A small, low-risk Task is trivial.
-Every route writes a Decision Receipt (`decision_receipts` in D1) and a `model.route.decided` Event.
+Every route writes a Decision Receipt (`decision_receipts` in the product database) and a `model.route.decided` Event.
 A receipt holds no private reasoning.
 
 ### Tiers and the provider
@@ -172,7 +172,7 @@ flowchart LR
   SM --> RES
   OPUS --> RES
   RES -->|"over budget"| STOP["No call: Change budget_blocked<br/>(the budget that ran out)"]
-  RES -->|"reserved"| GW["AI Gateway /anthropic/v1/messages<br/>x-api-key + anthropic-workspace-id<br/>20 requests per minute"]
+  RES -->|"reserved"| GW["Anthropic /v1/messages<br/>x-api-key + anthropic-workspace-id"]
   GW --> SETTLE["Settle the meter to the<br/>exact cost from usage"]
 ```
 
@@ -182,7 +182,7 @@ flowchart LR
 | sonnet | `claude-sonnet-5-5` | Adaptive, medium effort, text omitted | 16,000 tokens: a 40,000-character file fits one `write_file` call |
 | opus | `claude-sonnet-5-5` while Opus is off. `claude-opus-5-5` when `ALLOW_OPUS` is `"true"`. | Adaptive, high effort, text omitted | 16,000 tokens |
 
-Two call paths use the same gateway, headers, prices, and meter:
+Two call paths use the same base URL, headers, prices, and meter:
 
 - Pi agent runs (`workers/agents/src/models.ts`) use Pi's Anthropic Messages API. Pi puts `cache_control` on the system prompt, the tool definitions, and the latest message. Pi prices each response from its usage fields.
 - `complete()` (`packages/model-router/src/gateway-client.ts`) serves the Root Planner, the intake gate, the request review, conflict review, context compaction, the acceptance check, and the Integration Judge. Each caller goes through `meteredComplete()`. `complete()` caches the system prompt. On a follow-up call, it replays a whole assistant turn, with its thinking blocks. The caller sets the output cap.
@@ -195,19 +195,19 @@ Rhumbatron computes the exact cost of each call. The cost includes uncached inpu
 
 | Limit | Value | Where |
 |---|---|---|
-| Monthly Anthropic budget | `ANTHROPIC_MONTHLY_BUDGET_USD`: $100 in prod (Terraform maximum $100, code fallback $10) | D1 `usage_counters`, counter `anthropic-usd-micro`, one row per `YYYY-MM`. The AI Gateway spend limit has the same value. |
-| Model calls per UTC day | 400 for agent runs, conflict review, compaction, and the acceptance check | D1 `usage_counters`, counter `agent-model-calls` |
-| Clef-flash calls per UTC day | 200, shared by routing, intake, and the causal router | D1 `usage_counters`, counter `clef-flash` |
-| Request, Project, and user budgets | `changes.budget_usd`, `projects.monthly_budget_usd`, `users.monthly_budget_usd` (ADR 0030) | D1 `usage_counters`, counters `change-usd-micro:<id>`, `project-usd-micro:<id>`, `user-usd-micro:<id>` |
+| Monthly Anthropic budget | `ANTHROPIC_MONTHLY_BUDGET_USD`: default $100 in Compose (code fallback $10 when the value is absent) | `usage_counters`, counter `anthropic-usd-micro`, one row per `YYYY-MM` |
+| Model calls per UTC day | 1,000 for agent runs, conflict review, and compaction (`AGENT_DAILY_CALL_CAP`) | `usage_counters`, counter `agent-model-calls` |
+| Clef-flash calls per UTC day | 200, shared by routing, intake, and the causal router | `usage_counters`, counter `clef-flash` |
+| Request, Project, and user budgets | `changes.budget_usd`, `projects.monthly_budget_usd`, `users.monthly_budget_usd` (ADR 0030) | `usage_counters`, counters `change-usd-micro:<id>`, `project-usd-micro:<id>`, `user-usd-micro:<id>` |
 
-Before each call that a Change pays for, Rhumbatron reserves an estimate on every meter of the Change. One D1 batch writes all the reservations or none of them. After the call, each meter settles to its exact cost (`reserveMeters`, `settleMeters` in `packages/model-router/src/budget-meters.ts`). See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
-A refused reservation, a gateway spend-limit 429, and an Anthropic billing error are `spend_limited` events.
+Before each call that a Change pays for, Rhumbatron reserves an estimate on every meter of the Change. One database batch writes all the reservations or none of them. After the call, each meter settles to its exact cost (`reserveMeters`, `settleMeters` in `packages/model-router/src/budget-meters.ts`). See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
+A refused reservation, a 429 or 402 that is not a rate limit, and an Anthropic billing error are `spend_limited` events.
 `spend_limited` is a budget stop. It never retries and never tries another provider.
 
 ## Escalation
 
 `nextAttempt` (`workers/agents/src/limits.ts`) decides what happens after a failed run.
-It applies `nextStep` and then `limitAttempts` to the whole failure history of the Task in D1 `task_runs`.
+It applies `nextStep` and then `limitAttempts` to the whole failure history of the Task in `task_runs`.
 Transport failures never escalate.
 Two intelligence failures at one tier move the Task up one tier.
 
@@ -240,8 +240,8 @@ Rules:
 - The daily call cap and the monthly, Project, user, and request budgets stop the Task at once. The Task becomes `blocked`, and the Change becomes `budget_blocked` with the exact limit.
 - `replan` is a budget stop with limit `max_attempts_per_tier`. No automatic re-plan runs. The Task becomes `blocked`, and the Change becomes `budget_blocked`.
 - `limitAttempts` allows at most 2 attempts per tier and counts every earlier run at that tier.
-- A promotion advances the generation, then writes the new tree's file index. A Task that starts in between waits up to 12 seconds for the index. If it is still missing, the start fails and the wake Queue delivers it again; the Task never reads "no source repository" for a Project that has one.
-- Conflicting dependency ChangeSets fail the Task at once (`dependency_merge_conflict`). The integration Worker then re-runs the dependency that did not merge on top of the others. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release).
+- A promotion advances the generation, then writes the new tree's file index. A Task that starts in between waits up to 12 seconds for the index. If it is still missing, the start fails and the wake queue delivers it again; the Task never reads "no source repository" for a Project that has one.
+- Conflicting dependency ChangeSets fail the Task at once (`dependency_merge_conflict`). The integration code then re-runs the dependency that did not merge on top of the others. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release).
 - When a Task fails or stops, its pending dependents become `blocked`.
 - The Decision Receipt of the next run records an escalation (reason `two_failures_at_<tier>` or `max_attempts_at_<tier>`).
 - Every attempt gets a fresh Pi session.
@@ -262,27 +262,27 @@ flowchart TB
     TOOLS["Allowed tools and budget"]
   end
   subgraph Exact["Exact retrieval, in order"]
-    D1["1. Declared files"]
-    D2["2. Dependency neighbors"]
-    D3["3. Resource owners<br/>(Product Graph)"]
-    D4["4. Dependency and nearby Intents,<br/>prior failures"]
+    E1["1. Declared files"]
+    E2["2. Dependency neighbors"]
+    E3["3. Resource owners<br/>(Product Graph)"]
+    E4["4. Dependency and nearby Intents,<br/>prior failures"]
   end
-  V["5. Vectorize: max 5 matches,<br/>score at least 0.6"]
+  V["5. Semantic memory: max 5 matches,<br/>score at least 0.6"]
   PKT["ContextPacket (packetVersion 1)<br/>max 12,000 tokens"]
-  R2[("R2 context/project/change/task/hash.json")]
+  OBJ[("Object store<br/>context/project/change/task/hash.json")]
   Fixed --> PKT
-  D1 --> D2 --> D3 --> D4 --> V --> PKT
-  PKT --> R2
+  E1 --> E2 --> E3 --> E4 --> V --> PKT
+  PKT --> OBJ
 ```
 
 Rules:
 
 - Every item carries `itemId`, `source`, `sourceVersion`, and `capturedAt`.
-- Over the token limit, `compilePacket` drops the lowest-priority items first. Vectorize matches are the first to go.
+- Over the token limit, `compilePacket` drops the lowest-priority items first. Semantic matches are the first to go.
 - AgentDO stores the packet hash on the `task_runs` row (`context_hash`). Two runs with the same hash have the same inputs.
-- Vectorize gets at most 1,000 query embeddings per UTC day. It adds only files of the same Project that exist in the indexed tree.
-- `rhumbatron-indexer` builds the exact indexes once per canonical tree, on the `index.build` command.
-- Tool inputs and outputs go to R2 at `context/<project>/<change>/<task>/tools-<run>.json`. Model reasoning never goes there.
+- Semantic retrieval uses the `MEMORY` vector index: exact cosine similarity over the vectors of one Project. Query embeddings come from the `embed` service (bge-small-en-v1.5, 384 dimensions). At most 1,000 query embeddings run per UTC day. Retrieval adds only files of the same Project that exist in the indexed tree.
+- The indexer builds the exact indexes once per canonical tree, on the `index.build` command.
+- Tool inputs and outputs go to the object store at `context/<project>/<change>/<task>/tools-<run>.json`. Model reasoning never goes there.
 
 ## Stacked workspaces
 
@@ -312,13 +312,13 @@ The ChangeSet records this lineage in `intent_json.changeSet` (`ChangeSetIntent`
 
 | Field | Meaning |
 |---|---|
-| `fork`, `commit` | Artifacts fork and commit of the ChangeSet |
+| `fork`, `commit` | Git fork and commit of the ChangeSet |
 | `baseCommit` | Canonical commit the fork started from |
 | `stackedOn` | Dependency ChangeSet IDs merged before the first edit |
 | `startCommit` | HEAD after the stacked merges |
 | `files` | Every file that differs from `baseCommit` |
 | `ownFiles` | Files this Task changed on top of its stack |
-| `patchRef` | R2 key of the stored `git diff`, from `startCommit` when stacked, else from `baseCommit` |
+| `patchRef` | Object key of the stored `git diff`, from `startCommit` when stacked, else from `baseCommit` |
 
 `ws-t3` descends from `ws-t1` and `ws-t2`, so Candidate composition merges them as shared history.
 The integrate rule can reopen a Task (`route_json.integrate`, [Source and verification](source-and-verification.md#sibling-candidates-and-selection)).

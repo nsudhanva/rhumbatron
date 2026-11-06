@@ -1,0 +1,24 @@
+{
+  "name": "@rhumbatron/sandboxd",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./client": "./client.ts"
+  },
+  "scripts": {
+    "start": "bun src/server.ts",
+    "egress": "bun src/egress.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test:critical": "vitest run --dir src"
+  },
+  "dependencies": {
+    "dockerode": "5.0.1"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/dockerode": "4.0.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}

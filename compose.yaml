@@ -1,0 +1,241 @@
+# Rhumbatron, local stack. Start it with `bun run stack:up`. See docs/operations/local-stack.md.
+#
+#   https://rhumbatron.localhost        web app (and /live sockets to core)
+#   https://api.rhumbatron.localhost    API
+#   https://docs.rhumbatron.localhost   docs
+#   https://<slug>.rhumbatron.localhost live apps and Candidate previews
+#
+# Settings come from .env (bun run stack:env writes it).
+name: rhumbatron
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  edge:
+    <<: *restart
+    build: { context: ., dockerfile: services/edge/Dockerfile }
+    ports: ["80:80", "443:443"]
+    volumes: [caddy-data:/data, caddy-config:/config]
+    depends_on: [web, core, apps]
+
+  web:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY}
+    environment:
+      PORT: "3000"
+      API_INTERNAL_URL: http://core:8787
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY}
+    depends_on:
+      core: { condition: service_healthy }
+
+  core:
+    <<: *restart
+    build: { context: ., dockerfile: services/core/Dockerfile }
+    environment:
+      WEB_ORIGIN: https://rhumbatron.localhost
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      NATS_URL: nats://nats:4222
+      S3_ENDPOINT: http://objects:7070
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: rhumbatron-evidence
+      GIT_URL: http://git:8080
+      GIT_ADMIN_TOKEN: ${GIT_ADMIN_TOKEN}
+      SANDBOXD_URL: http://sandboxd:7070
+      SANDBOXD_TOKEN: ${SANDBOXD_TOKEN}
+      APPS_RPC_URL: http://apps:8789
+      BROWSER_WS_URL: ws://browser:3000/
+      EMBED_URL: http://embed:8080
+      RERANK_URL: http://rerank:8080
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      CLERK_AUTHORIZED_PARTIES: https://rhumbatron.localhost
+      # The Clerk development instance mints Backend API session tokens without `azp` (scripts).
+      CLERK_ALLOW_MISSING_AZP: "true"
+      PLATFORM_ADMIN_USER_IDS: ${PLATFORM_ADMIN_USER_IDS:-[]}
+      APPS_DOMAIN: rhumbatron.localhost
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
+      ANTHROPIC_MONTHLY_BUDGET_USD: ${ANTHROPIC_MONTHLY_BUDGET_USD:-100}
+      ALLOW_OPUS: ${ALLOW_OPUS:-false}
+      SANDBOX_MONTHLY_SECONDS: ${SANDBOX_MONTHLY_SECONDS:-72000}
+      BROWSER_DAILY_SECONDS: ${BROWSER_DAILY_SECONDS:-960}
+    volumes: [core-data:/data]
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    depends_on:
+      nats: { condition: service_healthy }
+      objects: { condition: service_started }
+      git: { condition: service_healthy }
+
+  apps:
+    <<: *restart
+    build: { context: ., dockerfile: services/apps/Dockerfile }
+    environment:
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      APPS_DOMAIN: rhumbatron.localhost
+    volumes: [apps-data:/data]
+    # workerd resolves the core address once, at start.
+    depends_on:
+      core: { condition: service_healthy }
+
+  git:
+    <<: *restart
+    build: { context: services/git }
+    environment:
+      GIT_ADMIN_TOKEN: ${GIT_ADMIN_TOKEN}
+      GIT_TOKEN_SECRET: ${GIT_TOKEN_SECRET}
+      GIT_PUBLIC_URL: http://git:8080
+      GIT_NAMESPACE: rhumbatron
+    volumes: [git-data:/srv/git]
+    networks: [default, sbx]
+
+  nats:
+    <<: *restart
+    image: nats:2.15.2-alpine
+    command: ["-c", "/etc/nats/nats.conf"]
+    volumes: [./services/nats/nats.conf:/etc/nats/nats.conf:ro, nats-data:/data]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  objects:
+    <<: *restart
+    image: versity/versitygw:v1.10.0
+    entrypoint: ["sh", "-c", "mkdir -p /data/s3/rhumbatron-evidence && exec versitygw --port :7070 posix /data/s3"]
+    environment:
+      ROOT_ACCESS_KEY: ${S3_ACCESS_KEY}
+      ROOT_SECRET_KEY: ${S3_SECRET_KEY}
+    volumes: [objects-data:/data]
+
+  browser:
+    <<: *restart
+    build: { context: services/browser }
+    init: true
+    ipc: host
+
+  embed:
+    <<: *restart
+    image: ghcr.io/ggml-org/llama.cpp:server-b12110
+    command: ["-hf", "ggml-org/bge-small-en-v1.5-Q8_0-GGUF", "--embeddings", "--pooling", "cls", "-c", "512", "--host", "0.0.0.0", "--port", "8080"]
+    volumes: [models:/root/.cache/llama.cpp]
+
+  rerank:
+    <<: *restart
+    image: ghcr.io/ggml-org/llama.cpp:server-b12110
+    command: ["-hf", "sinjab/bge-reranker-base-Q8_0-GGUF", "--reranking", "-c", "512", "--host", "0.0.0.0", "--port", "8080"]
+    volumes: [models:/root/.cache/llama.cpp]
+
+  # --- Sandboxes ------------------------------------------------------------------------------
+  # sandboxd starts one container per sandbox through the socket proxy. Sandboxes sit on the
+  # internal `sbx` network: they reach git directly and package registries through `egress`.
+
+  # Builds the sandbox image that sandboxd starts. It exits at once.
+  sandbox-image:
+    build: { context: containers/sandbox }
+    image: rhumbatron/sandbox:local
+    entrypoint: ["true"]
+    network_mode: none
+    restart: "no"
+
+  socket-proxy:
+    <<: *restart
+    image: wollomatic/socket-proxy:1.13.2
+    # The socket group: 0 on Docker Desktop; the `docker` group ID on a Linux server.
+    user: "65534:${DOCKER_GID:-0}"
+    read_only: true
+    mem_limit: 64m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes: [/var/run/docker.sock:/var/run/docker.sock:ro]
+    command:
+      - "-loglevel=info"
+      - "-listenip=0.0.0.0"
+      - "-allowfrom=sandboxd"
+      # No host path is allowed, so every bind mount is rejected.
+      - "-allowbindmountfrom=/nonexistent"
+      - "-shutdowngracetime=5"
+      - "-watchdoginterval=600"
+      - "-stoponwatchdog"
+      - "-allowGET=(/v1\\.[0-9]+)?/(_ping|containers/json|containers/(rhumbatron-sbx-[A-Za-z0-9_.-]+|[0-9a-f]{64})/json|exec/[0-9a-f]{64}/json)"
+      - "-allowHEAD=(/v1\\.[0-9]+)?/_ping"
+      - "-allowPOST=(/v1\\.[0-9]+)?/(containers/create|containers/[0-9a-f]{64}/(start|exec)|exec/[0-9a-f]{64}/start)"
+      - "-allowDELETE=(/v1\\.[0-9]+)?/containers/(rhumbatron-sbx-[A-Za-z0-9_.-]+|[0-9a-f]{64})"
+    networks: [docker]
+
+  egress:
+    <<: *restart
+    build: { context: services/sandboxd }
+    image: rhumbatron/sandboxd:local
+    command: ["bun", "src/egress.ts"]
+    read_only: true
+    mem_limit: 128m
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      EGRESS_PORT: "4750"
+      EGRESS_ALLOW: "registry.npmjs.org:443,registry.yarnpkg.com:443,bun.sh:443,github.com:443,codeload.github.com:443,objects.githubusercontent.com:443,git:8080"
+    networks: [default, sbx]
+
+  sandboxd:
+    <<: *restart
+    build: { context: services/sandboxd }
+    image: rhumbatron/sandboxd:local
+    read_only: true
+    mem_limit: 256m
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      SANDBOXD_TOKEN: ${SANDBOXD_TOKEN}
+      DOCKER_HOST: tcp://socket-proxy:2375
+      SANDBOX_IMAGE: rhumbatron/sandbox:local
+      SANDBOX_NETWORK: rhumbatron_sbx
+      SANDBOX_RUNTIME: ${SANDBOX_RUNTIME:-runc}
+      SANDBOX_EGRESS_PROXY: http://egress:4750
+      SANDBOX_IDLE_MS: ${SANDBOX_IDLE_MS:-120000}
+      SANDBOX_MAX: ${SANDBOX_MAX:-4}
+      SANDBOX_CPUS: ${SANDBOX_CPUS:-2}
+      SANDBOX_MEMORY_MB: ${SANDBOX_MEMORY_MB:-2048}
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:7070/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      socket-proxy: { condition: service_started }
+      egress: { condition: service_started }
+      sandbox-image: { condition: service_completed_successfully }
+    networks: [default, docker, sbx]
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}
+  core-data: {}
+  apps-data: {}
+  git-data: {}
+  nats-data: {}
+  objects-data: {}
+  models: {}
+
+networks:
+  default: {}
+  # Sandboxes, egress, sandboxd (preview fetches) and git. No route out.
+  sbx:
+    name: rhumbatron_sbx
+    internal: true
+  # sandboxd to the socket proxy only.
+  docker:
+    name: rhumbatron_docker
+    internal: true

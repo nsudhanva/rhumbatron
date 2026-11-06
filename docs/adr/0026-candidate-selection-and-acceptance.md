@@ -85,7 +85,7 @@ the loss. See [Source and verification](../architecture/source-and-verification.
 | Acceptance as a required gate check | When each fork side implements part of the request and the combined Candidate does not compose, each Candidate is rejected and nothing can ship, also with the consent of a person. |
 | A `candidate_selections` table keyed by Change and base | It works, but it needs its own cleanup on Project deletion. The anchor row gives the same single claim. |
 | A model picks the winner every time | Executable Evidence decides when it differs. The judge only breaks a tie. |
-| Run a browser session per criterion | Browser Run minutes have a cap. A cited quote of the patch is cheap Evidence for "the code does this". |
+| Run a browser session per criterion | Browser check time has a daily cap (`BROWSER_DAILY_SECONDS`). A cited quote of the patch is cheap Evidence for "the code does this". |
 | Sonnet for every acceptance check | Haiku is enough for a bounded, cited classification. Sonnet runs only on invalid output. |
 
 ## Consequences

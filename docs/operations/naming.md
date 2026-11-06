@@ -1,52 +1,37 @@
-# Cloudflare resource naming and grouping
+# Resource naming
 
-The name of each Cloudflare resource shows its project, environment, and component.
+Each name in the stack shows that it belongs to Rhumbatron. The Compose project name is `rhumbatron` (`compose.yaml`), so Docker prefixes its containers, volumes, and default network with `rhumbatron`.
 
-## Name pattern
+## Services and images
 
-```text
-rhumbatron-<component>-<env>
-```
+| Kind | Names |
+|---|---|
+| Compose services | `edge`, `web`, `core`, `apps`, `git`, `nats`, `objects`, `browser`, `embed`, `rerank`, `sandbox-image`, `socket-proxy`, `egress`, `sandboxd` |
+| Local images | `rhumbatron/sandbox:local` (the Sandbox image), `rhumbatron/sandboxd:local` (sandboxd and the egress proxy). Compose names the other built images after the project and the service. |
+| Volumes | `caddy-data`, `caddy-config`, `core-data`, `apps-data`, `git-data`, `nats-data`, `objects-data`, `models` |
+| Networks | `default`, `rhumbatron_sbx` (internal, Sandboxes), `rhumbatron_docker` (internal, sandboxd to the socket proxy) |
+| Application modules in `core` | `SERVICE_NAME` is `rhumbatron-<module>`: `api`, `coordinator`, `agents`, `event-router`, `integration`, `indexer` |
 
-- `component`: the purpose in lowercase kebab-case, for example `control`, `evidence`, `agent-wakeups`, `api`.
-- `env`: `prod`, or `global` for account-wide resources such as the Terraform state bucket.
-
-`bun run check:guardrails` rejects a `name`, `queue_name`, `title`, or `bucket_name` in Terraform that breaks this pattern.
-
-## Names
+## Data names
 
 | Resource | Name |
 |---|---|
-| Terraform state bucket (R2) | `rhumbatron-terraform-state-global` |
-| D1 database | `rhumbatron-control-prod` |
-| KV namespace | `rhumbatron-config-prod` |
-| R2 evidence bucket | `rhumbatron-evidence-prod` |
-| Queues | `rhumbatron-<purpose>-prod` |
-| Vectorize index | `rhumbatron-memory-prod` |
-| AI Gateway | `rhumbatron-models-prod` |
-| Artifacts namespace | `rhumbatron-projects-prod` |
-| Workers | `rhumbatron-<component>-prod`: `web`, `api`, `coordinator`, `agents`, `event-router`, `integration`, `indexer`, `sandbox`, `apps`, `docs` |
-| Workflows | `rhumbatron-change-workflow-prod`, `rhumbatron-candidate-verification-prod`, `rhumbatron-release-prod` |
-| K2 streams | `rhumbatron_events_00_prod` to `rhumbatron_events_07_prod` |
-| Analytics Engine datasets | `rhumbatron_metrics_prod`, `rhumbatron_event_metrics_prod` |
+| Product database | `rhumbatron.sqlite` in the `core-data` volume |
+| Workflow database | `workflows.sqlite` in the `core-data` volume |
+| Actor storage | `actors/<class>/<id>.sqlite` in the `core-data` volume |
+| Object bucket | `rhumbatron-evidence` |
+| Git namespace | `rhumbatron` |
+| Project repository | The Project ID |
+| Task, Candidate, and code edit session forks | `ws-*`, `cand-*`, `edit-*` |
+| Command stream | `COMMANDS`, subjects `cmd.<queue>`, durable consumers `q-<queue>` |
+| Command queues | `agent-wakeups`, `integration`, `verification`, `indexing`, `release`, `dead-letter` |
+| Event streams | `EVENTS_00` to `EVENTS_07`, subjects `events.00` to `events.07` |
+| Event subscriptions | `causal-router`, `project-view-projector`, `audit-archiver`, `analytics-projector` |
+| Sandbox container | `rhumbatron-sbx-<id>`, label `rhumbatron.sandbox=<id>`. The ID of a Project's Sandbox is `proj-<project>`. |
 
-Queue purposes: `agent-wakeups`, `integration`, `verification`, `indexing`, `release`, `dead-letter`.
+## Guardrails
 
-K2 stream names and Analytics Engine dataset names allow only letters, digits, and underscores. They use underscores (ADR 0004, ADR 0006).
+`bun run check:guardrails` (`scripts/check-guardrails.ts`) enforces two repository rules:
 
-## Tags
-
-| Key | Values |
-|---|---|
-| `project` | `rhumbatron` |
-| `env` | `prod` |
-| `component` | the component part of the name |
-| `managed-by` | `terraform` |
-
-- `modules/worker` and the docs Worker set these tags as `key:value` strings in `cloudflare_worker.tags`. This applies to the web, api, event-router, integration, indexer, and docs Workers.
-- The coordinator and agents Workers deploy through `cloudflare_workers_script` (`modules/durable-worker`), and the sandbox and apps Workers deploy through adapters. They have no tags. Their names group them.
-- D1, KV, R2, Queues, AI Gateway, Vectorize, and Durable Object namespaces have no tags. Provider 5.27 has no tagging resource for them (ADR 0004).
-
-## Local
-
-Each `wrangler.jsonc` names its local resources `rhumbatron-<component>-local`, for example `rhumbatron-evidence-local`. The binding names are the same as in Terraform (`bun run check:bindings`). Local data is in the `.wrangler/state` directory of each package.
+- Git never tracks a local secret file (`.env`, `.env.*`, `.dev.vars`), except an `.example` file.
+- In a tracked Compose file, only the `socket-proxy` service mounts `/var/run/docker.sock`.

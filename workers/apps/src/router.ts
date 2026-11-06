@@ -15,7 +15,7 @@ import { cachedDeployments, selectDeployment } from "./pointer.ts";
 import { loadBundle } from "./store.ts";
 
 /**
- * The apps router (ADR 0020). One Worker serves every app on `<label>.rhumbatron.com`
+ * The apps router (ADR 0020). One Worker serves every app on `<label>.rhumbatron.localhost`
  * (prod only). Per request:
  *
  * 1. Host to app: `parseAppHost`. Reserved and malformed hosts get a plain 404.

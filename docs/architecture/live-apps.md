@@ -1,25 +1,26 @@
 # Live apps
 
-This page explains how Rhumbatron serves each Project as a live app, how a Candidate gets a preview, and how a promotion moves the live app (ADR 0020).
+This page explains how Rhumbatron serves each Project as a live app, how a Candidate gets a preview, and how a promotion moves the live app (ADR 0020, ADR 0034).
 
 Main source files:
 
 - `workers/apps/src`: the router, `AppBuilder`, `AppChecker`, `AppDataDO`, and the bundle format.
+- `workers/apps/src/platform/workerd.ts`: the entry module on workerd, with the shims for `DB` and `EVIDENCE`.
+- `services/apps`: the workerd config, the image, and the RPC client for core ([README](../../services/apps/README.md), [CONTRACT](../../services/apps/CONTRACT.md)).
 - `workers/integration/src/app-provision.ts`, `app-release.ts`, `app-release-model.ts`, `preview-smoke.ts`, `rollback.ts`
 - `workers/integration/src/release-workflow.ts`: the release steps.
 - `packages/protocol/src/app.ts`: host rules and limits.
-- `infrastructure/terraform/envs/prod/main.tf`: the apps Worker, the wildcard DNS record, and the routes.
 
 ## Hosts
 
-Every app host has one label under `rhumbatron.com`.
-One label keeps the hosts inside Universal SSL.
+Every app host has one label under `rhumbatron.localhost` (`APPS_DOMAIN`).
+One label keeps the hosts inside the wildcard certificate that Caddy issues for `*.rhumbatron.localhost`.
 
 | Host | Serves |
 |---|---|
-| `<slug>.rhumbatron.com` | The production app of the Project. |
-| `<previewId>--<slug>.rhumbatron.com` | The preview of one Candidate. The preview ID is the first 8 characters after `cand_`. |
-| `v0000001--<slug>.rhumbatron.com` | One promoted generation. `v` and 7 digits name the generation. |
+| `<slug>.rhumbatron.localhost` | The production app of the Project. |
+| `<previewId>--<slug>.rhumbatron.localhost` | The preview of one Candidate. The preview ID is the first 8 characters after `cand_`. |
+| `v0000001--<slug>.rhumbatron.localhost` | One promoted generation. `v` and 7 digits name the generation. |
 
 Rules:
 
@@ -28,33 +29,32 @@ Rules:
 - A label has at most 50 characters. A host with a reserved, unknown, or invalid label gets a plain 404.
 - A preview host and a version host each have their own data store. They never read or write production data.
 
-## The apps Worker
+## The apps service
 
-`rhumbatron-apps-prod` has these parts:
+The `apps` service runs `workers/apps` on the open-source `workerd` runtime.
+Caddy sends every `*.rhumbatron.localhost` host that is not `api` or `docs` to port 8788.
+Core calls the RPC entrypoints on port 8789. Caddy does not route port 8789.
 
 | Part | Role |
 |---|---|
 | Router (default `fetch`) | Maps the host to an app, reads the pointer, and runs the app. |
-| `AppBuilder` | RPC entrypoint on the `APPS` service binding of the integration Worker. Methods: `build` (bundle), `probe` (one request through the router with a fresh pointer read), `check` (runs `AppChecker`), and `wipeData` (deletes app data stores). |
-| `AppChecker` | Runs the `build`, `unit`, and `contract` checks in Dynamic Workers. Only `AppBuilder.check` calls it. See [Source and verification](source-and-verification.md#where-checks-run). |
-| `AppDataDO` | One SQLite Durable Object per production app, per preview, and per version host. It stores the key-value data of the app. |
+| `AppBuilder` | RPC entrypoint that core reaches as `env.APPS`. Methods: `build` (bundle), `probe` (one request through the router with a fresh pointer read), `check` (runs `AppChecker`), and `wipeData` (deletes app data stores). |
+| `AppChecker` | Runs the `build`, `unit`, and `contract` checks in loaded Workers. Only `AppBuilder.check` calls it. See [Source and verification](source-and-verification.md#where-checks-run). |
+| `AppDataDO` | One SQLite instance per production app, per preview, and per version host, in a workerd Durable Object namespace on local disk (`/data/do` on the `apps-data` volume). It stores the key-value data of the app. |
 | `AppAssets`, `AppData` | The `ASSETS` and `DATA` bindings that the router gives to each app. |
-| `LOADER` | The Worker Loader binding that starts an app as a Dynamic Worker. |
+| `LOADER` | The workerd Worker Loader binding. It starts each app as its own isolate. |
 
-Terraform deploys the Worker through the `terraform_data.apps_worker` adapter, because provider 5.27 has no `worker_loader` binding type.
-The Worker also has the D1 binding `DB`, the R2 binding `EVIDENCE`, and the Durable Object binding `APP_DATA`.
-Terraform owns these routing resources:
-
-- The proxied wildcard DNS record `*.rhumbatron.com`.
-- The route `*.rhumbatron.com/*` to the apps Worker.
-- One route without a Worker for each of `api`, `www`, and `docs`. These keep the three hosts on their own Workers.
+The apps service reads the pointer rows and the bundles through core (`core:8790`, the `INTERNAL_TOKEN` bearer token).
+`DB` is an HTTP shim to the product database. `EVIDENCE` is an HTTP shim to the object store.
+The platform Worker can `fetch` public addresses only. The bundle builder uses this to fetch npm packages.
 
 ```mermaid
 flowchart LR
-  USER["Browser"] --> R["Router"]
-  R --> P[("D1 app_deployments<br/>pointer, cached 10 s")]
-  R --> B[("R2 bundle<br/>apps/ or app-previews/")]
-  R -->|"LOADER.get(loader ID)"| DW["App as a Dynamic Worker"]
+  USER["Browser"] --> CADDY["Caddy<br/>*.rhumbatron.localhost"]
+  CADDY --> R["Router (workerd)"]
+  R -->|"DB shim"| P[("app_deployments<br/>pointer, cached 10 s")]
+  R -->|"EVIDENCE shim"| B[("bundle<br/>apps/ or app-previews/")]
+  R -->|"LOADER.get(loader ID)"| DW["App isolate"]
   DW -->|"ASSETS"| B
   DW -->|"DATA"| DO[("AppDataDO")]
 ```
@@ -62,9 +62,9 @@ flowchart LR
 Each request follows these steps:
 
 1. The router parses the host.
-2. The router reads the pointer rows of the host from D1 `app_deployments`. Each isolate caches them for 10 s.
-3. The router serves a static asset first, unless the bundle sets `runWorkerFirst`. Otherwise it runs the app as a Dynamic Worker.
-4. The app runs with no network (`globalOutbound: null`), 50 ms CPU, and 20 subrequests per request. A limit hit answers 503. Another app error answers 502.
+2. The router reads the pointer rows of the host from `app_deployments`. Each isolate caches them for 10 s.
+3. The router serves a static asset first, unless the bundle sets `runWorkerFirst`. Otherwise it runs the app in its own isolate.
+4. The app runs with no network (`globalOutbound: null`). The router passes a limit of 50 ms CPU and 20 subrequests per request. workerd does not verify these limits, so treat them as not enforced. An app error answers 502.
 5. The app env holds only `ASSETS` and `DATA`. The router strips cookies of other hosts on the way in and `Domain` cookies on the way out.
 
 The router has a page for each other state: `building` (503), `failed` (503), an app with no code (200), and `removed` (410).
@@ -74,9 +74,9 @@ A pointer row keeps the last good bundle while a newer build runs or fails. A fa
 
 ## Builds
 
-The integration Worker reads the source of one commit from Artifacts and calls `AppBuilder.build` with the files.
-The builder bundles the files with `@cloudflare/worker-bundler` in the Worker. It uses no Sandbox time.
-It writes the bundle to R2 and reuses a stored bundle of the same commit.
+The integration code reads the source of one commit from the git service and calls `AppBuilder.build` with the files.
+The builder bundles the files with the `@cloudflare/worker-bundler` library (esbuild) in the apps service. It uses no Sandbox time.
+It writes the bundle to the object store under `apps/<project>/<commit>/` and reuses a stored bundle of the same commit.
 Tests, benchmarks, lockfiles, and Markdown files stay out of the build.
 A deterministic failure returns a reason and is not retried. A build that finds real authentication in the app fails.
 
@@ -100,8 +100,9 @@ Agents edit the client sources. They do not edit the generated files (`APP_CONVE
 ## Preview of a Candidate
 
 The verification workflow builds the composed commit of a Candidate and points the preview host at it.
+The preview bundle is under `app-previews/<project>/<commit>/`.
 A Change has at most 3 previews.
-The R2 lifecycle rule deletes bundles under `app-previews/` after 7 days. The integration Worker sweep then expires the preview rows and their data.
+The daily maintenance sweep deletes preview rows older than 7 days, with their data stores (`expirePreviews`). Preview bundles stay in the object store until "Remove app" or the Project deletion clears the prefix.
 A failed preview build marks only the preview row. It does not change the verification result.
 
 Every Project with a live app has a required `preview-smoke` check (kind `smoke`).
@@ -122,28 +123,28 @@ sequenceDiagram
   autonumber
   participant RW as ReleaseWorkflow
   participant INT as app-release
-  participant D1 as D1
+  participant DB as Product database
   participant APPS as AppBuilder.probe
   participant Router as Router
 
-  RW->>D1: generation still canonical, else superseded
+  RW->>DB: generation still canonical, else superseded
   RW->>INT: ensureProductionBundle (stored, same tree, copied from the preview, or built)
   RW->>INT: movePointer(production, expected row)
-  INT->>D1: UPDATE app_deployments WHERE commit, bundle, generation match
-  INT->>D1: version host row v<generation>
+  INT->>DB: UPDATE app_deployments WHERE commit, bundle, generation match
+  INT->>DB: version host row v<generation>
   RW->>APPS: smoke probes on the production host (second try after 10 s)
   APPS->>Router: request with a fresh pointer read
   alt probes pass
-    RW->>D1: release deployed
+    RW->>DB: release deployed
   else a probe fails
     RW->>INT: movePointer(revert to the replaced version)
-    RW->>D1: release smoke_failed
+    RW->>DB: release smoke_failed
   end
 ```
 
 - The pointer moves by compare-and-swap on the row that the workflow read. A lost race fails the step, and the retry decides again from the new row.
 - A newer generation that is already live makes the release `superseded`.
-- A bundle copied from a preview costs only R2 operations.
+- A bundle copied from a preview costs only object copies. It does not build again.
 - A smoke failure moves the pointer back to the version that it replaced. The failure is a recorded transition with the Event `release.smoke_failed`. The Canonical Generation stays promoted.
 - Every promoted generation keeps a version host `v<generation>--<slug>`.
 
@@ -161,5 +162,5 @@ No model decides a rollback.
 "Remove app" keeps the Project. It sets every `app_deployments` row of the Project to `removed`, and every host of the app answers 410 within 10 seconds (the router caches pointer rows for 10 seconds in each isolate).
 Cleanup then deletes the previews and bundles and wipes the data stores. The production row stays as a tombstone, so the host keeps its label and keeps answering 410.
 
-Deleting a Project removes all of its data: the live app, the Artifacts repositories, the R2 objects, the D1 rows, and the Durable Object storage.
+Deleting a Project removes all of its data: the live app, the git repositories, the objects, the database rows, and the actor storage.
 The list is in [cleanup.md](../operations/cleanup.md).

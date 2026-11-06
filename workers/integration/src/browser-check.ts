@@ -1,9 +1,4 @@
-import puppeteer, {
-  type Browser,
-  type BrowserWorker,
-  type HTTPRequest,
-  type Page,
-} from "@cloudflare/puppeteer";
+import { type Browser, chromium, type Page, type Route } from "playwright-core";
 import { type CandidatePreview, startCandidatePreview } from "./candidate-sandbox.ts";
 import {
   BROWSER_DAILY_SECONDS,
@@ -122,16 +117,17 @@ type Session = {
 
 /** Answers preview requests from the Sandbox and blocks the rest of the network. */
 function intercept(session: Session, preview: CandidatePreview) {
-  return async (req: HTTPRequest) => {
+  return async (route: Route) => {
+    const req = route.request();
     let url: URL;
     try {
       url = new URL(req.url());
     } catch {
-      await req.abort("blockedbyclient").catch(() => undefined);
+      await route.abort("blockedbyclient").catch(() => undefined);
       return;
     }
     if (url.hostname !== PREVIEW_HOST) {
-      await req.abort("blockedbyclient").catch(() => undefined);
+      await route.abort("blockedbyclient").catch(() => undefined);
       return;
     }
     const path = `${url.pathname}${url.search}`;
@@ -150,10 +146,10 @@ function intercept(session: Session, preview: CandidatePreview) {
           out[k] = v;
         }
       });
-      await req.respond({ status: res.status, headers: out, body: Buffer.from(bytes) });
+      await route.fulfill({ status: res.status, headers: out, body: Buffer.from(bytes) });
     } catch (error) {
       session.proxyErrors.push(`${method} ${path}: ${String(error).slice(0, 160)}`);
-      await req.respond({ status: 502, body: "preview proxy error" }).catch(() => undefined);
+      await route.fulfill({ status: 502, body: "preview proxy error" }).catch(() => undefined);
     }
   };
 }
@@ -294,18 +290,18 @@ export async function runBrowserCheck(
   let sessionMs = 0;
   try {
     try {
-      browser = await puppeteer.launch(env.BROWSER as unknown as BrowserWorker);
+      browser = await chromium.connect(
+        (env.BROWSER as unknown as { wsEndpoint: string }).wsEndpoint,
+        { timeout: 30_000 },
+      );
     } catch (error) {
       await settleBrowserSeconds(env.DB, 0);
       lines.push(`launch failed: ${String(error)}`);
       return done({ kind: "launch_failed", detail: String(error) });
     }
-    const page = await browser.newPage();
-    await page.setViewport(VIEWPORT);
+    const page = await browser.newPage({ viewport: VIEWPORT });
     const session: Session = { page, proxyErrors: [], shots: [], steps: [] };
-    await page.setRequestInterception(true);
-    const proxy = intercept(session, preview);
-    page.on("request", (req) => void proxy(req));
+    await page.route("**/*", intercept(session, preview));
 
     const total = 1 + APP_STEPS;
     const flow = (async () => {

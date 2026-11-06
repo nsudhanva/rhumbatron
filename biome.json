@@ -73,7 +73,7 @@
   },
   "overrides": [
     {
-      "includes": ["scripts/**", "e2e/**"],
+      "includes": ["scripts/**", "e2e/**", "services/*/build.ts", "services/*/test/**"],
       "linter": {
         "rules": {
           "suspicious": {

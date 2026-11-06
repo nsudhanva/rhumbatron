@@ -16,7 +16,7 @@ export const AGENT_DAILY_CALL_CAP = 1000;
 
 /**
  * Fallback for the `ANTHROPIC_MONTHLY_BUDGET_USD` binding: a low safe budget ($10 per calendar
- * month), so a Worker without the binding never spends the prod budget (Terraform `envs/prod`).
+ * month), so a service without the binding never spends more than that.
  */
 export const ANTHROPIC_MONTHLY_BUDGET_FALLBACK_USD = 10;
 

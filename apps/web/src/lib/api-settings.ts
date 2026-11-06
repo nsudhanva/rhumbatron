@@ -1,8 +1,8 @@
-import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
 import { apiErrorMessage } from "./access";
 import type { ProjectRole } from "./permissions";
+import { apiFetch } from "./server-env";
 
 /**
  * Project settings server functions (`GET /v1/projects/:projectId/settings`,
@@ -39,7 +39,7 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
   const { getToken } = await auth();
   const token = await getToken();
   if (!token) throw new Error("Sign in to continue");
-  const response = await env.API.fetch(
+  const response = await apiFetch(
     new Request(`https://api.internal${path}`, {
       method: init.method ?? "GET",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

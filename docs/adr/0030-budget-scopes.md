@@ -8,10 +8,11 @@ requests across Projects. These rules apply:
 
 - No autonomous work runs without a budget. A budget stop keeps all state and names the exact
   budget.
-- The monthly Anthropic budget of the environment (`ANTHROPIC_MONTHLY_BUDGET_USD`, ADR 0021) is
-  the hard stop of the account. Code enforces it on the D1 meter `usage_counters`.
-- Stay in the Cloudflare free limits. Add no new database, and add no extra request per call
-  beyond a small D1 read and one D1 batch.
+- The monthly Anthropic budget of the stack (`ANTHROPIC_MONTHLY_BUDGET_USD`, ADR 0021) is the
+  hard stop of the account. Code enforces it on the meter `usage_counters` in the product
+  database.
+- Keep each model call cheap to meter. Add no new database, and add no extra request per call
+  beyond a small database read and one database batch.
 - Roles decide who may act, never what is built (ADR 0025, ADR 0028).
 
 ## Decision
@@ -29,7 +30,7 @@ requests across Projects. These rules apply:
   `anthropic-usd-micro`. Every meter counts every call. A cap applies only when it is set, so the
   spend of the month shows before a person sets a cap.
 - Every model call that a Change pays for reserves its estimate on all meters of the Change in one
-  D1 batch. The batch first makes sure that the rows exist. Then one UPDATE adds the reservation to
+  database batch. The batch first makes sure that the rows exist. Then one UPDATE adds the reservation to
   every row, but only when no capped meter would pass its cap. After the call, every meter settles
   to the exact cost. The calls
   are the agent runs (Pi), context compaction, conflict review, the Root Planner, intake review,
@@ -69,9 +70,9 @@ requests across Projects. These rules apply:
 
 ## Consequences
 
-- One extra D1 read (the caps) and one D1 batch per model call. The batch replaces the single
-  monthly-meter statement. D1 rows written per call stay within the free daily limit at the
-  current call caps (400 agent calls per day).
+- One extra database read (the caps) and one database batch per model call. The batch replaces
+  the single monthly-meter statement. At the current call caps (1,000 agent calls per day), the
+  rows written per day stay small for SQLite.
 - A deleted Project keeps its meter rows. They hold an ID and an amount, and a user meter must
   keep the spend of the month across Projects.
 - The reservation is an estimate (full output cap, whole prompt uncached). Near a cap, the meter

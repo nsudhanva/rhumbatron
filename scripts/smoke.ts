@@ -1,6 +1,6 @@
 /**
  * Remote smoke check for a deployed environment.
- * Usage: bun scripts/smoke.ts prod [--plan] [--sandbox]
+ * Usage: bun scripts/smoke.ts local [--plan] [--sandbox]
  *
  * Public checks are read-only. When CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID are set
  * (set them for the prod Clerk instance), it also runs the authenticated flow:
@@ -16,7 +16,7 @@
 import { signIn } from "./lib/clerk-session.ts";
 
 const hosts: Record<string, { web: string; api: string }> = {
-  prod: { web: "https://rhumbatron.com", api: "https://api.rhumbatron.com" },
+  local: { web: "https://rhumbatron.localhost", api: "https://api.rhumbatron.localhost" },
 };
 
 /**
@@ -141,7 +141,7 @@ process.stdout.write(\`\${JSON.stringify({ p95Ms })}\\n\`);
 `,
 };
 
-const env = process.argv[2] ?? "prod";
+const env = process.argv[2] ?? "local";
 const target = hosts[env];
 if (!target) {
   console.error(`Usage: bun scripts/smoke.ts <${Object.keys(hosts).join("|")}>`);

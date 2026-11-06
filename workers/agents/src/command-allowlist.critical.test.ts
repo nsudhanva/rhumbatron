@@ -8,7 +8,7 @@ const box = vi.hoisted(() => ({
   files: new Map<string, string>(),
   status: "",
 }));
-vi.mock("@cloudflare/sandbox", () => ({
+vi.mock("@rhumbatron/platform/sandbox", () => ({
   getSandbox: () => ({
     async exec(command: string) {
       box.commands.push(command);

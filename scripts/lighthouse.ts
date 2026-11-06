@@ -17,7 +17,7 @@ import desktopConfig from "lighthouse/core/config/desktop-config.js";
 import { signInPage } from "../e2e/ui/clerk.ts";
 import { FIXTURE_ABOUT, type FixtureKey, findFixture, PAGES } from "../e2e/ui/support.ts";
 
-const BASE = "https://rhumbatron.com";
+const BASE = "https://rhumbatron.localhost";
 const OUT = "e2e/.lighthouse";
 const CATEGORIES = ["performance", "accessibility", "best-practices", "seo"] as const;
 

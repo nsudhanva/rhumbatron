@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import {
   CODE_SESSION_IDLE_MS,
@@ -14,6 +13,7 @@ import {
 } from "@rhumbatron/protocol";
 import { createServerFn } from "@tanstack/react-start";
 import { apiErrorMessage } from "./access";
+import { apiFetch } from "./server-env";
 
 /**
  * Code page edit sessions (`/v1/code/sessions`, docs/protocols/README.md): server functions over
@@ -75,7 +75,7 @@ async function call<T>(
   const { getToken } = await auth();
   const token = await getToken();
   if (!token) return { ok: false, status: 401, message: "Sign in to continue", reason: null };
-  const response = await env.API.fetch(
+  const response = await apiFetch(
     new Request(`https://api.internal${path}`, {
       method: init.method ?? "GET",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

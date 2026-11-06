@@ -1,8 +1,8 @@
-import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
 import { apiErrorMessage } from "./access";
 import type { TaskDetail } from "./api";
+import { apiFetch } from "./server-env";
 
 /**
  * Server functions for the Project execution timeline (components/timeline). They read the same
@@ -10,11 +10,11 @@ import type { TaskDetail } from "./api";
  * session token. Read-only.
  */
 
-/** Changes read per call: one service-binding subrequest each, well under the Worker limit. */
+/** Changes read per call: one API request each. */
 export const TIMELINE_TASK_BATCH = 20;
 
 async function read<T>(path: string, token: string): Promise<T> {
-  const response = await env.API.fetch(
+  const response = await apiFetch(
     new Request(`https://api.internal${path}`, {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     }),

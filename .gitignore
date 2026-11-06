@@ -72,3 +72,4 @@ infrastructure/terraform/.terraform-check/
 e2e/.auth/
 e2e/.results/
 e2e/.lighthouse/
+.local-ca.crt

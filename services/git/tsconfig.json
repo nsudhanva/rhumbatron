@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "ESNext.Disposable", "DOM"],
+    "types": ["bun"]
+  },
+  "include": ["client.ts", "src/**/*.ts", "test/**/*.ts"]
+}

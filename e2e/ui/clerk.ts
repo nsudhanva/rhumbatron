@@ -5,7 +5,7 @@
  */
 import type { Page } from "@playwright/test";
 
-const API = "https://api.rhumbatron.com";
+const API = "https://api.rhumbatron.localhost";
 
 function env() {
   const secretKey = process.env.CLERK_SECRET_KEY;

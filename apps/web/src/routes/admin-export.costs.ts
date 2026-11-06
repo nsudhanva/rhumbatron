@@ -1,11 +1,11 @@
-import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import { createFileRoute } from "@tanstack/react-router";
+import { apiFetch } from "../lib/server-env";
 
 /**
  * CSV of the admin Costs view: `GET /admin-export/costs?from=&to=&userId=&projectId=&groupBy=`
  * returns `GET /v1/admin/costs?…&format=csv` as a download. The browser sends only its Clerk
- * session cookie; this Worker calls the API with `Authorization: Bearer`, so no token is ever in
+ * session cookie; the web server calls the API with `Authorization: Bearer`, so no token is ever in
  * a URL. The API decides admin rights; anyone else gets a plain 404.
  */
 
@@ -33,7 +33,7 @@ export const Route = createFileRoute("/admin-export/costs")({
         const token = await getToken();
         if (!token) return plain(401, "Sign in to continue");
 
-        const upstream = await env.API.fetch(
+        const upstream = await apiFetch(
           new Request(`https://api.internal/v1/admin/costs?${query}`, {
             headers: { authorization: `Bearer ${token}` },
           }),

@@ -7,10 +7,11 @@ The Code page lets the owner or an admin save one file of the live tree as a hum
 command such as `bun test` before the person sends it. These rules apply:
 
 - A person never advances canonical directly. Only verified Evidence advances the Canonical State.
-- The Sandbox costs Container time. The Project has one Sandbox (`proj-<uuid>`, `max_instances = 1`)
-  that agents and Candidate checks share (ADR 0011). The monthly meter `SANDBOX_MONTHLY_SECONDS`
-  limits it to 72,000 s (20 hours) in prod.
-- The Sandbox never gets a Terraform, Cloudflare API, or model credential.
+- The Sandbox takes host time. The Project has one Sandbox (`proj-<uuid>`) that agents and
+  Candidate checks share (ADR 0011). The monthly meter `SANDBOX_MONTHLY_SECONDS` limits it to
+  72,000 s (20 hours) by default.
+- The Sandbox never gets `INTERNAL_TOKEN`, `GIT_ADMIN_TOKEN`, `SANDBOXD_TOKEN`, or a model
+  credential.
 
 ## Decision
 
@@ -18,15 +19,16 @@ command such as `bun test` before the person sends it. These rules apply:
   one open session per Project (unique index `code_sessions_one_open`). A second open returns the
   open session. A session belongs to the person who opened it. Another person, also an admin, gets
   404 for it. Everyone else uses the read-only Code page.
-- The API Worker (`workers/api/src/code-sessions.ts`) checks the role and the owner of the session
-  on each request. It calls the integration Worker through the `INTEGRATION` service binding (RPC).
-  The integration Worker (`workers/integration/src/code-sessions.ts`) owns the session state, the
-  fork, and the Sandbox. It checks the owner and the session state again from D1.
-- Open: the session forks canonical into the Artifacts repository `edit-<hex>` for session
-  `edit_<hex>`. Cleanup derives the name only from the D1 row ID. The open does not start the
+- The API module (`workers/api/src/code-sessions.ts`) checks the role and the owner of the session
+  on each request. It calls the integration module through the in-process `INTEGRATION` binding (RPC).
+  The integration module (`workers/integration/src/code-sessions.ts`) owns the session state, the
+  fork, and the Sandbox. It checks the owner and the session state again from the product database.
+- Open: the session forks canonical into the git service repository `edit-<hex>` for session
+  `edit_<hex>`. Cleanup derives the name only from the database row ID. The open does not start the
   Sandbox.
-- Edits: D1 `code_session_files` holds each changed file (its full text) or a deleted path. Reads
-  come from the edits, then from the R2 code store of the base tree, then from Artifacts. A file
+- Edits: the table `code_session_files` holds each changed file (its full text) or a deleted
+  path. Reads come from the edits, then from the code store of the base tree in the object store,
+  then from the git service. A file
   path is under the repository root, has no `..` part, and has no `.git` part at any depth. A file
   is text (no NUL byte) and at most 256 KB. A binary file is refused with 415, a large file with
   413. A session holds at most 200 changed paths.
@@ -59,9 +61,9 @@ command such as `bun test` before the person sends it. These rules apply:
   the daily maintenance sweep (`forks.sweep`) ends overdue sessions. The end deletes the fork and
   the edits. Edits that are not submitted are discarded. The web warns 1 minute before the idle
   limit.
-- Sandbox stop: while the Sandbox is awake, the end kills every process of the session and
-  removes its directory. Then the Sandbox sleeps after 2 idle minutes (`sleepAfter`). A sleeping
-  Sandbox has no disk, so the end does not wake it. The end does not destroy the Sandbox, because
+- Sandbox stop: while the Sandbox is live, the end kills every process of the session and
+  removes its directory. sandboxd then removes the Sandbox after 2 idle minutes (`sleepAfter`). A
+  removed Sandbox has no disk, so the end does not start it. The end does not destroy the Sandbox, because
   agents and Candidate checks of the Project can use it at the same time.
 - Events: `code.session.opened`, `code.session.closed` (with `reason`: `discarded`, `idle`,
   `max_age`, or `archived`), and `code.session.submitted` (with `changeId`). They are
@@ -73,11 +75,11 @@ command such as `bun test` before the person sends it. These rules apply:
 
 | Alternative | Why it lost |
 |---|---|
-| Keep the edits only in the Sandbox checkout | The Sandbox sleeps after 2 idle minutes and loses its disk. A session lives up to 10 idle minutes. |
-| A separate Sandbox instance for each session | The container application has one instance (ADR 0011). A second instance doubles the Sandbox hours. |
-| Destroy the Sandbox when a session ends | It stops agent runs and Candidate checks that use the same Sandbox. The 2-minute sleep stops it at no cost. |
+| Keep the edits only in the Sandbox checkout | sandboxd removes the Sandbox and its disk after 2 idle minutes. A session lives up to 10 idle minutes. |
+| A separate Sandbox instance for each session | Each Project has one Sandbox (ADR 0011), and `SANDBOX_MAX` allows 4 live sandboxes on the host. A second instance doubles the Sandbox hours. |
+| Destroy the Sandbox when a session ends | It stops agent runs and Candidate checks that use the same Sandbox. The 2-minute idle removal stops it. |
 | Run commands as root with an allowlist, as agents do | A person needs any command in a terminal. An unprivileged user per session limits what a command can reach. |
-| Commit each save to the fork | Each save then costs Artifacts operations. One commit at submit costs one. |
+| Commit each save to the fork | Each save then costs a commit and a push to the git service. One commit at submit is enough. |
 
 ## Consequences
 
@@ -85,5 +87,6 @@ command such as `bun test` before the person sends it. These rules apply:
   the terminal is off, and file edits and submit still work.
 - A command can reach the network that the Sandbox allows. It cannot read the tokens of agents or
   Candidate checks, because those are in root process environments only.
-- A session that a person leaves open ends at its next request or at the next daily sweep. Its D1
-  edits stay until then. Its Sandbox sleeps 2 minutes after the last command.
+- A session that a person leaves open ends at its next request or at the next daily sweep. Its
+  edits in the database stay until then. sandboxd removes its Sandbox 2 minutes after the last
+  command.

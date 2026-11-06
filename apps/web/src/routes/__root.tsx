@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { ClerkProvider } from "@clerk/tanstack-react-start";
 import { LinkProvider } from "@cloudflare/kumo";
 import archivo400 from "@fontsource/archivo/files/archivo-latin-400-normal.woff2?url";
@@ -28,14 +27,12 @@ import {
   renderNow,
   TIME_ZONE_BOOT_SCRIPT,
 } from "../lib/render-time";
+import { buildInfo } from "../lib/server-env";
 import { loadSignedInUser } from "../lib/ssr-data";
 import appCss from "../styles.css?url";
 
 // Build and environment are shown on every page, in the status bar.
-const getBuildInfo = createServerFn().handler(() => ({
-  service: env.SERVICE_NAME,
-  environment: env.ENVIRONMENT,
-}));
+const getBuildInfo = createServerFn().handler(() => buildInfo());
 
 type RouterContext = {
   queryClient: QueryClient;

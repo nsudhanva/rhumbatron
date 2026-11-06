@@ -23,7 +23,7 @@ Claims are advisory leases for agent runs.
    boundaries (`beforeModelCall`) tick the renewal. A tick makes a request only when a lease is at
    half-life (60 s, with 10 s slack for a check that fires a little early). The renewal adds no
    timer and no loop. The run check is an interval schedule (`scheduleEvery(60)`). Each fire counts
-   against the AgentDO daily alarm cap (ADR 0019).
+   against the AgentDO daily alarm cap (`DAILY_ALARM_CAP`).
 3. **Release at run end.** `finishRun` releases every Claim of the run for success, failure,
    cancel, and timeout. Release is idempotent on both sides. The run only logs a failed release,
    and the lease then expires.
@@ -46,7 +46,7 @@ Claims are advisory leases for agent runs.
 
 - The Claims feed shows real `claim.acquired`, `claim.renewed`, `claim.released`, and
   `claim.expired` facts for every run.
-- `claim.contended` is an Event type. The Claims feed API and its D1 partial index list it with the
+- `claim.contended` is an Event type. The Claims feed API and its partial index in the product database list it with the
   four lifecycle types, so the Claims feed shows contention too.
 - Contention with an agent of another Change stays an event and a `claim_contention` metric. It
   does not enter that Change's conflict pass, because the other Intent is not compared there.
@@ -54,9 +54,9 @@ Claims are advisory leases for agent runs.
   both Intents only add. This signal never forks Candidates by itself.
 - Cost per run with R resources and a run of T minutes: about R acquire requests, R per minute for
   renewal, and R release requests to ResourceShardDO, plus the shard alarms that publish the
-  outbox. That is about 2R(T + 2) Durable Object requests and the same number of feed rows in D1
-  (`project_events`) through the projector. For R = 2 and T = 5, this is about 28 requests and 28
-  rows, far below the free daily limits.
+  outbox. That is about 2R(T + 2) actor requests and the same number of feed rows in the product
+  database (`project_events`) through the projector. For R = 2 and T = 5, this is about 28
+  requests and 28 rows.
 
 ## Why not blocking Claims
 

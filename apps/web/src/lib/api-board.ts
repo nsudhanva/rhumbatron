@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import {
   type AssignableRole,
@@ -14,6 +13,7 @@ import {
 } from "@rhumbatron/protocol";
 import { createServerFn } from "@tanstack/react-start";
 import { apiErrorMessage } from "./access";
+import { apiFetch } from "./server-env";
 
 export type { BoardAgent, BoardCard, BoardColumn, BoardPerson, FirstComeChoice, RequestWait };
 export type ProjectBoard = BoardResponse;
@@ -40,7 +40,7 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
   const { getToken } = await auth();
   const token = await getToken();
   if (!token) throw new ApiError(401, "Sign in to continue");
-  const response = await env.API.fetch(
+  const response = await apiFetch(
     new Request(`https://api.internal${path}`, {
       method: init.method ?? "GET",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

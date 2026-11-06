@@ -1,4 +1,4 @@
-# ADR 0013: Split promotion preconditions between the integration Worker and ProjectRootDO
+# ADR 0013: Split promotion preconditions between the integration module and ProjectRootDO
 
 ## Context
 
@@ -14,19 +14,20 @@ Promotion is one atomic `S<n> -> S<n+1>` transition. Eight preconditions must be
 8. The Candidate Artifact still exists.
 
 Most of these preconditions read data that ProjectRootDO does not own. Candidate status, the
-Verification Plan, Evidence, and approvals are D1 rows. The Candidate commit is in an Artifacts
-fork. ProjectRootDO owns only the Canonical Generation, tree, ref, and active policy version. A
-Durable Object that reads D1 inside its transaction cannot make those reads atomic with its own
-state. D1 reads also make the most important correctness boundary depend on a second database.
+Verification Plan, Evidence, and approvals are rows in the product database. The Candidate
+commit is in a fork in the git service. ProjectRootDO owns only the Canonical Generation, tree,
+ref, and active policy version. An actor that reads the product database inside its transaction
+cannot make those reads atomic with its own SQLite state. Those reads also make the most
+important correctness boundary depend on a second database.
 
 ## Decision
 
 Rhumbatron checks the preconditions for `POST /v1/candidates/:candidateId/promote` in two steps,
 in this order.
 
-1. Integration Worker (`promoteCandidate` RPC). The API authenticates the user, checks that
-   the user is a Project owner or admin (ADR 0028), and calls the integration Worker over the
-   `INTEGRATION` service binding. The integration Worker has no public route. It reads the
+1. Integration module (`promoteCandidate` RPC). The API authenticates the user, checks that
+   the user is a Project owner or admin (ADR 0028), and calls the integration module through the
+   in-process `INTEGRATION` binding. The integration module has no public route. It reads the
    authoritative rows and checks them with the pure function `checkPromotion`
    (`packages/evidence/src/promotion.ts`):
    - rule 1: the Candidate status is `verified`, and its base is the current generation;
@@ -40,7 +41,7 @@ in this order.
    - selection: no sibling Candidate is still composing or verifying (`selection_pending`,
      ADR 0026).
 
-   `checkPromotion` returns every block at once. Then the Worker builds and Zod-validates a
+   `checkPromotion` returns every block at once. Then the module builds and Zod-validates a
    `PromotionRequest` and records `canonical.promotion.requested`.
 2. ProjectRootDO (`promote`). It decides on its own state in one SQLite transaction. It
    checks rule 5 (authoritative policy version), rule 6 (expected generation = current), and rule 7
@@ -60,7 +61,7 @@ records `candidate.stale`. Rhumbatron does not retry a stale promotion blind.
 request body never names the approver. Only a verified Candidate that needs approval can get a
 decision. The first decision is final, and an identical repeat returns the stored row. A rejection also sets the Candidate to
 `rejected`. The policy is deterministic (`approvalRequired`, `checkApprovalDecision`). No model
-takes part. The integration Worker records `approval.requested` for a verified Candidate that
+takes part. The integration module records `approval.requested` for a verified Candidate that
 needs approval. That Candidate has no siblings, or it is the winner of a selection (ADR 0026).
 The Event has `reason` (one sentence, also the Candidate status reason, from `approvalReason` or
 `policyHoldReason`) and `trigger` (`policy` or `acceptance`). `approval.granted` or
@@ -68,12 +69,12 @@ The Event has `reason` (one sentence, also the Candidate status reason, from `ap
 
 ### Canonical source after promotion
 
-ProjectRootDO is the authority, so the canonical Artifacts repository moves after the
-compare-and-swap. The integration Worker fetches the Candidate fork with isomorphic-git into memory.
+ProjectRootDO is the authority, so the canonical repository in the git service moves after the
+compare-and-swap. The integration module fetches the Candidate fork with isomorphic-git into memory.
 It pushes the composed commit to `main` of the canonical repository as a fast-forward only (no
 force push; receive-pack also checks the old value). Then it writes
 `source/<project>/<tree>/index.json`. Agents and the verification workflow use that index to find
-the canonical commit, so the integration Worker writes it only after `main` moves. The canonical
+the canonical commit, so the integration module writes it only after `main` moves. The canonical
 ref is `artifacts://<project>@<commit>`.
 
 If the sync fails, the generation stays advanced, and the response has `sourceSynced: false`.
@@ -84,11 +85,11 @@ on a commit that `main` does not have. The sync uses no Sandbox time.
 ### Stale Candidates after promotion
 
 - On `canonical.advanced`, the Causal Router marks every other in-flight Candidate of the Project
-  on an older base as `stale` (one D1 batch, deterministic). It marks the promoted Candidate
-  `promoted`. This repairs the D1 mirror if the integration Worker stopped between the
+  on an older base as `stale` (one database batch, deterministic). It marks the promoted Candidate
+  `promoted`. This repairs the database mirror if the integration module stopped between the
   compare-and-swap and its own write. A Change in `awaiting_approval` with no verified Candidate
   goes back to `verifying`.
-- The Causal Router then sends `candidates.recompose` on `rhumbatron-integration`. The promotion
+- The Causal Router then sends `candidates.recompose` on the `integration` queue. The promotion
   path also runs the same settle step (`settleStaleBehind`). Each stale Candidate of an open Change
   gets a recomposed Candidate on the current generation, a blocked status, or nothing when its Change
   is closed (ADR 0020, "Stale recomposition"). The order of the two paths does not matter.
@@ -96,12 +97,12 @@ on a commit that `main` does not have. The sync uses no Sandbox time.
 
 ## Consequences
 
-- The Durable Object trusts its caller for rules 1 to 4 and 8. Only Workers with a `PROJECT_ROOT`
-  binding can call it, and only the integration Worker calls `promote`.
+- The actor trusts its caller for rules 1 to 4 and 8. Only code with a `PROJECT_ROOT` binding
+  can call it, and only the integration module calls `promote`. ProjectRootDO has no public route.
 - A precondition can change between the check and the compare-and-swap (for example, a new
   Evidence row). Evidence IDs are stable per check. Only the verification workflow of a Candidate
   writes its Evidence, and that workflow is finished when the Candidate is `verified`.
-- The API Worker has the `INTEGRATION` service binding (Terraform `api_worker`).
+- The API code gets the `INTEGRATION` binding from the core service (`services/core/src/main.ts`).
 - The approver can also be the author of the Change. Only the Project owner and admins can
   approve (ADR 0028).
 - The rules in ProjectRootDO are the pure function `decidePromotion`
@@ -126,7 +127,7 @@ on a commit that `main` does not have. The sync uses no Sandbox time.
 
 ## Diagram
 
-Preconditions in the integration Worker (`checkPromotion`).
+Preconditions in the integration module (`checkPromotion`).
 
 ```mermaid
 flowchart TD
@@ -151,9 +152,9 @@ Compare-and-swap and source sync.
 
 ```mermaid
 sequenceDiagram
-  participant I as Integration Worker
+  participant I as Integration module
   participant P as ProjectRootDO
-  participant A as Artifacts
+  participant A as Git service
   participant W as ReleaseWorkflow
   I->>P: promote(expectedGeneration = base_generation, expectedTree, policyVersion)
   alt already promoted (same Candidate, generation + 1)

@@ -17,7 +17,7 @@
 import { $ } from "bun";
 
 const apis: Record<string, string> = {
-  prod: "https://api.rhumbatron.com",
+  local: "https://api.rhumbatron.localhost",
 };
 
 const [projectId = "", environment = ""] = process.argv.slice(2);

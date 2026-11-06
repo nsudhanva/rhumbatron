@@ -2,9 +2,9 @@
 
 ## Context
 
-Rhumbatron's frozen stack contains Bun, Turborepo, TypeScript, Biome, Zod, Vitest, Terraform, and
-Wrangler. The repository also needs secret scanning, Git hooks, dependency hygiene, and a check of
-the Terraform-only rule. These are developer tools. They do not change the runtime stack.
+Rhumbatron's frozen stack contains Bun, Turborepo, TypeScript, Biome, Zod, and Vitest. The
+repository also needs secret scanning, Git hooks, dependency hygiene, and a check of project
+policy. These are developer tools. They do not change the runtime stack.
 
 ## Decision
 
@@ -14,29 +14,26 @@ Rhumbatron uses these developer tools.
 |---|---|---|
 | Lint and format (TS, JSON, CSS) | Biome | Frozen choice. |
 | Type checking | TypeScript (`tsc`) through Turborepo | Frozen choice. |
-| Cloudflare runtime types | `wrangler types` (`bun run cf:types`) | Wrangler generates them per Worker from `wrangler.jsonc`. Git ignores `worker-configuration.d.ts`. |
-| Secret scanning | gitleaks (system binary) | Default rules plus Cloudflare, R2, and Anthropic rules in `.gitleaks.toml`. |
+| Secret scanning | gitleaks (system binary) | Default rules plus the custom rules in `.gitleaks.toml`. |
 | Git hooks | lefthook (dev dependency) | One binary, parallel jobs, no shell scripts. |
 | Commit messages | commitlint, conventional config | One commit format. |
 | Unused code and dependencies | knip | Fails on undeclared and unused dependencies. |
 | Monorepo package hygiene | sherif | Finds version mismatches across workspaces. |
-| Terraform | `terraform fmt`, `terraform validate`, tflint (`scripts/terraform-check.ts`) | Static checks with no backend access. |
-| Project policy | `scripts/check-guardrails.ts` | Blocks `wrangler deploy`, remote Wrangler mutations, `-auto-approve`, direct API writes, credential literals in Terraform, and resource names outside `rhumbatron-<component>-<prod\|global>`. |
-| Binding drift | `scripts/check-binding-drift.ts` | Compares each `wrangler.jsonc` with the bindings that Terraform uploads in `envs/prod`. It never contacts Cloudflare. |
+| Project policy | `scripts/check-guardrails.ts` | Fails when a local secret file is tracked, or when a service other than the socket proxy mounts the Docker socket. |
+| Migrations | `scripts/check-migrations.ts` | Migrations in `migrations/d1` are append-only and safe. |
 | Installs | Bun isolated linker, exact versions (`bunfig.toml`) | A package cannot import a dependency that it does not declare. |
-| Checks against prod | `bun run smoke:prod`, `bun run e2e`, `bun run test:ui` (Playwright, `e2e/ui`), `bun run lighthouse` | They run on a developer machine against `rhumbatron.com`. |
+| Checks against the stack | `bun run smoke`, `bun run e2e`, `bun run journeys`, `bun run test:ui` (Playwright, `e2e/ui`), `bun run lighthouse` | They run on a developer machine against the Compose stack at `https://rhumbatron.localhost`. |
 
 ## Consequences
 
-- Contributors need `gitleaks`, `terraform`, and `tflint` on `PATH`.
-- `bun run check` runs lint, typecheck, guardrails, the D1 migration guard, knip, sherif,
-  gitleaks, and the Terraform checks.
+- Contributors need `gitleaks` on `PATH`, and Docker for the checks against the stack.
+- `bun run check` runs lint, typecheck, guardrails, the migration guard, knip, sherif, and
+  gitleaks.
 - `bun install` installs the Git hooks through the `prepare` script.
-- `.github/workflows/ci.yml` runs the checks on each pull request. It uses no secrets and no
-  remote state. The checks are lint, guardrails, binding drift, knip, sherif, the D1
-  migration guard, typecheck, critical tests, build, bundles, the Terraform checks, and gitleaks.
-- `.github/workflows/production.yml` deploys each push to `main` through Terraform (ADR 0031).
-- The checks against prod (`e2e`, `test:ui`, `lighthouse`, `journeys`) run on a developer machine.
+- `.github/workflows/ci.yml` runs the checks on each pull request. It uses no secrets. No
+  workflow deploys anything.
+- The checks against the stack (`smoke`, `e2e`, `journeys`, `test:ui`, `lighthouse`) run on a
+  developer machine.
 
 ## Diagram
 
@@ -47,12 +44,9 @@ flowchart LR
   commit["git commit"] --> pre["pre-commit (parallel)"]
   pre --> biome["biome check --write"]
   pre --> leaks["gitleaks git --staged"]
-  pre --> tffmt["terraform fmt -check"]
   pre --> guard["check-guardrails.ts"]
   commit --> msg["commit-msg"] --> cl["commitlint"]
   push["git push"] --> prepush["pre-push (parallel)"]
   prepush --> tc["bun run typecheck"]
   prepush --> deps["check:deps (knip, sherif)"]
-  prepush --> tfc["tf:check (fmt, validate, tflint)"]
-  prepush --> bind["check:bindings"]
 ```

@@ -1,10 +1,10 @@
-import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import { createFileRoute } from "@tanstack/react-router";
+import { apiFetch } from "../lib/server-env";
 
 /**
  * Same-origin Browser Run screenshot: `GET /evidence/:candidateId/:checkId/:n` returns the PNG.
- * The browser sends only its Clerk session cookie. This Worker turns it into a session token and
+ * The browser sends only its Clerk session cookie. The web server turns it into a session token and
  * calls the API (`/v1/candidates/:candidateId/evidence/:checkId/screenshots/:n`) with
  * `Authorization: Bearer`, so no token is ever in a URL. The API checks
  * project access and derives the R2 key from the Evidence row, never from the request.
@@ -34,7 +34,7 @@ export const Route = createFileRoute("/evidence/$candidateId/$checkId/$n")({
         const token = await getToken();
         if (!token) return plain(401, "Sign in to continue");
 
-        const upstream = await env.API.fetch(
+        const upstream = await apiFetch(
           new Request(
             `https://api.internal/v1/candidates/${candidateId}/evidence/${checkId}/screenshots/${n}`,
             { headers: { authorization: `Bearer ${token}` } },

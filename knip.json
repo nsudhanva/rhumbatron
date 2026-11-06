@@ -1,18 +1,21 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreBinaries": ["cf", "gitleaks", "terraform", "tflint"],
+  "ignoreBinaries": ["gitleaks"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.ts"],
-      "ignoreDependencies": ["wrangler"]
+      "entry": ["scripts/*.ts", "services/*/*.ts", "services/*/src/main.ts", "services/*/test/*.ts"]
     },
-    "apps/web": {
+    "apps/web": {},
+    "workers/apps": {
+      "entry": ["src/platform/workerd.ts"],
       "ignoreDependencies": ["cloudflare"]
     },
     "workers/*": {
       "ignoreDependencies": ["cloudflare"]
     },
-    "packages/*": {}
+    "packages/*": {},
+    "services/git": {},
+    "services/sandboxd": {}
   },
   "ignoreExportsUsedInFile": {
     "interface": true,

@@ -15,7 +15,7 @@ fail the legible text audit on phone widths.
   writes the cache into the HTML. The components read the same query keys with the same server
   functions, so their first render has the data. On the client, the loaders do nothing. A
   client-side navigation renders at once, and the components read their data in the browser.
-- The server functions call the API Worker with the user's Clerk session during the server render.
+- The server functions call the API module with the user's Clerk session during the server render.
   A failed read stays in the cache as an error. The page shows its error state and the client
   reads again.
 - The event feeds and the Project timeline start from the first page that the loader read. Their

@@ -4,10 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
+    "dev": "bun --bun vite dev",
     "build": "vite build",
-    "preview": "vite preview",
-    "cf:types": "wrangler types",
+    "start": "bun serve.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test:critical": "vitest run --dir src"
   },
@@ -38,15 +37,14 @@
     "zustand": "5.0.15"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.63.1",
     "@tailwindcss/vite": "4.3.3",
+    "@types/bun": "1.4.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.4",
-    "vitest": "5.0.3",
-    "wrangler": "4.149.0"
+    "vitest": "5.0.3"
   }
 }

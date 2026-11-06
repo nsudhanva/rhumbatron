@@ -8,15 +8,15 @@ A release never deletes history. A failed release keeps the Canonical Generation
 
 ## 1. Live app release
 
-Each Project has a live app at `<slug>.rhumbatron.com`. The apps Worker (`rhumbatron-apps-prod`) serves it through Dynamic Workers ([ADR 0020](../adr/0020-live-apps-dynamic-workers.md)). A deploy is runtime data. It is an R2 bundle and a D1 pointer (`app_deployments`). Terraform does not change for a deploy.
+Each Project has a live app at `https://<slug>.rhumbatron.localhost`. The `apps` service runs it on workerd with the Worker Loader ([ADR 0020](../adr/0020-live-apps-dynamic-workers.md), [live-apps.md](../architecture/live-apps.md)). A deploy is runtime data: a bundle in the object store and a pointer row in `app_deployments`. No container or configuration changes for a deploy.
 
 ```mermaid
 sequenceDiagram
   participant I as integration (promotion)
-  participant Q as rhumbatron-release Queue
+  participant Q as release queue
   participant R as ReleaseWorkflow
-  participant S as R2 bundles
-  participant D as D1 app_deployments
+  participant S as object store bundles
+  participant D as app_deployments
   participant A as apps router
   I->>Q: release.start rel_project_generation
   Q->>R: start the instance
@@ -32,21 +32,21 @@ sequenceDiagram
   end
 ```
 
-1. Start: the promotion fast-forwards canonical `main` in the Artifacts repository of the Project. It records a `queued` release with the ID `rel_<project>_<generation>` and sends `release.start` on the `rhumbatron-release` Queue. The integration Worker starts `ReleaseWorkflow` with the release ID as the instance ID.
+1. Start: the promotion fast-forwards canonical `main` in the Project repository on the git service. It records a `queued` release with the ID `rel_<project>_<generation>` and sends `release.start` on the `release` command queue. The integration module starts `ReleaseWorkflow` with the release ID as the instance ID.
 2. Check: the workflow confirms that the generation is still canonical. A newer promotion during the release sets the release to `superseded`.
-3. Bundle: the workflow uses the stored bundle of the promoted commit, the bundle of the same tree, or the bundle of the Candidate preview. Otherwise it builds the bundle from the Artifacts source on the apps Worker. The cap is 60 builds per UTC day (`APP_BUILDS_PER_DAY`).
+3. Bundle: the workflow uses the stored bundle of the promoted commit, the bundle of the same tree, or the bundle of the Candidate preview. Otherwise it builds the bundle from the Project source on the apps service. The cap is 60 builds per UTC day (`APP_BUILDS_PER_DAY`).
 4. Pointer: the workflow moves the production pointer by compare-and-swap on the row that it read. The previous version stays.
 5. Smoke check: the workflow probes the app through the apps router. It probes `/` (a real page, not a router status page) and up to 3 static `GET` routes from the route table of the app (`workers/integration/src/release-model.ts`). After a failed check, it waits 10 seconds and runs the check once more.
-6. Evidence: the workflow stores release Evidence with the check ID `release-s<generation>` in R2 and in D1 `evidence_index`.
+6. Evidence: the workflow stores release Evidence with the check ID `release-s<generation>` in the object store and in `evidence_index`.
 7. Status: a passed smoke check sets `deployed`. A failed smoke check moves the pointer back to the version it replaced and sets `smoke_failed`. A missing bundle or a failed build sets `failed`.
 
 ### Hosts
 
 | Host | Serves |
 |---|---|
-| `<slug>.rhumbatron.com` | The production version. |
-| `<previewId>--<slug>.rhumbatron.com` | The preview of one Candidate. A Change keeps at most 3 previews. The R2 lifecycle rule on `app-previews/` deletes preview bundles after 7 days. |
-| `v0000001--<slug>.rhumbatron.com` | One kept version. The number is the Canonical Generation with 7 digits. |
+| `<slug>.rhumbatron.localhost` | The production version. |
+| `<previewId>--<slug>.rhumbatron.localhost` | The preview of one Candidate. A Change keeps at most 3 previews. The daily sweep deletes preview rows and their data stores after 7 days ([cleanup.md](./cleanup.md)). |
+| `v0000001--<slug>.rhumbatron.localhost` | One kept version. The number is the Canonical Generation with 7 digits. |
 
 A Project with no shipped Change shows "Nothing built yet". After "Remove app", the host answers 410.
 
@@ -56,16 +56,16 @@ A rollback to generation Sk is a new canonical transition from Sn to Sn+1. The n
 
 ### Stuck releases
 
-Every 5 minutes, the event router cron queues `release.recover` for each Change that is `releasing` for more than 45 minutes (`RELEASE_STUCK_AFTER_MS`). It queues at most 10 per sweep. The integration Worker then does one of these actions.
+Every 5 minutes, the event router sweep queues `release.recover` for each Change that is `releasing` for more than 45 minutes (`RELEASE_STUCK_AFTER_MS`). It queues at most 10 per sweep. The integration module then does one of these actions.
 
 - A finished release settles the Change to `completed` or `failed`.
 - A release that is still `queued` or `building` is marked `failed`, and the Change fails.
 - A Project without a live app completes the Change.
 - A Project with a live app but no release gets a failed release record.
 
-While `paused = true`, the cron does not run, so this recovery waits for the resume ([pause-resume.md](./pause-resume.md)).
+While the stack is down, the sweep does not run. The recovery runs after `bun run stack:up`.
 
 ## 2. Check a release
 
 1. Open the Candidate page. The release panel shows the status, the version, and the smoke Evidence.
-2. Run `bun run e2e prod`. On an empty Project, it checks the app host, versions, code reads, the rollback refusals, and "Remove app".
+2. Run `bun run e2e local` ([local-stack.md](./local-stack.md)). It checks the API routes for apps, versions, code reads, and the rollback refusals.

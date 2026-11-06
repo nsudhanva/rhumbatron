@@ -17,7 +17,7 @@ const box = vi.hoisted(() => ({
   envs: [] as (Record<string, string> | undefined)[],
 }));
 
-vi.mock("@cloudflare/sandbox", () => ({
+vi.mock("@rhumbatron/platform/sandbox", () => ({
   getSandbox: () => ({
     async exec(command: string, opts: { env?: Record<string, string> } = {}): Promise<ExecResult> {
       box.commands.push(command);

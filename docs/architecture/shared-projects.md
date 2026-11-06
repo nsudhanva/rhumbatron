@@ -24,7 +24,7 @@ Main source files:
 | `workers/api/src/board.ts` | `GET /v1/projects/:projectId/board` |
 | `workers/api/src/clarify.ts` | `POST /v1/changes/:changeId/clarify` |
 | `workers/api/src/first-come.ts` | `GET /v1/changes/:changeId/request-waits`, `POST /v1/changes/:changeId/choose` |
-| `workers/coordinator/src/request-scopes.ts` | Admission order and scope receipts in ProjectRootDO SQLite |
+| `workers/coordinator/src/request-scopes.ts` | Admission order and scope receipts in the ProjectRootDO actor SQLite |
 | `workers/integration/src/intake-context.ts` | Related requests, the current app summary, the app context of the clarity check, stored answers, `intakeMayAsk` |
 | `workers/integration/src/intake.ts` | The intake cascade and its citation checks |
 | `workers/integration/src/request-policy.ts` | Overlap pass, review validation, quality-gate rule |
@@ -39,7 +39,7 @@ Before a person can open any Project, the platform must approve them (ADR 0033).
 `users.access_status` holds `approved`, `pending`, or `declined`.
 `requireAuth` runs the gate after it verifies the Clerk session.
 
-1. The gate reads the status of the user and the setting `signup_approval_required` in one D1 query.
+1. The gate reads the status of the user and the setting `signup_approval_required` in one database query.
 2. The first request of a new person creates the user row. While the setting is `"true"`, the row is `pending`. Otherwise it is `approved`.
 3. A platform admin (a user ID in `PLATFORM_ADMIN_USER_IDS`) is always approved.
 4. A person who is `pending` or `declined` gets 403 `approval_required` with `details.status`. Only `GET /v1/me` answers. It returns `accessStatus`, so the web can show one full-page message and no Project data. Sign-out is a Clerk action in the browser.
@@ -66,7 +66,7 @@ flowchart TD
 ## Membership
 
 Membership is per Project.
-The D1 table `project_members` has one row for each user and Project.
+The table `project_members` has one row for each user and Project.
 A person sees only the Projects that they own or that another person shares with them.
 Rhumbatron does not use Clerk Organizations.
 
@@ -77,7 +77,7 @@ Rhumbatron does not use Clerk Organizations.
 | `member` | The person accepts an invitation with the role `member` (the default). | 10 |
 | `viewer` | The person accepts an invitation with the role `viewer`. | 30 |
 
-`projectRole` reads the role from D1. The API never reads a role from the client.
+`projectRole` reads the role from the database. The API never reads a role from the client.
 
 - `owner`: the owner row, or a member of the organization that owns the Project.
 - `admin`, `member`, `viewer`: the role of the caller's row in `project_members`.
@@ -125,7 +125,7 @@ A refused action gets `403` with the text of `deniedMessage`: "Only the project 
 
 ## Request review
 
-The Project setting `memberRequestReview` (D1 `projects.member_request_review`, default on) controls review.
+The Project setting `memberRequestReview` (`projects.member_request_review`, default on) controls review.
 While it is on, the request of a `member` starts as `proposed` (`needsReview`).
 The requests of the owner and the admins never need review.
 When the setting is off, a member's request goes to the system at once, as the request of an admin does.
@@ -144,7 +144,7 @@ stateDiagram-v2
   declined --> [*]
 ```
 
-- Create: the API inserts the Change with status `proposed` and `review_state = 'proposed'`. The integration Worker records `change.proposed` (`recordProposal`). The owner and the admins get the notification `request_proposed`.
+- Create: the API inserts the Change with status `proposed` and `review_state = 'proposed'`. The integration code records `change.proposed` (`recordProposal`). The owner and the admins get the notification `request_proposed`.
 - Include: `POST /v1/changes/:changeId/include` (`change.review`). `includeChange` moves the Change to `created` at the current Canonical Generation and stores who decided and when. It records `change.included` and starts the ChangeWorkflow with the Change ID as instance ID, as for a request without review. A repeat returns the same result and starts no second workflow. The requester gets `request_included`.
 - Decline: `POST /v1/changes/:changeId/decline` with an optional `reason` (up to 500 characters). The Change becomes `declined` with `outcome = declined` and the reason. `declined` is terminal. The event is `change.declined`. The requester gets `request_declined`.
 - Withdraw: the requester sends `POST /v1/changes/:changeId/cancel`. The Change becomes `cancelled`. Its `review.state` stays `proposed`, because nobody decided.
@@ -154,7 +154,7 @@ Each Change response has `review`: `state` (`not_needed`, `proposed`, `included`
 
 ### Board
 
-`GET /v1/projects/:projectId/board` reads the newest 100 Changes, their Tasks with the newest run of each, and the members, in one D1 batch.
+`GET /v1/projects/:projectId/board` reads the newest 100 Changes, their Tasks with the newest run of each, and the members, in one database batch.
 Each Change is a card in one column (`BOARD_COLUMN_OF` in `packages/protocol/src/board.ts`):
 
 | Column | Change statuses |
@@ -209,9 +209,9 @@ Each text has a packet ID: `<changeId>:goal`, `<changeId>:c1`, and so on.
 
 `retrieveRelated` then does these steps:
 
-1. Embed the goal and each item with Workers AI `@cf/baai/bge-small-en-v1.5`.
+1. Embed the goal and each item with bge-small-en-v1.5 on the `embed` service (llama.cpp).
 2. Keep up to 10 items with a cosine similarity of 0.55 or more. If the embedding call fails, keep the items that share a non-generic word with the goal.
-3. Order the shortlist with `@cf/baai/bge-reranker-base`. Keep 5.
+3. Order the shortlist with bge-reranker-base on the `rerank` service (llama.cpp). Keep 5.
 
 The current app is one more target when its source is readable and not empty.
 Its packet items are `canonical:files` (up to 60 paths), `canonical:deps` (dependency names of the root `package.json`), and `canonical:stack` (hints such as `react` or `angularjs`).
@@ -219,12 +219,12 @@ Cosine similarity only selects targets. It never decides.
 
 ### Clef-flash
 
-One Clef-flash call answers two kinds of question:
+One Clef-flash call answers two kinds of question. Claude Haiku answers it with a forced tool call (`packages/platform/src/ai/models.ts`):
 
 - For each pair: `duplicate`, `already_covered`, `extends`, `overlaps`, or `unrelated`.
 - For the request: `buildable` or `needs_detail`.
 
-The call uses the D1 `clef-flash` daily counter (200 calls per UTC day). The integration, agents, and event router Workers share this counter.
+The call uses the `clef-flash` daily counter in `usage_counters` (200 calls per UTC day). The integration, agents, and event router code share this counter.
 When the counter is spent, Clef-flash abstains, and every later stage runs.
 A pair drops only when `unrelated` has a probability of 0.9 or more.
 Clef-flash alone never marks a duplicate.
@@ -258,7 +258,7 @@ When the call fails or the source cannot be read, the question is asked as befor
 ### Clarity
 
 The clarity check reads the request as a change to the current app.
-`appContext` (`intake-context.ts`) builds the app context with no model call and no extra D1 read:
+`appContext` (`intake-context.ts`) builds the app context with no model call and no extra database read:
 
 | Field | Source |
 |---|---|
@@ -279,7 +279,7 @@ So "Change to 16 color palette" in a canvas app that has a palette is clear.
 5. The request gets a question when one or more questions remain. When the rule failed and no question remains, the request gets one open question: "What should <goal> do?".
 6. Otherwise the request goes to planning. The assumptions go to the Root Planner as open details. The planner decides each one and records it.
 
-Small details are never questions. The Root Planner records the details it decided in `assumptions` of the Work Graph. The ChangeWorkflow writes them to D1 `changes.assumptions_json` (migration `0032_change_assumptions.sql`). The Change page shows them as "Assumptions". To change one, the requester sends a follow-up request.
+Small details are never questions. The Root Planner records the details it decided in `assumptions` of the Work Graph. The ChangeWorkflow writes them to `changes.assumptions_json` (migration `0032_change_assumptions.sql`). The Change page shows them as "Assumptions". To change one, the requester sends a follow-up request.
 
 ### Waiting for an answer
 
@@ -289,7 +289,7 @@ Each question has its own answer. A question with `options` shows the readings a
 The requester gets the notification `request_needs_input`.
 
 The workflow waits for the event `clarification`.
-It reads the D1 row after each event and once a day.
+It reads the database row after each event and once a day.
 After 7 days without an answer, the Change becomes `cancelled` with the reason "No answer within 7 days".
 
 `POST /v1/changes/:changeId/clarify` accepts one of three bodies.
@@ -334,7 +334,7 @@ sequenceDiagram
   participant WB as ChangeWorkflow B
   participant Root as ProjectRootDO
   participant Rev as Sonnet
-  participant D1
+  participant DB as Product database
 
   WA->>Root: admit A (order 1)
   WB->>Root: admit B (order 2)
@@ -350,9 +350,9 @@ sequenceDiagram
     WB->>Rev: review_requests: criteria of A and B
     Rev-->>WB: verdict with cited criterion IDs
   end
-  WB->>D1: request_conflicts row (one per pair, round, and plan)
+  WB->>DB: request_conflicts row (one per pair, round, and plan)
   opt supported conflict, different requesters
-    WB->>D1: request_choices row, B awaiting_choice
+    WB->>DB: request_choices row, B awaiting_choice
   end
   WB->>WB: continue, wait for the choice, or needs_input
 ```
@@ -480,7 +480,7 @@ stateDiagram-v2
 
 The wait:
 
-- The ChangeWorkflow of B waits with `step.waitForEvent` (type `first_come`). The timeout is 6 hours while the choice is open and 1 hour while B is `queued`. After each wake or timeout, the workflow runs `advanceFirstCome`, so the D1 rows decide. A lost event only adds delay.
+- The ChangeWorkflow of B waits with `step.waitForEvent` (type `first_come`). The timeout is 6 hours while the choice is open and 1 hour while B is `queued`. After each wake or timeout, the workflow runs `advanceFirstCome`, so the database rows decide. A lost event only adds delay.
 - The choose command sends the event. When A ends, `releaseRequestScope` calls `wakeAfterFirst`. Each B that waits on A moves to its next step, and its workflow wakes.
 - The workflow re-checks at most 150 times (`FIRST_COME_CHECKS`). If it ends while B waits, the end of A starts a new instance `<B>_f<n>`.
 

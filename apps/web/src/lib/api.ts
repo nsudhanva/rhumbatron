@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import type {
   AssignableRole,
@@ -11,6 +10,7 @@ import type {
 import { createServerFn } from "@tanstack/react-start";
 import { apiErrorMessage } from "./access";
 import type { BudgetScope, ChangeBudget, ProjectBudget } from "./api-budget";
+import { apiFetch } from "./server-env";
 
 /**
  * Server functions over the API Worker (service binding `API`). The browser never calls the API
@@ -204,7 +204,7 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
   const { getToken } = await auth();
   const token = await getToken();
   if (!token) throw new ApiError(401, "Sign in to continue");
-  const response = await env.API.fetch(
+  const response = await apiFetch(
     new Request(`https://api.internal${path}`, {
       method: init.method ?? "GET",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -558,7 +558,7 @@ export const getCheckOutput = createServerFn()
     const { getToken } = await auth();
     const token = await getToken();
     if (!token) throw new ApiError(401, "Sign in to continue");
-    const response = await env.API.fetch(
+    const response = await apiFetch(
       new Request(
         `https://api.internal/v1/candidates/${data.candidateId}/evidence/${data.checkId}/output`,
         { headers: { authorization: `Bearer ${token}` } },

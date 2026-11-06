@@ -23,10 +23,10 @@ import { candidateFork } from "./repo-names.ts";
 
 /**
  * Live app releases (ADR 0020): Candidate previews, the production pointer after promotion and its
- * smoke check, version hosts, app removal, and preview expiry. Prod only: every entry point is a
- * no-op without the `APPS` binding.
+ * smoke check, version hosts, app removal, and preview expiry. Every entry point is a no-op
+ * without the `APPS` binding.
  *
- * Writes are runtime data (D1 `app_deployments`, R2 bundles), never Terraform.
+ * Writes are runtime data (`app_deployments` rows, bundles in the object store).
  * Every write is guarded and safe to repeat: rows are keyed by Project and channel, bundles by
  * commit, and the pointer moves only by compare-and-swap on the row it read.
  *
@@ -38,7 +38,7 @@ import { candidateFork } from "./repo-names.ts";
 const ACTOR = { kind: "system", id: "app-release" } as const;
 const MAX_FILES = 400;
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
-/** Preview rows and bundles live 7 days (the R2 lifecycle rule on `app-previews/`). */
+/** Preview rows and bundles live 7 days (core expires `app-previews/` objects). */
 const PREVIEW_RETENTION_DAYS = 7;
 /** Data stores wiped and rows deleted per command delivery (one Durable Object call each). */
 const WIPES_PER_PASS = 25;
@@ -128,7 +128,7 @@ export async function productionRow(env: Env, projectId: string): Promise<AppRow
     .first<AppRow>();
 }
 
-/** True when promotions of this Project release to its live app (prod, app not removed). */
+/** True when promotions of this Project release to its live app (app not removed). */
 export async function hasLiveApp(env: Env, projectId: string): Promise<boolean> {
   if (!env.APPS) return false;
   const row = await productionRow(env, projectId);
@@ -628,7 +628,7 @@ export async function removeApp(env: Env, projectId: string): Promise<AppRemoval
 
 /**
  * Deletes preview rows older than the bundle retention, with their data stores. The R2
- * lifecycle rule already expired their bundles. Version rows and production are never touched.
+ * object expiry in core already removed their bundles. Version rows and production are never touched.
  * Bounded: one pass per daily sweep.
  */
 export async function expirePreviews(env: Env, now = Date.now()): Promise<{ expired: number }> {

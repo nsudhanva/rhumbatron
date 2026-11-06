@@ -2,7 +2,7 @@
 
 ## Context
 
-Two people send conflicting requests to one Project. A case on prod sets the requirements:
+Two people send conflicting requests to one Project. A real case sets the requirements:
 
 - In the Project "Place", Sudhanva asks "build a canvas like r/place". The planner chooses a
   palette of 4 colors.
@@ -51,7 +51,7 @@ an earlier request creates must plan on the tree that has that work.
 - A request that waits after another request never plans against a stale base. It plans only
   after the earlier request has a promoted Candidate or a terminal status, and it reads the
   canonical tree at planning time.
-- Durable state: D1 table `request_choices` (migration `0033_first_come_choices.sql`), one row per
+- Durable state: the table `request_choices` (migration `0033_first_come_choices.sql`), one row per
   earlier and later pair. `advanceFirstCome` (`workers/integration/src/first-come.ts`) is the one
   writer of the transitions. It applies `firstComeStep`, a pure function, with guarded updates.
   The choose command, the end of the earlier request (`releaseRequestScope`), and the waiting
@@ -68,12 +68,12 @@ an earlier request creates must plan on the tree that has that work.
 
 | Alternative | Why it lost |
 |---|---|
-| A model arbiter picks the request that fits the app | It cancels the work of one person on a model opinion. The prod case shows a rationale that the code cannot carry out. |
+| A model arbiter picks the request that fits the app | It cancels the work of one person on a model opinion. The case shows a rationale that the code cannot carry out. |
 | Remove the conflicting criteria from the later request | The later requester sees a request that is rejected in part, without a person deciding. The remaining criteria plan against a stale base. |
 | An admin or the owner decides | The role of a person says nothing about two requests (ADR 0025). The earlier requester knows what their request needs. |
 | The later requester decides | They would override work that started first. |
-| Build both and let promotion order decide | The later build plans against the empty or old tree and fails to merge, as in the prod case. |
-| A separate queue or scheduler service | D1, the existing ChangeWorkflow, and workflow events cover the wait. |
+| Build both and let promotion order decide | The later build plans against the empty or old tree and fails to merge, as in the case above. |
+| A separate queue or scheduler service | The product database, the existing ChangeWorkflow, and workflow events cover the wait. |
 
 ## Consequences
 

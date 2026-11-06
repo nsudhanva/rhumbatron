@@ -1,78 +1,65 @@
 # Costs, Quotas, and Budget Caps Runbook
 
-This runbook covers the cost report, the caps, and what to do when a cap trips. Prod runs within the Cloudflare free and included limits and a capped Anthropic budget.
+This runbook covers what costs money, the caps, and what to do when a cap trips.
 
-Cloudflare has no hard spend cap. Rhumbatron therefore uses layers of guards. [ADR 0019](../adr/0019-runaway-billing-guards.md) defines the code guards, the monitoring, and the account budget alerts. [ADR 0021](../adr/0021-anthropic-model-provider.md) defines the Anthropic budget.
+The stack runs on one computer. The only paid service is the Anthropic API ([ADR 0021](../adr/0021-anthropic-model-provider.md)). Every other service is open source and runs in Docker ([ADR 0034](../adr/0034-docker-compose-stack.md)). The local caps protect the computer, not a bill.
 
 ```mermaid
 flowchart TB
-  w[Work: agents, alarms, wakeups, checks] --> l1
-  l1[Layer 1: code guards<br/>alarm caps, causal caps, call caps,<br/>Sandbox, Browser Run, and Anthropic meters] --> l2
-  l2[Layer 2: AI Gateway<br/>20 requests per minute, Anthropic spend limit] --> l3
-  l3[Layer 3: monitoring<br/>bun run cost:report --alerts-only] --> l4
-  l4[Layer 4: account budget alerts<br/>email at 10, 25, 100 USD] --> l5
-  l5[Operator: pause switch, change caps]
+  w[Work: agents, alarms, wake-ups, checks] --> l1
+  l1[Code guards<br/>alarm caps, causal caps, daily call quotas] --> l2
+  l2[Meters in usage_counters<br/>Anthropic USD, Sandbox seconds, browser seconds, app builds] --> l3
+  l3[Operator<br/>admin pages, bun run stack:down, .env caps]
 ```
 
-## 1. Cost report
+## 1. Read the spend
 
-```sh
-bun run cost:report
-bun run cost:report --alerts-only
-```
-
-- `scripts/cost-report.ts` reads the account usage with `CLOUDFLARE_MONITOR_TOKEN` (read-only, Keychain `rhumbatron-cloudflare-monitor-token`). It reads the D1 meters with `CLOUDFLARE_D1_TOKEN` (Keychain `rhumbatron-cloudflare-api-token`). It never writes.
-- It reports account usage and leftover resources (containers, Workflow instances, forks, archived Projects).
-- It compares the prod meters in `usage_counters` with the prod caps. It compares the Anthropic spend of this month with the 100 USD budget.
-- In the web app, the platform admin reads the same meters on `/admin` (`GET /v1/admin/overview` and `GET /v1/admin/costs`). Each person reads their own spend on the Account page (`GET /v1/me/costs`). See [ADR 0033](../adr/0033-platform-admin-and-access.md).
-- The admin totals add up to the Anthropic meter `anthropic-usd-micro`. The user meters (`user-usd-micro:<userId>`) and the Project meters (`project-usd-micro:<projectId>`) start on 2026-10-11 and count only the model calls that a request pays for. The rest of the Anthropic meter shows as "Not attributed": the spend before 2026-10-11, and the model calls that no request pays for.
+- The platform admin reads the meters on `/admin` (`GET /v1/admin/overview` and `GET /v1/admin/costs`). Each person reads their own spend on the Account page (`GET /v1/me/costs`). See [ADR 0033](../adr/0033-platform-admin-and-access.md).
+- A Project's cost page reads `GET /v1/projects/:projectId/cost`.
+- The admin totals add up to the Anthropic meter `anthropic-usd-micro`. The user meters (`user-usd-micro:<userId>`) and the Project meters (`project-usd-micro:<projectId>`) count only the model calls that a request pays for. The rest of the Anthropic meter shows as "Not attributed": the model calls that no request pays for.
   - Overview: the model spend of the month, the part attributed to users, and the part not attributed.
   - Users and Projects: a footer with the sum of all meters of the list, the "Not attributed" part, and their sum (the Anthropic meter), this month and all time.
   - Costs grouped by user or by Project: the monthly meters for whole months, plus a "Not attributed" row.
   - Costs grouped by model or by day: the `task_runs` rows, plus an "Other model calls (no per-call record)" row when the range is whole months. That row holds the Root Planner, the intake check, conflict reviews, the acceptance check, the Integration Judge, the calls that no request pays for, and the runs of deleted Projects. For any other range, the `source` line gives the meter total.
-- The levels are `OK` below 60 %, `WARN` from 60 % to below 85 %, and `ALERT` at 85 % or more. When a line is `ALERT`, the script exits with code 1.
+- The Anthropic Console shows the spend of the API key.
 
 ## 2. Caps
 
-```mermaid
-flowchart LR
-  subgraph prod[prod meters in D1]
-    ps[Sandbox 20 h per month]
-    pb[Browser Run 960 s per day]
-    pv[Anthropic 100 USD per month]
-    ac[1,000 agent model calls per day<br/>200 Clef-flash calls per day<br/>60 app builds per day]
-  end
-  subgraph account[account]
-    ab[Budget alerts 10, 25, 100 USD]
-  end
-```
+| Cap | Value | Set by |
+|---|---|---|
+| Anthropic spend | 100 USD per calendar month | `ANTHROPIC_MONTHLY_BUDGET_USD` in `.env` (default `100`) |
+| Sandbox time | 72,000 seconds (20 hours) per UTC month | `SANDBOX_MONTHLY_SECONDS` (core default) |
+| Browser checks | 960 seconds per UTC day | `BROWSER_DAILY_SECONDS` (core default) |
+| Agent model calls | 1,000 per UTC day | `AGENT_DAILY_CALL_CAP` in `packages/model-router/src/budget.ts` |
+| Model calls per Task run | 16 for Haiku, 32 for Sonnet and Opus | `MAX_CALLS_PER_RUN` in the same file |
+| Clef-flash questions | 200 per UTC day, shared counter `clef-flash` | The event router, the agents, and the intake gate |
+| Goal suggestions | 100 per UTC day | `SUGGESTION_DAILY_CAP` in `workers/agents/src/suggestions.ts` |
+| App builds | 60 per UTC day | `APP_BUILDS_PER_DAY` in `workers/integration/src/app-release.ts` |
+| Previews | 3 per Change | `MAX_PREVIEWS_PER_CHANGE` in `packages/protocol/src/app.ts` |
 
-`locals.caps` and `local.cap_bindings` in `infrastructure/terraform/envs/prod/main.tf` set the Sandbox and Browser Run caps at 80 % of the Workers Paid included allowance. Each Worker reads its cap from a plain-text binding and enforces it on the D1 meter (`usage_counters`).
-
-### Sandbox (`SANDBOX_MONTHLY_SECONDS`)
-
-- Cap: `72000` seconds (20 hours) per UTC calendar month. This value is 80 % of the 25 included basic-instance hours.
-- One container instance (`max_instances = 1`), instance type `basic`.
-- Agent Workspaces (`workers/agents/src/workspace.ts`), Candidate checks (`workers/integration/src/candidate-sandbox.ts`), and Code page edit session commands (`workers/integration/src/code-sessions.ts`, ADR 0029) share the meter. All sleep after 2 idle minutes.
-- A code edit session starts the Sandbox only at its first command. Each command reserves 480 s and runs at most 120 s. A session ends after 10 idle minutes or 2 hours.
-- Each use reserves seconds before the container starts. A reservation that passes the cap is refused.
-- The meter charges the awake time of each Project's container, as Cloudflare bills it (`workers/integration/src/sandbox-meter.ts`). When a use ends, it refunds its reservation and charges only the time it adds to the container's awake block (D1 `sandbox_awake`), plus one 120 s idle tail. Agents, checks, and commands that overlap in one container count once.
-- Cloudflare's container analytics (GraphQL `containersMetricsAdaptiveGroups`: `allocatedMemory`, `allocatedCpu`, `allocatedDisk`) give the billed usage. On a `basic` instance, allocated vCPU-seconds divided by 0.25 is the awake time.
-
-### Browser Run (`BROWSER_DAILY_SECONDS`)
-
-- Cap: `960` seconds per UTC day. This value is 80 % of the 10 included browser hours per month.
-- One session per check, closed after at most 55 seconds. At most 2 browser runs per Candidate (`workers/integration/src/check-semantics.ts`).
-- Only a Change with risk `high` or `critical` that touches pages gets the browser check (`packages/evidence/src/plan.ts`).
-- The API Worker reads the binding only to show the cap on the admin overview (ADR 0033).
+All meters are rows of `usage_counters` in the product database.
 
 ### Anthropic (`ANTHROPIC_MONTHLY_BUDGET_USD`)
 
-- Cap: 100 USD per calendar month (`var.anthropic_monthly_budget_usd` in `envs/prod/variables.tf`). Terraform rejects a value above 100.
-- The meter is the `usage_counters` counter `anthropic-usd-micro` (micro-USD per calendar month).
-- Every model call first reserves an estimate in one conditional D1 statement. The reservation then settles to the exact cost from the usage fields of the response, cache reads and writes included. A refused reservation stops the work. Rhumbatron does not try another provider.
-- The agents, integration, and API Workers get the cap through the `ANTHROPIC_MONTHLY_BUDGET_USD` binding. A Worker without the binding uses 10 USD (`packages/model-router/src/budget.ts`).
-- The AI Gateway `rhumbatron-models-prod` is the second guard. It has a spend limit of the same value per 30 days on the `anthropic` provider, and a rate limit of 20 requests per minute (`modules/ai`). Cloudflare documents the spend limit for BYOK and Unified Billing requests. The gateway limit can miss requests that carry their own key. The code therefore relies on the D1 meter as the stop.
+- The meter is the counter `anthropic-usd-micro`, in micro-USD per calendar month.
+- Every model call of the model router first reserves an estimate in one conditional SQL statement. The reservation then settles to the exact cost from the usage fields of the response, cache reads and writes included. A refused reservation stops the work. Rhumbatron does not try another provider.
+- Core passes the cap to every module. Code without the value uses 10 USD (`packages/model-router/src/budget.ts`).
+- Clef and Clef-flash questions go to Claude Haiku from `packages/platform/src/ai/models.ts`, with at most 1,024 output tokens each. The Anthropic meter does not count them. The daily `clef-flash` and goal suggestion quotas bound them.
+- `ALLOW_OPUS` is `false` by default. The opus tier then runs on Sonnet 5.5, and the Decision Receipt records the downgrade.
+
+### Sandbox (`SANDBOX_MONTHLY_SECONDS`)
+
+- Agent Workspaces (`workers/agents/src/workspace.ts`), Candidate checks (`workers/integration/src/candidate-sandbox.ts`), and Code page edit session commands (`workers/integration/src/code-sessions.ts`, [ADR 0029](../adr/0029-code-edit-sessions.md)) share the meter.
+- Each Project has one Sandbox, `proj-<project>`. sandboxd removes it with its disk after 2 idle minutes (`SANDBOX_IDLE_MS`). At most 4 Sandboxes are live at one time (`SANDBOX_MAX`).
+- Each use reserves seconds before the Sandbox starts. A reservation that passes the cap is refused.
+- When a use ends, it refunds its reservation and charges only the time it adds to the Sandbox's awake block (`sandbox_awake`), plus one 120-second idle tail (`workers/integration/src/sandbox-meter.ts`). Agents, checks, and commands that overlap in one Sandbox count once.
+- A code edit session starts the Sandbox only at its first command. Each command reserves 480 seconds and runs at most 120 seconds. A session ends after 10 idle minutes or 2 hours.
+
+### Browser checks (`BROWSER_DAILY_SECONDS`)
+
+- One browser session per check on the `browser` service, closed after at most 55 seconds. At most 2 browser checks per Candidate (`workers/integration/src/check-semantics.ts`).
+- Only a Change with risk `high` or `critical` that touches pages gets the browser check (`packages/evidence/src/plan.ts`).
+- The API reads the value only to show the cap on the admin overview.
 
 ### Budget scopes
 
@@ -85,9 +72,9 @@ A person selects the budget that pays for a request ([ADR 0030](../adr/0030-budg
 | `account` ("My budget") | `users.monthly_budget_usd`, 1 to 100 USD per calendar month, across every Project. | Each user for themselves. | Account page (`/account`) |
 
 - A Change with scope `project` or `account` has no cap of its own. A request for such a Change without that monthly budget fails with 400 `no_budget_set`.
-- The Project budget and the requester budget always apply as ceilings, for every scope. The environment budget (`ANTHROPIC_MONTHLY_BUDGET_USD`) applies to every call.
+- The Project budget and the requester budget always apply as ceilings, for every scope. The stack budget (`ANTHROPIC_MONTHLY_BUDGET_USD`) applies to every metered call.
 - Meters in `usage_counters`, in micro-USD: `change-usd-micro:<changeId>` (`day` = `total`), `project-usd-micro:<projectId>` and `user-usd-micro:<userId>` (`day` = `YYYY-MM`), and `anthropic-usd-micro`. Each meter counts every call, also when no cap is set.
-- Every model call that a Change pays for reserves its estimate on all meters of the Change in one D1 batch, all or nothing. The call then settles each meter to the exact cost. These calls are the agent runs, the Root Planner, the intake review, the request review, conflict review, context compaction, the acceptance check, and the Integration Judge (`packages/model-router/src/budget-meters.ts`).
+- Every model call that a Change pays for reserves its estimate on all meters of the Change in one batch, all or nothing. The call then settles each meter to the exact cost. These calls are the agent runs, the Root Planner, the intake review, the request review, conflict review, context compaction, the acceptance check, and the Integration Judge (`packages/model-router/src/budget-meters.ts`).
 - When a meter refuses, Rhumbatron sends no call. A Change in `compiling` or `running` becomes `budget_blocked` with `blocked_limit` `change_budget`, `project_budget`, `account_budget`, or `monthly_model_spend`. When several meters refuse, `blocked_limit` names the narrowest budget. `blocked_reason` names the budget, its amount, the month, and who can raise it. Example: "Stopped: the project budget of $100.00 for October is used up. An owner or admin can raise it in Settings."
 - During verification, a refused acceptance check is a gap that names the budget. The Candidate then goes to a person. A refused Integration Judge call sends the Candidate selection to a person.
 - A higher budget resumes the stopped Changes:
@@ -96,28 +83,16 @@ A person selects the budget that pays for a request ([ADR 0030](../adr/0030-budg
   - A higher user budget on the Account page resumes all Changes of that requester that their budget stopped.
 - A Change that a budget stopped during planning plans again. The admission checks run again. A budget that is still used up stops the Change again.
 
-### Model call quotas and routing
-
-- Agent model calls: 1,000 per UTC day (`AGENT_DAILY_CALL_CAP` in `packages/model-router/src/budget.ts`).
-- Model calls per Task run: 16 for Haiku, 32 for Sonnet and Opus (`MAX_CALLS_PER_RUN`).
-- Clef-flash on Workers AI: 200 calls per UTC day on the shared counter `clef-flash`. The event router, the agents, and the intake gate use it. Workers AI includes 10,000 Neurons per day.
-- `ALLOW_OPUS`: `false`. The opus tier runs on Sonnet 5.5, and the Decision Receipt records the downgrade. Set `allow_opus = true` only with the owner's approval.
-
-### Live apps
-
-- App builds: 60 per UTC day (`APP_BUILDS_PER_DAY` in `workers/integration/src/app-release.ts`).
-- Previews: at most 3 per Change. Preview bundles expire after 7 days.
-
 ## 3. When a cap trips
 
 | Cap | What happens | Operator action |
 |---|---|---|
-| Anthropic monthly budget (100 USD) | The meter refuses the reservation, or the gateway or Anthropic refuses for spend or billing. The Task is `blocked`. The Change is `budget_blocked` with the limit `monthly_model_spend`. | 1. Run `bun run cost:report` and read the AI Gateway logs.<br>2. The meter starts again at the next UTC calendar month.<br>3. A higher budget needs the owner's approval, a new validation bound in `envs/prod/variables.tf`, a plan, and an apply. |
+| Anthropic monthly budget | The meter refuses the reservation, or Anthropic refuses for spend or billing. The Task is `blocked`. The Change is `budget_blocked` with the limit `monthly_model_spend`. | 1. Read `/admin` and the Anthropic Console.<br>2. The meter starts again at the next UTC calendar month.<br>3. To raise the cap, set `ANTHROPIC_MONTHLY_BUDGET_USD` in `.env` and run `docker compose up -d`. |
 | Request budget (`change_budget`) | The Change meter refuses the reservation, or a Task's share of the request budget runs out. The Change is `budget_blocked`. | An owner or admin raises the request budget on the Change page. |
 | Project monthly budget (`project_budget`) | The Project meter refuses the reservation. Every Change of the Project that calls a model stops. | An owner or admin raises or removes the Project monthly budget in Settings. The stopped Changes resume. The meter starts again at the next UTC calendar month. |
 | User monthly budget (`account_budget`) | The requester meter refuses the reservation. Every Change of that requester stops, in every Project. | The requester raises or removes their monthly budget on the Account page. The stopped Changes resume. |
 | Agent model calls (1,000 per day) | The Task stops. The Change is `budget_blocked` with the limit `daily_model_calls`. | Look for looping Tasks. The meter starts again at 00:00 UTC. A person can raise the Change budget to resume. |
-| Sandbox (72,000 s per month) | New Sandbox starts are refused. An agent gets "The monthly Sandbox budget is used up". Candidate checks that need the Sandbox do not run. A Code page terminal command gets 429 `sandbox_cap`; file edits and submit still work. | Look for long tests or open containers. The meter starts again at the next UTC calendar month. To stop all Sandbox starts, set `paused = true`. |
-| Browser Run (960 s per day) | The browser check does not start. It records `not_checked`, a gap for the required check, so the Candidate cannot promote. | Wait for the next UTC day, then verify the Candidate again. |
+| Sandbox (72,000 s per month) | New Sandbox starts are refused. An agent gets "The monthly Sandbox budget is used up". Candidate checks that need the Sandbox do not run. A Code page terminal command gets 429 `sandbox_cap`; file edits and submit still work. | Look for long tests. The meter starts again at the next UTC calendar month. To stop all work, run `bun run stack:down`. |
+| Browser checks (960 s per day) | The browser check does not start. It records `not_checked`, a gap for the required check, so the Candidate cannot promote. | Wait for the next UTC day, then verify the Candidate again. |
 | App builds (60 per day) | The build is refused with "The daily app build cap (60) is reached." | Wait for the next UTC day. |
-| Account budget alert (10, 25, 100 USD) | The account sends an email. Nothing stops. | Run `bun run cost:report`, find the source, and set `paused = true` in `envs/prod` ([pause-resume.md](./pause-resume.md)). |
+| Clef-flash questions (200 per day) | The caller abstains and uses its deterministic fallback. | No action. The quota starts again at 00:00 UTC. |

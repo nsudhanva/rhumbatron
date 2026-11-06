@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const box = vi.hoisted(() => ({ commands: [] as string[], fail: null as Error | null }));
 
-vi.mock("@cloudflare/sandbox", () => ({
+vi.mock("@rhumbatron/platform/sandbox", () => ({
   getSandbox: () => ({
     async exec(command: string) {
       box.commands.push(command);

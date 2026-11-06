@@ -193,7 +193,7 @@ describe("a smoke failure never marks a release deployed", () => {
   const probes = smokeProbes({ routes, added: ["GET /api/wishlists/:id", "GET /api/wishlists"] });
   const routerPage = (title: string) =>
     `<html><head><title>${title}</title></head><body><h1>${title}</h1>
-<p><a href="https://rhumbatron.com">Rhumbatron</a></p></body></html>`;
+<p><a href="https://rhumbatron.localhost">Rhumbatron</a></p></body></html>`;
 
   it("probes the home page and up to 3 static GET routes of the app, added routes first", () => {
     expect(probes.map((p) => p.path)).toEqual([

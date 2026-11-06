@@ -7,7 +7,7 @@ This guide describes the code on `main` with text, tables, and diagrams.
 1. A user submits a goal for one Project. The goal becomes a Change.
 2. An intake gate checks the request. An unclear, duplicate, or conflicting request waits for its requester (ADR 0025).
 3. A Root Planner model splits the goal into a Work Graph of small Tasks.
-4. Agents run the ready Tasks in parallel. A Task that changes source works in its own Artifacts fork and Sandbox directory.
+4. Agents run the ready Tasks in parallel. A Task that changes source works in its own Git fork and Sandbox directory.
 5. Each Agent publishes a ChangeSet and declares a typed Intent.
 6. Deterministic code compares the Intents and finds semantic conflicts that Git cannot see.
 7. Complementary Tasks integrate into one Candidate. Two conflicting designs become two Candidates.
@@ -27,103 +27,109 @@ Arrows show the main direction of calls and data.
 ```mermaid
 flowchart LR
   subgraph Control["Control Plane"]
-    API["rhumbatron-api (Hono)"]
+    API["api (Hono)"]
     ROOT["ProjectRootDO + ResourceShardDO"]
-    INT["Integration Worker + Workflows"]
-    D1[("D1 control DB")]
+    INT["integration + Workflows"]
+    DB[("product database<br/>SQLite")]
   end
   subgraph Event["Event Plane"]
-    OUTBOX["DO SQLite outbox"]
-    K2[("K2: 8 streams")]
-    Q[["Queues"]]
+    OUTBOX["actor SQLite outbox"]
+    EVL[("JetStream: 8 event streams")]
+    Q[["JetStream: command queues"]]
   end
   subgraph Agent["Agent Plane"]
     AGENT["AgentDO + Pi harness"]
-    GW["AI Gateway"]
+    ANT["Anthropic API"]
   end
   subgraph Exec["Execution Plane"]
-    SBX["Sandbox container"]
-    BR["Browser Run"]
+    SBX["sandboxd containers"]
+    BR["Playwright server"]
+    APPS["apps (workerd)"]
   end
   subgraph State["State Plane"]
-    ART[("Artifacts repos")]
-    R2[("R2 evidence bucket")]
-    VEC[("Vectorize")]
+    GIT[("git service repos")]
+    OBJ[("S3 bucket rhumbatron-evidence")]
+    VEC[("MEMORY vectors")]
   end
   subgraph Obs["Observability Plane"]
-    AE["Analytics Engine"]
-    LOGS["Workers Logs"]
+    MET["platform_metrics"]
+    LOGS["JSON logs on stdout"]
   end
-  API --> ROOT --> OUTBOX --> K2 --> Q
+  API --> ROOT --> OUTBOX --> EVL --> Q
   Q --> AGENT
   Q --> INT
   INT --> ROOT
-  AGENT --> GW
-  AGENT --> SBX --> ART
+  AGENT --> ANT
+  AGENT --> SBX --> GIT
   INT --> SBX
   INT --> BR --> SBX
-  AGENT --> R2
+  INT --> APPS
+  AGENT --> OBJ
   AGENT --> VEC
-  AGENT --> AE
-  API --> D1
-  API -.->|"every Worker"| LOGS
+  AGENT --> MET
+  API --> DB
+  API -.->|"every service"| LOGS
 ```
 
 | Plane | What the code uses | Main source |
 |---|---|---|
-| Control | `rhumbatron-api`, ProjectRootDO, ResourceShardDO, D1, the integration Worker | `workers/api`, `workers/coordinator`, `workers/integration` |
-| Event | DO SQLite outbox, K2 streams, Queues, Workflows | `workers/coordinator/src/outbox.ts`, `workers/event-router` |
-| Agent | AgentDO, Pi harness, AI Gateway, Workers AI (Clef-flash; intake gate embeddings and reranker) | `workers/agents`, `packages/model-router`, `workers/integration/src/intake.ts` |
-| Execution | Sandbox container, Browser Run, Dynamic Workers | `workers/sandbox`, `workers/integration/src/browser-check.ts`, `workers/apps` |
-| State | Artifacts, R2, D1, DO SQLite, KV (`CONFIG`), Vectorize | `workers/integration`, `workers/indexer` |
-| Observability | Analytics Engine (`METRICS`, `EVENT_METRICS`), Workers Logs, AI Gateway logs | `workers/agents`, `workers/indexer`, `workers/event-router` |
+| Control | The API, ProjectRootDO, ResourceShardDO, the product database, the integration module | `workers/api`, `workers/coordinator`, `workers/integration` |
+| Event | Actor SQLite outbox, JetStream event streams and command queues, the workflow engine | `workers/coordinator/src/outbox.ts`, `workers/event-router`, `packages/platform/src/messaging`, `packages/platform/src/workflows` |
+| Agent | AgentDO, Pi harness, the Anthropic API, Clef-flash on Claude Haiku, the `embed` and `rerank` servers (intake gate) | `workers/agents`, `packages/model-router`, `workers/integration/src/intake.ts`, `packages/platform/src/ai/models.ts` |
+| Execution | sandboxd containers, the Playwright server, the apps service on `workerd` | `services/sandboxd`, `workers/integration/src/browser-check.ts`, `services/apps`, `workers/apps` |
+| State | The git service, the S3 bucket, the product database, actor SQLite, `CONFIG`, `MEMORY` | `services/git`, `packages/platform/src/sql`, `packages/platform/src/objects`, `workers/integration`, `workers/indexer` |
+| Observability | `METRICS` and `EVENT_METRICS` rows, JSON logs | `packages/platform/src/sql/metrics.ts`, `packages/platform/src/log.ts` |
 
-The integration Worker drives Browser Run for the browser check.
-Browser Run reaches the composed app in the Sandbox only through request interception (`containerFetch`).
+The integration module drives the Playwright server for the browser check.
+The browser reaches the composed app in the Sandbox only through request interception (`containerFetch`).
 
 Policy and tracing:
 
-- D1 `project_policies` is the source of truth for the Project policy. No API writes it.
-  The KV namespace `rhumbatron-config-prod` (binding `CONFIG` on the integration Worker) holds a 5-minute snapshot (`workers/integration/src/policy.ts`).
+- The `project_policies` table is the source of truth for the Project policy. No API writes it.
+  `CONFIG` holds a 5-minute snapshot (`workers/integration/src/policy.ts`).
   Each reader gets the policy from one source:
 
   | Reader | Policy source |
   |---|---|
-  | Promotion, approval, human edit, rollback | Stored row through the KV snapshot. Without a row: `DEFAULT_POLICY`, which protects no resource. |
-  | Verification plan, approval gate, auto-promotion decision, composition compatibility check | Stored row through the KV snapshot, read once per verification run. Without a row: `DEFAULT_POLICY`, which protects no resource. |
+  | Promotion, approval, human edit, rollback | Stored row through the `CONFIG` snapshot. Without a row: `DEFAULT_POLICY`, which protects no resource. |
+  | Verification plan, approval gate, auto-promotion decision, composition compatibility check | Stored row through the `CONFIG` snapshot, read once per verification run. Without a row: `DEFAULT_POLICY`, which protects no resource. |
   | Conflict detection, conflict review, Product Graph | `protectedResources` of the stored row only. Without a row: nothing is protected. |
 
-- Rhumbatron configures no OpenTelemetry tracing. The Durable Object Workers set `traces.enabled = false`.
+- Rhumbatron configures no tracing.
 
-## Deployables map
+## Services map
 
-Rhumbatron has nine Workers. The docs site `rhumbatron-docs-prod` is a tenth, assets-only Worker at `docs.rhumbatron.com`.
-Each Worker name is `rhumbatron-<component>-prod`.
+Rhumbatron runs as one Docker Compose stack (ADR 0034).
+[Infrastructure and cost](infrastructure-and-cost.md) lists every service, network, and volume.
+The application code is in `workers/*`. The `core` service loads six of these modules into one Bun process. The `apps` service runs `workers/apps` on `workerd`.
 
-The first diagram shows how the Workers call each other.
-Solid arrows are service bindings, Workflow bindings, or cross-script Durable Object bindings.
-Dotted arrows are Queue messages or K2 records.
+The first diagram shows how the modules and services call each other.
+Solid arrows are in-process calls, actor stubs, Workflow bindings, or HTTP calls between services.
+Dotted arrows are queue messages or event stream records.
 
 ```mermaid
 flowchart LR
-  WEB["rhumbatron-web"]
-  API["rhumbatron-api"]
-  COORD["rhumbatron-coordinator"]
-  ER["rhumbatron-event-router"]
-  INT["rhumbatron-integration"]
-  AG["rhumbatron-agents"]
-  IDX["rhumbatron-indexer"]
-  SBX["rhumbatron-sandbox"]
-  APPS["rhumbatron-apps"]
+  WEB["web service"]
+  subgraph CORE["core service"]
+    API["api"]
+    COORD["coordinator actors"]
+    ER["event router"]
+    INT["integration"]
+    AG["agents"]
+    IDX["indexer"]
+  end
+  APPS["apps service (workerd)"]
+  GIT["git service"]
+  SBXD["sandboxd"]
 
-  WEB -->|"API"| API
+  WEB -->|"HTTP, API_INTERNAL_URL"| API
   API -->|"PROJECT_ROOT, PROJECT_VIEW"| COORD
   API -->|"INTEGRATION, CHANGE_WORKFLOW"| INT
   API -->|"AGENTS"| AG
   API -.->|"integration"| INT
   API -.->|"agent-wakeups (dead-letter retry)"| AG
   COORD -->|"EVENT_ROUTER nudge"| ER
-  COORD -.->|"K2 records"| ER
+  COORD -.->|"event records"| ER
   ER -->|"PROJECT_VIEW, RESOURCE_SHARD"| COORD
   ER -.->|"agent-wakeups"| AG
   ER -.->|"integration"| INT
@@ -131,60 +137,59 @@ flowchart LR
   INT -.->|"agent-wakeups"| AG
   INT -->|"PROJECT_ROOT, RESOURCE_SHARD, PROJECT_VIEW"| COORD
   INT -->|"AGENT"| AG
-  INT -->|"SANDBOX"| SBX
-  INT -->|"APPS (AppBuilder)"| APPS
+  INT -->|"SANDBOX"| SBXD
+  INT -->|"APPS (RPC on :8789)"| APPS
+  APPS -->|"DB and EVIDENCE shims on :8790"| CORE
   AG -->|"PROJECT_ROOT, RESOURCE_SHARD"| COORD
-  AG -->|"SANDBOX"| SBX
+  AG -->|"SANDBOX"| SBXD
+  AG -->|"ARTIFACTS"| GIT
+  INT -->|"ARTIFACTS"| GIT
+  IDX -->|"ARTIFACTS"| GIT
   IDX -->|"PROJECT_ROOT"| COORD
 ```
 
-The second diagram shows which Worker hosts each Durable Object class and each Workflow class.
+The second diagram shows where each actor class and each Workflow class runs.
 
 ```mermaid
 flowchart TB
-  subgraph COORD["rhumbatron-coordinator"]
+  subgraph CORE["core: actor host"]
     PR["ProjectRootDO"]
     RS["ResourceShardDO"]
     PV["ProjectViewDO"]
-  end
-  subgraph AG["rhumbatron-agents"]
     ADO["AgentDO"]
   end
-  subgraph SBX["rhumbatron-sandbox"]
-    SB["Sandbox (container class)"]
-  end
-  subgraph INT["rhumbatron-integration"]
+  subgraph WF["core: workflow engine"]
     CW["ChangeWorkflow"]
     VW["CandidateVerificationWorkflow"]
     RW["ReleaseWorkflow"]
   end
-  subgraph APPS["rhumbatron-apps"]
+  subgraph APPS["apps service (workerd)"]
     ADD["AppDataDO"]
   end
-  API["rhumbatron-api"] -->|"CHANGE_WORKFLOW"| CW
+  SBX["sandboxd: one container per Project"]
+  API["api"] -->|"CHANGE_WORKFLOW"| CW
   CW --> RS
-  VW --> SB
-  ADO --> SB
+  VW --> SBX
+  ADO --> SBX
   RW --> PR
 ```
 
-| Worker | Hosts | Main bindings (Terraform names) | Triggers |
+| Module | Runs in | Hosts | Triggers |
 |---|---|---|---|
-| `rhumbatron-web` | TanStack Start app and static assets | `API` (service) | Custom domains `rhumbatron.com` and `www.rhumbatron.com` |
-| `rhumbatron-api` | Hono product API | `DB`, `EVIDENCE`, `PROJECT_ROOT`, `PROJECT_VIEW`, `AGENTS`, `INTEGRATION`, `INTEGRATION_COMMANDS`, `AGENT_WAKEUPS`, `CHANGE_WORKFLOW` | Custom domain `api.rhumbatron.com` |
-| `rhumbatron-coordinator` | ProjectRootDO, ResourceShardDO, ProjectViewDO | Own DO classes, `EVENT_ROUTER` (service), K2 producers `EVENTS_00` to `EVENTS_07` | Durable Object calls and alarms |
-| `rhumbatron-event-router` | K2 pull consumer, causal router, dead-letter consumer | `DB`, `EVIDENCE`, `PROJECT_VIEW`, `RESOURCE_SHARD`, `AGENT_WAKEUPS`, `INTEGRATION_COMMANDS`, `INDEXING`, `AI`, `EVENT_METRICS`, `K2_STREAM_IDS`, `K2_CONSUMER_TOKEN` | Cron `* * * * *`, `nudge` RPC, `rhumbatron-dead-letter-prod` Queue |
-| `rhumbatron-integration` | ChangeWorkflow, CandidateVerificationWorkflow, ReleaseWorkflow, approval and promotion RPC | `DB`, `EVIDENCE`, `CONFIG`, `AGENT_WAKEUPS`, `VERIFICATION_COMMANDS`, `RELEASE_COMMANDS`, `RESOURCE_SHARD`, `PROJECT_ROOT`, `PROJECT_VIEW`, `AGENT`, `SANDBOX`, `CHANGE_WORKFLOW`, `CANDIDATE_WORKFLOW`, `RELEASE_WORKFLOW`, `ARTIFACTS`, `BROWSER`, `APPS`, `AI`, AI Gateway variables | `rhumbatron-integration-prod`, `rhumbatron-verification-prod`, and `rhumbatron-release-prod` Queues, RPC |
-| `rhumbatron-agents` | AgentDO (Agents SDK `Agent` with Pi harness) | `DB`, `AGENT`, `SANDBOX`, `PROJECT_ROOT`, `RESOURCE_SHARD`, `ARTIFACTS`, `EVIDENCE`, `METRICS`, `AI`, `MEMORY`, AI Gateway variables | `rhumbatron-agent-wakeups-prod` Queue, `sandboxSmoke` and `goalSuggestions` RPC |
-| `rhumbatron-indexer` | Symbol, dependency, Product Graph, and vector indexes | `DB`, `EVIDENCE`, `PROJECT_ROOT`, `ARTIFACTS`, `MEMORY`, `AI`, `METRICS` | `rhumbatron-indexing-prod` Queue only |
-| `rhumbatron-sandbox` | `Sandbox` container class from `@cloudflare/sandbox` | Image `docker.io/cloudflare/sandbox:0.12.6`, instance type `basic`, `max_instances` 1 | Cross-script DO binding only |
-| `rhumbatron-apps` | Live apps of Projects on Dynamic Workers, `AppDataDO`, `AppBuilder` RPC (ADR 0020) | `LOADER` (Worker Loader), `DB`, `EVIDENCE`, `APP_DATA` (DO) | Route `*.rhumbatron.com/*`, `APPS` service binding |
+| `apps/web` | `web` service | TanStack Start app and static assets | `https://rhumbatron.localhost` |
+| `workers/api` | `core` | Hono product API and the live socket route | `https://api.rhumbatron.localhost`, and `/live/*` on the web host |
+| `workers/coordinator` | `core` | ProjectRootDO, ResourceShardDO, ProjectViewDO | Actor calls and alarms |
+| `workers/event-router` | `core` | Event log consumer, causal router, dead-letter consumer, housekeeping sweep | The sweep at the start of each minute, the `nudge` call, the `dead-letter` queue |
+| `workers/integration` | `core` | ChangeWorkflow, CandidateVerificationWorkflow, ReleaseWorkflow, approval and promotion calls | The `integration`, `verification`, and `release` queues, in-process calls |
+| `workers/agents` | `core` | AgentDO (Agents SDK `Agent` with the Pi harness) | The `agent-wakeups` queue, `sandboxSmoke` and `goalSuggestions` calls |
+| `workers/indexer` | `core` | Symbol, dependency, Product Graph, and vector indexes | The `indexing` queue only |
+| `workers/apps` | `apps` service | Live apps of Projects through the Worker Loader, `AppDataDO`, the app builder and checker (ADR 0020) | `https://<slug>.rhumbatron.localhost`, RPC from core |
 
 Notes:
 
-- The Sandbox class has its own Worker, `rhumbatron-sandbox` (ADR 0012). The provider cannot attach a container to a DO class in another Worker.
-- `rhumbatron-apps` hosts the live apps of Projects (ADR 0020).
-- Terraform sources: `infrastructure/terraform/envs/prod/main.tf` and `docs.tf`.
+- Every module in core gets the same environment, built in `services/core/src/main.ts`. [Infrastructure and cost](infrastructure-and-cost.md#bindings-in-core) lists the bindings.
+- The apps service reaches the product database and the bucket only through the internal shims of core (`services/apps/CONTRACT.md`). Loaded apps have no network.
+- The docs site is static files in the `edge` service at `https://docs.rhumbatron.localhost`.
 
 ## Reading order
 
@@ -202,15 +207,16 @@ flowchart LR
 ```
 
 1. [Change lifecycle](change-lifecycle.md): one goal from the browser to a release, and the status state machines.
-2. [Events and commands](events-and-commands.md): the outbox, K2, the event router, Queues, and idempotency.
+2. [Events and commands](events-and-commands.md): the outbox, the event log, the event router, the queues, and idempotency.
 3. [Agents and models](agents-and-models.md): AgentDO, the Pi loop, model routing, providers, and the Context Packet.
-4. [Source and verification](source-and-verification.md): Artifacts repos and forks, the Sandbox, checks, coverage, selection, and promotion.
-5. [Infrastructure and cost](infrastructure-and-cost.md): Terraform roots, adapters, state, cost guards, and the pause switch.
+4. [Source and verification](source-and-verification.md): Git repositories and forks, the Sandbox, checks, coverage, selection, and promotion.
+5. [Infrastructure and cost](infrastructure-and-cost.md): the Compose services, networks, and volumes, what costs money, and the guards.
 6. [Shared Projects and simultaneous requests](shared-projects.md): membership, roles, the intake gate, and how the system decides between open requests.
-7. [Live apps](live-apps.md): app hosts, the apps Worker, previews, the production pointer, rollback, and removal.
+7. [Live apps](live-apps.md): app hosts, the apps service, previews, the production pointer, rollback, and removal.
 
 Related documents:
 
 - [Tech stack](tech-stack.md): each technology in use and its function.
 - `docs/adr/`: one record per architecture decision. This guide cites ADRs by number.
 - `docs/BUILD_STATUS.md`: current phase, blockers, and caps.
+- [Local stack](../operations/local-stack.md): start, stop, and inspect the stack.

@@ -2,7 +2,7 @@
  * Single-person API journeys against a deployed environment: one person (the Clerk smoke user)
  * drives whole requests through the public API, with real planning, agents, Sandbox checks,
  * promotion, and live app releases. One function per journey A1 to A18 of the journey matrix.
- * Usage: bun scripts/journeys.ts prod [A1,A2,...|all]
+ * Usage: bun scripts/journeys.ts local [A1,A2,...|all]
  *
  * CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID must both be set in the environment, for the Clerk
  * instance of that environment. Nothing reads them from the Keychain, and nothing prints them.
@@ -20,8 +20,9 @@
  * Anthropic month passes $40, Sandbox use passes 15 h, or fewer than 40 model calls are left today.
  * `bun run cost:report` shows the Dynamic Worker versions, which the API does not report.
  */
+import { signIn as clerkSignIn } from "./lib/clerk-session.ts";
 
-const apis: Record<string, string> = { prod: "https://api.rhumbatron.com" };
+const apis: Record<string, string> = { local: "https://api.rhumbatron.localhost" };
 
 const environment = process.argv[2] ?? "";
 const base = apis[environment] ?? "";
@@ -51,80 +52,9 @@ const MINUTE = 60_000;
 /* Clerk sign-in                                                                               */
 /* ------------------------------------------------------------------------------------------ */
 
-async function clerkBackend(method: string, path: string, body?: unknown) {
-  const response = await fetch(`https://api.clerk.com/v1${path}`, {
-    method,
-    headers: { authorization: `Bearer ${secretKey}`, "content-type": "application/json" },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  return { status: response.status, json };
-}
-
-/**
- * A one-time sign-in token, redeemed on the Frontend API from the app origin, so the session
- * token carries `azp` like a browser session. Clerk session tokens live 60 seconds: one is reused
- * for at most 30 seconds.
- */
-async function signIn() {
-  const domains = await clerkBackend("GET", "/domains");
-  const domain = (
-    (domains.json.data ?? []) as { name: string; frontend_api_url: string; is_satellite: boolean }[]
-  ).find((d) => !d.is_satellite);
-  if (!domain) throw new Error(`Clerk domains returned ${domains.status} with no primary domain`);
-  const origin = `https://${domain.name}`;
-  const fapi = domain.frontend_api_url;
-  const ticket = await clerkBackend("POST", "/sign_in_tokens", {
-    user_id: smokeUserId,
-    expires_in_seconds: 120,
-  });
-  if (ticket.status !== 200) throw new Error(`Clerk sign-in token returned ${ticket.status}`);
-  const response = await fetch(`${fapi}/v1/client/sign_ins`, {
-    method: "POST",
-    headers: { origin, "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ strategy: "ticket", ticket: ticket.json.token as string }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const signed = (await response.json()) as {
-    response?: { status?: string; created_session_id?: string };
-  };
-  const sessionId = signed.response?.created_session_id;
-  if (response.status !== 200 || signed.response?.status !== "complete" || !sessionId) {
-    throw new Error(`Clerk ticket sign-in returned ${response.status}`);
-  }
-  const cookie = response.headers
-    .getSetCookie()
-    .map((c) => c.split(";")[0])
-    .join("; ");
-  let token = "";
-  let mintedAt = 0;
-  let minting: Promise<string> | null = null;
-  const mint = async () => {
-    const r = await fetch(`${fapi}/v1/client/sessions/${sessionId}/tokens`, {
-      method: "POST",
-      headers: { origin, cookie },
-      signal: AbortSignal.timeout(20_000),
-    });
-    const body = (await r.json()) as { jwt?: string };
-    if (r.status !== 200 || !body.jwt) throw new Error(`Clerk session token returned ${r.status}`);
-    token = body.jwt;
-    mintedAt = Date.now();
-    return token;
-  };
-  return {
-    async token(): Promise<string> {
-      if (token && Date.now() - mintedAt < 30_000) return token;
-      // Journeys run in parallel: one mint at a time.
-      minting ??= mint().finally(() => {
-        minting = null;
-      });
-      return minting;
-    },
-    async close() {
-      await clerkBackend("POST", `/sessions/${sessionId}/revoke`, {});
-    },
-  };
+/** A session for the smoke user (scripts/lib/clerk-session.ts). Tokens are reused for 30 s. */
+function signIn() {
+  return clerkSignIn(secretKey as string, smokeUserId as string);
 }
 
 const session = await signIn();

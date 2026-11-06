@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * UI end-to-end suite against prod (e2e/ui). Signs in as the Clerk prod smoke user in
+ * UI end-to-end suite against the local stack (e2e/ui). Signs in as the Clerk smoke user in
  * global setup. Run: bun run test:ui (needs CLERK_SECRET_KEY and CLERK_SMOKE_USER_ID).
  */
 export default defineConfig({
@@ -15,7 +15,7 @@ export default defineConfig({
   expect: { timeout: 20_000 },
   reporter: [["list"], ["json", { outputFile: "e2e/.results/report.json" }]],
   use: {
-    baseURL: "https://rhumbatron.com",
+    baseURL: "https://rhumbatron.localhost",
     storageState: "e2e/.auth/smoke.json",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",

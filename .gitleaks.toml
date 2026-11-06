@@ -26,6 +26,5 @@ keywords = ["sk-ant-"]
 description = "Generated and vendored files"
 paths = [
   '''bun\.lock''',
-  '''\.terraform\.lock\.hcl''',
   '''worker-configuration\.d\.ts''',
 ]

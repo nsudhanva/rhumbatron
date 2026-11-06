@@ -4,11 +4,11 @@ import { resolveTier, TIER_REASONING_EFFORT } from "./models.ts";
 import { anthropicCostUsd, classifyProviderFailure, type ModelProvider } from "./provider.ts";
 
 /**
- * One Messages API call to Anthropic through the Cloudflare AI Gateway (ADR 0021). Runs in Workers
- * and Bun. The request shape is provider-neutral (OpenAI-style messages and function tools) so the
- * callers stay unchanged; this module maps it to Anthropic content blocks and back.
+ * One Messages API call to Anthropic. The request shape is provider-neutral (OpenAI-style messages
+ * and function tools) so the callers stay unchanged; this module maps it to Anthropic content
+ * blocks and back.
  *
- * - URL: `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic/v1/messages`.
+ * - URL: `<baseUrl>/v1/messages`. The base URL defaults to `https://api.anthropic.com`.
  * - Every request sends `anthropic-workspace-id`: the API key is organization-level.
  * - Prompt caching: one `cache_control` breakpoint on the last system block, which also covers the
  *   tool definitions (render order tools -> system -> messages).
@@ -47,7 +47,7 @@ export type CompletionRequest = {
   messages: ChatMessage[];
   tools?: ToolDefinition[];
   maxOutputTokens: number;
-  /** Up to 5 small values, sent as cf-aig-metadata for gateway log filtering. */
+  /** Up to 5 small values that describe the call. Callers record them; they are not sent. */
   metadata?: Record<string, string>;
 };
 
@@ -100,8 +100,8 @@ export class ModelCallError extends Error {
 }
 
 export type GatewayConfig = {
-  accountId: string;
-  gatewayId: string;
+  /** Anthropic API base URL. Default `https://api.anthropic.com`. */
+  baseUrl?: string | undefined;
   /** Anthropic API key (organization-level). */
   apiKey: string;
   /** Sent as `anthropic-workspace-id` on every request. Not a secret. */
@@ -112,8 +112,8 @@ export type GatewayConfig = {
   fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 };
 
-export const gatewayAnthropicUrl = (accountId: string, gatewayId: string) =>
-  `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/anthropic`;
+export const anthropicBaseUrl = (baseUrl?: string) =>
+  (baseUrl || "https://api.anthropic.com").replace(/\/+$/, "");
 
 const EPHEMERAL = { type: "ephemeral" } as const;
 
@@ -192,7 +192,7 @@ export async function complete(
   const resolved = resolveTier(req.tier, config.allowOpus === true);
   const client = new Anthropic({
     apiKey: config.apiKey,
-    baseURL: gatewayAnthropicUrl(config.accountId, config.gatewayId),
+    baseURL: anthropicBaseUrl(config.baseUrl),
     defaultHeaders: { "anthropic-workspace-id": config.workspaceId },
     maxRetries: 0,
     timeout: config.timeoutMs ?? 120_000,
@@ -209,27 +209,17 @@ export async function complete(
   let headers: Headers;
   try {
     const { data, response } = await client.messages
-      .create(
-        {
-          model: resolved.model,
-          max_tokens: req.maxOutputTokens,
-          ...(mapped.system.length ? { system: mapped.system } : {}),
-          messages: mapped.messages,
-          ...(mapped.tools.length ? { tools: mapped.tools } : {}),
-          thinking,
-          ...(resolved.tier === "haiku"
-            ? {}
-            : { output_config: { effort: TIER_REASONING_EFFORT[resolved.tier] } }),
-        },
-        {
-          headers: {
-            // Agent and planner turns must never be served from the AI Gateway response cache: a
-            // repair turn after a rejected answer would get the same stored answer back.
-            "cf-aig-skip-cache": "true",
-            ...(req.metadata ? { "cf-aig-metadata": JSON.stringify(req.metadata) } : {}),
-          },
-        },
-      )
+      .create({
+        model: resolved.model,
+        max_tokens: req.maxOutputTokens,
+        ...(mapped.system.length ? { system: mapped.system } : {}),
+        messages: mapped.messages,
+        ...(mapped.tools.length ? { tools: mapped.tools } : {}),
+        thinking,
+        ...(resolved.tier === "haiku"
+          ? {}
+          : { output_config: { effort: TIER_REASONING_EFFORT[resolved.tier] } }),
+      })
       .withResponse();
     message = data;
     headers = response.headers;
@@ -280,7 +270,7 @@ export async function complete(
       cacheWrite1hTokens: usage.cache_creation?.ephemeral_1h_input_tokens ?? 0,
     }),
     latencyMs,
-    gatewayLogId: headers.get("cf-aig-log-id"),
+    gatewayLogId: headers.get("request-id"),
   };
 }
 

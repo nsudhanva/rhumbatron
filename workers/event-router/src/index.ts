@@ -6,20 +6,19 @@ import { buildArchive, writeArchive } from "./archive.ts";
 import { routeCausalBatch } from "./causal.ts";
 import { consumeDeadLetters } from "./dead-letter.ts";
 import { claimEvents, releaseEvents } from "./dedupe.ts";
-import { feedStatements } from "./feed.ts";
 import {
   ANALYTICS_SUBSCRIPTION,
   APPLY_DELTA_CAP,
   ARCHIVE_SUBSCRIPTION,
   type ConsumedBatch,
-  K2Client,
-  K2Error,
+  type EventLogClient,
+  eventLogOf,
   MAX_CONSUMES_PER_SUBSCRIPTION,
-  parseStreamIds,
   SUBSCRIPTIONS,
   type SubscriptionName,
   sweepStreamIndex,
-} from "./k2-consumer.ts";
+} from "./event-log.ts";
+import { feedStatements } from "./feed.ts";
 import {
   closeEndedDeadLetters,
   isMaintenanceTick,
@@ -33,13 +32,10 @@ import { batchKey, countBatchFailure, deadLetterBatch, shouldSkipBatch } from ".
 import { decodeEnvelope, groupByProject, planProjects, toViewDelta } from "./projector.ts";
 
 /**
- * K2 pull consumer. Two subscriptions per stream:
+ * Event log pull consumer. Two subscriptions per stream:
  * `project-view-projector` updates ProjectViewDO; `causal-router` wakes affected agents.
- * Subrequest budget per invocation, worst case, both subscriptions on one stream:
- *   per subscription: 1 resolve + 2 consume + 2 ack/nack + 2 D1 claim batches + 2 D1 release batches
- *     + 2 D1 batches for one failed delivery (count, dead-letter); a failure ends the subscription
- *   shared: at most APPLY_DELTA_CAP (15) applyDelta calls
- *   total: 2 * 11 + 15 = 37, below the Workers Free limit of 50.
+ * One invocation consumes at most MAX_CONSUMES_PER_SUBSCRIPTION batches per subscription and makes
+ * at most APPLY_DELTA_CAP (15) applyDelta calls, so one sweep stays short.
  * A batch that keeps failing is skipped after MAX_BATCH_FAILURES deliveries (poison-batch.ts).
  * The projector's event feed rows (feed.ts) ride in its D1 claim batch: no extra subrequest.
  */
@@ -60,15 +56,14 @@ const warnedProjects = new Set<string>();
 type Run = {
   env: Env;
   streamIndex: number;
-  k2: K2Client;
+  k2: EventLogClient;
   /** Remaining applyDelta calls for this invocation, shared by both subscriptions. */
   applyBudget: { remaining: number };
 };
 
-const errorInfo = (error: unknown) =>
-  error instanceof K2Error
-    ? { code: error.code, status: error.status, retryable: error.retryable, message: error.message }
-    : { message: error instanceof Error ? error.message : "unknown error" };
+const errorInfo = (error: unknown) => ({
+  message: error instanceof Error ? error.message.slice(0, 300) : "unknown error",
+});
 
 /**
  * Outcome of one batch. `failure` is set when processing failed, so the delivery counts toward the
@@ -266,9 +261,15 @@ async function runSubscription(run: Run, sub: SubscriptionName): Promise<number>
       }
     }
   } catch (error) {
-    // Includes lease-gone (10218) and retryable K2 codes. The cron sweep is the retry; at-least-once
+    // The sweep is the retry; at-least-once
     // delivery plus dedupe makes a redelivered batch safe.
-    log({ event: "router.k2_failed", stream: run.streamIndex, sub, stage, ...errorInfo(error) });
+    log({
+      event: "router.consume_failed",
+      stream: run.streamIndex,
+      sub,
+      stage,
+      ...errorInfo(error),
+    });
   }
   return processed;
 }
@@ -304,7 +305,7 @@ async function runArchive(run: Run): Promise<number> {
     }
   } catch (error) {
     log({
-      event: "router.k2_failed",
+      event: "router.consume_failed",
       stream: run.streamIndex,
       sub: ARCHIVE_SUBSCRIPTION,
       ...errorInfo(error),
@@ -364,7 +365,7 @@ async function runAnalytics(run: Run): Promise<number> {
     return written;
   } catch (error) {
     log({
-      event: "router.k2_failed",
+      event: "router.consume_failed",
       stream: run.streamIndex,
       sub: ANALYTICS_SUBSCRIPTION,
       ...errorInfo(error),
@@ -374,12 +375,12 @@ async function runAnalytics(run: Run): Promise<number> {
 }
 
 function newRun(env: Env, streamIndex: number): Run | null {
-  const streamId = parseStreamIds(env.K2_STREAM_IDS)[streamIndex];
-  if (!streamId || !env.K2_CONSUMER_TOKEN) return null;
+  const eventLog = eventLogOf(env);
+  if (!eventLog || streamIndex < 0 || streamIndex >= eventLog.streams) return null;
   return {
     env,
     streamIndex,
-    k2: new K2Client(streamId, env.K2_CONSUMER_TOKEN),
+    k2: eventLog.client(streamIndex),
     applyBudget: { remaining: APPLY_DELTA_CAP },
   };
 }
@@ -406,10 +407,9 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
   }
 
   /**
-   * Safety-net sweep: one stream per tick. Once a day it also queues fork and Project cleanup;
-   * every 5 minutes it queues recovery of Changes stuck in `releasing` (2 more subrequests).
-   * Ticks without either also project one analytics batch (5 more subrequests), so the worst case
-   * stays at 37 + 4 (archive) + 5 = 46, under the Workers Free limit of 50.
+   * Safety-net sweep, once a minute: one stream per tick. Once a day it also queues fork and Project
+   * cleanup; every 5 minutes it queues recovery of Changes stuck in `releasing`. Ticks without
+   * either also project one analytics batch.
    */
   override async scheduled(controller: ScheduledController): Promise<void> {
     if (isMaintenanceTick(controller.scheduledTime)) {
@@ -448,7 +448,7 @@ export default class EventRouter extends WorkerEntrypoint<Env> {
         log({ event: "router.index_purge_sweep_failed", ...errorInfo(error) });
       }
     }
-    const count = parseStreamIds(this.env.K2_STREAM_IDS).length;
+    const count = eventLogOf(this.env)?.streams ?? 0;
     const index = sweepStreamIndex(controller.scheduledTime, count);
     if (index < 0) return;
     await processStream(this.env, index);

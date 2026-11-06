@@ -1,6 +1,6 @@
-import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
 import type { ProjectRootDO, ResourceShardDO } from "@rhumbatron/coordinator";
 import { shardKey } from "@rhumbatron/coordinator/shard-key";
+import { getSandbox, type Sandbox } from "@rhumbatron/platform/sandbox";
 import {
   CODE_EXEC_TIMEOUT_MS,
   CODE_SESSION_IDLE_MS,
@@ -223,11 +223,7 @@ async function sessionEvent(
 const sessionDir = (sessionId: string) => `/workspace/${codeSessionRepo(sessionId)}`;
 
 const sandboxFor = (env: SessionEnv, projectId: string) =>
-  getSandbox(
-    env.SANDBOX as unknown as DurableObjectNamespace<Sandbox>,
-    `proj-${projectId.slice(5)}`,
-    { sleepAfter: "2m" },
-  );
+  getSandbox(env.SANDBOX, `proj-${projectId.slice(5)}`, { sleepAfter: "2m" });
 
 /**
  * Ends a session: status, the Sandbox directory (only while the Sandbox is awake: a sleeping

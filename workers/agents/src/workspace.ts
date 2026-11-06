@@ -1,10 +1,10 @@
-import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
 import {
   refundSandboxSeconds,
   reserveSandboxSeconds,
   SANDBOX_SLEEP_TAIL_SECONDS,
   settleSandboxUse,
 } from "@rhumbatron/integration/sandbox-meter";
+import { getSandbox, type Sandbox } from "@rhumbatron/platform/sandbox";
 import {
   boundPatch,
   changeSetPatchKey,
@@ -156,7 +156,7 @@ export const safePath = (path: string): string => {
 /* ------------------------------------------------------------------------------------------ */
 
 const sandboxFor = (env: WorkspaceEnv, projectId: string) =>
-  getSandbox(env.SANDBOX as unknown as DurableObjectNamespace<Sandbox>, sandboxId(projectId), {
+  getSandbox(env.SANDBOX, sandboxId(projectId), {
     sleepAfter: SLEEP_TAIL_SECONDS,
   });
 

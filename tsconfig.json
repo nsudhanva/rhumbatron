@@ -3,5 +3,11 @@
   "compilerOptions": {
     "types": ["bun"]
   },
-  "include": ["scripts/**/*.ts", "e2e/**/*.ts", "playwright.config.ts", "commitlint.config.ts"]
+  "include": [
+    "scripts/**/*.ts",
+    "services/**/*.ts",
+    "e2e/**/*.ts",
+    "playwright.config.ts",
+    "commitlint.config.ts"
+  ]
 }

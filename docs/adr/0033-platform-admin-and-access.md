@@ -2,7 +2,7 @@
 
 ## Context
 
-Rhumbatron runs on one prod environment with a fixed monthly spend (ADR 0017, ADR 0021). Any
+Rhumbatron runs as one Compose stack with one monthly model budget (ADR 0021, ADR 0034). Any
 person with a Clerk account can sign in. These requirements apply:
 
 - The operator must see the whole platform: spend against each cap, people, Projects, costs, and
@@ -10,14 +10,14 @@ person with a Clerk account can sign in. These requirements apply:
 - The operator must be able to hold new people until a person approves them, so that a stranger
   cannot spend the shared budget.
 - Each person must see their own spend: per month, per Project, and per request.
-- Prompts and request fields never grant authority (AGENTS.md section 40). Stay in the Cloudflare
-  free limits: add no new service and no new database.
+- Prompts and request fields never grant authority (AGENTS.md section 40). Add no new service
+  and no new database.
 
 ## Decision
 
-- One platform admin list. The Terraform variable `platform_admin_user_ids` (default: Sudhanva,
-  `usr_user_3KVgK2jUomozHjWQw7kPaVopRLq`) becomes the plain_text binding
-  `PLATFORM_ADMIN_USER_IDS` (a JSON array) on the API Worker. Local development has `[]`.
+- One platform admin list: the core setting `PLATFORM_ADMIN_USER_IDS` (a JSON array of user IDs)
+  in `.env`. `bun run stack:env` writes `[]`, and `compose.yaml` also defaults to `[]`. A change
+  takes effect when the core service restarts.
 - The API decides admin rights from the user ID of the verified session only
   (`isPlatformAdmin` in `workers/api/src/access.ts`). A malformed list gives no admin. No request
   field, header, or query value can name an admin. The web reads `platformAdmin` from `GET /v1/me`.
@@ -76,17 +76,17 @@ person with a Clerk account can sign in. These requirements apply:
 
 | Alternative | Why it lost |
 |---|---|
-| Clerk roles or Clerk Organizations for the admin | Rhumbatron does not use Clerk Organizations (ADR 0028). A Terraform variable keeps the admin list in reviewed code, and the API checks it without a Clerk call. |
-| An admin flag in D1 | A D1 write could create an admin. The binding changes only through a Terraform apply. |
-| Cloudflare Access in front of an admin page | It protects a host, not API routes that the web calls through a service binding. It adds a second identity system. |
+| Clerk roles or Clerk Organizations for the admin | Rhumbatron does not use Clerk Organizations (ADR 0028). A setting on the host keeps the admin list outside every API write, and the API checks it without a Clerk call. |
+| An admin flag in the database | A database write could create an admin. The setting changes only on the host, with a restart of core. |
+| An access proxy in front of an admin page | It protects a host, not API routes that the web server calls inside the stack. It adds a second identity system. |
 | Clerk allowlist or restricted sign-up mode | It stops sign-up in Clerk, with no queue for the operator to decide and no record in Rhumbatron. |
-| A cost table per model call | Every model caller would write one more D1 row per call. The meters and `task_runs` already hold the spend. |
+| A cost table per model call | Every model caller would write one more database row per call. The meters and `task_runs` already hold the spend. |
 | Refuse unknown people before the user row exists | The admin needs the row to see and approve the person. |
 
 ## Consequences
 
 - Each authenticated request reads two primary-key rows more (the user status and the setting)
-  in one D1 query. The first request of a new person adds one write. `users.last_seen_at` is
+  in one database query. The first request of a new person adds one write. `users.last_seen_at` is
   written at most once per hour per person.
 - The admin cost report reads `task_runs` through `idx_task_runs_started`, or the monthly meters
   through the `usage_counters` primary key (`day`, `counter`), at most 366 days and 1,000 rows.
@@ -96,4 +96,5 @@ person with a Clerk account can sign in. These requirements apply:
   most 20,000 rows.
 - A pending person can sign in and read `GET /v1/me`. The web shows one full-page message and no
   Project data.
-- A change of the admin list needs a Terraform apply.
+- A change of the admin list needs an edit of `.env` and a restart of core
+  (`docker compose up -d core`).

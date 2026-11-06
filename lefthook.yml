@@ -8,9 +8,6 @@ pre-commit:
       stage_fixed: true
     - name: gitleaks
       run: gitleaks git --staged --redact --no-banner
-    - name: terraform-fmt
-      glob: "*.{tf,tfvars}"
-      run: terraform fmt -check {staged_files}
     - name: guardrails
       run: bun scripts/check-guardrails.ts
 
@@ -26,7 +23,3 @@ pre-push:
       run: bun run typecheck
     - name: deps
       run: bun run check:deps
-    - name: terraform
-      run: bun run tf:check
-    - name: bindings
-      run: bun run check:bindings

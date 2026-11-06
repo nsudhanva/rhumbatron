@@ -1,10 +1,10 @@
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 
-// Static docs site for docs.rhumbatron.com, served by an assets-only Worker (envs/prod/docs.tf).
+// Static docs site for docs.rhumbatron.localhost. The edge (Caddy) serves the build output.
 // Pages are generated from the repository docs/ folder by scripts/sync-docs.ts.
 export default defineConfig({
-  site: "https://docs.rhumbatron.com",
+  site: "https://docs.rhumbatron.localhost",
   integrations: [
     starlight({
       title: "Rhumbatron",

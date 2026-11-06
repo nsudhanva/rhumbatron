@@ -30,8 +30,7 @@ export async function changeComplete(
     return await meteredComplete(
       { db: env.DB, budgetUsd, meters },
       {
-        accountId: env.AI_ACCOUNT_ID,
-        gatewayId: env.AI_GATEWAY_ID,
+        baseUrl: env.ANTHROPIC_BASE_URL,
         apiKey: env.ANTHROPIC_API_KEY,
         workspaceId: env.ANTHROPIC_WORKSPACE_ID,
         allowOpus: opusAllowed(env.ALLOW_OPUS),

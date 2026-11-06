@@ -2,13 +2,13 @@
 import { test as base, expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { apiFetch } from "./clerk.ts";
 
-/** Read-only fixtures the smoke user owns on prod. */
+/** Read-only fixtures the smoke user owns. Create them on the local stack, then set the IDs here. */
 export const TODO = {
   project: "proj_4dcb813d-4d3d-42f3-8dd2-99c52c271d87",
   change: "chg_45f49eca-1fcd-4235-b45c-b38817d33ea4",
   candidate: "cand_dc31a659317dac824aa25e23",
   task: "tsk_45f49eca-1fcd-4235-b45c-b38817d33ea4_t1",
-  app: "https://todo-mv497wob.rhumbatron.com",
+  app: "https://todo-mv497wob.rhumbatron.localhost",
 };
 
 /**

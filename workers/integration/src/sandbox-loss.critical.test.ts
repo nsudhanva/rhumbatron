@@ -12,7 +12,7 @@ const box = vi.hoisted(() => ({
   commands: [] as string[],
 }));
 
-vi.mock("@cloudflare/sandbox", () => ({
+vi.mock("@rhumbatron/platform/sandbox", () => ({
   getSandbox: () => ({
     async exec(command: string): Promise<ExecResult> {
       box.commands.push(command);

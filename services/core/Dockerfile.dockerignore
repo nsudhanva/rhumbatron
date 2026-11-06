@@ -1,0 +1,16 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.wrangler
+**/.probe
+.git
+.claude
+.env
+**/.env.local
+**/.dev.vars
+e2e
+infrastructure
+apps/web/src
+apps/web/public
+apps/docs/src
+apps/docs/public

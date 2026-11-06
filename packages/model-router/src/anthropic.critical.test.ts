@@ -135,8 +135,7 @@ describe("failure classes", () => {
 
 describe("gateway client", () => {
   const config = {
-    accountId: "acct",
-    gatewayId: "gw",
+    baseUrl: "https://anthropic.test",
     apiKey: "sk-test",
     workspaceId: "wrkspc_test",
   };
@@ -168,7 +167,7 @@ describe("gateway client", () => {
             cache_creation_input_tokens: 0,
           },
         },
-        { headers: { "cf-aig-log-id": "log-1" } },
+        { headers: { "request-id": "log-1" } },
       );
     };
     const result = await complete(
@@ -197,7 +196,7 @@ describe("gateway client", () => {
       headers: Headers;
       body: Record<string, unknown>;
     };
-    expect(request.url).toBe("https://gateway.ai.cloudflare.com/v1/acct/gw/anthropic/v1/messages");
+    expect(request.url).toBe("https://anthropic.test/v1/messages");
     expect(request.headers.get("anthropic-workspace-id")).toBe("wrkspc_test");
     expect(request.headers.get("x-api-key")).toBe("sk-test");
     expect(request.body.model).toBe("claude-sonnet-5-5");

@@ -10,7 +10,7 @@
  * the same path the product uses: the integration Worker then deletes each Project's Artifacts
  * repos and R2 source and context objects. `--dry-run` lists the matches and changes nothing.
  */
-const api = "https://api.rhumbatron.com";
+const api = "https://api.rhumbatron.localhost";
 const SMOKE_SLUG = /^(smoke|sandbox)-\d+$/;
 const PAGE = 200;
 

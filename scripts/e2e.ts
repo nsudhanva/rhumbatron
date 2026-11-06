@@ -58,7 +58,7 @@ import { ProjectViewSnapshot } from "../workers/coordinator/src/view-model.ts";
 import { type Session, signIn } from "./lib/clerk-session.ts";
 
 const apis: Record<string, string> = {
-  prod: "https://api.rhumbatron.com",
+  local: "https://api.rhumbatron.localhost",
 };
 
 const environment = process.argv[2] ?? "";
@@ -1043,9 +1043,9 @@ async function run() {
   if (!okProject) throw new Error("Project creation failed; later checks need it");
   const projectId = created[0] as string;
 
-  // Live apps exist only on prod. The app Project is created now, so its provisioning
+  // The app Project is created now, so its provisioning
   // overlaps the checks below; its own checks run before the archive section.
-  const appsOn = environment === "prod";
+  const appsOn = true;
   let appProjectId: string | null = null;
   if (appsOn) {
     const createdApp = await call("POST", "/v1/projects", {

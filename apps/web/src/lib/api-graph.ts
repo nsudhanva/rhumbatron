@@ -1,7 +1,7 @@
-import { env } from "cloudflare:workers";
 import { auth } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
 import { apiErrorMessage } from "./access";
+import { apiFetch } from "./server-env";
 
 /**
  * Graph reads over the API Worker (service binding `API`), on the web Worker with the user's Clerk
@@ -13,7 +13,7 @@ async function call<T>(path: string): Promise<T> {
   const { getToken } = await auth();
   const token = await getToken();
   if (!token) throw new Error("Sign in to continue");
-  const response = await env.API.fetch(
+  const response = await apiFetch(
     new Request(`https://api.internal${path}`, {
       method: "GET",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

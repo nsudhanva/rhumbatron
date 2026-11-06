@@ -1,15 +1,16 @@
 /**
  * Transactional outbox shared by the coordinator Durable Objects.
- * State changes insert outbox rows in the same transaction; an alarm publishes due rows to K2.
+ * State changes insert outbox rows in the same transaction; an alarm publishes due rows to the
+ * event log (NATS JetStream, one stream per shard).
  * Retries are bounded: exponential backoff up to 5 minutes, then the row is marked failed. A row
  * whose stream has no producer binding is marked failed at once: no retry can bind it.
  */
 import { fnv1a32 } from "./shard-key.ts";
 
 /**
- * K2 producer bindings EVENTS_00..EVENTS_07 come from Terraform with stream IDs that wrangler.jsonc
- * does not know, so they are typed here. They are absent in local dev: no alarm is set for the
- * outbox alone, and rows that another alarm finds due are marked failed as unbound.
+ * Event stream producer bindings EVENTS_00..EVENTS_07, one per shard. Core sets them. Without
+ * them no alarm is set for the outbox alone, and rows that another alarm finds due are marked
+ * failed as unbound.
  */
 export type K2SendResult = { success: boolean; error?: { message: string; retryable: boolean } };
 export type K2Producer = {
@@ -72,7 +73,7 @@ function unboundOutcome(previousAttempts: number, binding: string): PublishOutco
   return {
     kind: "failed",
     attemptCount: previousAttempts,
-    error: `unbound: no K2 producer binding ${binding} for this project's stream (Terraform Worker bindings)`,
+    error: `unbound: no event stream producer binding ${binding} for this project's stream`,
   };
 }
 
@@ -113,7 +114,7 @@ export class OutboxPublisher {
     private readonly env: Env,
   ) {}
 
-  /** Earliest time a pending row is due, or null. Null when no K2 binding exists (local dev). */
+  /** Earliest time a pending row is due, or null. Null when no stream binding exists. */
   nextDueAt(): number | null {
     if (!(this.env as unknown as K2Env).EVENTS_00) return null;
     const row = this.sql

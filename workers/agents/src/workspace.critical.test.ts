@@ -2,7 +2,7 @@ import { WorkspaceManifest, workspaceManifestKey } from "@rhumbatron/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const box = vi.hoisted(() => ({ head: "a".repeat(40), dirty: false, cleanupFails: false }));
-vi.mock("@cloudflare/sandbox", () => ({
+vi.mock("@rhumbatron/platform/sandbox", () => ({
   getSandbox: () => ({
     async exec(command: string) {
       if (command.startsWith("rm -rf") && box.cleanupFails) throw new Error("Sandbox lost");

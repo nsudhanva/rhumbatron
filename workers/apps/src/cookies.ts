@@ -1,11 +1,11 @@
 /**
- * Cookie isolation for apps on rhumbatron.com subdomains (ADR 0020). The router is the
+ * Cookie isolation for apps on rhumbatron.localhost subdomains (ADR 0020). The router is the
  * only path in and out of an app, so it can keep apps away from Rhumbatron cookies without a
  * separate zone:
  *
  * - Every cookie that an app sets is stored under a router prefix on the app's own host. A
  *   `Set-Cookie` with a `Domain` attribute is dropped, so an app cannot set a cookie for
- *   rhumbatron.com or for another app.
+ *   rhumbatron.localhost or for another app.
  * - On the way in, the app sees only the prefixed cookies, with the prefix removed. Cookies that
  *   other hosts set for the whole zone (for example Clerk's `__client_uat`) never reach the app.
  *

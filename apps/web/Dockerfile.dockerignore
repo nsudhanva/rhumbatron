@@ -1,0 +1,18 @@
+# Build context is the repository root (see apps/web/Dockerfile).
+.git
+**/node_modules
+**/dist
+**/.turbo
+**/.tanstack
+**/.wrangler
+**/.terraform
+**/.env*
+!**/.env.example
+**/.dev.vars*
+**/*.pem
+**/*.key
+**/*.tfstate*
+**/worker-configuration.d.ts
+infrastructure
+e2e
+docs

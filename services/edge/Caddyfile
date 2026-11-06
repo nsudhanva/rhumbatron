@@ -1,0 +1,29 @@
+# The edge for the local stack. Caddy issues certificates from its own local CA.
+{
+	local_certs
+}
+
+# The web app. Live sockets go straight to core, which reads the session cookie.
+rhumbatron.localhost {
+	@live path /live/*
+	reverse_proxy @live core:8787 {
+		stream_close_delay 5m
+	}
+	reverse_proxy web:3000
+}
+
+api.rhumbatron.localhost {
+	reverse_proxy core:8787 {
+		stream_close_delay 5m
+	}
+}
+
+docs.rhumbatron.localhost {
+	root * /srv/docs
+	file_server
+}
+
+# Live apps (<slug>) and Candidate previews (<previewId>--<slug>).
+*.rhumbatron.localhost {
+	reverse_proxy apps:8788
+}

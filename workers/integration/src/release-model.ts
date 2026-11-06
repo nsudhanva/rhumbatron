@@ -122,7 +122,7 @@ const ROUTER_PAGE_TITLES = [
   "App limit reached",
   "App error",
 ];
-const ROUTER_PAGE_FOOTER = '<a href="https://rhumbatron.com">Rhumbatron</a>';
+const ROUTER_PAGE_FOOTER = '<a href="https://rhumbatron.localhost">Rhumbatron</a>';
 
 /** The router's status page title when `body` is one, else null. */
 function routerPageTitle(body: string): string | null {

@@ -1,4 +1,4 @@
-import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
+import { getSandbox, type Sandbox } from "@rhumbatron/platform/sandbox";
 import { boundPatch, candidatePatchKey, patchCommand, patchMetadata } from "@rhumbatron/protocol";
 import {
   APP_BUILD_COMMAND,
@@ -59,11 +59,7 @@ export const settleSandbox = (
   });
 
 const sandboxFor = (env: CandidateEnv, projectId: string) =>
-  getSandbox(
-    env.SANDBOX as unknown as DurableObjectNamespace<Sandbox>,
-    `proj-${projectId.slice(5)}`,
-    { sleepAfter: "2m" },
-  );
+  getSandbox(env.SANDBOX, `proj-${projectId.slice(5)}`, { sleepAfter: "2m" });
 
 const candidateDir = (candidateId: string) => `/workspace/cand-${candidateId.slice(5)}`;
 

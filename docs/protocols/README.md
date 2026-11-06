@@ -5,7 +5,7 @@ The Zod schemas in `packages/protocol/src` are the protocol source of truth.
 | File | Content |
 |---|---|
 | `event.ts` | Event envelope and Event types. |
-| `command.ts` | Queue command envelope. |
+| `command.ts` | Command envelope for the command queues. |
 | `project.ts` | Project, Change, Change statuses, policies, create requests, requesters, request outcomes, clarifications, and the request review (`ChangeReview`, `DeclineChangeRequest`, `ReviewChangeOutcome`). |
 | `roles.ts` | Project roles, the permission matrix (`PERMISSIONS`, `can`), the review rule (`needsReview`), invitation and role-change rules, and the members response. |
 | `board.ts` | The Board response and the column of each Change status (`BOARD_COLUMN_OF`). |
@@ -24,7 +24,7 @@ The Zod schemas in `packages/protocol/src` are the protocol source of truth.
 
 ## API routes
 
-The API Worker (`workers/api/src`) serves `https://api.rhumbatron.com`. Every route except `/health` and `/v1/version` needs a signed-in user. A person who is not approved gets 403 `approval_required` on every route except `GET /v1/me` (see [Platform admin and access](#platform-admin-and-access)). The API reads the role of the caller from D1 (`identity.ts`). It never reads the role from the client. A caller with no access to the Project gets 404.
+The API module (`workers/api/src`) runs in the `core` service and serves `https://api.rhumbatron.localhost`. Every route except `/health` and `/v1/version` needs a signed-in user. A person who is not approved gets 403 `approval_required` on every route except `GET /v1/me` (see [Platform admin and access](#platform-admin-and-access)). The API reads the role of the caller from the product database (`identity.ts`). It never reads the role from the client. A caller with no access to the Project gets 404.
 
 The roles are `owner`, `admin`, `member`, and `viewer`. `can(role, action)` in `packages/protocol/src/roles.ts` is the one permission matrix (see [Roles and permissions](#roles-and-permissions)). The Access column uses these values:
 
@@ -157,13 +157,13 @@ While the Project setting `memberRequestReview` is `true` (the default), `POST /
 | Response | Field | Meaning |
 |---|---|---|
 | `GET /v1/projects` and `GET /v1/projects/:projectId` | `role` | `owner`, `admin`, `member`, or `viewer`. The caller's role in the Project. |
-| Every response that names a Change | `title` | Short display title, at most 48 characters. The Root Planner writes it with the Work Graph (D1 `changes.title`, migration `0028_change_titles.sql`). Before planning, after a planning failure, and for a Change created with `startPlanning: false`, it is `fallbackTitle(goal)`: the first sentence or clause of the goal without opening filler such as "please" or "I want", at most 6 words. The responses are the Change, the Change list, the request-conflict sides, the cost, verification, workspace, and Product Graph Change lists, and the code version `change`. Agent tasks carry it as `changeTitle`. Notification bodies use it in place of the goal. `goal` stays the full request text. |
+| Every response that names a Change | `title` | Short display title, at most 48 characters. The Root Planner writes it with the Work Graph (`changes.title`, migration `0028_change_titles.sql`). Before planning, after a planning failure, and for a Change created with `startPlanning: false`, it is `fallbackTitle(goal)`: the first sentence or clause of the goal without opening filler such as "please" or "I want", at most 6 words. The responses are the Change, the Change list, the request-conflict sides, the cost, verification, workspace, and Product Graph Change lists, and the code version `change`. Agent tasks carry it as `changeTitle`. Notification bodies use it in place of the goal. `goal` stays the full request text. |
 | Change list and `GET /v1/changes/:changeId` | `requester` | Who asked for the Change: `userId`, `name`, `rank` (the rank of the requester's role at request time, display order only), `role` (the requester's current role, null after they left), and `isYou`. |
 | `POST /v1/projects/:projectId/changes`, the Change list, and `GET /v1/changes/:changeId` | `review` | `state` (`not_needed`, `proposed`, `included`, or `declined`), `decidedBy` (`userId`, `name`, or null), `decidedAt`, and `reason` (the decline reason). A withdrawn `proposed` request keeps `state: proposed`. |
 | Change list and `GET /v1/changes/:changeId` | `outcome` | How the request ended after the intake gate or the cross-request check. Null when no check decided it. |
 | Change list and `GET /v1/changes/:changeId` | `supersedesChangeId` | Null for every request the API creates. |
 | Change list and `GET /v1/changes/:changeId` | `clarification` | `ChangeClarification` while the Change is `needs_input`, else null: `kind` (`unclear`, `duplicate`, `conflict`), `summary`, `questions` (`id`, `text`, optional `options`: 2 to 4 readings), `relatedChangeId`, `relatedGoal`, `relatedTitle` (the related Change's title, added on read), `askedAt`, `round` (1 to 3). Each question asks one thing and has its own answer. |
-| `GET /v1/changes/:changeId` | `assumptions` | The small product details that the Root Planner decided because the goal left them open, as plain sentences (D1 `changes.assumptions_json`, migration `0032_change_assumptions.sql`). Empty before planning. |
+| `GET /v1/changes/:changeId` | `assumptions` | The small product details that the Root Planner decided because the goal left them open, as plain sentences (`changes.assumptions_json`, migration `0032_change_assumptions.sql`). Empty before planning. |
 
 ### Change statuses for requests
 
@@ -235,7 +235,7 @@ The routes and helpers are in `workers/api/src/budgets.ts`. The schemas are in `
 
 ## Code edit sessions
 
-The owner or an admin (`can(role, "code.edit")`) opens an edit session on the Code page (ADR 0029). The routes are in `workers/api/src/code-sessions.ts`. The API calls the integration Worker through the `INTEGRATION` service binding (`workers/integration/src/code-sessions.ts`). A session belongs to the person who opened it. Any other caller gets 404 for it. A caller without `code.edit` gets 403.
+The owner or an admin (`can(role, "code.edit")`) opens an edit session on the Code page (ADR 0029). The routes are in `workers/api/src/code-sessions.ts`. The API calls the integration module through the `INTEGRATION` binding (`workers/integration/src/code-sessions.ts`). A session belongs to the person who opened it. Any other caller gets 404 for it. A caller without `code.edit` gets 403.
 
 | Method | Path | Result | Main errors |
 |---|---|---|---|
@@ -260,14 +260,14 @@ Sandbox refusals of a command:
 | Reason | HTTP | Cause |
 |---|---|---|
 | `sandbox_cap` | 429 | The monthly Sandbox meter is used up. |
-| `sandbox_busy` | 503 | The Sandbox did not start (`ContainerUnavailableError`), or the readiness probe got no answer in 120 s. The account runs one Sandbox container at a time, and agents or Candidate checks of another Project can use it. The message is "The Sandbox is busy with work for another Project. Only one runs at a time. Try again in a few minutes." |
+| `sandbox_busy` | 503 | The Sandbox did not start (`ContainerUnavailableError`), or the readiness probe got no answer in 120 s. sandboxd runs at most `SANDBOX_MAX` Sandboxes (default 4), and agents or Candidate checks of other Projects can use them. The message is "The Sandbox is busy with work for another Project. Only one runs at a time. Try again in a few minutes." |
 | `sandbox_unavailable` | 503 | The Sandbox cannot run commands as an unprivileged user, or the command failed in the Sandbox. |
 
-The first command of a session can cold-start the container, so it probes the checkout with the 120 s setup timeout. A failed probe writes `code_session.probe_failed` to Workers Logs with the session, the Project, and the error. The Code page terminal shows the message of the server for each refusal.
+The first command of a session can cold-start the container, so it probes the checkout with the 120 s setup timeout. A failed probe writes `code_session.probe_failed` to the core log with the session, the Project, and the error. The Code page terminal shows the message of the server for each refusal.
 
 A session ends 10 minutes after its last request (`CODE_SESSION_IDLE_MS`) or 2 hours after it opened (`CODE_SESSION_MAX_MS`). Each request checks the limits first. The daily maintenance sweep ends the overdue sessions of all Projects. When a session ends, Rhumbatron deletes its fork and the edits that are not submitted.
 
-D1 tables (migration `0030_code_sessions.sql`):
+Tables (migration `0030_code_sessions.sql`):
 
 | Table | Content |
 |---|---|
@@ -281,7 +281,7 @@ Events: `code.session.opened` (`baseGeneration`, `baseTree`), `code.session.clos
 
 The routes are in `workers/api/src/admin.ts`, `workers/api/src/access.ts`, and `workers/api/src/budgets.ts`. The schemas are in `packages/protocol/src/admin.ts`. See [ADR 0033](../adr/0033-platform-admin-and-access.md) and [Shared Projects, Access gate](../architecture/shared-projects.md#access-gate).
 
-A platform admin is a user ID in the `PLATFORM_ADMIN_USER_IDS` binding (Terraform `platform_admin_user_ids`). The API compares it with the user ID of the verified session. Every `/v1/admin/*` route answers 403 `forbidden` to anyone else. Every admin read and write adds one `admin_audit` row. Each JSON response is `{ data }`.
+A platform admin is a user ID in the `PLATFORM_ADMIN_USER_IDS` setting, a JSON array in `.env`. The API compares it with the user ID of the verified session. Every `/v1/admin/*` route answers 403 `forbidden` to anyone else. Every admin read and write adds one `admin_audit` row. Each JSON response is `{ data }`.
 
 | Method | Path | Result | Main errors |
 |---|---|---|---|
@@ -309,7 +309,7 @@ Notifications (derived on each read, like all other items):
 
 These items have no Project: `projectId` is an empty string and `projectName` is "Rhumbatron".
 
-D1 (migration `0035_platform_admin_and_access.sql`):
+Tables and columns (migration `0035_platform_admin_and_access.sql`):
 
 | Table or column | Content |
 |---|---|

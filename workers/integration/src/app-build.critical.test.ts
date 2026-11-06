@@ -15,7 +15,7 @@ const box = vi.hoisted(() => ({
   buildExit: 0,
 }));
 
-vi.mock("@cloudflare/sandbox", () => ({
+vi.mock("@rhumbatron/platform/sandbox", () => ({
   getSandbox: () => ({
     async exec(command: string) {
       box.commands.push(command);

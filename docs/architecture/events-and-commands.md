@@ -2,12 +2,14 @@
 
 Rhumbatron keeps facts and work apart.
 
-- An Event is an immutable fact, for example `task.completed`. Events travel on K2.
-- A Command is a request for work, for example `agent.wake`. Commands travel on Queues.
+- An Event is an immutable fact, for example `task.completed`. Events travel on the event log: eight NATS JetStream streams.
+- A Command is a request for work, for example `agent.wake`. Commands travel on queues: one JetStream work-queue stream.
 
-No authoritative state change writes to K2 directly.
-A Durable Object writes the state change and the Event in one SQLite transaction (the outbox).
-A publisher sends the outbox rows to K2 later.
+No authoritative state change writes to the event log directly.
+An actor writes the state change and the Event in one SQLite transaction (the outbox).
+A publisher sends the outbox rows to the event log later.
+
+Core creates the streams at start (`packages/platform/src/messaging/jetstream.ts`). The `nats` service stores them on the `nats-data` volume.
 
 ## Envelopes
 
@@ -26,43 +28,43 @@ A retried Workflow step writes the same Event ID again, and the outbox ignores t
 ProjectRootDO and ResourceShardDO use `crypto.randomUUID()` for Events that they create in their own transaction (for example `canonical.advanced` and `claim.acquired`).
 The transaction runs once, so a retry keeps the same ID.
 
-## Transactional outbox to K2
+## Transactional outbox to the event log
 
-Two Durable Object classes own an outbox: ProjectRootDO and ResourceShardDO.
+Two actor classes own an outbox: ProjectRootDO and ResourceShardDO.
 ProjectRootDO writes `project.created`, `artifact.promoted`, and `canonical.advanced`.
 ResourceShardDO writes all other Events.
 Change Events go to the shard that owns `change:<id>` (`appendChangeEvents` in `workers/integration/src/events.ts`).
 
 ```mermaid
 flowchart LR
-  W["State change in DO SQLite"] --> T{{"Same transaction"}}
+  W["State change in actor SQLite"] --> T{{"Same transaction"}}
   T --> OB[("outbox row<br/>event_id UNIQUE")]
-  OB --> AL["DO alarm<br/>(AlarmGuard)"]
+  OB --> AL["Actor alarm<br/>(AlarmGuard)"]
   AL --> PUB["OutboxPublisher.publishDue<br/>max 100 rows per project"]
   PUB --> H["streamIndex =<br/>fnv1a32(projectId) mod 8"]
   H --> P["Producer binding<br/>EVENTS_00 .. EVENTS_07"]
-  P --> K2[("K2 stream<br/>rhumbatron_events_NN_prod")]
+  P --> JS[("JetStream stream<br/>EVENTS_NN")]
   PUB -->|"after a successful send"| N["EVENT_ROUTER.nudge(streamIndex)"]
-  CRON["Cron every minute<br/>one stream per tick"] --> ER["rhumbatron-event-router"]
+  SWEEP["Sweep every minute<br/>one stream per tick"] --> ER["Event router"]
   N --> ER
-  K2 --> ER
+  JS --> ER
 ```
 
-Rules in the code (`workers/coordinator/src/outbox.ts`, `infrastructure/terraform/envs/prod/main.tf`):
+Rules in the code (`workers/coordinator/src/outbox.ts`, `packages/platform/src/messaging/jetstream.ts`):
 
-- There are 8 streams, `rhumbatron_events_00_prod` to `rhumbatron_events_07_prod`. K2 names allow only letters, digits, and underscores (ADR 0006).
-- Retention is 7 days (`retention_seconds = 604800`).
+- There are 8 streams, `EVENTS_00` to `EVENTS_07`, on the subjects `events.00` to `events.07`. Core creates them at start.
+- Retention is 7 days (`max_age`, limits retention, file storage).
+- JetStream drops a second publish with the same `event-id` header inside a 2-hour window.
 - One Project always maps to one stream. Its Events stay in order on that stream.
-- The nudge is best effort. The cron sweep catches what the nudge misses. The cron visits one stream per minute, so each stream gets a sweep every 8 minutes. The pause switch removes the cron.
-- A Terraform precondition fails the plan if the account would have more than 20 K2 streams (ADR 0017).
-- `AlarmGuard` (`alarm-guard.ts`) limits each Durable Object to 2,000 alarm fires per UTC day. An alarm with no due work is deleted.
+- The nudge is an in-process call to the event router. The sweep catches what the nudge misses. The sweep visits one stream per minute, so each stream gets a sweep every 8 minutes.
+- `AlarmGuard` (`alarm-guard.ts`) limits each actor to 2,000 alarm fires per UTC day. An alarm with no due work is deleted.
 
 ### Outbox row states
 
 ```mermaid
 stateDiagram-v2
   [*] --> pending: inserted with the state change
-  pending --> published: K2 send succeeded
+  pending --> published: stream publish succeeded
   pending --> retry_wait: send failed
   retry_wait --> pending: backoff 1 s, 2 s, 4 s ... max 5 min
   retry_wait --> failed: 10th failed attempt
@@ -72,18 +74,20 @@ stateDiagram-v2
 ```
 
 A failed row stays in the table with `last_error`, so an operator can see it.
-If K2 is down, the state change is still correct. Only the dashboard lags.
+If NATS is down, the state change is still correct. Only the dashboard lags.
 
-## Event router: K2 pull consumer
+## Event router: the event log consumer
 
-The event router pulls from K2 over HTTP with `K2_CONSUMER_TOKEN`.
-Every nudge and every cron tick runs two subscriptions on one stream: `project-view-projector`, then `causal-router`.
-The cron tick also runs one `audit-archiver` batch.
-A cron tick without maintenance or the release sweep also runs one `analytics-projector` batch.
+The event router runs in core. It reads the streams through the `EVENT_LOG` binding.
+Each subscription is a durable JetStream pull consumer with explicit ack. One consume fetches at most 100 records. A nack redelivers the batch after 30 s. An unacknowledged batch comes back after 5 minutes.
+Core calls the router's `scheduled` handler at the start of each minute (`scheduleSweep` in `services/core/src/main.ts`).
+Every nudge and every sweep tick runs two subscriptions on one stream: `project-view-projector`, then `causal-router`.
+The sweep tick also runs one `audit-archiver` batch.
+A sweep tick without maintenance or the release sweep also runs one `analytics-projector` batch.
 
 ```mermaid
 flowchart TB
-  START["nudge or cron tick for stream N"] --> SUBS["project-view-projector,<br/>then causal-router<br/>(max 2 consumes each)"]
+  START["nudge or sweep tick for stream N"] --> SUBS["project-view-projector,<br/>then causal-router<br/>(max 2 consumes each)"]
   SUBS --> DEC["Decode envelopes"]
   DEC --> CLAIM["claimEvents: INSERT OR IGNORE<br/>processed_events (consumer, event_id)<br/>projector: + project_events feed rows"]
   CLAIM --> FRESH{"Subscription"}
@@ -96,24 +100,23 @@ flowchart TB
   REL --> CNT["Count failure in k2_batch_failures"]
   CNT -->|"below 5"| NACK["nack: redeliver later"]
   CNT -->|"5th failure"| DL["dead_letters row, mark events processed, ack"]
-  START --> ARC["Cron only: audit-archiver<br/>gzip NDJSON to R2 events/"]
-  START --> AN["Cron only: analytics-projector<br/>1 batch, dedupe, Analytics Engine"]
+  START --> ARC["Sweep only: audit-archiver<br/>gzip NDJSON to the bucket, events/"]
+  START --> AN["Sweep only: analytics-projector<br/>1 batch, dedupe, EVENT_METRICS"]
 ```
 
 Notes (`workers/event-router/src/index.ts`):
 
-- A nudge uses at most 37 subrequests. A cron tick uses at most 46. The Workers Free limit is 50.
 - The router releases the claim rows before a nack. Otherwise a redelivery skips the events as duplicates.
 - Events that the 15-call `applyDelta` cap defers lose their claim and come back with the next delivery. A deferral does not count as a failure.
-- A dead-lettered K2 batch gets a `dead_letters` row with queue `k2-<consumer>`. An operator can only dismiss it (`poison-batch.ts`).
+- A skipped event batch gets a `dead_letters` row. An operator can only dismiss it (`poison-batch.ts`).
 - A dead letter closes without an operator: `succeeded` when the same command later succeeds, and `superseded` when a later `change.settle` of the same Change runs or when its Change ends (the 5-minute sweep closes the dead letters of `completed`, `failed`, `cancelled`, `not_selected`, and `declined` Changes).
-- The archive key is `events/<yyyy>/<mm>/<dd>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz`. The R2 lifecycle deletes `events/` objects after 365 days.
-- Terraform creates four subscriptions: `causal-router`, `project-view-projector`, `audit-archiver`, and `analytics-projector`.
-- `analytics-projector` (`analytics.ts`) maps lifecycle Events to metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others). It writes one data point per fresh Event, at most 100 per tick, to the `rhumbatron_event_metrics_prod` dataset (binding `EVENT_METRICS`). Other Workers write their own data points to `METRICS`.
+- The archive key is `events/<yyyy>/<mm>/<dd>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz` in the `rhumbatron-evidence` bucket. Core deletes archive objects after 365 days (`services/core/src/expiry.ts`).
+- There are four subscriptions per stream: `causal-router`, `project-view-projector`, `audit-archiver`, and `analytics-projector`. The client creates each durable consumer when it first reads it.
+- `analytics-projector` (`analytics.ts`) maps lifecycle Events to metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others). It writes one data point per fresh Event, at most 100 per tick, to `EVENT_METRICS`. Other modules write their own data points to `METRICS`. Both are rows in the `platform_metrics` table.
 
-### Cron housekeeping
+### Sweep housekeeping
 
-The same every-minute cron runs two bounded sweeps (`workers/event-router/src/maintenance.ts`):
+The every-minute sweep also runs two bounded housekeeping jobs (`workers/event-router/src/maintenance.ts`):
 
 | Tick | Work |
 |---|---|
@@ -123,7 +126,7 @@ The same every-minute cron runs two bounded sweeps (`workers/event-router/src/ma
 ## Causal routing
 
 The causal router decides which Agents wake after each fresh Event (`workers/event-router/src/causal.ts`, `packages/causal-router`).
-Deterministic rules run first. Clef-flash on Workers AI decides only a prefix resource overlap.
+Deterministic rules run first. Clef-flash decides only a prefix resource overlap. A Clef-flash question is one Claude Haiku call with a forced tool call (`packages/platform/src/ai/models.ts`).
 
 ```mermaid
 flowchart TB
@@ -156,26 +159,33 @@ Notes:
 - `artifact.promoted` and `canonical.advanced` both queue `index.build` for the indexer. The cap does not count `index.build` or `candidates.recompose`.
 - After `canonical.advanced`, the router marks the promoted Candidate `promoted` and every other open Candidate on an older base `stale`. A Change in `awaiting_approval` with no verified Candidate returns to `verifying`. The `candidates.recompose` command then settles each stale Candidate. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release).
 - `task.completed` and `task.failed` free an Agent slot. When a ready Task waits at the 8-agent limit, the router dispatches the Change again.
-- The wake consumer checks relevance again. A stale wake ends at once and counts as a false wakeup in Analytics Engine (`workers/agents/src/wake-consumer.ts`).
+- The wake consumer checks relevance again. A stale wake ends at once and counts as a false wakeup in `METRICS` (`workers/agents/src/wake-consumer.ts`).
 
 ## Queues
 
-All Queues are named `rhumbatron-<purpose>-prod`.
-Terraform creates six Queues (`modules/async`) with 1 day of message retention.
+Each queue is one subject, `cmd.<queue>`, on the JetStream work-queue stream `COMMANDS`.
+Core runs one durable consumer, `q-<queue>`, per queue (`runQueueConsumer` in `packages/platform/src/messaging/jetstream.ts`).
+
+- Delivery is at least once, with explicit ack.
+- A send with a `commandId` carries the message ID `<queue>:<commandId>`. JetStream drops a repeat inside a 2-hour window.
+- A message stays in the stream for at most 14 days.
+- A handler that throws, or that calls `retry`, gets a redelivery after the delay that the handler sets.
+- After the last retry the consumer sends the message to `dead-letter` and terminates it.
+- A handler can hold a batch for up to 15 minutes. The consumer extends the ack deadline every 30 s while the handler runs.
 
 ```mermaid
 flowchart LR
-  API["rhumbatron-api"]
-  ER["rhumbatron-event-router"]
-  INT["rhumbatron-integration"]
+  API["api"]
+  ER["event router"]
+  INT["integration"]
   WQ[["agent-wakeups"]]
   IQ[["integration"]]
   XQ[["indexing"]]
   VQ[["verification"]]
   RQ[["release"]]
   DLQ[["dead-letter"]]
-  AG["rhumbatron-agents"]
-  IDX["rhumbatron-indexer"]
+  AG["agents"]
+  IDX["indexer"]
 
   INT -->|"agent.wake"| WQ
   ER -->|"agent.wake"| WQ
@@ -193,16 +203,16 @@ flowchart LR
   DLQ --> ER
 ```
 
-| Queue | Consumer | Batch | Retries | Retry delay | Dead-letter Queue |
-|---|---|---|---|---|---|
-| `agent-wakeups` | `rhumbatron-agents` | 10 | 3 | 30 s | `dead-letter` |
-| `integration` | `rhumbatron-integration` | 10 | 3 | 30 s | `dead-letter` |
-| `verification` | `rhumbatron-integration` | 5 | 3 | 30 s | `dead-letter` |
-| `release` | `rhumbatron-integration` | 5 | 3 | 30 s | `dead-letter` |
-| `indexing` | `rhumbatron-indexer` | 1, concurrency 1 | 3 | 30 s | none (the indexer records the failure in `project_indexes`) |
-| `dead-letter` | `rhumbatron-event-router` | 5 | 5 | 60 s | none (dropped and logged) |
+| Queue | Consumer | Batch | Concurrency | Retries | Retry delay | Dead-letter queue |
+|---|---|---|---|---|---|---|
+| `agent-wakeups` | agents | 10 | 2 | 3 | 30 s | `dead-letter` |
+| `integration` | integration | 10 | 2 | 3 | 30 s | `dead-letter` |
+| `verification` | integration | 5 | 2 | 3 | 30 s | `dead-letter` |
+| `release` | integration | 5 | 2 | 3 | 30 s | `dead-letter` |
+| `indexing` | indexer | 1 | 1 | 3 | 30 s | none (the indexer records the failure in `project_indexes`) |
+| `dead-letter` | event router | 5 | 1 | 5 | 60 s | none (dropped and logged) |
 
-The integration Worker consumes the `integration`, `verification`, and `release` Queues with one handler.
+The integration module consumes the `integration`, `verification`, and `release` queues with one handler.
 
 Two commands start Workflows: `verification.start` (one per Candidate) and `release.start` (one per promoted generation with a live app).
 Each command carries a stable `commandId` and the idempotency key (Candidate ID or release ID).
@@ -214,7 +224,7 @@ The integration consumer also limits its own work (`MAX_DELIVERIES = 4` in `work
 1. A bounded command with more work asks for another delivery after 10 s.
 2. A `candidate.create` that waits for a conflict review asks for another delivery after 45 s. Its last delivery composes anyway.
 3. A thrown error retries after 30 s.
-4. On the 4th delivery the consumer acknowledges the message. It does not send it to the dead-letter Queue.
+4. On the 4th delivery the consumer acknowledges the message. It does not send it to the dead-letter queue.
 
 The daily 04:17 UTC tick queues `forks.sweep` and `project.cleanup` again.
 
@@ -223,11 +233,11 @@ The daily 04:17 UTC tick queues `forks.sweep` and `project.cleanup` again.
 ```mermaid
 sequenceDiagram
   autonumber
-  participant Q as Origin Queue
-  participant C as Consumer Worker
-  participant DLQ as dead-letter Queue
+  participant Q as Origin queue
+  participant C as Consumer module
+  participant DLQ as dead-letter queue
   participant ER as Event router
-  participant D1 as D1
+  participant DB as Product database
   participant Shard as ResourceShardDO
   actor Op as Operator
 
@@ -235,18 +245,18 @@ sequenceDiagram
   C-->>Q: throw, retry in 30 s (3 times)
   Q->>DLQ: move poison command
   DLQ->>ER: deliver
-  ER->>D1: dead_letters row (idempotent on command_id)
-  ER->>D1: ready or assigned Task to blocked (blocked_limit dead_letter)
+  ER->>DB: dead_letters row (idempotent on command_id)
+  ER->>DB: ready or assigned Task to blocked (blocked_limit dead_letter)
   ER->>Shard: task.failed (outbox)
-  Op->>D1: Retry or Dismiss in the UI (API)
-  D1-->>Q: Retry sends the command again with attempt + 1
+  Op->>DB: Retry or Dismiss in the UI (API)
+  DB-->>Q: Retry sends the command again with attempt + 1
 ```
 
 Notes (`workers/event-router/src/dead-letter.ts`, `workers/api/src/dead-letters.ts`):
 
 - A command without a Task, or with a Task that already runs, puts the reason on the Change instead. Only a blocked Task records `task.failed`.
 - Retry sends `agent.wake` to `agent-wakeups` and every other command to `integration`.
-- The dead-letter consumer never re-sends a command. Only an operator action re-sends it (ADR 0019).
+- The dead-letter consumer never re-sends a command. Only an operator action re-sends it.
 
 ## Idempotency and dedupe
 
@@ -255,36 +265,38 @@ Every retry boundary has a stable key, so a retry never creates a second logical
 | Boundary | Key | Where the code enforces it |
 |---|---|---|
 | Event publish | `eventId` | `outbox.event_id UNIQUE`; shard `appendEvents` uses `INSERT OR IGNORE` |
-| Event consume | `(consumer, event_id)` | D1 `processed_events`, `INSERT OR IGNORE`, kept 14 days |
+| Event consume | `(consumer, event_id)` | `processed_events`, `INSERT OR IGNORE`, kept 14 days |
 | Wake command | `cmd_<task>_ready` (dispatch), `cmd_<event>_<task>` (router) | Wake consumer treats a ready wake for a Task that the same Agent holds as a duplicate; `admitAgent` assigns once |
-| Dead-letter record | `command_id` | D1 `dead_letters`, `UNIQUE` |
-| Change creation | `(project_id, client_request_id)` | D1 unique constraint and `ON CONFLICT DO NOTHING` |
-| Workflow start | Instance ID = Change ID, Candidate ID, or release ID | Workflows reject a second instance with the same ID |
+| Dead-letter record | `command_id` | `dead_letters`, `UNIQUE` |
+| Change creation | `(project_id, client_request_id)` | Unique constraint and `ON CONFLICT DO NOTHING` |
+| Workflow start | Instance ID = Change ID, Candidate ID, or release ID | The workflow engine rejects a second instance with the same ID |
 | Workflow start command | `cmd_<candidate>_verify`, `cmd_<release>_release` | `workflowStartFor` maps the command to that instance ID |
 | Candidate composition | SHA-256 composition key | Candidate ID derives from the key |
 | Promotion | Candidate ID + expected generation | `decidePromotion` returns `already_promoted` |
-| Release | `rel_<project>_<generation>` | D1 `releases` primary key |
-| K2 batch failure | `(consumer, batch_key)` | D1 `k2_batch_failures` |
-| K2 archive object | Event IDs of the batch | Same key, so a redelivery overwrites the same R2 object |
+| Release | `rel_<project>_<generation>` | `releases` primary key |
+| Event batch failure | `(consumer, batch_key)` | `k2_batch_failures` |
+| Event archive object | Event IDs of the batch | Same key, so a redelivery overwrites the same object |
+| Command publish | `<queue>:<commandId>` | JetStream message ID, 2-hour duplicate window |
+| Event stream publish | `event-id` header | JetStream message ID, 2-hour duplicate window |
 
-This sequence shows a duplicate K2 delivery.
+This sequence shows a duplicate event delivery.
 The second delivery finds the claim row and applies nothing.
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant K2 as K2 stream
+  participant JS as JetStream stream
   participant ER as Event router
-  participant D1 as D1 processed_events
+  participant DB as processed_events
   participant PV as ProjectViewDO
 
-  K2->>ER: batch with event E
-  ER->>D1: INSERT OR IGNORE (projector, E)
-  D1-->>ER: 1 row changed: E is fresh
+  JS->>ER: batch with event E
+  ER->>DB: INSERT OR IGNORE (projector, E)
+  DB-->>ER: 1 row changed: E is fresh
   ER->>PV: applyDelta(E)
-  ER->>K2: ack
-  K2->>ER: same batch again (at least once)
-  ER->>D1: INSERT OR IGNORE (projector, E)
-  D1-->>ER: 0 rows changed: duplicate
-  ER->>K2: ack, no side effect
+  ER->>JS: ack
+  JS->>ER: same batch again (at least once)
+  ER->>DB: INSERT OR IGNORE (projector, E)
+  DB-->>ER: 0 rows changed: duplicate
+  ER->>JS: ack, no side effect
 ```

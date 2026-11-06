@@ -7,7 +7,7 @@ import { z } from "zod";
  *   apps/<project>/<commit>/bundle.json          modules, settings, asset manifest
  *   apps/<project>/<commit>/assets/<path>        static assets, one object each
  *
- * Previews use the `app-previews/` prefix, which an R2 lifecycle rule expires (prod Terraform).
+ * Previews use the `app-previews/` prefix, which core expires after 7 days.
  * `bundle.json` is written last, so its presence means the bundle is complete. The commit is the
  * content address: the same commit always builds the same bundle, so a stored bundle is reused.
  *

@@ -10,7 +10,7 @@ ${status === 503 ? '<meta http-equiv="refresh" content="10">' : ""}
 <style>body{font:15px/1.5 system-ui,sans-serif;max-width:36rem;margin:15vh auto;padding:0 1.5rem;color:#1f2328}
 h1{font-size:1.25rem}p{color:#57606a}a{color:#0969da}</style></head>
 <body><h1>${escapeHtml(title)}</h1><p>${escapeHtml(body)}</p>
-<p><a href="https://rhumbatron.com">Rhumbatron</a></p></body></html>`;
+<p><a href="https://rhumbatron.localhost">Rhumbatron</a></p></body></html>`;
   return new Response(html, {
     status,
     headers: {

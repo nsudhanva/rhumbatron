@@ -1,6 +1,6 @@
 # Source and verification
 
-This page covers Project source in Artifacts, the Sandbox, checks and Evidence, sibling selection, and promotion.
+This page covers Project source in the git service, the Sandbox, checks and Evidence, sibling selection, and promotion.
 
 Main source files:
 
@@ -8,35 +8,37 @@ Main source files:
 - `workers/agents/src/workspace.ts`, `stack.ts`
 - `workers/integration/src/verification-workflow.ts`, `candidate-sandbox.ts`, `browser-check.ts`, `runner-selection.ts`
 - `workers/integration/src/candidate-create.ts` (fork rule), `integrate.ts`, `acceptance-check.ts`, `candidate-selection.ts`, `promotion.ts`
-- `workers/apps/src/checker.ts`, `checker-program.ts` (Dynamic Worker checks)
+- `workers/apps/src/checker.ts`, `checker-program.ts` (checks in the apps service)
+- `services/git`, `services/sandboxd`: the git service and the Sandbox host
 - `packages/evidence/src`: `plan.ts`, `gate.ts`, `promotion.ts`, `compatibility.ts`
 - `workers/coordinator/src/promotion-cas.ts`, `project-root-do.ts`
 
-## Artifacts repositories
+## Git repositories
 
-Cloudflare Artifacts holds the Project source (ADR 0010).
-The namespace is `rhumbatron-projects-prod`.
-Terraform declares the `ARTIFACTS` binding. The code creates the namespace on first use. Terraform has no resource for it.
+The `git` service holds the Project source (ADR 0010, [services/git](../../services/git/README.md)).
+Each repository is a bare Git repository on the `git-data` volume. The one namespace is `rhumbatron` (`GIT_NAMESPACE`).
+Core reaches the control API through the `ARTIFACTS` binding (`services/git/client.ts`). Git traffic uses smart HTTP.
+A fork is a bare clone that borrows the objects of its source through `objects/info/alternates` and keeps its own `main`.
 
 ```mermaid
 flowchart TB
-  subgraph NS["Artifacts namespace rhumbatron-projects-prod"]
+  subgraph NS["git service, namespace rhumbatron"]
     CAN[("proj_uuid<br/>canonical repo, branch main")]
     WS1[("ws-run<br/>Task workspace fork")]
     WS2[("ws-run<br/>Task workspace fork")]
     CA[("cand-id<br/>Candidate fork")]
   end
-  PROV["project.provision<br/>(integration Worker)"] -->|"create, commit .gitignore"| CAN
+  PROV["project.provision<br/>(integration)"] -->|"create, commit .gitignore"| CAN
   AG["AgentDO run"] -->|"fork on the first<br/>workspace tool call"| WS1
   AG --> WS2
   VW["CandidateVerificationWorkflow"] -->|"fork, merge ChangeSets"| CA
   CA -->|"fast-forward main<br/>after the CAS"| CAN
   SWEEP["forks.sweep, daily"] -.->|"delete 30 days<br/>after the end"| WS1
   SWEEP -.-> CA
-  IDX["rhumbatron-indexer"] -->|"read token"| CAN
+  IDX["indexer"] -->|"read token"| CAN
 ```
 
-Repository names come from D1 row IDs only (`repo-names.ts`):
+Repository names come from database row IDs only (`repo-names.ts`):
 
 | Repository | Name |
 |---|---|
@@ -48,24 +50,24 @@ Repository names come from D1 row IDs only (`repo-names.ts`):
 Rules:
 
 - Cleanup does not list the namespace. It deletes only the names that it derives from the rows of one Project. So it cannot delete a repository of a different Project.
-- Each Git access uses a repository token that expires after 600 s. The code revokes the token after use.
+- Each Git access uses a repository token that expires after 600 s. The token is an HMAC signature over the token ID, the repository, the scope (`read` or `write`), and the expiry. It grants one repository. The code revokes the token after use.
 - The daily `forks.sweep` command deletes a fork 30 days after its run or Candidate ends (`FORK_RETENTION_DAYS`). It deletes workspace forks of failed runs, of runs without a ChangeSet, and of finished Changes. It deletes the forks of `rejected`, `stale`, and `promoted` Candidates. It deletes a promoted fork only when canonical `main` holds the composed commit.
 - A code edit session deletes its fork when it ends. The daily `forks.sweep` command ends overdue sessions and deletes a session fork that a failed delete left.
 - A new Project starts at Canonical Generation 0 (`S0`) with one commit that holds only `.gitignore` (ADR 0022).
 
-Source objects in R2:
+Source objects in the object store (bucket `rhumbatron-evidence`, binding `EVIDENCE`):
 
 | Object | Key | Writer |
 |---|---|---|
 | File index | `source/<project>/<tree>/index.json` | Provisioning and each promotion |
-| Code manifest (path to Git blob ID) | `source/<project>/<tree>/code.json` | Provisioning and each promotion. Composition also writes the Candidate tree when the integration Worker has the `APPS` binding. |
+| Code manifest (path to Git blob ID) | `source/<project>/<tree>/code.json` | Provisioning and each promotion. Composition also writes the Candidate tree when core has the `APPS` binding. |
 | Blob | `source/<project>/blobs/<blob>` | Same as the code manifest. Each blob is copied once. A file over 1 MB is listed but not copied. |
 | ChangeSet patch | `source/<project>/patches/changesets/<cs>.patch` | Agent publish (`patchRef`) |
 | Candidate patch | `source/<project>/patches/candidates/<cand>.patch` | Candidate composition |
 
 - Agents read the file index. They do not walk the repository.
-- A patch stops at 512 KB, at a line boundary. R2 metadata records `truncated` and the full size.
-- No R2 lifecycle rule expires `source/`. Project deletion removes it (see `docs/operations/cleanup.md`).
+- A patch stops at 512 KB, at a line boundary. The object metadata records `truncated` and the full size.
+- Nothing expires `source/`. Project deletion removes it (see [cleanup.md](../operations/cleanup.md)).
 
 ## Composition and promotion in Git terms
 
@@ -97,28 +99,30 @@ gitGraph
 Notes:
 
 - `gitGraph` draws the last step as a merge. The code pushes the composed commit as a fast-forward (`canonical-source.ts`). It never force-pushes.
-- The push runs in the integration Worker with `isomorphic-git` on an in-memory file system. It uses no Sandbox time.
+- The push runs in core with `isomorphic-git` on an in-memory file system. It uses no Sandbox time.
 - If the push fails, the compare-and-swap result stays. A retry of the promotion pushes again.
 
 ## Sandbox lifecycle
 
-The `Sandbox` class is in `rhumbatron-sandbox` (ADR 0012).
+`sandboxd` runs each Sandbox as a sibling container through a socket proxy ([services/sandboxd](../../services/sandboxd/README.md)).
 Each Project has one Sandbox, with the ID `proj-<uuid>`.
 Agent runs and Candidate checks use different directories in it.
-The container application allows one instance (0 when the pause switch is on).
+At most `SANDBOX_MAX` (4) Sandboxes are live at one time. A call that needs one more fails with `ContainerUnavailableError`.
+Each Sandbox has 2 CPUs, 2 GiB of memory, no swap, and 512 processes. It runs under `runc` on a Mac and under `runsc` (gVisor) on a Linux server (`SANDBOX_RUNTIME`).
+A Sandbox sits on the internal network `rhumbatron_sbx`. It reaches the git service directly and package registries through the `egress` proxy allowlist. It has no other route out.
 Only Task kinds `implement`, `migrate`, and `test` open a workspace.
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant A as AgentDO
-  participant D1 as D1
-  participant Art as Artifacts
+  participant DB as Product database
+  participant Art as git service
   participant SBX as Sandbox proj-id
 
-  A->>D1: admitSandbox: fewer than 4 open workspaces in the Change?
-  A->>D1: reserve 300 s on the monthly meter
-  D1-->>A: refuse when the cap would be exceeded
+  A->>DB: admitSandbox: fewer than 4 open workspaces in the Change?
+  A->>DB: reserve 300 s on the monthly meter
+  DB-->>A: refuse when the cap would be exceeded
   A->>Art: fork canonical as ws-run
   A->>SBX: git clone into /workspace/run (read token)
   A->>SBX: check out base, merge stacked ChangeSets, bun install
@@ -128,9 +132,9 @@ sequenceDiagram
   A->>Art: write token (600 s)
   A->>SBX: git commit, push to ws-run
   A->>Art: revoke token
-  A->>D1: settle: awake time this session adds to the container (overlaps once, 120 s tail)
+  A->>DB: settle: awake time this session adds to the container (overlaps once, 120 s tail)
   A->>SBX: remove the run directory
-  Note over SBX: Sleeps after 2 idle minutes
+  Note over SBX: Removed with its disk after 2 idle minutes
 ```
 
 The fork and the checkout happen at the first workspace tool call of the run.
@@ -146,13 +150,13 @@ After `bun run build` (or `bun run build:<x>`), the workspace discards the files
 | Command user | root, allowlisted commands | root | An unprivileged user of the session, any command, 120 s timeout |
 | Monthly meter | `SANDBOX_MONTHLY_SECONDS`: 72,000 s (20 h). A settle charges only the awake time the use adds to the Project's container (`sandbox-meter.ts`). | Same meter | Same meter. At the cap: 429 `sandbox_cap`. |
 
-A code edit session (ADR 0029) starts the Sandbox only at its first command. After each command, and when the session ends while the Sandbox is awake, a kill as the session user stops every process of the session. The end also removes the session directory. The Sandbox then sleeps after 2 idle minutes.
+A code edit session (ADR 0029) starts the Sandbox only at its first command. After each command, and when the session ends while the Sandbox is awake, a kill as the session user stops every process of the session. The end also removes the session directory. sandboxd then removes the idle Sandbox after 2 minutes.
 
-A Sandbox loss does not lose committed work.
+A Sandbox loss, or an idle removal, does not lose committed work.
 The workspace restores from the same fork, base, and stacked merges. Then it compares the result with the recorded start commit.
 Uncommitted edits are lost.
 A publish after a loss fails the run. It does not publish partial work.
-The Sandbox gets short-lived Git tokens only. It never gets Terraform, Cloudflare API, or model credentials.
+The Sandbox gets short-lived Git tokens only. It never gets model credentials or any token of the stack services.
 
 ## Verification workflow
 
@@ -179,7 +183,7 @@ flowchart TB
   CM -->|"merge conflict"| RJ
   CM -->|"merged"| BD["build script in package.json:<br/>bun install, bun run build,<br/>commit the output"]
   BD --> PL["Plan, status verifying,<br/>candidate.composed"]
-  PL --> CK["One step per check:<br/>Evidence to D1 and R2"]
+  PL --> CK["One step per check:<br/>Evidence rows and objects"]
   CK --> PV["Live app only: publish preview,<br/>run preview-smoke"]
   PV --> GT{"gateRequiredChecks"}
   GT -->|"promotable"| VF["verified"]
@@ -198,14 +202,14 @@ flowchart TB
 
 ### Where checks run
 
-`build`, `unit`, and `contract` run in a Dynamic Worker through the `APPS.check` RPC when the integration Worker has the `APPS` binding (`isAppCheckerEligible` in `runner-selection.ts`).
-The AppChecker reads the composed tree from the R2 code store. Each check has at most 30 s, no network, and no binding.
+`build`, `unit`, and `contract` run in an isolate that the apps service loads through the Worker Loader, through the `APPS.check` RPC, when core has the `APPS` binding (`isAppCheckerEligible` in `runner-selection.ts`).
+The AppChecker reads the composed tree from the code store in the object store. Each check has at most 30 s, no network, and no binding.
 When AppChecker answers `supported: false` (for example no code store, a bundler error, or a deadline), the check runs in the Sandbox.
-A `unit` check whose tests read project files (`import.meta.dir`, `__dirname`, `node:fs`), use Bun globals, call `process.cwd()`, or start processes is `supported: false` before any test runs (`sandboxOnlyFeatures` in `workers/apps/src/checker-program.ts`). A Dynamic Worker has no project files on disk, so such a test would fail there because of the runner.
-A completed Dynamic Worker failure is final. It does not go to the Sandbox for a second try.
+A `unit` check whose tests read project files (`import.meta.dir`, `__dirname`, `node:fs`), use Bun globals, call `process.cwd()`, or start processes is `supported: false` before any test runs (`sandboxOnlyFeatures` in `workers/apps/src/checker-program.ts`). A loaded isolate has no project files on disk, so such a test would fail there because of the runner.
+A completed failure in the apps service is final. It does not go to the Sandbox for a second try.
 `protected-invariant-cart`, `performance`, `security`, and `browser` always run in the Sandbox.
 `acceptance` and `preview-smoke` use no Sandbox.
-The Evidence summary of a check that ran in a Dynamic Worker or the Sandbox ends with `(runner: dynamic-worker)` or `(runner: sandbox)`.
+The Evidence summary of a check that ran in the apps service or the Sandbox ends with `(runner: dynamic-worker)` or `(runner: sandbox)`. `dynamic-worker` is the runner name in code.
 
 ### Which checks run
 
@@ -225,7 +229,7 @@ flowchart LR
   T6["package.json has a build script"] --> CA["client-assets"]
 ```
 
-- Verification uses the policy of the Project. The policy is the D1 `project_policies` row (migration 0017). `policyForRun` (`workers/integration/src/policy.ts`) reads it once per run. The plan, the approval gate, the auto-promotion tiers, and the protected resources of `checkCompatibility` use this policy. Without a row, verification uses `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`). `DEFAULT_POLICY` protects no resource.
+- Verification uses the policy of the Project. The policy is the `project_policies` row (migration 0017). `policyForRun` (`workers/integration/src/policy.ts`) reads it once per run. The plan, the approval gate, the auto-promotion tiers, and the protected resources of `checkCompatibility` use this policy. Without a row, verification uses `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`). `DEFAULT_POLICY` protects no resource.
 - Rhumbatron rejects a Candidate as `invariant_violation` when one of its ChangeSets declares a contract or data change on a protected resource of the Project policy.
 - The policy check `targeted` runs the `unit` check. Every plan has `build` and `unit`.
 - The policy does not list the `critical` tier. A `critical` Change uses the strictest listed tier. A gap in the policy never lowers verification.
@@ -237,21 +241,21 @@ flowchart LR
 
 | Check ID | Kind | Command or procedure | Timeout |
 |---|---|---|---|
-| `build` | build | Dynamic Worker: bundle the app with `@cloudflare/worker-bundler` and load it. Sandbox: `bun run typecheck`. A failed composition build is the result | 120 s (30 s in the Dynamic Worker) |
+| `build` | build | Apps service: bundle the app with the `@cloudflare/worker-bundler` library and load it. Sandbox: `bun run typecheck`. A failed composition build is the result | 120 s (30 s in the apps service) |
 | `client-assets` | build | Only with a `build` script. Composition compares the composed commit with the base (see above). No runner | 30 s |
-| `unit` | unit | Dynamic Worker: the project tests. Sandbox: `bun test` | 180 s (30 s in the Dynamic Worker) |
-| `contract` | contract | Compare the route table of the base and of the Candidate with the declared contract changes. Dynamic Worker extraction, or `bun run contract` in the Sandbox | 120 s (30 s in the Dynamic Worker) |
+| `unit` | unit | Apps service: the project tests. Sandbox: `bun test` | 180 s (30 s in the apps service) |
+| `contract` | contract | Compare the route table of the base and of the Candidate with the declared contract changes. Extraction in the apps service, or `bun run contract` in the Sandbox | 120 s (30 s in the apps service) |
 | `protected-invariant-cart` | protected-invariant | `bun test test/cart.invariant.test.ts` | 120 s |
 | `performance` | performance | `bun run bench`. Metric `p95Ms` must be below the limit | 120 s |
 | `security` | security | `bun test --test-name-pattern authorization`. The app conventions (`APP_CONVENTIONS`) tell agents to name the denial tests this way. No matching test is a gap | 180 s |
-| `browser` | browser | One Browser Run session (see below) | 90 s |
+| `browser` | browser | One session on the Playwright server (see below) | 90 s |
 | `acceptance` | acceptance | Optional. Haiku judges each acceptance criterion against the Candidate patch and the composed files. Code validates each citation | 180 s |
 | `preview-smoke` | smoke | Publish the Candidate preview and run the release probes against it | 30 s |
 
-The browser check starts the composed app in the Sandbox. The browser reaches it only through request interception.
+The browser check starts the composed app in the Sandbox. Core connects to the `browser` service (a Playwright server) over WebSocket (`BROWSER_WS_URL`). The browser reaches the app only through request interception.
 The preview host has no public URL. The check blocks every other request.
 The flow is the same for every app: the home page loads and shows text, and `GET /api/health` answers 200.
-The check saves up to 8 screenshots to R2 as Evidence.
+The check saves up to 8 screenshots to the object store as Evidence.
 
 One session lasts at most 55 s. A Candidate gets at most 2 browser runs.
 The `BROWSER_DAILY_SECONDS` meter (960 s per UTC day) applies before a session opens.
@@ -280,7 +284,7 @@ A failing required check (`build`, `unit`, `contract`, `preview-smoke`, and the 
   4. It records `approval.requested` with the reason, for example "Best candidate meets 2 of 3 criteria; not met: calendar view. Approve to ship it or cancel the change."
 
   A person then approves and ships the Candidate through the normal path, or cancels the Change.
-- Storage: the per-criterion results go to `candidates.acceptance_json` and to the R2 report. `criteriaMet`, `criteriaTotal`, and `costUsd` go to `metrics_json`. The cost counts against the Change budget.
+- Storage: the per-criterion results go to `candidates.acceptance_json` and to the report object. `criteriaMet`, `criteriaTotal`, and `costUsd` go to `metrics_json`. The cost counts against the Change budget.
 
 ## Sibling Candidates and selection
 
@@ -313,7 +317,7 @@ Integrate rule (applied before the fork rule, `workers/integration/src/integrate
   2. Else the UI Task depends on the API Task. A UI Task has a resource whose last segment is `ui`, `frontend`, or `page` (alone or after `-`), or a title that says UI, page, or frontend. An API Task has a last segment `api` (alone or after `-`), or a title that says API.
   3. Else the Task whose Intent uses the contract of the other (`consumedContracts`) depends on it.
   4. Else the higher Task key depends on the lower.
-- Composition applies one integration per round, before any Candidate exists. One D1 transaction does these steps:
+- Composition applies one integration per round, before any Candidate exists. One database transaction does these steps:
   1. It resolves the conflict (`review_json.integrate`).
   2. It adds the edge to `task_dependencies`.
   3. It rejects the ChangeSets of the dependent Task and of the Tasks built on it, and resolves their other open conflicts.
@@ -390,9 +394,9 @@ A finding with a bad citation is `unsupported`. It cannot change state.
 ## Promotion preconditions
 
 Promotion has two deterministic layers (ADR 0013).
-The integration Worker reads authoritative D1 rows and Artifacts. It checks that the Candidate is verified, that the required Evidence exists and passes, that each required human approval exists, and that the composed commit is still in the Candidate fork. It also compares the plan policy version with the active policy version.
+The integration code reads the authoritative database rows and the git service. It checks that the Candidate is verified, that the required Evidence exists and passes, that each required human approval exists, and that the composed commit is still in the Candidate fork. It also compares the plan policy version with the active policy version.
 ProjectRootDO then checks the expected Canonical Generation, the expected canonical tree, and the policy version in its own transaction.
-The integration Worker reports every failed precondition at once.
+The integration code reports every failed precondition at once.
 
 ```mermaid
 flowchart TB
@@ -423,4 +427,4 @@ Approval rules (`packages/evidence/src/promotion.ts`):
 - No model decides approval or promotion.
 
 The idempotency key is the Candidate ID plus the expected generation.
-A retry after success returns `alreadyPromoted`. It repairs the D1 mirror and the source sync.
+A retry after success returns `alreadyPromoted`. It repairs the database mirror and the source sync.

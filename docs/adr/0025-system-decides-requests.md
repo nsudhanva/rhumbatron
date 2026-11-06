@@ -26,9 +26,10 @@ Research on model cascades and model judges sets the method:
 - The stated confidence of a model is poorly calibrated (arXiv 2306.13063). Gate on probabilities
   from a decision model or on agreement across runs.
 - Ambiguity needs a clarifying question that names the readings: CLAMBER (arXiv 2405.12063).
-- Clef and Clef-flash are Workers AI choice models. They return probabilities and have no
-  built-in abstain, so Rhumbatron sets the thresholds (blog.cloudflare.com/clef-decision-models,
-  developers.cloudflare.com/workers-ai/models/clef).
+- Clef and Clef-flash are the bounded choice interface of Rhumbatron. Claude Haiku answers each
+  question through a forced tool call with one option and a probability for each option
+  (`packages/platform/src/ai/models.ts`). The interface has no built-in abstain, so Rhumbatron
+  sets the thresholds. The caller abstains on any answer that it cannot parse.
 
 ## Decision
 
@@ -37,16 +38,17 @@ Research on model cascades and model judges sets the method:
   reads a role or `requester_rank`.
 - Intake gate, a ChangeWorkflow step before the Root Planner (`workers/integration/src/intake.ts`):
   1. Retrieval (deterministic): the open Changes plus the 20 latest completed Changes. Each is
-     embedded as goal plus acceptance criteria (`@cf/baai/bge-small-en-v1.5`). Up to 10 with
+     embedded as goal plus acceptance criteria (bge-small-en-v1.5 on the `embed` llama.cpp
+     server). Up to 10 with
      cosine >= 0.55 stay. When embeddings fail, shared product words select them.
-     `@cf/baai/bge-reranker-base` orders them, and 5 go on. When its source is readable and not
+     bge-reranker-base on the `rerank` llama.cpp server orders them, and 5 go on. When its source is readable and not
      empty, the current app (canonical file list, `package.json` dependency names, stack hints) is
      one more item. Cosine never decides.
   2. Clef-flash makes one call inside the shared counter of 200 calls per UTC day. It reads the
      request, the items, and a short copy of the app context. For each pair it picks one of
      `duplicate`, `already_covered`, `extends`, `overlaps`, and `unrelated`. It also answers
-     "buildable as stated". Clef-flash is a different model family from Claude, so its agreement
-     counts. It can only clear a pair. The pair drops when P(`unrelated`) >= 0.9.
+     "buildable as stated". Claude Haiku answers Clef-flash, so its errors correlate with
+     Sonnet's. It can only clear a pair. The pair drops when P(`unrelated`) >= 0.9.
   3. Duplicates: Sonnet answers "which criteria of the existing request, or which features of the
      app, already deliver the new request?" with quotes. It runs twice with the order swapped. Code
      drops an answer with a quote that is not in the packet. When Clef and both Sonnet orders say
@@ -59,7 +61,7 @@ Research on model cascades and model judges sets the method:
      - A rule runs first. A goal with fewer than two words that name a product object gets a
        question.
      - Then the `buildable` answer of the Clef-flash call decides. P(buildable) >= 0.9 plans with
-       no Claude call.
+       no Sonnet call.
      - Otherwise one Sonnet call (`review_clarity`) reads the request and the app context. It
        returns questions only for a part that two readings build as materially different
        products. Each question has a quote of the goal and 2 to 4 readings as options. The call
@@ -76,8 +78,8 @@ Research on model cascades and model judges sets the method:
   `changes.assumptions_json`. The Change page shows them as "Assumptions". A follow-up request
   changes one.
 - A question makes the Change `needs_input`, with a `ChangeClarification` in
-  `changes.clarification_json`. The ChangeWorkflow waits for the event `clarification`. It reads D1
-  after each event and once a day. It cancels the Change after 7 days without an answer. The
+  `changes.clarification_json`. The ChangeWorkflow waits for the event `clarification`. It reads the
+  product database after each event and once a day. It cancels the Change after 7 days without an answer. The
   requester, the owner, or an admin answers with `POST /v1/changes/:changeId/clarify`:
   - answers, one for each answered question (a picked reading or free text), which go to
     `clarification_answers_json` and to the goal that the planner reads;
@@ -99,7 +101,7 @@ Research on model cascades and model judges sets the method:
   later request after theirs. No model and no role chooses between two people.
 - Two conflicting requests from the same requester are not a conflict between people. The later
   request replaces the earlier one (`system:same_requester`).
-- Each intake decision is a Decision Receipt in D1 `change_decisions` (`INTAKE`), without
+- Each intake decision is a Decision Receipt in the table `change_decisions` (`INTAKE`), without
   private reasoning. Intake also records `change.intake.reviewed`. An answer records
   `change.clarification.answered`. Model cost counts against the Change budget.
 
@@ -108,31 +110,31 @@ Research on model cascades and model judges sets the method:
 | Alternative | Why it lost |
 |---|---|
 | Owner rank decides conflicts | People do not own features. Rank says nothing about which request fits the app. |
-| Haiku reviews, Sonnet confirms | Same model family: correlated errors make Haiku agreeing with Sonnet close to one vote. Clef-flash is independent and cheaper. |
+| Haiku reviews, Sonnet confirms | Same model family: correlated errors make Haiku agreeing with Sonnet close to one vote. So the Clef-flash answer (Haiku) only clears a pair, and two swapped Sonnet runs confirm a duplicate. |
 | One Sonnet run per decision | Position bias: the model prefers the request it reads first. Two swapped runs that agree remove it. |
-| Gate on the model's stated confidence | Verbal confidence is poorly calibrated. Clef probabilities and cross-run agreement are measurable. |
+| Gate on the model's stated confidence alone | Verbal confidence is poorly calibrated. A Clef probability can only clear, with a high threshold. Cross-run agreement confirms. |
 | Cosine similarity decides duplicates | Short goals such as "Add kanban feature" embed badly. Cosine only shortlists. |
 | Reject a duplicate automatically | A wrong rejection loses a request. A question costs one answer. |
 | Clarity check on the request text only | Without the app, a model reads most requests as open and asks about each product decision. "Change to 16 color palette" is clear in a canvas app with a palette. |
 | A question for each open product decision | Most decisions are small details that the planner can decide. Questions about them delay the build, and people answer "any". Assumptions keep them visible and changeable. |
 | Several decisions in one question | One text box for "a; b; c" gets one vague answer. Each question has its own answer and options. |
 | Run the intake gate again after each answer | Each answer can open more questions about the same request. One round is enough. The planner decides the details that stay open. |
-| A separate review service or vector store | Workers AI, D1, and the existing Workflow cover it. |
+| A separate review service or vector store | The llama.cpp embed and rerank servers, the product database, and the existing workflow cover it. |
 
 ## Consequences
 
 - An unclear or repeated request waits for its requester before any planning spend. In the C1 and
   C2 case, intake stops C2 as a duplicate.
-- A request with no related items and a clear goal costs one embedding call, one Clef-flash call,
-  and no Claude call. A pair that Clef-flash cannot clear adds two Sonnet calls (about $0.02). A
+- A request with no related items and a clear goal costs one embedding call, one Clef-flash call
+  (Claude Haiku), and no Sonnet call. A pair that Clef-flash cannot clear adds two Sonnet calls (about $0.02). A
   request that Clef-flash does not clear adds one Sonnet clarity call. The app context adds at
-  most one R2 read (`README.md`) and about 1,000 input tokens. A supported conflict adds no
+  most one object store read (`README.md`) and about 1,000 input tokens. A supported conflict adds no
   model call, because the earlier requester chooses (ADR 0032).
-- Workers AI adds one `AI` binding to the integration Worker (Terraform and `wrangler.jsonc`).
-  Embeddings and the reranker cost much less than 1 Neuron per request. Clef-flash stays inside
-  the shared counter of 200 calls per day. The free 10,000 Neurons per day cover it.
-- D1 migration `0024_intake_and_system_decisions.sql` adds the clarification columns, the
-  `duplicate` verdict and the pair `round`, and `change_decisions`. D1 migration
+- The integration code uses the `AI` binding (`SmallModels`) that the core service builds.
+  Embeddings and the reranker run on the local host and have no usage charge. Clef-flash stays
+  inside the shared counter of 200 calls per day.
+- Migration `0024_intake_and_system_decisions.sql` adds the clarification columns, the
+  `duplicate` verdict and the pair `round`, and `change_decisions`. Migration
   `0032_change_assumptions.sql` adds `changes.assumptions_json`.
-- A waiting Workflow instance holds no compute. An answer to a Change whose first instance has
+- A waiting workflow instance holds no compute. An answer to a Change whose first instance has
   ended starts the instance `<changeId>_r<round>`.

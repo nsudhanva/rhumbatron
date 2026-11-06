@@ -11,7 +11,7 @@ the system chooses between requests. See
 
 ## Decision
 
-- Share per Project. Use the D1 table `project_members` with the roles of ADR 0028: `owner`,
+- Share per Project. Use the table `project_members` with the roles of ADR 0028: `owner`,
   `admin`, `member`, and `viewer`. Its `rank` only orders the members list. Do not use Clerk
   Organizations.
 - An invitation (`project_invitations`) binds only to a Clerk-verified email of the signed-in
@@ -76,7 +76,7 @@ the system chooses between requests. See
   and the admins.
 - Each pair of overlapping requests costs one Sonnet review, about $0.01. The limit is 4 pairs per
   Change.
-- The design adds D1 migration `0022_shared_projects.sql` and no Cloudflare resource.
+- The design adds migration `0022_shared_projects.sql` and no new service.
 - Known limitation: a conflict that both requests hide behind unrelated words and unrelated
   resources can pass the review. Then both Changes ship in sequence, and the later one wins. The
   tests of the earlier Change usually fail on the later tree and stop it. An agent can edit those

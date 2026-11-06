@@ -5,7 +5,7 @@ export type AppliedMigration = { name: string; sha256: string | null };
 
 export type MigrationPlan = { pending: LocalMigration[]; errors: string[] };
 
-export const MIGRATION_NAME = /^\d{4}_[a-z0-9_]+\.sql$/;
+const MIGRATION_NAME = /^\d{4}_[a-z0-9_]+\.sql$/;
 
 /**
  * Returns the migrations to apply, in order, or errors that must stop the run:

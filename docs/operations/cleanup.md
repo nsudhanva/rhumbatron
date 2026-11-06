@@ -1,17 +1,17 @@
 # Resource Cleanup and Retention Runbook
 
-This runbook covers smoke Project cleanup, Project deletion, the daily fork sweep, and R2 retention. Cleanup keeps Artifacts, R2, and D1 usage within the free and included limits ([ADR 0010](../adr/0010-artifacts-project-source.md)).
+This runbook covers smoke Project cleanup, Project deletion, the daily fork sweep, and retention. Cleanup keeps the `git-data`, `objects-data`, and `core-data` volumes small ([ADR 0010](../adr/0010-artifacts-project-source.md)).
 
 ## 1. Smoke Project cleanup
 
-`scripts/smoke.ts` creates temporary Projects on prod. `scripts/cleanup-projects.ts` deletes them through `DELETE /v1/projects/:id` on `https://api.rhumbatron.com`, as the Clerk smoke user.
+`scripts/smoke.ts` creates temporary Projects in the stack. `scripts/cleanup-projects.ts` deletes them through `DELETE /v1/projects/:id` on `https://api.rhumbatron.localhost`, as the Clerk smoke user.
 
 - The script selects the active Projects of the smoke user with a slug that matches `/^(smoke|sandbox)-\d+$/`.
 - It keeps every other Project, for example a demo Project.
 - `--all` selects every active Project of the smoke user.
 - `scripts/e2e.ts` and `scripts/journeys.ts` delete their own Projects at the end of each run.
 
-Set `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` for the prod Clerk instance (see the root `README.md`). Then:
+Set `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` for the Clerk development instance, and `NODE_EXTRA_CA_CERTS=.local-ca.crt` ([local-stack.md](./local-stack.md)). Then:
 
 1. List the matches. This command changes nothing.
    ```sh
@@ -24,22 +24,22 @@ Set `CLERK_SECRET_KEY` and `CLERK_SMOKE_USER_ID` for the prod Clerk instance (se
 
 ## 2. Project deletion
 
-Only the owner can delete a Project. `DELETE /v1/projects/:id` sets the Project to `archived` in D1, purges its `ProjectRootDO` and `ProjectViewDO`, and queues `project.cleanup` on the integration Queue. Then `cleanupProject` in `workers/integration/src/project-cleanup.ts` deletes everything that the Project created.
+Only the owner can delete a Project. `DELETE /v1/projects/:id` sets the Project to `archived` in the product database, purges its `ProjectRootDO` and `ProjectViewDO` actors, and queues `project.cleanup` on the `integration` command queue. Then `cleanupProject` in `workers/integration/src/project-cleanup.ts` deletes everything that the Project created.
 
 ```mermaid
 flowchart TB
   del[DELETE /v1/projects/:id] --> arch[API: status archived,<br/>purge root and view]
-  arch --> q[integration Queue: project.cleanup]
+  arch --> q[integration queue: project.cleanup]
   q --> f[Delete ws-*, cand-*, and edit-* forks<br/>20 per message]
   f --> more{More forks?}
   more -->|yes| q
   more -->|no| canon[Delete canonical repo]
-  canon --> r2[Delete the R2 prefixes of the Project]
-  r2 --> apps[Wait for app removal]
+  canon --> obj[Delete the object prefixes of the Project]
+  obj --> apps[Wait for app removal]
   apps --> tasks[25 Tasks per message:<br/>purge AgentDO, delete Task rows]
-  tasks --> d1[Delete D1 content rows]
-  d1 --> shards[Purge 32 ResourceShardDO shards]
-  shards --> done[Delete KV policy, scrub name and slug,<br/>set cleaned_at]
+  tasks --> rows[Delete content rows]
+  rows --> shards[Purge 32 ResourceShardDO shards]
+  shards --> done[Delete the policy copy, scrub name and slug,<br/>set cleaned_at]
   cron[Daily maintenance 04:17 UTC] -.->|re-queue leftovers| q
   sweep[Event router, every 5 minutes] -.->|index.purge after cleaned_at| idx[Indexer: vectors, index objects, index rows]
 ```
@@ -50,13 +50,13 @@ Cleanup skips a Project that is not `archived`. Each queue message does a bounde
 2. Delete every Workspace fork (`ws-*`), Candidate fork (`cand-*`), and code edit session fork (`edit-*`) that `task_runs`, `candidates`, and `code_sessions` record, 20 per message.
 3. Delete the canonical repository (`ARTIFACTS.delete(projectId)`).
 4. Delete every object in the evidence bucket under these prefixes, each followed by the Project ID: `source/`, `context/`, `apps/`, `app-previews/`, `evidence/`, `work-graphs/`, and `workspace/`.
-5. Wait until `removeApp` on the apps Worker clears the app data stores.
+5. Wait until `removeApp` on the apps service clears the app data stores.
 6. For each batch of 25 Tasks, purge the `AgentDO` of each Task, then delete the `task_dependencies`, `decision_receipts`, `task_runs`, and `tasks` rows.
 7. Delete the rows of `evidence_index`, `approvals`, `conflicts`, `changesets`, `candidates`, `change_decisions`, `live_removals`, `changes`, `request_conflicts`, `goal_suggestions`, `project_policies`, `project_members`, `project_invitations`, `agents`, `dead_letters`, `releases`, `project_events`, `code_session_files`, `code_session_commands`, `code_sessions`, and `sandbox_awake`. Each statement deletes at most 500 rows. Each message runs at most 40 statements.
 8. Purge the 32 `ResourceShardDO` shards (Claims, Intents, Challenges, outbox). This step is last, so a late Claim cannot fill a shard again.
-9. Delete the KV policy copy. Set the name to `Deleted project` and the slug to `deleted-<id>`. Set `cleaned_at`.
+9. Delete the policy copy in `CONFIG`. Set the name to `Deleted project` and the slug to `deleted-<id>`. Set `cleaned_at`.
 
-The indexer Worker deletes the Vectorize vectors, the `index/` objects, and the `project_indexes` and `project_vectors` rows (`index.purge`). Every 5 minutes, the event router sends `index.purge` for each archived Project that has `cleaned_at` and still has an index row. The daily maintenance also sends it. The indexer deletes the rows last, so the sweep stops when the purge is complete.
+The indexer deletes the vectors in `MEMORY`, the `index/` objects, and the `project_indexes` and `project_vectors` rows (`index.purge`). Every 5 minutes, the event router sends `index.purge` for each archived Project that has `cleaned_at` and still has an index row. The daily maintenance also sends it. The indexer deletes the rows last, so the sweep stops when the purge is complete.
 
 Cleanup keeps these records.
 
@@ -64,10 +64,10 @@ Cleanup keeps these records.
 |---|---|
 | The `projects` row (ID, organization, status, generation, timestamps), with the name and slug scrubbed | Archive record. The slug is free to use again. |
 | One `app_deployments` row for the production app host | The host answers `410`. The row has the host label and the `removed` status only. |
-| `usage_counters` | The Anthropic, Sandbox, Browser Run, and build meters are global rows. A deletion cannot free budget. The budget meters of the Project and its Changes (`project-usd-micro:<id>`, `change-usd-micro:<id>`) hold only an ID and an amount, and they stay. |
-| The R2 `events/` archive and K2 events | All Projects share them. The R2 lifecycle rule deletes `events/` after 365 days. K2 keeps events for 7 days. |
+| `usage_counters` | The Anthropic, Sandbox, browser, and build meters are global rows. A deletion cannot free budget. The budget meters of the Project and its Changes (`project-usd-micro:<id>`, `change-usd-micro:<id>`) hold only an ID and an amount, and they stay. |
+| The `events/` archive in the object store, and the event streams | All Projects share them. The event streams keep events for 7 days. |
 | Organization, user, and membership rows; `notification_reads`; `processed_events` | They are not Project data. |
-| The Project Sandbox container | It keeps no data after its 2-minute sleep. A wake only to destroy it uses Sandbox hours. |
+| The Project Sandbox | sandboxd removes it with its disk after 2 idle minutes, so it holds no data. |
 
 ## 3. Daily fork sweep
 
@@ -77,20 +77,28 @@ Cleanup keeps these records.
 - Candidate forks (`cand-*`): Candidates that are `rejected`, `stale`, or `promoted`. A promoted fork is deleted only after the sweep confirms that canonical `main` contains the composed commit.
 - Code edit sessions: the sweep ends each open session that is 10 minutes idle or 2 hours old (`expireCodeSessions` in `workers/integration/src/code-sessions.ts`, at most 50 sessions and 50 left forks per run). It deletes the session fork and the edits. It also deletes a session fork that a failed delete left. A session also ends at its next request after a limit.
 
-The sweep deletes at most 20 repositories per message. It sets `fork_deleted_at` in D1, so a retry deletes nothing twice.
+The sweep deletes at most 20 repositories per message. It sets `fork_deleted_at` in the product database, so a retry deletes nothing twice.
 
-The event router cron queues one `forks.sweep` each day at 04:17 UTC (`workers/event-router/src/maintenance.ts`). The same tick re-queues `project.cleanup` for at most 10 archived Projects with leftovers. It also queues `index.build` for at most 10 active Projects that have no ready index. While `paused = true`, the cron does not run ([pause-resume.md](./pause-resume.md)).
+The event router's per-minute sweep queues one `forks.sweep` each day at 04:17 UTC (`workers/event-router/src/maintenance.ts`). The same tick re-queues `project.cleanup` for at most 10 archived Projects with leftovers. It also queues `index.build` for at most 10 active Projects that have no ready index. Core runs the sweep at the start of each minute (`services/core/src/main.ts`). While the stack is down, no sweep runs.
 
 ## 4. Retention
 
+The object store (`objects`, versitygw) has no lifecycle rules of its own. Core deletes expired objects once a day (`services/core/src/expiry.ts`), and the other code deletes the rest.
+
 | Resource | Scope | Retention | Managed by |
 |---|---|---|---|
-| Artifacts forks | `ws-*`, `cand-*` | 30 days after the run or Candidate finishes | `sweepForks` |
+| Task and Candidate forks | `ws-*`, `cand-*` | 30 days after the run or Candidate finishes | `sweepForks` |
 | Code edit session forks | `edit-*` | Until the session ends (at most 2 hours, or the next daily sweep) | `endSession`, `expireCodeSessions` |
-| Canonical repositories | One per Project, named by the Project ID | Until the Project is deleted | `cleanupProject` |
-| R2 event archive | `events/` | 365 days | R2 lifecycle rule (`envs/prod`, `modules/state`) |
-| R2 Evidence | `evidence/` | Until the Project is deleted | `cleanupProject` |
-| R2 temporary objects | `tmp/` | 7 days | R2 lifecycle rule |
-| R2 preview bundles | `app-previews/` | 7 days | R2 lifecycle rule |
-| R2 Project objects | `source/`, `context/`, `apps/`, `work-graphs/`, `workspace/` | Until the Project is deleted | `cleanupProject` |
-| R2 incomplete multipart uploads | All prefixes | 1 day | R2 lifecycle rule |
+| Project repositories | One per Project, named by the Project ID | Until the Project is deleted | `cleanupProject` |
+| Preview rows and app data stores | `app_deployments` rows of `preview:*` channels | 7 days | `expirePreviews` in `workers/integration/src/app-release.ts` |
+| Preview bundles | `app-previews/` | 7 days, or sooner when the Project is deleted or its app is removed | `expireObjects`, `cleanupProject`, `removeApp` |
+| Temporary objects | `tmp/` | 7 days | `expireObjects` |
+| Evidence | `evidence/` | Until the Project is deleted | `cleanupProject` |
+| Project objects | `source/`, `context/`, `apps/`, `work-graphs/`, `workspace/` | Until the Project is deleted | `cleanupProject` |
+| Event archive | `events/` | 365 days | `expireObjects` |
+| Event streams | `EVENTS_00` to `EVENTS_07` | 7 days | JetStream `max_age` |
+| Command stream | `COMMANDS` | Until a consumer acknowledges the command, at most 14 days | JetStream work-queue retention, `max_age` |
+| Admin audit rows | `admin_audit` | 365 days | `workers/api/src/access.ts` |
+| Metrics rows | `METRICS`, `EVENT_METRICS` | 30 days | `packages/platform/src/sql/metrics.ts`, at core start |
+
+`docker compose down -v` deletes every volume, and with it all of the data above ([local-stack.md](./local-stack.md)).

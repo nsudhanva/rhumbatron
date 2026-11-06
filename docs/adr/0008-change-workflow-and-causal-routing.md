@@ -7,8 +7,8 @@ needs idempotent transitions and durable events. ProjectRootDO holds only cold p
 
 ## Decision
 
-- `POST /v1/projects/:id/changes` starts `ChangeWorkflow` (Cloudflare Workflows, integration
-  Worker) with instance ID = Change ID. A request with `startPlanning: false` does not start it.
+- `POST /v1/projects/:id/changes` starts `ChangeWorkflow` (the workflow engine in
+  `packages/platform`, integration code) with instance ID = Change ID. A request with `startPlanning: false` does not start it.
   Smoke checks use this option.
 - Steps (`workers/integration/src/change-workflow.ts`):
   1. Load the Change. Mark it `compiling`.
@@ -18,7 +18,7 @@ needs idempotent transitions and durable events. ProjectRootDO holds only cold p
   4. Plan the Work Graph (Root Planner).
   5. Compare the plan with the other open requests of the Project (ADR 0023, ADR 0025).
   6. Persist the Work Graph. Record the events. Dispatch the ready Tasks.
-- The Root Planner uses the opus tier through the AI Gateway. It makes one tool call that Zod and
+- The Root Planner uses the opus tier on the Anthropic API. It makes one tool call that Zod and
   an acyclicity check validate. It gets one repair turn and one step retry. The opus tier runs on
   Sonnet while `ALLOW_OPUS` is not `"true"` (ADR 0021).
 - Plan rules in code (`workers/integration/src/root-planner.ts`):
@@ -28,53 +28,56 @@ needs idempotent transitions and durable events. ProjectRootDO holds only cold p
     UI -> API. No model call adds it. The UI agent then reads the real API routes.
 - Each step is idempotent. The steps use deterministic Task IDs, `INSERT OR IGNORE`, conditional
   status updates, and stable event and command IDs.
-- Tasks and dependency edges are in D1. R2 stores the Work Graph JSON under
+- Tasks and dependency edges are in the product database. The object store keeps the Work
+  Graph JSON under
   `work-graphs/<project>/<change>.json`, with the planner model, tokens, and cost.
 - Change and Task events go to the outbox of the ResourceShardDO that owns `change:<id>`
-  (`appendEvents`, idempotent on event ID). Its alarm publishes them to K2.
-- Dispatch marks the ready Tasks, records `task.ready`, sends `agent.wake` commands on
-  `rhumbatron-agent-wakeups`, and then sets `wake_sent_at` (at least once).
-- The agents Worker consumes wakes. It drops a stale wake and writes an Analytics Engine
-  false-wakeup point. For a valid wake, it assigns the Task, records `task.assigned` and
+  (`appendEvents`, idempotent on event ID). Its alarm publishes them to the event log (NATS
+  JetStream streams `EVENTS_00` to `EVENTS_07`).
+- Dispatch marks the ready Tasks, records `task.ready`, sends `agent.wake` commands on the
+  `agent-wakeups` queue, and then sets `wake_sent_at` (at least once).
+- The agents code consumes wakes. It drops a stale wake and writes a false-wakeup point to the
+  metrics table. For a valid wake, it assigns the Task, records `task.assigned` and
   `agent.woken`, and starts a run on the `AgentDO` of the Task (ADR 0009).
 - The `causal-router` subscription of the event router runs `routeEvent`
-  (`packages/causal-router`). It sends these commands on `rhumbatron-integration`:
+  (`packages/causal-router`). It sends these commands on the `integration` queue:
   `change.dispatch` (newly ready Tasks), `candidate.create` (the Work Graph is complete), and
-  `candidates.recompose` (after `canonical.advanced`, ADR 0013). The router uses a Queue, because
-  a service binding makes the dependency cycle coordinator, router, integration, coordinator.
+  `candidates.recompose` (after `canonical.advanced`, ADR 0013). The router sends commands on a queue, not as direct
+  calls, so the coordinator, the router, and integration have no call cycle.
 - The Causal Router allows at most 1,000 wake, dispatch, and compose commands per Change per UTC
-  day (`CHANGE_DAILY_COMMAND_CAP`, ADR 0019).
-- Ambiguous resource overlaps go to Clef-flash (`@cf/cloudflare/clef-flash`, Workers AI) with an
-  abstain threshold of 0.7. When Clef-flash abstains or the cap is reached, the router wakes the
+  day (`CHANGE_DAILY_COMMAND_CAP`).
+- Ambiguous resource overlaps go to Clef-flash (model ID `@cf/cloudflare/clef-flash`, answered
+  by Claude Haiku through a forced tool call) with an abstain threshold of 0.7. When Clef-flash abstains or the cap is reached, the router wakes the
   Agent. The `clef-flash` counter in `usage_counters` allows 200 calls per UTC day. The intake gate
   uses the same counter.
 
 ## Budget
 
-Per Change: about 11 Workflow steps, plus 3 steps for each earlier open request of the Project.
-Per woken Task: 1 to 4 model calls and about 3 Queue operations. Analytics Engine has no billing.
-Code caps Workers AI calls. Model calls count against the monthly Anthropic budget (ADR 0021).
+Per Change: about 11 workflow steps, plus 3 steps for each earlier open request of the Project.
+Per woken Task: 1 to 4 model calls and about 3 queue operations. Code caps Clef-flash calls with
+the daily `clef-flash` counter. Agent model calls count against the monthly Anthropic budget
+(ADR 0021).
 
 ## Diagram
 
 ```mermaid
 sequenceDiagram
-  participant API as API Worker
+  participant API as API
   participant WF as ChangeWorkflow (integration)
   participant S as ResourceShardDO change:ID
-  participant Q as Queues
-  participant AG as Agents Worker
-  participant K2 as K2
+  participant Q as Queues (JetStream)
+  participant AG as Agents
+  participant EL as Event log (JetStream)
   participant R as Event router (causal-router)
   API->>WF: CHANGE_WORKFLOW.create(id = Change ID)
-  WF->>WF: load, mark compiling, intake gate, admit, plan (opus tier, gateway)
-  WF->>WF: compare with other requests, persist Tasks and edges (D1), Work Graph (R2)
+  WF->>WF: load, mark compiling, intake gate, admit, plan (opus tier)
+  WF->>WF: compare with other requests, persist Tasks and edges (database), Work Graph (object store)
   WF->>S: appendEvents (change.compiled, task.created)
   WF->>S: dispatch: appendEvents (task.ready)
-  WF->>Q: agent.wake on rhumbatron-agent-wakeups, then wake_sent_at
+  WF->>Q: agent.wake on agent-wakeups, then wake_sent_at
   Q->>AG: wake consumer: relevance check, task.assigned, agent.woken, AgentDO.start
-  S->>K2: outbox alarm publishes
-  K2->>R: routeEvent (rules first, Clef-flash for ambiguous overlaps)
+  S->>EL: outbox alarm publishes
+  EL->>R: routeEvent (rules first, Clef-flash for ambiguous overlaps)
   R->>Q: agent.wake for affected agents
-  R->>Q: change.dispatch, candidate.create, candidates.recompose on rhumbatron-integration
+  R->>Q: change.dispatch, candidate.create, candidates.recompose on integration
 ```

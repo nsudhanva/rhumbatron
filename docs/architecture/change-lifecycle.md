@@ -21,7 +21,7 @@ The path uses these stable IDs:
 The API stores the Change and starts one ChangeWorkflow (request field `startPlanning`, default `true`).
 The API returns before any model call.
 A member's request waits for review first (ADR 0028). While the Project setting `memberRequestReview` is on, the API stores the request as `proposed` and starts no ChangeWorkflow.
-When an owner or admin includes the request, the Change becomes `created` at the current Canonical Generation. The integration Worker then starts the ChangeWorkflow with the same instance ID.
+When an owner or admin includes the request, the Change becomes `created` at the current Canonical Generation. The integration code then starts the ChangeWorkflow with the same instance ID.
 [Shared Projects](shared-projects.md#request-review) describes the review.
 The ChangeWorkflow runs the intake gate, calls the Root Planner, and compares the plan with the other open requests.
 Then it stores the Work Graph and dispatches the ready Tasks.
@@ -36,31 +36,31 @@ The intake gate asks at most one round. After an answer, or after "Build it as i
 sequenceDiagram
   autonumber
   actor User
-  participant API as rhumbatron-api
+  participant API as API (core)
   participant Root as ProjectRootDO
-  participant D1 as D1
+  participant DB as Product database
   participant CW as ChangeWorkflow
-  participant GW as AI Gateway
+  participant GW as Models (Anthropic, embed, rerank)
   participant Shard as ResourceShardDO
-  participant WQ as agent-wakeups Queue
+  participant WQ as agent-wakeups queue
 
-  User->>API: POST /v1/projects/:id/changes (through rhumbatron-web)
+  User->>API: POST /v1/projects/:id/changes (through the web app)
   API->>Root: getCanonical()
   alt a member's request, review on
-    API->>D1: INSERT changes (status proposed)
+    API->>DB: INSERT changes (status proposed)
     API-->>User: 201 Change (proposed)
     User->>API: POST /v1/changes/:id/include (owner or admin)
-    API->>D1: integration RPC includeChange: status created
+    API->>DB: integration RPC includeChange: status created
     API->>CW: integration CHANGE_WORKFLOW.create(id = changeId)
   else owner or admin, or review off
-    API->>D1: INSERT changes (status created)
+    API->>DB: INSERT changes (status created)
     API->>CW: CHANGE_WORKFLOW.create(id = changeId)
     API-->>User: 201 Change
   end
-  CW->>D1: status compiling
+  CW->>DB: status compiling
   CW->>GW: intake gate (embeddings, reranker, Clef-flash, Sonnet)
   opt unclear or duplicate (at most one intake round)
-    CW->>D1: status needs_input, clarification
+    CW->>DB: status needs_input, clarification
     User->>API: POST /v1/changes/:id/clarify
     API->>CW: integration RPC clarifyChange, event clarification
   end
@@ -69,37 +69,37 @@ sequenceDiagram
   GW-->>CW: WorkGraphPlan (Zod and cycle check)
   CW->>Root: registerScope(), then compare with each earlier request
   opt supported conflict with an earlier request of another person
-    CW->>D1: request_choices row, status awaiting_choice
+    CW->>DB: request_choices row, status awaiting_choice
     User->>API: POST /v1/changes/:id/choose (the earlier requester)
     API->>CW: integration RPC chooseFirstCome, event first_come
     CW->>GW: apply theirs or moot: Root Planner on the current tree
   end
-  CW->>D1: tasks, task_dependencies, title, assumptions, status running (one batch)
+  CW->>DB: tasks, task_dependencies, title, assumptions, status running (one batch)
   CW->>Shard: change.compiled, task.created (outbox)
-  CW->>D1: pending to ready when dependencies are completed
+  CW->>DB: pending to ready when dependencies are completed
   CW->>Shard: task.ready (outbox)
   CW->>WQ: one agent.wake per ready Task
 ```
 
 Notes:
 
-- The Root Planner routes to the `opus` tier (`taskKind = plan`, `complexity = large`). With `ALLOW_OPUS` set to `false` (the Terraform default), the `opus` tier runs on Sonnet 5.5 (ADR 0021).
-- The plan has a short `title` for the request, at most 6 words. The planner sees the goal with the clarification answers, so the title names the final request. `parsePlan` cuts the title to 48 characters at a word boundary. A missing title never causes a repair turn. The ChangeWorkflow writes it to D1 `changes.title` with the Tasks. Without a title, the API shows `fallbackTitle(goal)` (`packages/protocol/src/change-title.ts`).
-- The plan has `assumptions`: up to 8 small product details that the goal leaves open and that the planner decided, for example colors, sizes, or defaults. The planner also gets the open details that the intake gate found. `parsePlan` drops bad entries and cuts the list, so assumptions never cause a repair turn. The ChangeWorkflow writes them to D1 `changes.assumptions_json` (migration `0032_change_assumptions.sql`). The Change page shows them as "Assumptions". To change one, the requester sends a follow-up request.
+- The Root Planner routes to the `opus` tier (`taskKind = plan`, `complexity = large`). With `ALLOW_OPUS` set to `false` (the default), the `opus` tier runs on Sonnet 5.5 (ADR 0021).
+- The plan has a short `title` for the request, at most 6 words. The planner sees the goal with the clarification answers, so the title names the final request. `parsePlan` cuts the title to 48 characters at a word boundary. A missing title never causes a repair turn. The ChangeWorkflow writes it to `changes.title` with the Tasks. Without a title, the API shows `fallbackTitle(goal)` (`packages/protocol/src/change-title.ts`).
+- The plan has `assumptions`: up to 8 small product details that the goal leaves open and that the planner decided, for example colors, sizes, or defaults. The planner also gets the open details that the intake gate found. `parsePlan` drops bad entries and cuts the list, so assumptions never cause a repair turn. The ChangeWorkflow writes them to `changes.assumptions_json` (migration `0032_change_assumptions.sql`). The Change page shows them as "Assumptions". To change one, the requester sends a follow-up request.
 - The prompt asks for 2 to 8 Tasks. The schema accepts 1 to 12 (`MAX_TASKS_PER_CHANGE`). The planner makes at most two model calls: the plan and one repair turn.
 - A UI Task that calls routes of another Task must depend on that Task. The prompt states the rule. `parsePlan` (`workers/integration/src/root-planner.ts`) also repairs the plan without a model call. It adds the edge UI → API between a UI Task and an API Task on the same area when no dependency path joins them. The area is the first resource segment, for example `todos` in `todos:ui` and `todos:api`.
 - Every UI Task edits `public/index.html`, and every API Task edits `src/app.ts`. Two Tasks of one kind built in parallel on one base do not merge. So `parsePlan` also runs Tasks of one kind in plan order when no dependency path joins them: the later key depends on the earlier key (`serializeSameSurface`). A UI Task and an API Task still run in parallel.
-- The Work Graph JSON goes to R2 at `work-graphs/<project>/<change>.json`.
+- The Work Graph JSON goes to the object store at `work-graphs/<project>/<change>.json`.
 - Change Events go to the ResourceShardDO that owns `change:<id>`. This keeps ProjectRootDO cold.
 - The API writes the Change to ProjectViewDO directly.
-- The intake gate records `change.intake.reviewed` and an `INTAKE` Decision Receipt in D1 `change_decisions`. An answer records `change.clarification.answered`.
+- The intake gate records `change.intake.reviewed` and an `INTAKE` Decision Receipt in `change_decisions`. An answer records `change.clarification.answered`.
 - An `awaiting_choice` or `queued` Change waits for the event `first_come`. It runs `advanceFirstCome` after each wake, and at the latest every 6 hours while the choice is open and every hour while queued. After 7 days without a choice, the Change is `not_selected`.
-- A `needs_input` Change waits for the event `clarification` and reads D1 once a day. After 7 days without an answer, the Change is `cancelled`. The intake gate asks at most one round. The request comparison can ask more. After 3 answered rounds in total, the Change plans without another question.
+- A `needs_input` Change waits for the event `clarification` and reads the database once a day. After 7 days without an answer, the Change is `cancelled`. The intake gate asks at most one round. The request comparison can ask more. After 3 answered rounds in total, the Change plans without another question.
 
 ## Part 2: from a wake to a published ChangeSet
 
 Each wake starts one AgentDO run.
-The Agent works in its own Artifacts fork and Sandbox directory.
+The Agent works in its own Git fork and Sandbox directory.
 When the run ends, the Agent publishes a ChangeSet and declares a typed Intent.
 The ResourceShardDO then detects conflicts.
 [Agents and models](agents-and-models.md) describes the run, model routing, and the Pi loop.
@@ -107,21 +107,21 @@ The ResourceShardDO then detects conflicts.
 ```mermaid
 sequenceDiagram
   autonumber
-  participant WQ as agent-wakeups Queue
+  participant WQ as agent-wakeups queue
   participant AC as Wake consumer
-  participant D1 as D1
+  participant DB as Product database
   participant A as AgentDO (Pi)
-  participant GW as AI Gateway
-  participant Art as Artifacts
+  participant GW as Anthropic API
+  participant Art as git service
   participant SBX as Sandbox
   participant Shard as ResourceShardDO
   participant ER as Event router
 
   WQ->>AC: agent.wake (task_ready)
-  AC->>D1: admitAgent: ready to assigned (max 8 per Change)
+  AC->>DB: admitAgent: ready to assigned (max 8 per Change)
   AC->>Shard: task.assigned, agent.woken
   AC->>A: start(input)
-  A->>D1: route tier, MODEL_ROUTE Decision Receipt, status running
+  A->>DB: route tier, MODEL_ROUTE Decision Receipt, status running
   A->>Shard: model.route.decided, task.started, advisory Claims
   loop Pi tool loop (max 16 model calls on haiku, 32 on sonnet and opus)
     A->>GW: model call
@@ -129,11 +129,11 @@ sequenceDiagram
     A->>SBX: read_file, edit_file, write_file, run_command in /workspace/{run suffix}
   end
   A->>SBX: git commit and push to ws-{run}
-  A->>D1: changesets (proposed), task completed
+  A->>DB: changesets (proposed), task completed
   A->>Shard: changeset.proposed, intent.declared, task.completed
-  Shard-->>ER: K2 records from the outbox
-  ER->>D1: dedupe, find newly ready Tasks
-  ER-->>WQ: change.dispatch on the integration Queue, which sends the next wakes
+  Shard-->>ER: event records from the outbox (JetStream)
+  ER->>DB: dedupe, find newly ready Tasks
+  ER-->>WQ: change.dispatch on the integration queue, which sends the next wakes
 ```
 
 Notes:
@@ -141,13 +141,13 @@ Notes:
 - Only Task kinds `implement`, `migrate`, and `test` get a workspace. Other kinds get read-only file tools.
 - A Task with dependencies starts on a stacked workspace: canonical plus the dependency ChangeSets. See [Agents and models](agents-and-models.md#stacked-workspaces).
 - Conflict detection is deterministic and runs before `task.completed`. Two Tasks joined by a Work Graph path, in either direction and through any number of edges, are never compared: the later Task runs on a workspace that holds the earlier Task's work, so they are not rival designs. A later Task that breaks the earlier work fails the Candidate's checks instead. A model review (Sonnet tier, then Opus tier) runs later from a durable schedule and stays off the run path.
-- Conflict detection and conflict review read protected resources from the Project policy row (D1 `project_policies`, `protectedResources`). A Project without a row, or with a row that does not parse, has no protected resources there.
+- Conflict detection and conflict review read protected resources from the Project policy row (`project_policies`, `protectedResources`). A Project without a row, or with a row that does not parse, has no protected resources there.
 - When the last Task completes, AgentDO moves the Change to `verifying` and records `verification.started` with reason `work_graph_completed`.
 
 ## Part 3: from Candidates to a release
 
 The causal router turns `verification.started` into one `candidate.create` command.
-The integration Worker applies the integrate rule, then the fork rule.
+The integration code applies the integrate rule, then the fork rule.
 It starts one CandidateVerificationWorkflow per Candidate.
 Sibling Candidates on one base wait for each other. The last one to settle selects the winner (ADR 0026).
 Policy or a person promotes the winner. ProjectRootDO runs the compare-and-swap.
@@ -157,27 +157,27 @@ sequenceDiagram
   autonumber
   actor User
   participant ER as Event router
-  participant INT as Integration Worker
+  participant INT as Integration
   participant VW as CandidateVerificationWorkflow
   participant SBX as Sandbox
-  participant D1 as D1 and R2
+  participant DB as Database and object store
   participant Root as ProjectRootDO
-  participant Art as Artifacts
+  participant Art as git service
   participant RW as ReleaseWorkflow
 
-  ER->>INT: candidate.create (integration Queue)
-  INT->>D1: fork rule, INSERT candidates (composing, max 3)
+  ER->>INT: candidate.create (integration queue)
+  INT->>DB: fork rule, INSERT candidates (composing, max 3)
   INT->>VW: create(id = candidateId)
   VW->>Art: fork canonical as cand-{id}
   VW->>SBX: merge ChangeSets in Work Graph order
-  VW->>D1: plan_json, status verifying, candidate.composed
+  VW->>DB: plan_json, status verifying, candidate.composed
   loop each check in the Verification Plan
-    VW->>SBX: run check (or Dynamic Worker, or acceptance model call)
-    VW->>D1: Evidence row in D1, output in R2
+    VW->>SBX: run check (or apps service, or acceptance model call)
+    VW->>DB: Evidence row, output object
   end
-  VW->>D1: gate: verified or rejected
-  VW->>D1: last sibling: claim selection, rank, reject losers, candidate.selected
-  VW->>D1: approval.requested for a gated winner
+  VW->>DB: gate: verified or rejected
+  VW->>DB: last sibling: claim selection, rank, reject losers, candidate.selected
+  VW->>DB: approval.requested for a gated winner
   User->>INT: POST /v1/changes/:id/approve (API RPC decideApproval)
   User->>INT: POST /v1/candidates/:id/promote (API RPC promoteCandidate)
   INT->>Root: promote(): compare-and-swap
@@ -197,10 +197,10 @@ Notes:
   - A Change gets at most 2 of these re-runs (`MAX_TASK_RESTACKS`).
   - The re-run Task gets the integrate instruction: build on the real routes, field names, and data shapes of the other Task's ChangeSet.
 - A Change with no Task left to run never stays `running`. When a Task failed and no Task is ready, assigned, or running, the Change ends `failed`. `blocked_reason` names the Task and its reason, for example "The Task on canvas:activity failed: ... Submit the request again." `change.failed` records it with `phase: "tasks"`.
-- Every 5 minutes, the event router also finds open Changes that are quiet for 3 minutes to 6 hours and cannot move on their own. These are `running` Changes with no Task at work, and `verifying` Changes with no live Candidate. It queues one `change.settle` per Change, at most 10 per sweep. The integration Worker re-checks the Change. Then it re-runs the work, dispatches the Tasks that are ready, or ends the Change with its reason.
-- `candidate.create` waits while a conflict review reserved in the last 10 minutes is still open. The last Queue delivery composes anyway.
+- Every 5 minutes, the event router also finds open Changes that are quiet for 3 minutes to 6 hours and cannot move on their own. These are `running` Changes with no Task at work, and `verifying` Changes with no live Candidate. It queues one `change.settle` per Change, at most 10 per sweep. The integration code re-checks the Change. Then it re-runs the work, dispatches the Tasks that are ready, or ends the Change with its reason.
+- `candidate.create` waits while a conflict review reserved in the last 10 minutes is still open. The last queue delivery composes anyway.
 - A verified Candidate does not promote while a sibling on the same base still composes or verifies. A winner that does not meet every acceptance criterion never auto-promotes. Its Change goes to `awaiting_approval`. See [Source and verification](source-and-verification.md#sibling-candidates-and-selection).
-- Auto-promotion applies when the winner needs no human approval, meets every acceptance criterion, and the Project's policy `autoPromoteRiskTiers` lists the Change risk tier. The policy is the D1 `project_policies` row. Without a row, the policy is `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`). It lists `low` and `medium` in `autoPromoteRiskTiers`, and `high` and `critical` in `humanGateRiskTiers`. The CandidateVerificationWorkflow then calls `promoteCandidate` with actor `system:auto-promotion`, and `canonical.promotion.requested` records `trigger: "auto"`. Every promotion precondition applies (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
+- Auto-promotion applies when the winner needs no human approval, meets every acceptance criterion, and the Project's policy `autoPromoteRiskTiers` lists the Change risk tier. The policy is the `project_policies` row. Without a row, the policy is `DEFAULT_POLICY` (`policy-1` in `workers/integration/src/candidate-composer.ts`). It lists `low` and `medium` in `autoPromoteRiskTiers`, and `high` and `critical` in `humanGateRiskTiers`. The CandidateVerificationWorkflow then calls `promoteCandidate` with actor `system:auto-promotion`, and `canonical.promotion.requested` records `trigger: "auto"`. Every promotion precondition applies (`autoPromoteDecision` in `packages/evidence/src/promotion.ts`).
 - These Candidates always wait for a person:
   - a `high` or `critical` Change;
   - an authorization change at any tier (the plan sets `humanApprovalRequired`);
@@ -211,7 +211,7 @@ Notes:
 - A Candidate that waits for a person is never silent. The Change goes to `awaiting_approval`. The Candidate status reason states why. `approval.requested` records `reason` and `trigger` (`policy` or `acceptance`). The inbox tells the owner, the admins, and the requester. The Change page shows the reason under Needs attention. An owner or admin approves the Candidate (when approval is required), then ships it with Ship on the Change page or Promote on the Candidate page. Both call `POST /v1/candidates/:id/promote`.
 - The Change is `promoting` during the compare-and-swap. After it, the Change is `releasing` when the Project has a live app, else `completed`. The release ends the Change as `completed` (deployed or superseded) or `failed`. See [Live apps](live-apps.md#promotion-and-release).
 - Every end after promotion records `change.completed` or `change.failed`. The projector maps `build.started` to `releasing`. These Events move ProjectViewDO out of `promoting`.
-- A Change that is still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes, the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change (at most 10 per sweep). The integration Worker then re-checks the Change:
+- A Change that is still `releasing` 45 minutes after promotion is stuck (`RELEASE_STUCK_AFTER_MS`). Every 5 minutes, the event router reads `changes` by `(status, updated_at)` and queues one `release.recover` per stuck Change (at most 10 per sweep). The integration code then re-checks the Change:
   1. A release that already finished settles the Change.
   2. A `queued` or `building` release becomes `failed`, and the Change becomes `failed`.
   3. A Project without a live app completes the Change.
@@ -287,7 +287,7 @@ The pure rules are in `workers/integration/src/change-status.ts`.
 
 1. Cancels the open Tasks and rejects the open Candidates (reason `change cancelled`).
 2. A cancel during `compiling` stores the planned Tasks as `cancelled` and records no compile.
-3. A running CandidateVerificationWorkflow checks the Change at each step boundary. It stops before it uses more Sandbox or Browser Run time.
+3. A running CandidateVerificationWorkflow checks the Change at each step boundary. It stops before it uses more Sandbox or browser time.
 4. Dispatch runs only for a `running` Change.
 5. An active Agent run stops at once: `cancelChange` calls `AgentDO.stopIfCancelled` for each Task that was `assigned` or `running`. It aborts the model call in flight and releases the Claims and the Sandbox. If that call fails, the run stops at its next run check (every 60 s). A cancelled Task stays `cancelled`: its run ends with no retry, no escalation, and no `task.failed` event.
 
@@ -342,7 +342,7 @@ stateDiagram-v2
   rejected --> [*]
 ```
 
-`composed` is in the enum and in RPC results. D1 rows go from `composing` directly to `verifying`.
+`composed` is in the enum and in RPC results. Database rows go from `composing` directly to `verifying`.
 Rhumbatron never retries a stale Candidate blind. A new Candidate on the new base replaces it.
 
 ### Release status

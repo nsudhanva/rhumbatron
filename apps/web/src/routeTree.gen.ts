@@ -26,7 +26,6 @@ import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as AdminUsersIndexRouteImport } from './routes/admin.users.index'
 import { Route as AdminUsersUserIdRouteImport } from './routes/admin.users.$userId'
 import { Route as ChangesChangeIdFlightRouteImport } from './routes/changes_.$changeId.flight'
-import { Route as LiveProjectsProjectIdRouteImport } from './routes/live.projects.$projectId'
 import { Route as ProjectsProjectIdAgentsRouteImport } from './routes/projects_.$projectId.agents'
 import { Route as ProjectsProjectIdBoardRouteImport } from './routes/projects_.$projectId.board'
 import { Route as ProjectsProjectIdCodeRouteImport } from './routes/projects_.$projectId.code'
@@ -124,11 +123,6 @@ const ChangesChangeIdFlightRoute = ChangesChangeIdFlightRouteImport.update({
   path: '/changes/$changeId/flight',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LiveProjectsProjectIdRoute = LiveProjectsProjectIdRouteImport.update({
-  id: '/live/projects/$projectId',
-  path: '/live/projects/$projectId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ProjectsProjectIdAgentsRoute = ProjectsProjectIdAgentsRouteImport.update({
   id: '/projects_/$projectId/agents',
   path: '/projects/$projectId/agents',
@@ -207,7 +201,6 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/changes/$changeId/flight': typeof ChangesChangeIdFlightRoute
-  '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
   '/projects/$projectId/board': typeof ProjectsProjectIdBoardRoute
   '/projects/$projectId/code': typeof ProjectsProjectIdCodeRoute
@@ -238,7 +231,6 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/changes/$changeId/flight': typeof ChangesChangeIdFlightRoute
-  '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
   '/projects/$projectId/board': typeof ProjectsProjectIdBoardRoute
   '/projects/$projectId/code': typeof ProjectsProjectIdCodeRoute
@@ -270,7 +262,6 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/changes_/$changeId/flight': typeof ChangesChangeIdFlightRoute
-  '/live/projects/$projectId': typeof LiveProjectsProjectIdRoute
   '/projects_/$projectId/agents': typeof ProjectsProjectIdAgentsRoute
   '/projects_/$projectId/board': typeof ProjectsProjectIdBoardRoute
   '/projects_/$projectId/code': typeof ProjectsProjectIdCodeRoute
@@ -303,7 +294,6 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/admin/users/$userId'
     | '/changes/$changeId/flight'
-    | '/live/projects/$projectId'
     | '/projects/$projectId/agents'
     | '/projects/$projectId/board'
     | '/projects/$projectId/code'
@@ -334,7 +324,6 @@ export interface FileRouteTypes {
     | '/admin'
     | '/admin/users/$userId'
     | '/changes/$changeId/flight'
-    | '/live/projects/$projectId'
     | '/projects/$projectId/agents'
     | '/projects/$projectId/board'
     | '/projects/$projectId/code'
@@ -365,7 +354,6 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/admin/users/$userId'
     | '/changes_/$changeId/flight'
-    | '/live/projects/$projectId'
     | '/projects_/$projectId/agents'
     | '/projects_/$projectId/board'
     | '/projects_/$projectId/code'
@@ -397,7 +385,6 @@ export interface RootRouteChildren {
   AdminIndexRoute: typeof AdminIndexRoute
   AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
   ChangesChangeIdFlightRoute: typeof ChangesChangeIdFlightRoute
-  LiveProjectsProjectIdRoute: typeof LiveProjectsProjectIdRoute
   ProjectsProjectIdAgentsRoute: typeof ProjectsProjectIdAgentsRoute
   ProjectsProjectIdBoardRoute: typeof ProjectsProjectIdBoardRoute
   ProjectsProjectIdCodeRoute: typeof ProjectsProjectIdCodeRoute
@@ -533,13 +520,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChangesChangeIdFlightRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/live/projects/$projectId': {
-      id: '/live/projects/$projectId'
-      path: '/live/projects/$projectId'
-      fullPath: '/live/projects/$projectId'
-      preLoaderRoute: typeof LiveProjectsProjectIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/projects_/$projectId/agents': {
       id: '/projects_/$projectId/agents'
       path: '/projects/$projectId/agents'
@@ -637,7 +617,6 @@ const rootRouteChildren: RootRouteChildren = {
   AdminIndexRoute: AdminIndexRoute,
   AdminUsersUserIdRoute: AdminUsersUserIdRoute,
   ChangesChangeIdFlightRoute: ChangesChangeIdFlightRoute,
-  LiveProjectsProjectIdRoute: LiveProjectsProjectIdRoute,
   ProjectsProjectIdAgentsRoute: ProjectsProjectIdAgentsRoute,
   ProjectsProjectIdBoardRoute: ProjectsProjectIdBoardRoute,
   ProjectsProjectIdCodeRoute: ProjectsProjectIdCodeRoute,

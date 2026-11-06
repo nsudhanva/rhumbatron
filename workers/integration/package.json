@@ -4,28 +4,24 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "build": "wrangler deploy --dry-run --outdir dist",
-    "cf:types": "wrangler types",
     "typecheck": "tsc -p tsconfig.json",
     "test:critical": "vitest run --dir src"
   },
   "devDependencies": {
     "typescript": "7.0.2",
-    "vitest": "5.0.3",
-    "wrangler": "4.149.0"
+    "vitest": "5.0.3"
   },
   "dependencies": {
-    "@cloudflare/puppeteer": "1.4.0",
-    "@cloudflare/sandbox": "0.12.6",
     "@rhumbatron/causal-router": "workspace:*",
     "@rhumbatron/conflict": "workspace:*",
     "@rhumbatron/coordinator": "workspace:*",
     "@rhumbatron/evidence": "workspace:*",
     "@rhumbatron/model-router": "workspace:*",
+    "@rhumbatron/platform": "workspace:*",
     "@rhumbatron/protocol": "workspace:*",
     "isomorphic-git": "1.43.2",
     "memfs": "4.80.0",
+    "playwright-core": "1.64.1",
     "zod": "4.6.5"
   },
   "exports": {

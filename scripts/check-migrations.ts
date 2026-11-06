@@ -1,7 +1,7 @@
 /**
- * D1 migration guard for CI. Terraform applies migrations before it deploys new Worker versions,
- * and the old Workers keep serving until then, so every migration must work with the code that
- * runs before it (expand first, contract later).
+ * Migration guard for CI. Core applies migrations at start, and a database may hold data from any
+ * earlier version, so every migration must work with the data and code before it (expand first,
+ * contract later).
  *
  * Rules against the base commit (BASE_SHA, else origin/main):
  * 1. Migrations are append-only. A change, rename, or removal of an existing file fails.

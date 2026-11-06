@@ -3,8 +3,8 @@ import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messag
 import { createModels, createProvider, type MutableModels } from "@earendil-works/pi-ai/models";
 import {
   ANTHROPIC_PRICES,
+  anthropicBaseUrl,
   anthropicPrice,
-  gatewayAnthropicUrl,
   TIER_MODELS,
   TIER_REASONING_EFFORT,
 } from "@rhumbatron/model-router";
@@ -39,8 +39,7 @@ const TIER_LIMITS: Record<ModelTier, { contextWindow: number; maxTokens: number 
 export const tierLimits = (tier: ModelTier) => TIER_LIMITS[tier];
 
 export type ModelAccess = {
-  accountId: string;
-  gatewayId: string;
+  baseUrl?: string | undefined;
   apiKey: string;
   workspaceId: string;
   beforeCall: (tier: ModelTier) => Promise<void>;
@@ -98,7 +97,7 @@ export function tierPayload(payload: Record<string, unknown>, tier: ModelTier) {
 }
 
 export function createTierModels(access: ModelAccess): MutableModels {
-  const baseUrl = gatewayAnthropicUrl(access.accountId, access.gatewayId);
+  const baseUrl = anthropicBaseUrl(access.baseUrl);
   const tiers = Object.keys(TIER_MODELS) as ModelTier[];
   const models: Model<"anthropic-messages">[] = tiers.map((tier) => ({
     api: "anthropic-messages" as const,

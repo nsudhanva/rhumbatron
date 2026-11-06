@@ -29,7 +29,7 @@ planner, and the agents spend model budget on it. Shared Projects (ADR 0023) hav
     code, invite people, change the role of a member or viewer, and change the settings.
   - Only the owner makes, changes, or removes an admin, and deletes the Project.
   - Every role except the owner can leave.
-- Member request review. The Project setting `memberRequestReview` (D1
+- Member request review. The Project setting `memberRequestReview` (column
   `projects.member_request_review`, default on) makes a member's request start as `proposed`. A
   `proposed` Change has no ChangeWorkflow, makes no model call, and has no admission in
   ProjectRootDO, so the request comparison never sees it. The requests of the owner
@@ -45,7 +45,7 @@ planner, and the agents spend model budget on it. Shared Projects (ADR 0023) hav
 - The intake gate counts a `proposed` request as open. So a later duplicate request gets a
   question with the name of the person who proposed the first request.
 - The Board (`GET /v1/projects/:projectId/board`) shows the newest 100 Changes as cards in six
-  columns, with the people and their counts, in one D1 batch.
+  columns, with the people and their counts, in one database batch.
 
 ## Alternatives considered
 
@@ -63,6 +63,6 @@ planner, and the agents spend model budget on it. Shared Projects (ADR 0023) hav
   Settings so that member requests start at once.
 - An admin can do every operational action. Only Project deletion and the admin role stay with
   the owner.
-- A `proposed` request costs one D1 row and one event. Nothing else runs until a person includes
+- A `proposed` request costs one database row and one event. Nothing else runs until a person includes
   it.
 - The members response returns `joinedAt` and each role. Invitations carry their role.
