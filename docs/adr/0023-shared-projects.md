@@ -40,13 +40,15 @@ the system chooses between requests. See
 - When an earlier Change has no scope yet, the later Change waits for it: 10 checks, 15 s apart.
   After that, the earlier Change without a scope counts as overlapping.
 - Comparison (`workers/integration/src/request-policy.ts`, `request-check.ts`):
-  1. A deterministic pass checks shared resource tokens and shared routes in the criteria.
+  1. A deterministic pass checks shared resource words and shared routes in the criteria. It
+     compares resource words by stem, so `gifts` and `gifting` meet.
   2. A pair that overlaps gets one Sonnet review of the criteria. The review returns
      `independent`, `compatible`, `conflicting`, or `duplicate`, and cites criterion IDs.
   3. Application code validates each citation. An invalid citation or an abstention counts as a
      conflict that is not confirmed.
   4. Clef and Haiku never confirm a conflict alone.
-  5. At most 4 overlapping pairs get a review per Change.
+  5. At most 8 overlapping pairs get a review per comparison round (`MAX_PAIR_REVIEWS`). A pair
+     past the limit asks the later requester.
 - A supported conflict between two people follows the first-come rule of
   [ADR 0032](./0032-first-come-conflicts.md): the earlier request keeps working, and the later
   request waits for the earlier requester's choice. When one person asks twice, the later request
@@ -74,9 +76,10 @@ the system chooses between requests. See
 
 - Bob never sees the other Projects of Alice. As a member, he cannot take the actions of the owner
   and the admins.
-- Each pair of overlapping requests costs one Sonnet review, about $0.01. The limit is 4 pairs per
-  Change.
-- The design adds migration `0022_shared_projects.sql` and no new service.
+- Each pair of overlapping requests costs one Sonnet review, about $0.01. The limit is 8 pairs per
+  comparison round.
+- Migration `0022_shared_projects.sql` holds the sharing tables. Sharing needs no extra
+  service.
 - Known limitation: a conflict that both requests hide behind unrelated words and unrelated
   resources can pass the review. Then both Changes ship in sequence, and the later one wins. The
   tests of the earlier Change usually fail on the later tree and stop it. An agent can edit those

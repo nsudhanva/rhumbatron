@@ -334,7 +334,7 @@ export async function openWorkspace(
       message: `${sandboxLimitReason()} Declare your Intent without code changes, or call fail_task.`,
     };
   }
-  // Hard stop at the monthly Sandbox hours (ADR 0017, integration sandbox-meter.ts).
+  // Hard stop at the monthly Sandbox hours (integration sandbox-meter.ts).
   if (
     !(await reserveSandboxSeconds(env.DB, OPEN_RESERVATION_SECONDS, env.SANDBOX_MONTHLY_SECONDS))
   ) {

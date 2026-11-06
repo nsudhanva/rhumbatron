@@ -17,8 +17,7 @@ planner, and the agents spend model budget on it. Shared Projects (ADR 0023) hav
 - Four roles per Project in `project_members`: `owner`, `admin`, `member`, and `viewer`. Each
   Project has one owner. Nobody can assign, change, or remove the owner role. The rank
   (`ROLE_RANK`: owner 0, admin 5, member 10, viewer 30) only orders lists. Migration
-  `0029_roles_and_request_review.sql` maps every `collaborator` row and pending invitation to
-  `member` and keeps all rows.
+  `0029_roles_and_request_review.sql` defines the roles and the review columns.
 - One permission matrix, `PERMISSIONS` in `packages/protocol/src/roles.ts`. The API checks every
   action with `can(role, action)`. The web uses the same function to hide controls. A critical test
   spells out the full matrix.
@@ -58,9 +57,9 @@ planner, and the agents spend model budget on it. Shared Projects (ADR 0023) hav
 
 ## Consequences
 
-- The migration makes each `collaborator` a `member`, with the review setting on. A request of a
-  member then waits for the owner or an admin. The owner or an admin turns the setting off in
-  Settings so that member requests start at once.
+- The review setting is on by default. A request of a member then waits for the owner or an
+  admin. The owner or an admin turns the setting off in Settings, and member requests start at
+  once.
 - An admin can do every operational action. Only Project deletion and the admin role stay with
   the owner.
 - A `proposed` request costs one database row and one event. Nothing else runs until a person includes

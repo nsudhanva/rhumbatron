@@ -57,8 +57,8 @@ const STD = ["report.json", "stdout.txt.zst"];
 
 /** Test-name filter of the security check. Authorization tests must carry it in their name. */
 export const SECURITY_TEST_PATTERN = "authorization";
-/** Browser check budget: one Browser Run session (at most 55 s) plus Evidence upload. */
-export const BROWSER_CHECK_TIMEOUT_MS = 90_000;
+/** Browser check budget: one browser session (at most 120 s) plus Evidence upload. */
+export const BROWSER_CHECK_TIMEOUT_MS = 180_000;
 const exit0 = { kind: "exit_code", code: 0 } as const;
 
 /**
@@ -74,10 +74,6 @@ function policyChecks(
   const fallback = [...TIERS].reverse().find((t) => byRisk[t] !== undefined);
   const listed = byRisk[stricter ?? fallback ?? tier] ?? [];
   return new Set([...MINIMUM_CHECKS, ...listed]);
-}
-
-function atLeast(tier: RiskTier, floor: RiskTier): boolean {
-  return TIERS.indexOf(tier) >= TIERS.indexOf(floor);
 }
 
 function invariantSlug(invariant: string, index: number): string {
@@ -272,16 +268,18 @@ export function buildVerificationPlan(input: BuildVerificationPlanInput): Verifi
     });
   }
 
-  // Browser Run is metered: only a high-risk Change that touches pages gets it.
-  if (touches.ui && atLeast(riskTier, "high")) {
+  // Every Change that touches pages gets the browser check, at every risk tier.
+  if (touches.ui) {
     checks.push({
       checkId: "browser",
       kind: "browser",
-      reason: "High-risk user-facing change: run the end-to-end flow in Browser Run.",
+      reason: "User-facing change: open the app in a browser as a person does.",
       procedure:
-        "Open the Candidate preview in one Browser Run session. The home page must show " +
-        "text, GET /api/health must answer, and the check saves screenshots. Every step must pass.",
-      // One session of at most 55 s plus screenshot upload; Sandbox restore is not counted.
+        "Open the Candidate preview in one browser session. The home page must show text, " +
+        "GET /api/health must answer, and every page the app links to must open by a click and " +
+        "by a direct load, with no page script error and no 4xx or 5xx page or asset. The check " +
+        "saves screenshots. Every step must pass.",
+      // One session of at most 120 s plus screenshot upload; Sandbox restore is not counted.
       timeoutMs: BROWSER_CHECK_TIMEOUT_MS,
       required: true,
       expected: { kind: "procedure", description: "Every flow step passes (k/N with k = N)" },

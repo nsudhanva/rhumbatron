@@ -11,8 +11,8 @@ requests across Projects. These rules apply:
 - The monthly Anthropic budget of the stack (`ANTHROPIC_MONTHLY_BUDGET_USD`, ADR 0021) is the
   hard stop of the account. Code enforces it on the meter `usage_counters` in the product
   database.
-- Keep each model call cheap to meter. Add no new database, and add no extra request per call
-  beyond a small database read and one database batch.
+- Keep each model call cheap to meter. Use the product database only. Each call adds at most one
+  small database read and one database batch.
 - Roles decide who may act, never what is built (ADR 0025, ADR 0028).
 
 ## Decision
@@ -30,17 +30,17 @@ requests across Projects. These rules apply:
   `anthropic-usd-micro`. Every meter counts every call. A cap applies only when it is set, so the
   spend of the month shows before a person sets a cap.
 - Every model call that a Change pays for reserves its estimate on all meters of the Change in one
-  database batch. The batch first makes sure that the rows exist. Then one UPDATE adds the reservation to
-  every row, but only when no capped meter would pass its cap. After the call, every meter settles
-  to the exact cost. The calls
-  are the agent runs (Pi), context compaction, conflict review, the Root Planner, intake review,
-  request review, the acceptance check, and the Integration Judge
-  (`packages/model-router/src/budget-meters.ts`, `meteredComplete` with `meters`).
+  database batch. The batch first makes sure that the rows exist. Then one UPDATE adds the
+  reservation to every row, but only when no capped meter would pass its cap. After the call,
+  every meter settles to the exact cost. The calls are the agent runs (Pi), context compaction,
+  conflict review, the Root Planner, intake review, request review, the acceptance check, and the
+  Integration Judge (`packages/model-router/src/budget-meters.ts`, `meteredComplete` with
+  `meters`).
 - The Project and user caps always apply as ceilings, whichever scope the Change has.
 - A refused reservation sends no call. A Change in `compiling` or `running` becomes
   `budget_blocked`, with `blocked_limit` set to `change_budget`, `project_budget`,
-  `account_budget`, or `monthly_model_spend`. When several meters refuse, the narrowest budget is named. The reason
-  names the budget, its amount, the month, and who can raise it.
+  `account_budget`, or `monthly_model_spend`. When several meters refuse, the reason names the
+  narrowest budget. The reason names the budget, its amount, the month, and who can raise it.
 - A run whose share of the request budget runs out fails as `run_cost_cap`. When the attempt
   limit then stops the Task, the stop is `change_budget`. Only the attempt limit uses the text
   "this task failed 2 times".
@@ -53,7 +53,7 @@ requests across Projects. These rules apply:
   - A raise of a user budget resumes the Changes of that user that their budget stopped.
 
   All three use one restore path.
-  A Change that a budget stopped while planning returns to `compiling`, and a new ChangeWorkflow
+  A Change that a budget stopped while planning returns to `compiling`, and another ChangeWorkflow
   instance plans it again.
 - A Change with a pool scope stores 100 USD in `budget_usd`. The per-Task shares of the agents
   stay finite, and the pool caps the Change. The API shows `capUsd: null` for it.
@@ -70,8 +70,7 @@ requests across Projects. These rules apply:
 
 ## Consequences
 
-- One extra database read (the caps) and one database batch per model call. The batch replaces
-  the single monthly-meter statement. At the current call caps (1,000 agent calls per day), the
+- One extra database read (the caps) and one database batch per model call. At the call caps (1,000 agent calls per day), the
   rows written per day stay small for SQLite.
 - A deleted Project keeps its meter rows. They hold an ID and an amount, and a user meter must
   keep the spend of the month across Projects.

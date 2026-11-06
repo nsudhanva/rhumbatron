@@ -80,10 +80,9 @@ describe("buildVerificationPlan", () => {
     expect(p.humanApprovalRequired).toBe(true);
   });
 
-  it("medium risk requires contract but no browser or security", () => {
-    const p = plan("medium", { ui: true });
+  it("medium risk requires contract but no security", () => {
+    const p = plan("medium", { ui: false });
     expect(ids(p)).toContain("contract");
-    expect(ids(p)).not.toContain("browser");
     expect(ids(p)).not.toContain("security");
   });
 
@@ -174,14 +173,15 @@ describe("buildVerificationPlan", () => {
     expect(security?.command).toBe("bun test --test-name-pattern authorization");
   });
 
-  it("Browser Run is planned only for a high-risk UI change, within one capped session", () => {
-    // Browser minutes are metered: no browser check without UI or below high risk.
+  it("every UI change gets a required browser check, within one capped session", () => {
+    // A change that touches pages is checked in a browser at every risk tier.
     expect(ids(plan("high", { ui: false }))).not.toContain("browser");
-    expect(ids(plan("low", { ui: true, authorization: true }))).not.toContain("browser");
-    const browser = plan("critical", { ui: true }).checks.find((c) => c.kind === "browser");
-    expect(browser?.required).toBe(true);
-    expect(browser?.command).toBeUndefined();
-    expect(browser?.timeoutMs).toBeLessThanOrEqual(90_000);
+    for (const tier of ["low", "medium", "high", "critical"] as const) {
+      const browser = plan(tier, { ui: true }).checks.find((c) => c.kind === "browser");
+      expect(browser?.required).toBe(true);
+      expect(browser?.command).toBeUndefined();
+      expect(browser?.timeoutMs).toBeLessThanOrEqual(180_000);
+    }
   });
 });
 

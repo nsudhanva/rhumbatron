@@ -212,10 +212,11 @@ function scheduleSweep(): void {
       log.error("sweep.failed", { error: String(error).slice(0, 300) });
     }
     if (!shutdown.signal.aborted) scheduleSweep();
-    scheduleExpiry(evidence, shutdown.signal);
   }, next - Date.now());
 }
 scheduleSweep();
+// Object expiry runs once now, then every 24 hours.
+scheduleExpiry(evidence, shutdown.signal);
 
 // --- HTTP -------------------------------------------------------------------------------------
 

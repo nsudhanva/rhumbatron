@@ -2,7 +2,7 @@
 
 Rhumbatron runs as one Docker Compose stack on one computer (ADR 0034).
 This page lists the services, the networks, and the volumes of the stack.
-It also explains what costs money and how the code limits it.
+It also tells what costs money and how the code limits it.
 
 Main source files:
 
@@ -17,7 +17,7 @@ Main source files:
 
 ## Services
 
-`bun run stack:up` writes `.env` and runs `docker compose up -d --build`.
+`bun run stack:up` writes `.env`, runs `docker compose up -d --build`, and reports the trust state of the local CA.
 Each service is one container.
 
 ```mermaid
@@ -32,9 +32,9 @@ flowchart LR
   CORE --> OBJ["objects<br/>versitygw S3"]
   CORE --> GIT["git"]
   CORE --> SBXD["sandboxd"]
-  CORE -->|"RPC"| APPS
-  APPS -->|"DB and EVIDENCE shims"| CORE
-  CORE --> BR["browser<br/>Playwright server"]
+  CORE -->|"RPC :8789"| APPS
+  APPS -->|"DB and EVIDENCE shims :8790"| CORE
+  CORE -->|"ws://browser:3000/"| BR["browser<br/>Playwright server"]
   CORE --> EMB["embed, rerank<br/>llama.cpp"]
   CORE --> ANT["Anthropic API"]
   SBXD --> PROXY["socket-proxy"] --> DOCKER["Docker Engine"]
@@ -45,23 +45,25 @@ flowchart LR
 
 | Service | Image or build | Role |
 |---|---|---|
-| `edge` | `services/edge/Dockerfile` (Caddy 2.11.7 with the docs site built in) | TLS from Caddy's local CA, routing by host name, WebSocket proxy. Serves the docs site from `/srv/docs`. |
-| `web` | `apps/web/Dockerfile` | TanStack Start app on Bun. Calls core at `http://core:8787`. |
-| `core` | `services/core/Dockerfile` | One Bun process. It hosts the API, the coordinator actors, the agents, integration and its Workflows, the event router, and the indexer. |
+| `edge` | `services/edge/Dockerfile` (`caddy:2.11.7-alpine`, with the docs site built on `oven/bun:1.3.14`) | TLS for every `*.rhumbatron.localhost` host from Caddy's local CA, routing by host name, WebSocket proxy. Serves the docs site from `/srv/docs`. |
+| `web` | `apps/web/Dockerfile` (`oven/bun:1.3.14-debian`) | TanStack Start app on Bun 1.3.14. Calls core at `http://core:8787`. |
+| `core` | `services/core/Dockerfile` (`oven/bun:1.4.4`) | One Bun 1.4.4 process. It hosts the API, the coordinator actors, the agents, integration and its Workflows, the event router, and the indexer. Playwright `connect()` to the `browser` service needs Bun 1.4. |
 | `apps` | `services/apps/Dockerfile` (`workerd` 1.20261008.1) | Live apps and Candidate previews. Builds and checks app bundles for core (ADR 0020). |
-| `git` | `services/git` | One bare Git repository per Project, Task fork, or Candidate fork. Smart HTTP with signed, scoped tokens. |
+| `git` | `services/git` (`oven/bun:1.3.14-debian`) | One bare Git repository per Project, Task fork, or Candidate fork. Smart HTTP with signed, scoped tokens. |
 | `nats` | `nats:2.15.2-alpine` | JetStream: the command queues and the event log. |
 | `objects` | `versity/versitygw:v1.10.0` | S3 bucket `rhumbatron-evidence` on plain files. |
-| `browser` | `services/browser` (Playwright 1.64.1 server) | Browser checks. Core connects over WebSocket. |
+| `browser` | `services/browser` (`mcr.microsoft.com/playwright:v1.64.1-noble`, Playwright 1.64.1 server) | Browser checks. Core connects to `ws://browser:3000/`. |
 | `embed` | `ghcr.io/ggml-org/llama.cpp:server-b12110` | `bge-small-en-v1.5` embeddings, 384 dimensions. |
 | `rerank` | `ghcr.io/ggml-org/llama.cpp:server-b12110` | `bge-reranker-base` reranking. |
-| `sandboxd` | `services/sandboxd` | Creates one sibling container per Sandbox ID through the socket proxy. |
+| `sandboxd` | `services/sandboxd` (`oven/bun:1.3.14-debian`) | Makes one sibling container per Sandbox ID through the socket proxy. Listens on port 7070. |
 | `socket-proxy` | `wollomatic/socket-proxy:1.13.2` | Allows only the Docker Engine calls that sandboxd uses. Rejects every bind mount. |
 | `egress` | `services/sandboxd` (`bun src/egress.ts`) | HTTP(S) proxy for Sandboxes with a `host:port` allowlist: package registries, GitHub, and `git:8080`. |
-| `sandbox-image` | `containers/sandbox` | Builds `rhumbatron/sandbox:local` and exits. |
+| `sandbox-image` | `containers/sandbox` (`oven/bun:1.3.14-debian`) | Builds `rhumbatron/sandbox:local` and stops. |
 
 Every long-running service has `restart: unless-stopped`.
-`core` waits for healthy `nats` and `git`. `web` and `apps` wait for a healthy `core`.
+`core` waits for a healthy `nats`, a healthy `git`, and a started `objects`.
+`web` waits for a healthy `core`.
+`apps` has `depends_on: core { condition: service_healthy, restart: true }`. It waits for a healthy `core`, and Compose restarts it when `core` restarts.
 
 ### Host names
 
@@ -76,7 +78,7 @@ Every long-running service has `restart: unless-stopped`.
 
 | Network | Members | Rule |
 |---|---|---|
-| `default` | All services except `socket-proxy` and `sandbox-image` | Normal Compose network with a route out, subnet `172.31.240.0/24`. `core` has the fixed address `172.31.240.10`: workerd in `apps` resolves `core` once, at start, so the address must not change when `core` restarts. |
+| `default` | All services except `socket-proxy` and `sandbox-image` | Normal Compose network with a route out, subnet `172.31.240.0/24`. `core` has the fixed address `172.31.240.10`. workerd in `apps` resolves `core` once, at start, so the address stays the same when `core` restarts. |
 | `rhumbatron_sbx` (`sbx`) | Sandboxes, `sandboxd`, `egress`, `git` | `internal: true`. A Sandbox reaches only `egress:4750`, `git:8080`, `sandboxd`, and other Sandboxes. |
 | `rhumbatron_docker` (`docker`) | `sandboxd`, `socket-proxy` | `internal: true`. Only sandboxd reaches the socket proxy. |
 
@@ -89,7 +91,7 @@ Only `socket-proxy` mounts the Docker socket. `bun run check:guardrails` fails w
 | `core-data` | `core` | `rhumbatron.sqlite` (product tables, `CONFIG`, `MEMORY`, metrics), `workflows.sqlite`, and `actors/` (one SQLite file per actor and `registry.sqlite`) |
 | `git-data` | `git` | Bare repositories and `_meta/git.sqlite` (repository metadata and tokens) |
 | `objects-data` | `objects` | The objects of the `rhumbatron-evidence` bucket |
-| `nats-data` | `nats` | JetStream streams and consumers (at most 10 GB file store) |
+| `nats-data` | `nats` | JetStream streams and consumers (at most 10 GB file store, `services/nats/nats.conf`) |
 | `apps-data` | `apps` | `AppDataDO` storage of each live app (`/data/do`) |
 | `caddy-data`, `caddy-config` | `edge` | The local CA, certificates, and Caddy state |
 | `models` | `embed`, `rerank` | The downloaded model files, about 300 MB |
@@ -101,6 +103,8 @@ Only `socket-proxy` mounts the Docker socket. `bun run check:guardrails` fails w
 `services/core/src/main.ts` builds one environment and gives it to every module in core.
 The application code uses the binding names below.
 `packages/platform` implements each binding.
+Each module has a tracked `src/bindings.d.ts` with the binding types that it compiles against.
+`packages/platform/types/runtime.d.ts` holds the shared runtime interface types that the platform implements.
 
 | Binding | Backend |
 |---|---|
@@ -112,18 +116,19 @@ The application code uses the binding names below.
 | `PROJECT_ROOT`, `RESOURCE_SHARD`, `PROJECT_VIEW`, `AGENT` | Actor namespaces of the actor host |
 | `CHANGE_WORKFLOW`, `CANDIDATE_WORKFLOW`, `RELEASE_WORKFLOW` | The workflow engine |
 | `AGENT_WAKEUPS`, `INTEGRATION_COMMANDS`, `VERIFICATION_COMMANDS`, `INDEXING`, `RELEASE_COMMANDS` | JetStream queue producers |
-| `EVENTS_00` to `EVENTS_07`, `EVENT_LOG` | JetStream event stream producers, and the consumer client |
+| `EVENTS_00` to `EVENTS_07` | JetStream event stream producers |
+| `EVENT_LOG` | `client(index)` returns the JetStream consumer client of one event stream. `streams` is 8. The event router reads it in `workers/event-router/src/event-log.ts`. |
 | `ARTIFACTS` | `GitServiceClient` for the `git` service |
 | `SANDBOX` | The sandboxd client |
 | `APPS` | The RPC client for the `apps` service |
-| `BROWSER` | The WebSocket endpoint of the `browser` service |
+| `BROWSER` | `{ wsEndpoint }`: the WebSocket endpoint of the `browser` service, `BROWSER_WS_URL` (`ws://browser:3000/`) |
 | `AI` | `SmallModels`: `embed`, `rerank`, and Clef-flash questions to Claude Haiku |
 | `EVENT_ROUTER`, `INTEGRATION`, `AGENTS` | In-process entrypoint objects |
 
 ## What costs money
 
 Only model calls to the Anthropic API cost money.
-All other services run on the local computer and have no usage charge.
+All other services run on the local computer without a usage charge.
 
 | Item | Limit | Where |
 |---|---|---|
@@ -138,13 +143,13 @@ Code without the budget binding uses 10 USD per month (`ANTHROPIC_MONTHLY_BUDGET
 ### Local caps
 
 The local caps protect the computer, not a bill.
-Core reads them from its environment. `compose.yaml` does not set them, so the defaults in `services/core/src/config.ts` apply.
+`compose.yaml` sets each cap from `.env`, with the defaults below.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SANDBOX_MONTHLY_SECONDS` | 72,000 (20 h) | Awake Sandbox time per calendar month, on the `sandbox-seconds` meter. A use reserves seconds first. At the cap, new Sandbox work stops. |
-| `BROWSER_DAILY_SECONDS` | 960 | Browser check time per UTC day. One session lasts at most 55 s. A Candidate gets at most 2 runs. |
-| `SANDBOX_MAX` | 4 | Live Sandbox containers in sandboxd. A call that needs one more fails with `ContainerUnavailableError`. |
+| `BROWSER_DAILY_SECONDS` | 3,600 | Browser check time per UTC day, on the `browser-seconds` meter. One session lasts at most 120 s. A Candidate gets at most 2 runs. |
+| `SANDBOX_MAX` | 4 | Live Sandbox containers in sandboxd. A call that needs one more container fails with `ContainerUnavailableError`. |
 | `SANDBOX_IDLE_MS` | 120,000 | sandboxd removes a Sandbox after this idle time, with its disk. |
 | `SANDBOX_CPUS`, `SANDBOX_MEMORY_MB` | 2, 2048 | Resources of one Sandbox container. |
 
@@ -159,7 +164,7 @@ flowchart TB
   L3["3. Causal caps<br/>1,000 commands per Change per day,<br/>Clef-flash 200 calls per day"]
   L4["4. Change limits<br/>8 agents, 4 Sandboxes, 3 Candidates,<br/>2 attempts per tier, 2 browser runs"]
   L5["5. Queue and event bounds<br/>3 retries, then dead-letter,<br/>event batch skipped after 5 failures"]
-  L6["6. Meters in the product database<br/>Sandbox 20 h per month,<br/>browser 960 s per day,<br/>1,000 agent model calls per day,<br/>Anthropic budget per month"]
+  L6["6. Meters in the product database<br/>Sandbox 20 h per month,<br/>browser 3,600 s per day,<br/>1,000 agent model calls per day,<br/>Anthropic budget per month"]
   L1 --> L2 --> L3 --> L4 --> L5 --> L6
 ```
 
@@ -175,15 +180,15 @@ flowchart TB
 | Attempts | 2 per Task per tier | `limits.ts` |
 | Model calls | 16 per run (Haiku) or 32 per run (Sonnet, Opus), 1,000 agent calls per day | `packages/model-router/src/budget.ts` |
 | Change budget | `budgetUsd`, default 3 USD, max 100 USD | `packages/protocol/src/project.ts` |
-| Queues | 3 retries, then `dead-letter`. The indexing queue has no dead-letter queue and records the failure in `project_indexes`. | `services/core/src/main.ts` |
+| Queues | 3 retries, then `dead-letter`. The `indexing` queue records its last failed delivery in `project_indexes`. The `dead-letter` queue gets 5 retries. | `services/core/src/consumers.ts` |
 | Event batches | A batch that fails 5 times is skipped and recorded | `workers/event-router/src/poison-batch.ts` |
 | Sandbox time | 72,000 s (20 h) per month | `SANDBOX_MONTHLY_SECONDS` |
-| Browser checks | 960 s per day, 55 s per session, 2 runs per Candidate | `BROWSER_DAILY_SECONDS`, `check-semantics.ts` |
+| Browser checks | 3,600 s per day, 120 s per session, 2 runs per Candidate | `BROWSER_DAILY_SECONDS`, `check-semantics.ts` |
 | Embeddings | 2,000 texts per day, 10,000 vectors in total | `workers/indexer/src/handler.ts` |
 | Vector queries | 1,000 query embeddings per day | `workers/agents/src/retrieval.ts` |
 | Anthropic spend | `ANTHROPIC_MONTHLY_BUDGET_USD` per calendar month | `spend-meter.ts` |
 
-A guard that trips stops new expensive work and keeps all state.
+A guard that trips stops further expensive work and keeps all state.
 A concurrency limit applies backpressure. The work waits for a free slot.
 A budget limit stops the work. The Task becomes `blocked`, and the Change becomes `budget_blocked` and names the exact limit.
 
@@ -191,11 +196,11 @@ A budget limit stops the work. The Task becomes `blocked`, and the Change become
 
 Core owns all strong state: the actors, the workflows, and the product database.
 One process owns every actor, so single-writer ownership needs no lease.
-The stack therefore runs on one host. A second host needs a change to the actor host and the database.
+The stack runs on one host. The actor host and the database are local to that host.
 
 ## Logs and metrics
 
 - Each service writes one JSON line per log event to stdout. Docker keeps the logs. `bun run stack:logs` follows them.
 - `METRICS` and `EVENT_METRICS` rows stay in `platform_metrics` for 30 days.
 - `GET /v1/projects/:projectId/cost` reports the meters of a Project and of the stack (`workers/api/src/cost.ts`).
-- Rhumbatron configures no tracing.
+- Logs and metrics are the observability data. The stack has no trace collector.

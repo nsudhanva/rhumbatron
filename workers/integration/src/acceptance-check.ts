@@ -507,7 +507,7 @@ export async function changeModelSpend(
   };
 }
 
-/** One model call on the shared daily call cap (ADR 0019). False when the cap is reached. */
+/** One model call on the shared daily call cap. False when the cap is reached. */
 export async function takeDailyCall(db: Db, now = new Date()): Promise<boolean> {
   const row = await db
     .prepare(

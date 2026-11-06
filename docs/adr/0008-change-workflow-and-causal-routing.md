@@ -7,9 +7,9 @@ needs idempotent transitions and durable events. ProjectRootDO holds only cold p
 
 ## Decision
 
-- `POST /v1/projects/:id/changes` starts `ChangeWorkflow` (the workflow engine in
-  `packages/platform`, integration code) with instance ID = Change ID. A request with `startPlanning: false` does not start it.
-  Smoke checks use this option.
+- `POST /v1/projects/:id/changes` starts `ChangeWorkflow` with instance ID = Change ID. The
+  workflow engine in `packages/platform` runs it, and the integration code defines it. A request
+  with `startPlanning: false` does not start it. Smoke checks use this option.
 - Steps (`workers/integration/src/change-workflow.ts`):
   1. Load the Change. Mark it `compiling`.
   2. Run the intake gate (ADR 0025). A question makes the Change `needs_input`, and the workflow
@@ -29,8 +29,7 @@ needs idempotent transitions and durable events. ProjectRootDO holds only cold p
 - Each step is idempotent. The steps use deterministic Task IDs, `INSERT OR IGNORE`, conditional
   status updates, and stable event and command IDs.
 - Tasks and dependency edges are in the product database. The object store keeps the Work
-  Graph JSON under
-  `work-graphs/<project>/<change>.json`, with the planner model, tokens, and cost.
+  Graph JSON under `work-graphs/<project>/<change>.json`, with the planner model, tokens, and cost.
 - Change and Task events go to the outbox of the ResourceShardDO that owns `change:<id>`
   (`appendEvents`, idempotent on event ID). Its alarm publishes them to the event log (NATS
   JetStream streams `EVENTS_00` to `EVENTS_07`).
@@ -41,15 +40,15 @@ needs idempotent transitions and durable events. ProjectRootDO holds only cold p
   `agent.woken`, and starts a run on the `AgentDO` of the Task (ADR 0009).
 - The `causal-router` subscription of the event router runs `routeEvent`
   (`packages/causal-router`). It sends these commands on the `integration` queue:
-  `change.dispatch` (newly ready Tasks), `candidate.create` (the Work Graph is complete), and
-  `candidates.recompose` (after `canonical.advanced`, ADR 0013). The router sends commands on a queue, not as direct
-  calls, so the coordinator, the router, and integration have no call cycle.
+  `change.dispatch` (Tasks that became ready), `candidate.create` (the Work Graph is complete),
+  and `candidates.recompose` (after `canonical.advanced`, ADR 0013). The router sends commands on
+  a queue, so the coordinator, the router, and integration have no call cycle.
 - The Causal Router allows at most 1,000 wake, dispatch, and compose commands per Change per UTC
   day (`CHANGE_DAILY_COMMAND_CAP`).
-- Ambiguous resource overlaps go to Clef-flash (model ID `@cf/cloudflare/clef-flash`, answered
-  by Claude Haiku through a forced tool call) with an abstain threshold of 0.7. When Clef-flash abstains or the cap is reached, the router wakes the
-  Agent. The `clef-flash` counter in `usage_counters` allows 200 calls per UTC day. The intake gate
-  uses the same counter.
+- Ambiguous resource overlaps go to Clef-flash (model ID `@cf/cloudflare/clef-flash`). Claude
+  Haiku answers it through a forced tool call. The router abstains below a probability of 0.7.
+  When Clef-flash abstains or the cap is reached, the router wakes the Agent. The `clef-flash`
+  counter in `usage_counters` allows 200 calls per UTC day. The intake gate uses the same counter.
 
 ## Budget
 

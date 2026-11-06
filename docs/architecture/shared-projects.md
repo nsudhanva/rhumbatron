@@ -40,14 +40,16 @@ Before a person can open any Project, the platform must approve them (ADR 0033).
 `requireAuth` runs the gate after it verifies the Clerk session.
 
 1. The gate reads the status of the user and the setting `signup_approval_required` in one database query.
-2. The first request of a new person creates the user row. While the setting is `"true"`, the row is `pending`. Otherwise it is `approved`.
+2. The first request of a person without a user row creates the row. While the setting is `"true"`, the row is `pending`. Otherwise it is `approved`.
 3. A platform admin (a user ID in `PLATFORM_ADMIN_USER_IDS`) is always approved.
-4. A person who is `pending` or `declined` gets 403 `approval_required` with `details.status`. Only `GET /v1/me` answers. It returns `accessStatus`, so the web can show one full-page message and no Project data. Sign-out is a Clerk action in the browser.
-5. A platform admin approves or declines each pending person, or approves all of them (`/v1/admin/*`). Turning the setting off approves nobody.
+4. A person who is `pending` or `declined` gets 403 `approval_required` with `details.status`.
+5. For such a person, only `GET /v1/me` answers. It returns `accessStatus`. The web then shows one full-page message and no Project data.
+6. Sign-out is a Clerk action in the browser.
+7. A platform admin approves or declines each pending person, or approves all of them (`/v1/admin/*`). A switch of the setting to off approves nobody.
 
 The API decides admin rights from the session user ID only. A request field never names an admin.
 Each platform admin gets the notification `access_request` while a person is pending. The person gets `access_decided` after the decision.
-Project roles apply only after the gate: an approved person sees only the Projects that they own or that another person shares with them.
+Project roles apply only after the gate. An approved person sees only the Projects that they own or that another person shares with them.
 
 ```mermaid
 flowchart TD
@@ -89,12 +91,14 @@ No build decision reads a role, `rank`, or `requester_rank`.
 
 ### Invitations
 
-1. The owner or an admin sends `POST /v1/projects/:projectId/invitations` with an email address and a role (`admin`, `member`, or `viewer`; default `member`). Only the owner can invite an admin. The API changes the email to lowercase.
-2. The invitation stays `pending` for 7 days. One `pending` invitation can exist for one Project and email. A repeat returns the same invitation. A repeat with another role changes the role of the pending invitation.
-3. After 7 days the invitation expires. The owner or an admin can then send a new one.
-4. `GET /v1/invitations` lists the pending invitations for the Clerk email addresses of the caller that have the status `verified`.
-5. `POST /v1/invitations/:invitationId/accept` checks that the invitation email is one of these addresses. If not, the API answers `404`, as for a missing invitation.
-6. The member row stores the user ID and the role of the invitation. It does not store the email. A second accept returns the same result.
+1. The owner or an admin sends `POST /v1/projects/:projectId/invitations` with an email address and a role.
+2. The role is `admin`, `member`, or `viewer`. The default is `member`. Only the owner can invite an admin. The API changes the email to lowercase.
+3. The invitation stays `pending` for 7 days. One `pending` invitation can exist for one Project and email.
+4. A repeat returns the same invitation. A repeat with a different role changes the role of the pending invitation.
+5. After 7 days the invitation expires. The owner or an admin can then send one more invitation.
+6. `GET /v1/invitations` lists the pending invitations for the `verified` Clerk email addresses of the caller.
+7. `POST /v1/invitations/:invitationId/accept` checks that the invitation email is one of these addresses. When it is not, the API answers `404`, as for a missing invitation.
+8. The member row stores the user ID and the role of the invitation. It does not store the email. A second accept returns the same result.
 
 ### Roles and permissions
 
@@ -121,14 +125,16 @@ A refused action gets `403` with the text of `deniedMessage`: "Only the project 
 
 - `PATCH /v1/projects/:projectId/members/:userId` changes a role. It never changes the owner row.
 - `DELETE /v1/projects/:projectId/members/:userId` removes a person, or the caller leaves with their own user ID.
-- When a person leaves, the API first cancels their open requests. When the API removes a person, it cancels their `proposed` requests. Past Changes stay with the Project.
+- When a person leaves, the API first cancels their open requests.
+- When the API removes a person, it cancels their `proposed` requests.
+- Completed Changes stay with the Project.
 
 ## Request review
 
 The Project setting `memberRequestReview` (`projects.member_request_review`, default on) controls review.
 While it is on, the request of a `member` starts as `proposed` (`needsReview`).
 The requests of the owner and the admins never need review.
-When the setting is off, a member's request goes to the system at once, as the request of an admin does.
+When the setting is off, the request of a member goes to the system at once, as the request of an admin does.
 
 A `proposed` Change has no ChangeWorkflow. It makes no model call and spends nothing.
 ProjectRootDO does not admit it, so the request comparison does not see it.
@@ -145,8 +151,14 @@ stateDiagram-v2
 ```
 
 - Create: the API inserts the Change with status `proposed` and `review_state = 'proposed'`. The integration code records `change.proposed` (`recordProposal`). The owner and the admins get the notification `request_proposed`.
-- Include: `POST /v1/changes/:changeId/include` (`change.review`). `includeChange` moves the Change to `created` at the current Canonical Generation and stores who decided and when. It records `change.included` and starts the ChangeWorkflow with the Change ID as instance ID, as for a request without review. A repeat returns the same result and starts no second workflow. The requester gets `request_included`.
-- Decline: `POST /v1/changes/:changeId/decline` with an optional `reason` (up to 500 characters). The Change becomes `declined` with `outcome = declined` and the reason. `declined` is terminal. The event is `change.declined`. The requester gets `request_declined`.
+- Include: `POST /v1/changes/:changeId/include` (`change.review`).
+  - `includeChange` moves the Change to `created` at the current Canonical Generation. It stores who decided and when.
+  - It records `change.included`. It starts the ChangeWorkflow with the Change ID as instance ID, as for a request without review.
+  - A repeat returns the same result and starts no second workflow.
+  - The requester gets `request_included`.
+- Decline: `POST /v1/changes/:changeId/decline` with an optional `reason` (up to 500 characters).
+  - The Change becomes `declined` with `outcome = declined` and the reason. `declined` is terminal.
+  - The event is `change.declined`. The requester gets `request_declined`.
 - Withdraw: the requester sends `POST /v1/changes/:changeId/cancel`. The Change becomes `cancelled`. Its `review.state` stays `proposed`, because nobody decided.
 - An include or a decline on a Change that is not `proposed` returns `409`. A repeat of the same decision returns `repeated: true`.
 
@@ -167,7 +179,8 @@ Each Change is a card in one column (`BOARD_COLUMN_OF` in `packages/protocol/src
 | `not_built` | `declined`, `not_selected`, `cancelled`, `failed` |
 
 The `shipped` and `not_built` columns show the newest 20 cards each.
-`people` lists each member with a role and each earlier requester who left (role `null`), with counts over the 100 Changes: `proposed`, `active` (`needs_answer`, `building`, `checking`), `shipped`, and `notBuilt`.
+`people` lists each member with a role, and each earlier requester who left the Project (role `null`).
+Each person has counts over the 100 Changes: `proposed`, `active` (`needs_answer`, `building`, `checking`), `shipped`, and `notBuilt`.
 `canReview` is `true` for the owner and the admins.
 A card of an `awaiting_choice` or `queued` Change has `waiting`: the earlier request, its requester, and `state` (`choosing` or `after_first`).
 
@@ -203,14 +216,14 @@ After an answer, or after "Build it as it is", the request goes to planning, and
 
 `loadRelatedRequests` reads up to 50 open Changes of the Project and the 20 most recent `completed` Changes.
 An open Change has any status except `completed`, `failed`, `cancelled`, `not_selected`, and `declined`.
-A `proposed` request is open. When it covers the new request, the question names it as "a request that <name> proposed (it waits for review)".
+A `proposed` request is open. When it covers the incoming request, the question names it as "a request that <name> proposed (it waits for review)".
 Each item is the goal plus the stored acceptance criteria.
 Each text has a packet ID: `<changeId>:goal`, `<changeId>:c1`, and so on.
 
 `retrieveRelated` then does these steps:
 
 1. Embed the goal and each item with bge-small-en-v1.5 on the `embed` service (llama.cpp).
-2. Keep up to 10 items with a cosine similarity of 0.55 or more. If the embedding call fails, keep the items that share a non-generic word with the goal.
+2. Keep up to 10 items with a cosine similarity of 0.55 or more. When the embedding call fails, keep the items that share a non-generic word with the goal.
 3. Order the shortlist with bge-reranker-base on the `rerank` service (llama.cpp). Keep 5.
 
 The current app is one more target when its source is readable and not empty.
@@ -231,12 +244,12 @@ Clef-flash alone never marks a duplicate.
 
 ### Duplicate check
 
-For each remaining pair, Sonnet finds the criteria of the other request, or the features of the current app, that already deliver the new request.
+For each remaining pair, Sonnet finds the criteria of the other request, or the features of the current app, that already deliver the incoming request.
 The tool is `coverage_review`.
 A `duplicate` or `already_covered` verdict must quote source text with its packet ID.
 `validateCoverage` checks that each quote is text of the cited source of that target.
 A covered verdict without a valid quote counts as `unsupported`.
-Sonnet runs twice: once with the new request first, once with the other items first.
+Sonnet runs twice: once with the incoming request first, once with the other items first.
 
 | Clef-flash | Sonnet, first order | Sonnet, second order | Result |
 |---|---|---|---|
@@ -248,12 +261,13 @@ Sonnet runs twice: once with the new request first, once with the other items fi
 
 The question quotes the covering text: "This looks covered by "<goal>": "<quote>". What is different in your request?"
 
-A `completed` request describes the app when it went live. A later request can remove what it built, for example "simplify the home page to a plain list".
-So before a `completed` request asks anything, one Sonnet call (`still_live`) reads the current app's entry files (`readCanonicalAppFiles`: `public/index.html`, the scripts and styles it references, `src/app.ts`, `src/worker.ts`, at most 24,000 characters).
-For each cited criterion, it says whether the code still delivers it.
+A `completed` request describes the app at the time of its release. A later request can take out what it built, for example "simplify the home page to a plain list".
+Thus, before a `completed` request causes a question, one Sonnet call (`still_live`) reads the entry files of the current app.
+The entry files come from `readCanonicalAppFiles`: `public/index.html`, the scripts and styles that it references, `src/app.ts`, and `src/worker.ts`, at most 24,000 characters.
+For each cited criterion, the call says whether the code still delivers it.
 A "still delivered" answer counts only with a quote of at least 8 characters that occurs in the named file.
-When no cited criterion is still delivered, the target is dropped and the next one is checked; the receipt lists it in `noLongerLive`.
-When the call fails or the source cannot be read, the question is asked as before.
+When the code delivers no cited criterion, the check drops the target and goes to the next one. The receipt lists the dropped target in `noLongerLive`.
+When the call fails or the source cannot be read, the question goes to the requester.
 
 ### Clarity
 
@@ -268,14 +282,19 @@ The clarity check reads the request as a change to the current app.
 | `requests` | Up to 10 titles of the related requests: in-flight requests first, then the latest shipped requests |
 
 Clef-flash gets a shorter copy (40 paths, 300 README characters).
-So "Change to 16 color palette" in a canvas app that has a palette is clear.
+Thus "Change to 16 color palette" is clear in a canvas app that has a palette.
 
-1. A rule runs first. A goal with fewer than two words that name a product object fails the rule. Generic words such as "add", "build", "feature", and "app" do not count. "Add kanban feature" fails the rule.
-2. If the rule passes, a Clef-flash `buildable` probability of 0.9 or more makes the request clear. The request goes to planning with no Claude call. Clef-flash can only clear a request. It never asks alone.
+1. A rule runs first. A goal with fewer than two words that name a product object fails the rule.
+   Generic words such as "add", "build", "feature", and "app" do not count. Thus "Add kanban feature" fails the rule.
+2. When the rule passes, a Clef-flash `buildable` probability of 0.9 or more makes the request clear.
+   The request then goes to planning with no Claude call. Clef-flash can only clear a request. It never asks a question alone.
 3. In all other cases, one Sonnet call (`review_clarity`) reads the request and the app context. It returns:
-   - `questions`: only for a part of the request that two readings build as materially different products (a different feature, object, page, or user). Each question has one text, a quote of the goal, and 2 to 4 readings as options.
+   - `questions`: only for a part of the request where two readings make materially different products (a different feature, object, page, or user). Each question has one text, a quote of the goal, and 2 to 4 readings as options.
    - `assumptions`: small details that the request leaves open, such as colors, sizes, labels, or defaults. Each is one sentence with the choice that the builder makes.
-4. `validateClarity` shapes the questions. It keeps a question only when its quote is in the goal, its text asks one thing (one question mark, no semicolon list), and it has 2 or more distinct options. It removes options such as "Other", because the form adds "Something else". It keeps at most 3 questions with at most 4 options each, and at most 6 assumptions.
+4. `validateClarity` shapes the questions:
+   - It keeps a question only when three conditions are true. Its quote is in the goal. Its text asks one thing: one question mark and no semicolon list. It has 2 or more distinct options.
+   - It drops options such as "Other", because the form adds "Something else".
+   - It keeps at most 3 questions with at most 4 options each, and at most 6 assumptions.
 5. The request gets a question when one or more questions remain. When the rule failed and no question remains, the request gets one open question: "What should <goal> do?".
 6. Otherwise the request goes to planning. The assumptions go to the Root Planner as open details. The planner decides each one and records it.
 
@@ -285,7 +304,9 @@ Small details are never questions. The Root Planner records the details it decid
 
 A question sets the Change to `needs_input`.
 `clarification_json` holds the `ChangeClarification`: `kind` (`unclear`, `duplicate`, or `conflict`), `summary`, up to 3 `questions`, `relatedChangeId`, `relatedGoal`, `askedAt`, and `round` (1 to 3).
-Each question has its own answer. A question with `options` shows the readings as choices, plus "Something else" with a text field. The form sends an answer for each question that the person answered. The Root Planner decides the part that an unanswered question leaves open.
+Each question has its own answer.
+A question with `options` shows the readings as choices, plus "Something else" with a text field.
+The form sends an answer for each question that the person answered. The Root Planner decides the part that an unanswered question leaves open.
 The requester gets the notification `request_needs_input`.
 
 The workflow waits for the event `clarification`.
@@ -302,9 +323,10 @@ Only the requester, the Project owner, or an admin can call it.
 | `{ "action": "withdraw" }` | The Change becomes `cancelled` with the reason "Withdrawn by the requester". |
 
 When a `duplicate` Change ends by withdrawal or by the 7-day limit, it also gets `outcome = duplicate` and the related Change ID.
-The intake gate asks at most one round (`intakeMayAsk`). The request comparison can ask more rounds. A request gets at most 3 rounds of questions in total. After the third answer, it plans without another question.
+The intake gate asks at most one round (`intakeMayAsk`). The request comparison can ask more rounds.
+A request gets at most 3 rounds of questions in total. After the third answer, it plans without another question.
 The update has a guard on the open round. When two answers arrive for one round, only one applies.
-If the first workflow instance of the Change has ended, the answer starts a new instance with the ID `<changeId>_r<round>`.
+When the first workflow instance of the Change has ended, the answer starts one more instance with the ID `<changeId>_r<round>`.
 
 Each intake run writes a Decision Receipt to `change_decisions` (`decision_type = 'INTAKE'`) and records the event `change.intake.reviewed`.
 The receipt holds the retrieval scores, the Clef-flash probabilities, the Sonnet verdicts and quotes, and the cost. It holds no private reasoning.
@@ -321,10 +343,10 @@ After planning, the ChangeWorkflow step `check other requests` compares the Chan
 1. After the intake gate lets the Change plan, the workflow calls `admit` on ProjectRootDO. `admit` inserts a row in the SQLite table `request_scopes` and returns the admission order. The row starts with an empty scope (`scoped: false`).
 2. After planning, the workflow calls `registerScope` with the criteria and the semantic resources of the Work Graph. Each criterion has an ID.
 3. `registerScope` runs in one ProjectRootDO transaction. It returns each scope that has a lower admission order and is not released. It stores this answer as a receipt.
-4. A retry gets the same receipt. After an answer, the next pass keeps the receipt and updates the scope with the new criteria.
+4. A retry gets the same receipt. After an answer, the next pass keeps the receipt and updates the scope with the criteria of the latest plan.
 
-A Change that waits for an answer before planning has no admission, so it does not delay other requests.
-A `proposed` Change has no ChangeWorkflow, so it has no admission either. Its admission order starts when an owner or admin includes it.
+A Change that waits for an answer before planning has no admission. Thus it does not delay other requests.
+A `proposed` Change has no ChangeWorkflow and no admission. It gets an admission order when an owner or admin includes it.
 The later-admitted Change of a pair does the comparison, once for each clarification round and once for each plan after a first-come wait.
 The workflow releases the scope of a Change that ends as `completed`, `failed`, `cancelled`, or `not_selected`.
 
@@ -361,26 +383,34 @@ sequenceDiagram
 
 An earlier Change can still be in planning when the later Change registers. Its scope is then `scoped: false`.
 The later workflow reads the scope again, up to 10 times, with 15 seconds between reads.
-If the scope is still unscoped, the pair counts as overlapping.
+When the scope is still unscoped, the pair counts as overlapping.
 
 ### Deterministic overlap pass
 
 `requestsOverlap` runs before any model call.
-It returns `true` if one of the two Changes is not scoped.
+It returns `true` when one of the two Changes is not scoped.
 Otherwise it compares two sets:
 
-- Resource tokens. The code removes the `project:<slug>` prefix, splits on `:` and `-`, drops the words `app`, `api`, `ui`, `project`, `frontend`, `backend`, `web`, and `src`, and reduces each word to a plain stem (`gifts`, `gifting`, and `gifted` are all `gift`). One shared token is an overlap.
+- Resource tokens:
+  - The code strips the `project:<slug>` prefix and splits on `:` and `-`.
+  - It drops the words `app`, `api`, `ui`, `project`, `frontend`, `backend`, `web`, and `src`.
+  - It reduces each word to a plain stem. `gifts`, `gifting`, and `gifted` all become `gift`.
+  - One shared token is an overlap.
 - HTTP routes. The code finds the strings that start with `/` in the criteria text. One shared route is an overlap.
 
 A pair with no overlap gets the verdict `independent`, with cost 0 and the receipt method `deterministic`.
 
 ### Review and citation validation
 
-An overlapping pair gets one Sonnet review with the tool `review_requests`. The review does not get quality-gate criteria ("typecheck, test and contract pass") or criteria that only guard against breakage ("other pages and API routes behave as before"). These criteria protect each request from accidents, so they never make two requests conflict.
+An overlapping pair gets one Sonnet review with the tool `review_requests`.
+The review does not get quality-gate criteria ("typecheck, test and contract pass").
+It also does not get criteria that only guard against breakage ("other pages and API routes behave as before").
+These criteria protect each request from accidents. Thus they never make two requests conflict.
 The verdict is `independent`, `compatible`, `builds_on`, `conflicting`, or `duplicate`.
 
 - `compatible` means that each request can be built from the current code alone, and neither needs or changes what the other creates.
-- `builds_on` means that the later request adds to, changes, or uses something that the earlier request creates: a feature, page, route, setting, or data shape. `builds` lists each such criterion of the later Change with the earlier criterion that it builds on and a short reason.
+- `builds_on` means that the later request adds to, changes, or uses something that the earlier request creates: a feature, page, route, setting, or data shape.
+- `builds` lists each such criterion of the later Change, with the earlier criterion that it builds on and a short reason.
 - Each conflict cites one criterion ID of each Change and a short reason.
 - For `duplicate`, `covered` maps each criterion of the later Change to the earlier criterion that delivers it, with a quote.
 
@@ -390,7 +420,8 @@ The verdict is `independent`, `compatible`, `builds_on`, `conflicting`, or `dupl
 - A conflict cites an ID that is not a criterion of that Change.
 - The verdict is `conflicting` and the conflict list is empty, or the verdict is not `conflicting` and the conflict list is not empty.
 - The verdict is `duplicate` and `covered` is empty, or the verdict is not `duplicate` and `covered` is not empty.
-- The verdict is `builds_on` and `builds` is empty, or the verdict is not `builds_on` and `builds` is not empty, or a `builds` entry cites an unknown criterion.
+- The verdict is `builds_on` and `builds` is empty, or the verdict is not `builds_on` and `builds` is not empty.
+- A `builds` entry cites an unknown criterion.
 - A `covered` entry cites an unknown criterion, or its quote is not text of the cited earlier criterion.
 
 A rejected answer, a provider error, and an abstention all become `unconfirmedReview`: verdict `conflicting`, `supported: false`, no cited criteria.
@@ -410,10 +441,10 @@ No role, rank, or model preference takes part.
 | Review | Requesters | Policy | Result |
 |---|---|---|---|
 | `independent` or `compatible` | Any | `none` | Both requests continue. |
-| `builds_on`, cited | Any | `follow` | A continues. The system records the choice `apply_theirs` (`chosen_by` `system:builds_on`). B is `queued` and plans after A promoted or ended, on the tree that has A's work. Nobody gets a question. |
+| `builds_on`, cited | Any | `follow` | A continues. The system records the choice `apply_theirs` (`chosen_by` `system:builds_on`). B is `queued`. It plans when A has promoted or ended, on the tree that holds the work of A. Nobody gets a question. |
 | `duplicate`, cited and quoted | Any | `duplicate` | B: `needs_input`, kind `duplicate`. |
 | `conflicting`, unsupported, or the review limit | Any | `ask_requester` | B: `needs_input`, kind `conflict`. |
-| `conflicting`, supported | The same person | `same_requester` | B replaces A. |
+| `conflicting`, supported | The same person | `same_requester` | B wins over A (outcome `selected` or `replaces`). |
 | `conflicting`, supported | Two people | `first_come` | A continues. B waits for the choice of A's requester. |
 
 ```mermaid
@@ -436,9 +467,10 @@ flowchart TB
 
 A question from the comparison uses the same `needs_input` status, notification, and route as the intake gate, with a limit of 3 rounds.
 For kind `conflict`, the Project owner and the admins also get the notification.
-The question names the other request and up to 2 conflicting criterion pairs, and asks how the later request must change so both fit.
-After an answer, the workflow runs the planner again, and compares the new criteria as a new round of the pair. The intake gate does not run again.
-After `proceed_anyway` or the third answer, the comparison asks no question. The `first_come` and `same_requester` rules still apply. An unsupported pair lets both requests continue.
+The question names the other request and up to 2 conflicting criterion pairs. It asks how the later request must change so both fit.
+After an answer, the workflow runs the planner again. It compares the resulting criteria as one more round of the pair. The intake gate does not run again.
+After `proceed_anyway` or the third answer, the comparison asks no question. The `first_come` and `same_requester` rules still apply.
+After `proceed_anyway` or the third answer, an unsupported pair lets both requests continue.
 
 `request_conflicts.policy` records the result: `first_come`, `same_requester`, or `ask_requester`.
 `decided_by` is the user ID of the earlier requester for `first_come`, `system:same_requester`, or `system:request_review` for a question.
@@ -447,13 +479,17 @@ The comparison records `conflict.reviewed` on the later Change, with the policy.
 ### First come: requests of two people
 
 The earlier request A keeps working without change (ADR 0032).
-The later request B waits. It does not plan again, build, or spend while it waits.
+The later request B waits. While it waits, it does not plan, build, or spend.
 
-1. `askFirstRequester` inserts one `request_choices` row for the pair (`rw_<A>_<B>`, `INSERT OR IGNORE`), with `asked_user_id` = A's requester and the waiting workflow instance ID. B moves from `compiling` to `awaiting_choice`. The event is `change.choice.requested`.
-2. The workflow stores B's planned title and criteria, so the wait shows what B asks for.
-3. A's requester gets `request_choice_needed`. The owner, the admins, and B's requester do not get it.
-4. A's requester sends `POST /v1/changes/<B>/choose` with `{ "choice": "keep_mine" }` or `{ "choice": "apply_theirs" }`. The API checks `canChooseFirstCome`. The caller must be the asked user and have `change.manageOwn`. Any other member of the Project gets `403`. The update has a guard on `choice IS NULL`. A repeat of the same choice returns `repeated: true`. Another choice returns `409`.
-5. `advanceFirstCome` applies the next step (`firstComeStep`):
+1. `askFirstRequester` inserts one `request_choices` row for the pair (`rw_<A>_<B>`, `INSERT OR IGNORE`).
+   The row holds `asked_user_id` (the requester of A) and the waiting workflow instance ID.
+2. B moves from `compiling` to `awaiting_choice`. The event is `change.choice.requested`.
+3. The workflow stores the planned title and criteria of B. Thus the wait shows what B asks for.
+4. The requester of A gets `request_choice_needed`. The owner, the admins, and the requester of B do not get it.
+5. The requester of A sends `POST /v1/changes/<B>/choose` with `{ "choice": "keep_mine" }` or `{ "choice": "apply_theirs" }`.
+6. The API checks `canChooseFirstCome`. The caller must be the asked user and have `change.manageOwn`. Any other member of the Project gets `403`.
+7. The update has a guard on `choice IS NULL`. A repeat of the same choice returns `repeated: true`. A different choice returns `409`.
+8. `advanceFirstCome` applies the next step (`firstComeStep`):
 
 | Step | When | Effect on B |
 |---|---|---|
@@ -464,7 +500,7 @@ The later request B waits. It does not plan again, build, or spend while it wait
 | `resume` | `moot`, or `apply_theirs` after A has a promoted Candidate or a terminal status | `compiling` at the current Canonical Generation. The event is `change.resumed`. |
 
 The choice events are `change.choice.made` (`keep_mine`, `apply_theirs`, `expired`, or `moot`).
-B's requester gets `request_not_selected` after `keep_mine` or `expired`, and `request_choice_made` after `apply_theirs`.
+The requester of B gets `request_not_selected` after `keep_mine` or `expired`, and `request_choice_made` after `apply_theirs`.
 
 ```mermaid
 stateDiagram-v2
@@ -480,23 +516,30 @@ stateDiagram-v2
 
 The wait:
 
-- The ChangeWorkflow of B waits with `step.waitForEvent` (type `first_come`). The timeout is 6 hours while the choice is open and 1 hour while B is `queued`. After each wake or timeout, the workflow runs `advanceFirstCome`, so the database rows decide. A lost event only adds delay.
-- The choose command sends the event. When A ends, `releaseRequestScope` calls `wakeAfterFirst`. Each B that waits on A moves to its next step, and its workflow wakes.
-- The workflow re-checks at most 150 times (`FIRST_COME_CHECKS`). If it ends while B waits, the end of A starts a new instance `<B>_f<n>`.
+- The ChangeWorkflow of B waits with `step.waitForEvent` (type `first_come`).
+- The timeout is 6 hours while the choice is open, and 1 hour while B is `queued`.
+- After each wake or timeout, the workflow runs `advanceFirstCome`. Thus the database rows decide. A lost event only adds delay.
+- The choose command sends the event.
+- When A ends, `releaseRequestScope` calls `wakeAfterFirst`. Each B that waits on A moves to its next step, and its workflow wakes.
+- The workflow checks at most 150 times (`FIRST_COME_CHECKS`). When it ends while B waits, the end of A starts one more instance `<B>_f<n>`.
 
 The plan after the wait:
 
-- B plans only after A promoted or ended, so it never plans against a stale base. The planner reads the canonical tree at planning time.
+- B plans only when A has promoted or ended. Thus B never plans against a stale base. The planner reads the canonical tree at planning time.
 - B does not run the intake gate again.
-- B compares its new criteria with the other earlier requests. The pair rows of this plan have the suffix `_q<n>`, so an old review is not reused. The pair with A has the stored `apply_theirs` choice, so B continues.
+- B compares its planned criteria with the other earlier requests.
+- The pair rows of this plan have the suffix `_q<n>`. Thus no earlier review applies to this plan.
+- The pair with A has the stored `apply_theirs` choice, so B continues.
 
 ### The same requester asks twice
 
 When the same requester made both requests, the later request wins with `decided_by = system:same_requester`.
 
-- If the earlier Change has no promoted Candidate, `cancelChange` sets it to `not_selected` with the reason and the winner ID. Its open Tasks become `cancelled` and its open Candidates become `rejected`. The later Change gets `outcome = selected`.
-- If the earlier Change has a promoted Candidate, the workflow does not undo the promotion. The later Change gets `outcome = replaces`.
-- If `cancelChange` refuses because promotion has started, the later Change also gets `outcome = replaces`.
+- When the earlier Change has no promoted Candidate, `cancelChange` sets it to `not_selected` with the reason and the winner ID.
+  - Its open Tasks become `cancelled`, and its open Candidates become `rejected`.
+  - The later Change gets `outcome = selected`.
+- When the earlier Change has a promoted Candidate, the workflow keeps the promotion. The later Change gets `outcome = replaces`.
+- When `cancelChange` refuses because promotion has started, the later Change also gets `outcome = replaces`.
 
 ### Recompose guard
 
@@ -507,14 +550,26 @@ The insert in `recomposeStaleCandidate` (`workers/integration/src/recompose.ts`)
 ## Web UI
 
 - The Project page lists Changes in a table with a `Requested by` column.
-- Each Change row has an outcome line: `Waiting for an admin to include it` for a `proposed` request, `Declined by <name>: <reason>`, `Not selected: <reason>` with the link "View the selected change", `Selected`, `Follows: <reason>`, `Replaces earlier request`, or `Duplicate: <reason>`. A `needs_input` Change reads "Waiting for an answer from the requester". An `awaiting_choice` Change reads "Waiting for the person who asked first to choose". A `queued` Change reads "Queued: plans when the earlier request finishes".
-- The New change form is hidden from a viewer. When a member's requests need review, the form shows "An admin reviews requests before anything is built." under Submit.
-- The New change form is at the top of the Project overview, under the stat strip. It shows one goal field until the field gets focus or text. In a Project with no Changes, the full form shows. The header of each Project page has a "New change" button. The button opens the overview with `?new=1`, opens the form, and moves focus to the goal. The button is hidden from a viewer, on an archived Project, and on screens narrower than 720px. An archived Project has no New change form.
+- Each Change row has an outcome line:
+  - `Waiting for an admin to include it` for a `proposed` request;
+  - `Declined by <name>: <reason>`;
+  - `Not selected: <reason>`, with the link "View the selected change";
+  - `Selected`, `Follows: <reason>`, `Replaces earlier request`, or `Duplicate: <reason>`.
+- A `needs_input` Change reads "Waiting for an answer from the requester".
+- An `awaiting_choice` Change reads "Waiting for the person who asked first to choose".
+- A `queued` Change reads "Queued: plans when the earlier request finishes".
+- The New change form is hidden from a viewer. When the requests of a member need review, the form shows "An admin reviews requests before anything is built." under Submit.
+- The New change form is at the top of the Project overview, under the stat strip.
+- The form shows one goal field until the field gets focus or text. In a Project with no Changes, the full form shows.
+- The header of each Project page has a "New change" button. The button opens the overview with `?new=1`, opens the form, and moves focus to the goal.
+- The button is hidden from a viewer, on an archived Project, and on screens narrower than 720px. An archived Project has no New change form.
 - A `proposed` Change reads "Waiting for an admin to include it". The requester can withdraw it ("Withdraw request"). An owner or admin sees Include and Decline under Needs attention. Decline asks for an optional reason in place. A `declined` Change reads "Not built: declined by <name>: <reason>".
 - A `needs_input` Change shows the summary, the questions, and a link to the related request. The requester, an admin, and the owner get the actions "Send answers", "Build it as it is", and "Withdraw request".
 - The first-come card (`apps/web/src/components/change/first-come-card.tsx`) reads `GET /v1/changes/:changeId/request-waits`.
-  - On the earlier request, an open question reads "<name>'s request conflicts with yours", with the conflicting criteria. The earlier requester gets "Keep mine" and "Apply theirs after mine". Everyone else reads who chooses.
-  - On the later request, it reads "Waiting for <name> to choose" with the conflicting criteria and the date when the earlier version stays. After "apply theirs", it reads "Waiting for "<title>" to finish".
+  - On the earlier request, an open question reads "<name>'s request conflicts with yours", with the conflicting criteria.
+  - The earlier requester gets "Keep mine" and "Apply theirs after mine". Everyone else reads who chooses.
+  - On the later request, the card reads "Waiting for <name> to choose", with the conflicting criteria and the date when the earlier version stays.
+  - After "apply theirs", the card reads "Waiting for "<title>" to finish".
 - The `Conflicting requests` card shows both goals, the cited criteria or covered quotes, and the winner. It reads `GET /v1/changes/:changeId/request-conflicts` (up to 10 `conflicting` or `duplicate` rows).
 - The Board (`/projects/:projectId/board`, sidebar item after Changes) reads `GET /v1/projects/:projectId/board`. The columns are Proposed, Needs answer, Building, Checking, Shipped, and Not built. "By person" shows one lane per person (initial, name, role, counts). "By stage" shows one lane. A Person filter shows only one lane. A card shows these items:
   - the title (else the goal), the requester, and the status;
@@ -523,7 +578,11 @@ The insert in `recomposeStaleCandidate` (`workers/integration/src/recompose.ts`)
   - the agents at work: Task title, tier H, S, or O, and a pulse while the Task runs;
   - the age.
 
-  A click on a card opens the Change. An owner or admin includes a Proposed card with Include or by a drag to Building, and declines it with Decline. The card moves at once and moves back when the API refuses. Live signals refresh the Board. Without the socket, the Board polls every 10 seconds. On a phone, the columns scroll sideways inside the Board.
+  A click on a card opens the Change.
+  An owner or admin includes a Proposed card with Include or by a drag to Building. They decline it with Decline.
+  The card moves at once. It moves back when the API refuses.
+  Live signals refresh the Board. Without the socket, the Board polls every 10 seconds.
+  On a phone, the columns scroll sideways inside the Board.
 - The Project header has a Share dialog for an owner or admin and a Members dialog for everyone else. The API shows invitations only to the owner and admins. It shows the email of a member only to the owner, admins, and that member.
 - The People section and the Share dialog show each person's role. An owner or admin changes a role with a select per person and invites with a role. Only the owner gives or removes the admin role. The owner role is never assignable.
 - The Settings page (`/projects/:projectId/settings`) has these sections:
@@ -535,12 +594,22 @@ The insert in `recomposeStaleCandidate` (`workers/integration/src/recompose.ts`)
 
   A member or viewer sees the values as read-only, with the line "Only the project owner or an admin can change these."
 - The Account page (`/account`, in the sidebar footer under the person's name) sets "My monthly budget" (1 to 100 USD) and shows this month's spend across Projects.
-- The New change form shows the spending limit on one line, for example "Spending limit: $3.00 for this request (Project default)". "Change" opens the choices in place: "This request only" with an amount, "Project budget" (only when the Project has a monthly budget), and "My budget" (only when the person set one). Each pool shows the money left this month. An amount that is not valid keeps the choices open. See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
+- The New change form shows the spending limit on one line, for example "Spending limit: $3.00 for this request (Project default)".
+  - "Change" opens the choices in place: "This request only" with an amount, "Project budget", and "My budget".
+  - "Project budget" shows only when the Project has a monthly budget. "My budget" shows only when the person set one.
+  - Each pool shows the money left this month. An amount that is not valid keeps the choices open.
+  - See [Costs runbook, Budget scopes](../operations/costs.md#budget-scopes).
 - The home page has a `Shared with you` section and the pending invitations.
 - The inbox shows `request_proposed` to the owner and admins ("<requester> proposed <title>", with Include and Decline links to the Change), and `request_included` and `request_declined` to the requester.
-- The inbox shows `request_choice_needed` to the earlier requester only. It reads "<name>'s request conflicts with yours" and links to their own Change, where they make the choice. The later requester gets `request_choice_made` ("<name> will apply your request after theirs").
-- A verified Candidate that waits for a person gives `approval_required` (no decision yet) or `promotion_ready` (approved, or no approval needed). The owner and admins get it as an action item. The requester gets it as an attention item ("Your request waits for an owner or admin"). The body states why the Candidate waits (the Candidate status reason). The link opens the Change, where an owner or admin approves the Candidate or ships it with Ship.
-- The UI hides each control that a role cannot use. `apps/web/src/lib/permissions.ts` mirrors the role matrix of the API. Only the owner and admins see approve, promote and Ship, compose, roll back, publish or remove the app, raise a budget, resolve dead letters, and edit code. The API enforces the same rules.
+- The inbox shows `request_choice_needed` to the earlier requester only. It reads "<name>'s request conflicts with yours". It links to their own Change, where they make the choice.
+- The later requester gets `request_choice_made` ("<name> will apply your request after theirs").
+- A verified Candidate that waits for a person gives `approval_required` (no decision yet) or `promotion_ready` (approved, or no approval needed).
+  - The owner and admins get it as an action item.
+  - The requester gets it as an attention item ("Your request waits for an owner or admin").
+  - The body states why the Candidate waits (the Candidate status reason).
+  - The link opens the Change. There, an owner or admin approves the Candidate or ships it with Ship.
+- The UI hides each control that a role cannot use. `apps/web/src/lib/permissions.ts` mirrors the role matrix of the API.
+- Only the owner and admins see approve, promote and Ship, compose, roll back, publish or remove the app, raise a budget, resolve dead letters, and edit code. The API enforces the same rules.
 
 ## Limitation
 
@@ -554,16 +623,30 @@ A compatible later request plans at the same time as the earlier one.
 A later request that builds on the earlier one waits and plans on the earlier work, so the two requests never build the same feature twice.
 The inbox tells the later requester "Your request builds on <name>'s request".
 
-A request can also remove features that were live before it was made, for example "simplify the home page to a plain list". Before any Task is built, `checkLiveRemovals` (`workers/integration/src/live-removal.ts`) checks for that:
+A request can also take out live features of other people, for example "simplify the home page to a plain list".
+Before any Task builds, `checkLiveRemovals` (`workers/integration/src/live-removal.ts`) checks for this case:
 
-- It runs only when the goal or a planned criterion uses words of removal or replacement (remove, replace, simplify, only, no longer, instead, rewrite, hide, and similar), and other people's requests are live (a promoted Candidate). A live request that a decided conflict replaced (first come or same requester) does not count: that choice was already made. Otherwise it spends nothing.
-- One Sonnet review lists the live criteria, without quality-gate criteria, and cites by ID each one the request would remove, hide, disable, or replace. An invented ID makes the answer invalid.
-- When it cites any, the requester gets one question (`needs_input`, question `keep_live`). It names each feature and whose request it came from. The options are "Keep them, and build the rest of my request around them" and "Remove them". The planner reads the answer like every clarification answer. The question is asked once per request. The named requests go to `live_removals`, so the kept criteria of the request leave them out after "Remove them".
+- It runs only when both conditions are true:
+  - The goal or a planned criterion matches the removal pattern `REMOVAL` in `live-removal.ts`. The pattern matches stems such as `remov`, `delet`, `drop`, `simplif`, `only`, `hide`, `plain`, `minimal`, and `get rid`.
+  - Requests of other people are live (they have a promoted Candidate).
+- A live request that lost a decided conflict (first come or same requester) does not count. A person made that choice.
+- When the conditions are false, the check spends nothing.
+- One Sonnet review lists the live criteria, without quality-gate criteria. It cites by ID each criterion that the request takes out, hides, or disables. An invented ID makes the answer invalid.
+- When the review cites a criterion, the requester gets one question (`needs_input`, question `keep_live`).
+  - The question names each feature and the request that made it.
+  - The options are "Keep them, and build the rest of my request around them" and "Remove them".
+  - The planner reads the answer like every clarification answer. The question comes once per request.
+  - The named requests go to `live_removals`. After "Remove them", the kept criteria of the request leave them out.
 - A failed or abstaining review asks nothing. The acceptance check still judges the build.
 
 When a request plans or re-runs after other requests went live, it keeps their work (`kept-criteria.ts` in `workers/integration/src`):
 
-- The kept criteria are the acceptance criteria of the other requests of the Project whose Candidate promoted after this request was created, newest first, at most 12. Criteria that only restate the quality gate and the request's own criteria are left out. A live request that conflicts with this one (first come or same requester) is left out: this request was chosen to replace it. A live request that the live-removal check named (`live_removals`) is left out after the requester answers "Remove them". The requester's own earlier requests are left out: the newer request states that person's current intent.
+- The kept criteria are the acceptance criteria of the other requests of the Project that promoted after the creation of this request. The list is newest first, at most 12.
+- The list leaves out these criteria:
+  - criteria that only restate the quality gate, and the own criteria of the request;
+  - a live request that conflicts with this one (first come or same requester), because a decision chose this request over it;
+  - a live request that the live-removal check named (`live_removals`), after the requester answers "Remove them";
+  - the earlier requests of the same requester, because the later request states the current intent of that person.
 - The Task instruction lists them: keep every one of them working, and do not remove, replace, or hide them.
 - The acceptance check judges them with the request's own criteria, each marked "Keep (from an earlier request)". A kept criterion that is not met holds the Candidate for a person, like any unmet criterion.
 
@@ -594,6 +677,6 @@ While that request builds, Maanasa asks "Change to 16 color palette".
 3. Maanasa's request becomes `awaiting_choice`. Her Change page and her Board card read "Waiting for Sudhanva to choose".
 4. Sudhanva gets `request_choice_needed`. His Change page shows "Maanasa's request conflicts with yours" with "Keep mine" and "Apply theirs after mine".
 5. Sudhanva chooses "Apply theirs after mine". Maanasa's request becomes `queued` with outcome `follows`, and she gets `request_choice_made`.
-6. Sudhanva's canvas promotes. Maanasa's request returns to `compiling` at the new Canonical Generation. It plans on the canvas app and changes the palette to 16 colors.
+6. Sudhanva's canvas promotes. Maanasa's request returns to `compiling` at the current Canonical Generation. It plans on the canvas app and changes the palette to 16 colors.
 
 If Sudhanva chooses "Keep mine", Maanasa's request ends as `not_selected` with the reason `Not selected: Sudhanva chose to keep their version of "Canvas".`

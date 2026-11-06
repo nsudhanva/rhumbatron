@@ -19,10 +19,10 @@ the loss. See [Source and verification](../architecture/source-and-verification.
   conditional `UPDATE` of `selection_json` from NULL on the anchor row (the earliest Candidate of
   the group). A retry by the claimant continues. Each other run stops. The claim and the outcome
   are on the `candidates` rows (migration 0025), so Project cleanup removes them with the
-  Candidates. No separate table exists.
-- Ranking: only promotable Candidates; then the most acceptance criteria met; then fewer gaps and
-  optional failures; then more passing checks. Deterministic code decides when the Evidence
-  differs.
+  Candidates.
+- Ranking (`rankCandidates`): only promotable Candidates; then the most acceptance criteria met;
+  then the fewest gaps; then the most passing checks. Deterministic code decides when the
+  Evidence differs. The order in which Candidates finish never decides.
 - A tie goes to the Integration Judge. The judge is one Sonnet call that reads only the Evidence
   snapshot of the tied Candidates. The verdict is closed: `prefer_candidate`,
   `reject_candidate`, `needs_more_evidence`, or `escalate_to_human`. Code validates the cited
@@ -53,28 +53,41 @@ the loss. See [Source and verification](../architecture/source-and-verification.
 - Acceptance check (`workers/integration/src/acceptance-check.ts`): an optional check (kind
   `acceptance`) for each Candidate of a Change with acceptance criteria.
   - One Haiku call judges each criterion against the app after the change. One Sonnet call
-    follows only when the Haiku output is invalid.
+    follows when the Haiku output is invalid, or when it leaves a criterion of the request
+    `unclear`. The Sonnet answer replaces only the `unclear` results.
   - The model receives the Candidate patch first. Then it receives the full text of the relevant
     files of the composed tree: the changed files, `public/index.html`, the scripts and styles that
     it references, `src/app.ts`, and `src/worker.ts`. The limit is 24 files and about 60 KB in
     total. A cut file is marked `truncated`.
   - A criterion that code in the base already satisfies is `met`, with a quote of the composed
-    file.
+    file. A removal is `met` with a quote of a removed line that no composed file still holds.
   - A `met` cites a path and a quote. Code keeps a citation only when the quote occurs in a
     composed file that the model received, or in the added or context lines of its patch.
   - The Evidence is `pass` only when each criterion is met. In all other cases it is `fail` with
     `checked_supported`. A model error or a refused call is a gap.
-  - Criteria that other checks cover (quality gate, latency, kept behavior) are not judged.
+  - The check judges only product criteria. The caller leaves out criteria that other checks
+    cover: the quality gate, latency, and kept behavior.
 - Acceptance gates auto-promotion. It does not decide whether a Candidate can promote.
   - A shortfall does not reject a Candidate. It ranks the Candidate (criteria met is the second
     sort key).
   - A winner that meets each criterion auto-promotes when policy allows. The default policy
     `policy-1` allows `low` and `medium` risk.
-  - A winner with a criterion that is not met or unclear, or with no acceptance result, gets the
-    human gate in its plan. The Change moves to `awaiting_approval`. `approval.requested` states
-    the reason ("Best candidate meets 2 of 3 criteria; not met: calendar view. Approve to ship it
-    or cancel the change.").
   - A failed required executable check makes a Candidate unpromotable.
+- Repair before a person (`workers/integration/src/acceptance-repair.ts`). Deterministic code
+  adds one repair Task (key `repair`) to the Change in these cases:
+  - The winner passes every required check, but criteria are `not_met`. An `unclear` criterion or
+    a gap starts no repair.
+  - A person rejects a gated Candidate with a reason.
+  - A Candidate fails a required check or the preview check.
+
+  The repair Task depends on every Task whose ChangeSet the Candidate holds. Its objective names
+  the unmet criteria, the reason, or the failure. The Change returns to `running`, and the next
+  Candidate holds the repair. A Change gets at most one repair. A Decision Receipt
+  (`ACCEPTANCE_REPAIR`) records it.
+- A winner with a criterion that stays not met or unclear, or with no acceptance result, gets the
+  human gate in its plan. The Change moves to `awaiting_approval`. `approval.requested` states the
+  reason ("Best candidate meets 2 of 3 criteria; not met: calendar view. Approve to ship it or
+  cancel the change.").
 
 ## Alternatives considered
 
@@ -82,10 +95,10 @@ the loss. See [Source and verification](../architecture/source-and-verification.
 |---|---|
 | Fork complementary Tasks and let the combined Candidate win | The combined Candidate exists only for `fork_required`, and a UI written against a guessed API fails it. The side Candidates then ship half of the request. |
 | First verified Candidate wins, plus the acceptance check | Two Candidates that each meet some criteria still race. The result depends on timing. |
-| Acceptance as a required gate check | When each fork side implements part of the request and the combined Candidate does not compose, each Candidate is rejected and nothing can ship, also with the consent of a person. |
+| Acceptance as a required gate check | Each fork side can implement part of the request, and the combined Candidate can fail to compose. Then the gate rejects each Candidate. Nothing can ship, even with the consent of a person. |
 | A `candidate_selections` table keyed by Change and base | It works, but it needs its own cleanup on Project deletion. The anchor row gives the same single claim. |
 | A model picks the winner every time | Executable Evidence decides when it differs. The judge only breaks a tie. |
-| Run a browser session per criterion | Browser check time has a daily cap (`BROWSER_DAILY_SECONDS`). A cited quote of the patch is cheap Evidence for "the code does this". |
+| Run a browser session per criterion | Browser check time has a daily cap (`BROWSER_DAILY_SECONDS`, 3,600 s in the Compose stack). One browser check per Candidate already opens every linked page. A cited quote of the patch is cheap Evidence for "the code does this". |
 | Sonnet for every acceptance check | Haiku is enough for a bounded, cited classification. Sonnet runs only on invalid output. |
 
 ## Consequences
@@ -97,7 +110,7 @@ the loss. See [Source and verification](../architecture/source-and-verification.
 - A Candidate that implements only part of the request never ships without a person. The person
   sees which criteria are missing and approves the best Candidate or cancels the Change.
 - The acceptance check reads code. A quote proves that code for a criterion exists. It does not
-  prove that the code works. The unit, contract, and preview checks prove behavior.
+  prove that the code works. The unit, contract, browser, and preview checks prove behavior.
 - An integrated pair costs one more agent run for the dependent Task (and the Tasks built on it)
   before the Change composes. It adds no verification of a second Candidate.
 - If the workflow of the claimant fails permanently after the claim, no winner is applied

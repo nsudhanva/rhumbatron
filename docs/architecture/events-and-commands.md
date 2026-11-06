@@ -5,11 +5,12 @@ Rhumbatron keeps facts and work apart.
 - An Event is an immutable fact, for example `task.completed`. Events travel on the event log: eight NATS JetStream streams.
 - A Command is a request for work, for example `agent.wake`. Commands travel on queues: one JetStream work-queue stream.
 
-No authoritative state change writes to the event log directly.
-An actor writes the state change and the Event in one SQLite transaction (the outbox).
-A publisher sends the outbox rows to the event log later.
+An authoritative state change reaches the event log only through an outbox.
+An actor writes the state change and the Event in one SQLite transaction.
+A publisher then sends the outbox rows to the event log.
 
-Core creates the streams at start (`packages/platform/src/messaging/jetstream.ts`). The `nats` service stores them on the `nats-data` volume.
+Core creates the streams at start (`packages/platform/src/messaging/jetstream.ts`).
+The `nats` service stores them on the `nats-data` volume.
 
 ## Envelopes
 
@@ -25,8 +26,8 @@ Both envelopes are Zod schemas in `packages/protocol/src`.
 Most Change Events get a deterministic ID from `stableEventId` in `workers/integration/src/events.ts`.
 The ID is `evt_` plus the first 16 bytes of SHA-256 over the Change ID, the Event type, the Task ID, and an optional key.
 A retried Workflow step writes the same Event ID again, and the outbox ignores the repeat.
-ProjectRootDO and ResourceShardDO use `crypto.randomUUID()` for Events that they create in their own transaction (for example `canonical.advanced` and `claim.acquired`).
-The transaction runs once, so a retry keeps the same ID.
+ProjectRootDO and ResourceShardDO use `crypto.randomUUID()` for Events of their own transactions, for example `canonical.advanced` and `claim.acquired`.
+The transaction runs one time, so a retry keeps the same ID.
 
 ## Transactional outbox to the event log
 
@@ -56,8 +57,9 @@ Rules in the code (`workers/coordinator/src/outbox.ts`, `packages/platform/src/m
 - Retention is 7 days (`max_age`, limits retention, file storage).
 - JetStream drops a second publish with the same `event-id` header inside a 2-hour window.
 - One Project always maps to one stream. Its Events stay in order on that stream.
-- The nudge is an in-process call to the event router. The sweep catches what the nudge misses. The sweep visits one stream per minute, so each stream gets a sweep every 8 minutes.
-- `AlarmGuard` (`alarm-guard.ts`) limits each actor to 2,000 alarm fires per UTC day. An alarm with no due work is deleted.
+- The nudge is an in-process call to the event router. The sweep reads the records that a nudge does not read.
+- The sweep visits one stream per minute, so each stream gets a sweep every 8 minutes.
+- `AlarmGuard` (`alarm-guard.ts`) limits each actor to 2,000 alarm fires per UTC day. The guard deletes an alarm that has no due work.
 
 ### Outbox row states
 
@@ -74,13 +76,20 @@ stateDiagram-v2
 ```
 
 A failed row stays in the table with `last_error`, so an operator can see it.
-If NATS is down, the state change is still correct. Only the dashboard lags.
+When NATS is down, the state change stays correct. The outbox keeps the rows, and the dashboard lags.
 
 ## Event router: the event log consumer
 
 The event router runs in core. It reads the streams through the `EVENT_LOG` binding.
-Each subscription is a durable JetStream pull consumer with explicit ack. One consume fetches at most 100 records. A nack redelivers the batch after 30 s. An unacknowledged batch comes back after 5 minutes.
-Core calls the router's `scheduled` handler at the start of each minute (`scheduleSweep` in `services/core/src/main.ts`).
+`workers/event-router/src/event-log.ts` defines the consumer client type and the subscription names.
+`EventLogClient` in `packages/platform/src/messaging/jetstream.ts` implements it.
+
+- Each subscription is a durable JetStream pull consumer with explicit ack.
+- One consume fetches at most 100 records.
+- A nack redelivers the batch after 30 s.
+- An unacknowledged batch comes back after 5 minutes.
+
+Core calls the `scheduled` handler of the router at the start of each minute (`scheduleSweep` in `services/core/src/main.ts`).
 Every nudge and every sweep tick runs two subscriptions on one stream: `project-view-projector`, then `causal-router`.
 The sweep tick also runs one `audit-archiver` batch.
 A sweep tick without maintenance or the release sweep also runs one `analytics-projector` batch.
@@ -106,13 +115,18 @@ flowchart TB
 
 Notes (`workers/event-router/src/index.ts`):
 
-- The router releases the claim rows before a nack. Otherwise a redelivery skips the events as duplicates.
-- Events that the 15-call `applyDelta` cap defers lose their claim and come back with the next delivery. A deferral does not count as a failure.
+- The router releases the claim rows before a nack, so a redelivery applies the events.
+- The 15-call `applyDelta` cap can defer events. A deferred event loses its claim and comes back with the next delivery. A deferral is not a failure.
 - A skipped event batch gets a `dead_letters` row. An operator can only dismiss it (`poison-batch.ts`).
-- A dead letter closes without an operator: `succeeded` when the same command later succeeds, and `superseded` when a later `change.settle` of the same Change runs or when its Change ends (the 5-minute sweep closes the dead letters of `completed`, `failed`, `cancelled`, `not_selected`, and `declined` Changes).
-- The archive key is `events/<yyyy>/<mm>/<dd>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz` in the `rhumbatron-evidence` bucket. Core deletes archive objects after 365 days (`services/core/src/expiry.ts`).
-- There are four subscriptions per stream: `causal-router`, `project-view-projector`, `audit-archiver`, and `analytics-projector`. The client creates each durable consumer when it first reads it.
-- `analytics-projector` (`analytics.ts`) maps lifecycle Events to metric names (`change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, `release_completed`, and others). It writes one data point per fresh Event, at most 100 per tick, to `EVENT_METRICS`. Other modules write their own data points to `METRICS`. Both are rows in the `platform_metrics` table.
+- A dead letter closes with the resolution `succeeded` when the same command succeeds later.
+- A dead letter closes with the resolution `superseded` when a later `change.settle` of the same Change runs.
+- The 5-minute sweep closes the dead letters of `completed`, `failed`, `cancelled`, `not_selected`, and `declined` Changes.
+- The archive key is `events/<yyyy>/<mm>/<dd>/stream-<NN>/part-<firstMs>-<hash>.ndjson.gz` in the `rhumbatron-evidence` bucket.
+- Core deletes archive objects 365 days after their upload (the object expiry in `services/core/src/expiry.ts`).
+- Each stream has four subscriptions: `causal-router`, `project-view-projector`, `audit-archiver`, and `analytics-projector`. The client creates each durable consumer at its first read.
+- `analytics-projector` (`analytics.ts`) maps lifecycle Events to metric names, for example `change_created`, `task_*`, `agent_wakeup`, `model_route`, `candidate_*`, `promotion_*`, and `release_completed`.
+- It writes one data point per fresh Event to `EVENT_METRICS`, at most 100 per tick.
+- Other modules write their own data points to `METRICS`. Both bindings write rows to the `platform_metrics` table.
 
 ### Sweep housekeeping
 
@@ -120,13 +134,14 @@ The every-minute sweep also runs two bounded housekeeping jobs (`workers/event-r
 
 | Tick | Work |
 |---|---|
-| 04:17 UTC, once a day | Queues one `forks.sweep`. Queues `project.cleanup` and `index.purge` for up to 10 archived Projects. Queues an `index.build` backfill for up to 10 active Projects without a ready index. Deletes at most 5,000 `processed_events` rows older than 14 days. |
-| Minute 4, 9, 14 ... of each hour | Queues one `release.recover` for each Change still `releasing` 45 minutes after promotion, at most 10 per sweep. Queues one `change.settle` for each open Change that is quiet for 3 minutes to 6 hours and cannot move on its own, at most 10 per sweep. Queues one `index.purge` for each deleted Project that still has index rows, at most 10 per sweep. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release). |
+| 04:17 UTC, once a day | Queues one `forks.sweep`. Queues `project.cleanup` and `index.purge` for up to 10 archived Projects. Queues an `index.build` backfill for up to 10 active Projects without a ready index. Deletes at most 5,000 `processed_events` rows after 14 days. |
+| Minute 4, 9, 14 ... of each hour | Queues one `release.recover` for each Change still `releasing` 45 minutes after promotion, at most 10 per sweep. Queues one `change.settle` for each open Change that is quiet for 3 minutes to 6 hours and cannot move on its own, at most 10 per sweep. Closes the dead letters of ended Changes. Queues one `index.purge` for each deleted Project that still has index rows, at most 10 per sweep. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release). |
 
 ## Causal routing
 
 The causal router decides which Agents wake after each fresh Event (`workers/event-router/src/causal.ts`, `packages/causal-router`).
-Deterministic rules run first. Clef-flash decides only a prefix resource overlap. A Clef-flash question is one Claude Haiku call with a forced tool call (`packages/platform/src/ai/models.ts`).
+Deterministic rules run first. Clef-flash decides only a prefix resource overlap.
+A Clef-flash question is one Claude Haiku call with a forced tool call (`packages/platform/src/ai/models.ts`).
 
 ```mermaid
 flowchart TB
@@ -138,7 +153,7 @@ flowchart TB
   TYPE -->|"task.completed"| READY["Newly ready Tasks:<br/>change.dispatch"]
   TYPE -->|"verification.started<br/>(work_graph_completed)"| COMP["candidate.create"]
   TYPE -->|"task.failed"| SETTLE["change.settle"]
-  TYPE -->|"canonical.advanced"| CA["Wake active agents,<br/>mark older Candidates stale,<br/>candidates.recompose"]
+  TYPE -->|"canonical.advanced"| CA["Wake active agents,<br/>mark Candidates on an earlier base stale,<br/>candidates.recompose"]
   TYPE -->|"resource Event"| OV{"Resource overlap<br/>with an active agent"}
   OV -->|"exact"| WAKE["agent.wake"]
   OV -->|"prefix only"| CLEF{"Clef-flash<br/>(200 calls per day)"}
@@ -157,7 +172,10 @@ Notes:
 - Clef-flash abstains below a probability of 0.7. An abstention wakes the Agent.
 - The 1,000-command cap counts `change.dispatch`, `candidate.create`, `change.settle`, and `agent.wake`. The router logs the dropped commands as errors.
 - `artifact.promoted` and `canonical.advanced` both queue `index.build` for the indexer. The cap does not count `index.build` or `candidates.recompose`.
-- After `canonical.advanced`, the router marks the promoted Candidate `promoted` and every other open Candidate on an older base `stale`. A Change in `awaiting_approval` with no verified Candidate returns to `verifying`. The `candidates.recompose` command then settles each stale Candidate. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release).
+- After `canonical.advanced`, the router marks the promoted Candidate `promoted`.
+- It marks every other open Candidate on an earlier base `stale`.
+- A Change in `awaiting_approval` with no verified Candidate goes back to `verifying`.
+- The `candidates.recompose` command then settles each stale Candidate. See [Change lifecycle](change-lifecycle.md#part-3-from-candidates-to-a-release).
 - `task.completed` and `task.failed` free an Agent slot. When a ready Task waits at the 8-agent limit, the router dispatches the Change again.
 - The wake consumer checks relevance again. A stale wake ends at once and counts as a false wakeup in `METRICS` (`workers/agents/src/wake-consumer.ts`).
 
@@ -165,12 +183,14 @@ Notes:
 
 Each queue is one subject, `cmd.<queue>`, on the JetStream work-queue stream `COMMANDS`.
 Core runs one durable consumer, `q-<queue>`, per queue (`runQueueConsumer` in `packages/platform/src/messaging/jetstream.ts`).
+One table, `QUEUE_CONSUMERS` in `services/core/src/consumers.ts`, sets the batch size, retries, dead-letter queue, and concurrency of each consumer.
+`scripts/inject/dead-letter.critical.test.ts` tests that table.
 
 - Delivery is at least once, with explicit ack.
 - A send with a `commandId` carries the message ID `<queue>:<commandId>`. JetStream drops a repeat inside a 2-hour window.
 - A message stays in the stream for at most 14 days.
 - A handler that throws, or that calls `retry`, gets a redelivery after the delay that the handler sets.
-- After the last retry the consumer sends the message to `dead-letter` and terminates it.
+- After the last retry, the consumer sends the message to `dead-letter` and terminates it.
 - A handler can hold a batch for up to 15 minutes. The consumer extends the ack deadline every 30 s while the handler runs.
 
 ```mermaid
@@ -210,21 +230,21 @@ flowchart LR
 | `verification` | integration | 5 | 2 | 3 | 30 s | `dead-letter` |
 | `release` | integration | 5 | 2 | 3 | 30 s | `dead-letter` |
 | `indexing` | indexer | 1 | 1 | 3 | 30 s | none (the indexer records the failure in `project_indexes`) |
-| `dead-letter` | event router | 5 | 1 | 5 | 60 s | none (dropped and logged) |
+| `dead-letter` | event router | 5 | 1 | 5 | 60 s | none (the consumer logs the message and terminates it) |
 
 The integration module consumes the `integration`, `verification`, and `release` queues with one handler.
 
 Two commands start Workflows: `verification.start` (one per Candidate) and `release.start` (one per promoted generation with a live app).
 Each command carries a stable `commandId` and the idempotency key (Candidate ID or release ID).
 The consumer uses that key as the Workflow instance ID, so a redelivery finds the existing instance.
-The producer starts the Workflow directly only if the send fails (`workers/integration/src/workflow-commands.ts`).
+The producer starts the Workflow directly only when the send fails (`workers/integration/src/workflow-commands.ts`).
 
 The integration consumer also limits its own work (`MAX_DELIVERIES = 4` in `workers/integration/src/index.ts`):
 
 1. A bounded command with more work asks for another delivery after 10 s.
 2. A `candidate.create` that waits for a conflict review asks for another delivery after 45 s. Its last delivery composes anyway.
-3. A thrown error retries after 30 s.
-4. On the 4th delivery the consumer acknowledges the message. It does not send it to the dead-letter queue.
+3. A thrown error retries after 30 s. After 3 retries, the message goes to the dead-letter queue.
+4. A bounded or waiting command gets at most 4 deliveries. On the 4th delivery, the consumer acknowledges it.
 
 The daily 04:17 UTC tick queues `forks.sweep` and `project.cleanup` again.
 
@@ -254,9 +274,9 @@ sequenceDiagram
 
 Notes (`workers/event-router/src/dead-letter.ts`, `workers/api/src/dead-letters.ts`):
 
-- A command without a Task, or with a Task that already runs, puts the reason on the Change instead. Only a blocked Task records `task.failed`.
+- A command without a Task, or with a Task that runs, puts the reason on the Change. Only a blocked Task records `task.failed`.
 - Retry sends `agent.wake` to `agent-wakeups` and every other command to `integration`.
-- The dead-letter consumer never re-sends a command. Only an operator action re-sends it.
+- The dead-letter consumer never sends a command again. Only an operator action sends it again.
 
 ## Idempotency and dedupe
 

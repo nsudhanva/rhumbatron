@@ -1,6 +1,6 @@
 # Operations
 
-These runbooks tell an operator how to start, stop, release, and clean up Rhumbatron. They also tell the operator how to watch its cost. Rhumbatron runs as one Docker Compose stack behind Caddy at `https://rhumbatron.localhost` ([ADR 0034](../adr/0034-docker-compose-stack.md)).
+These runbooks tell an operator how to start, stop, release, and clean up Rhumbatron. They also tell the operator how to monitor its cost. Rhumbatron runs as one Docker Compose stack behind Caddy at `https://rhumbatron.localhost` ([ADR 0034](../adr/0034-docker-compose-stack.md)).
 
 ## Rules
 
@@ -13,7 +13,7 @@ These runbooks tell an operator how to start, stop, release, and clean up Rhumba
 
 | Runbook | Content | Commands |
 |---|---|---|
-| [Local stack](./local-stack.md) | Prerequisites, start, the local CA, hostnames, logs, settings, data volumes, checks, and a Linux server. | `bun run stack:up`<br>`bun run stack:trust`<br>`bun run stack:logs`<br>`bun run stack:down`<br>`bun run smoke local` |
+| [Local stack](./local-stack.md) | Prerequisites, start, the local CA, hostnames, logs, settings, data volumes, restarts, checks, and a Linux server. | `bun run stack:up`<br>`bun run stack:trust`<br>`bun run stack:logs`<br>`bun run stack:down`<br>`bun run smoke local`<br>`bun run test:ui` |
 | [Cleanup and retention](./cleanup.md) | Smoke Project cleanup, Project deletion, the daily fork sweep, and retention. | `bun run cleanup:projects`<br>`bun run cleanup:projects --dry-run` |
 | [Costs and budgets](./costs.md) | What costs money, the caps (Anthropic, Sandbox, browser checks), call quotas, and what to do when a cap trips. | `/admin` in the web app |
 | [Application releases](./release.md) | Live app releases, hosts, rollback, stuck releases, and release checks. | `bun run e2e local` |

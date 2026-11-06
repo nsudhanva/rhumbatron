@@ -1,5 +1,5 @@
 /**
- * The monthly Sandbox meter (`usage_counters`, counter `sandbox-seconds`, ADR 0017). One container
+ * The monthly Sandbox meter (`usage_counters`, counter `sandbox-seconds`). One container
  * per Project (`proj-<project>`) serves the agents' workspaces, the Candidate checks, and the code
  * sessions, and Cloudflare bills its awake time. A use reserves seconds before it starts (the cap
  * stops new work), and its settle refunds the reservation and charges only the time the use adds

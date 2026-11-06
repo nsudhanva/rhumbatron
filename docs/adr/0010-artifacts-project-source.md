@@ -29,7 +29,7 @@ The `git` service (`services/git`) stores Project source as bare Git repositorie
 ## Cost
 
 The git service runs on the local host and has no usage charge. A fork shares objects with its
-source, so a fork costs disk only for its own new objects. Review the disk use again before any
+source, so a fork costs disk only for its own objects. Review the disk use again before any
 code clones per wake.
 
 ## Diagram

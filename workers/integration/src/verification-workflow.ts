@@ -448,7 +448,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
         return status;
       });
 
-    // Stop new expensive work: a cancelled Change starts no Sandbox or Browser Run time. Each later step checks
+    // Stop new expensive work: a cancelled Change starts no Sandbox or browser time. Each later step checks
     // again before its work (`guard`), so an in-flight run stops at its next step boundary.
     const stop = async (halt: Halt) => {
       if (halt.halted === "candidate_final") {
@@ -563,7 +563,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
     if (isHalt(forked)) return stop(forked);
     const fork = forked;
 
-    // Reserve before the Sandbox opens (ADR 0017). A retried reservation can only over-count.
+    // Reserve before the Sandbox opens. A retried reservation can only over-count.
     const reserved = await step.do("reserve sandbox", () =>
       this.guard(candidateId, async () => ({
         ok: await reserveSandbox(this.env.DB, this.env.SANDBOX_MONTHLY_SECONDS),
@@ -1106,7 +1106,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   /**
    * Runs `work` unless the Change was cancelled or the Candidate is already final (one indexed D1
    * read). Called at the start of each step, so a cancel stops the run at its next step boundary
-   * and spends no more Sandbox or Browser Run time.
+   * and spends no more Sandbox or browser time.
    */
   private async guard<T>(candidateId: string, work: () => Promise<T>): Promise<T | Halt> {
     const row = await this.env.DB.prepare(
@@ -1493,7 +1493,7 @@ export class CandidateVerificationWorkflow extends WorkflowEntrypoint<
   }
 
   /**
-   * Browser check: the composed app in the Sandbox, one capped Browser Run
+   * Browser check: the composed app in the Sandbox, one capped browser
    * session, screenshots in R2 beside the report. A refused budget, a missing preview, or a
    * session deadline is recorded as a gap, never a pass.
    */

@@ -16,13 +16,13 @@ transcripts in the actor's SQLite file, and resumes after a restart. The actor h
   Sonnet while `ALLOW_OPUS` is not `"true"`.
 - Tools (`workers/agents/src/task-tools.ts`): every run gets `list_files`, `read_file`,
   `write_file`, `edit_file`, `delete_file`, `run_command`, `complete_task`, and `fail_task`.
-  - `complete_task` (with a typed Intent) and `fail_task` end a run. Both are
-    idempotent.
+  - `complete_task` (with a typed Intent) and `fail_task` end a run. Both are idempotent.
   - Only `implement`, `migrate`, and `test` Tasks open a workspace (ADR 0011). For other Tasks,
     `list_files` and `read_file` read the canonical commit, and the write and command tools answer
     "This Task has no workspace".
-- Routing: deterministic rules first, then Clef-flash only for the generic case (the rule floors
-  still apply). Each attempt has a Decision Receipt in the product database and the Event `model.route.decided`.
+- Routing: deterministic rules first, then Clef-flash only for the generic case. The rule floors
+  apply to the Clef-flash answer too. Each attempt has a Decision Receipt in the product database
+  and the Event `model.route.decided`.
 - Escalation: two intelligence failures at one tier escalate one tier. Two failures at the top
   tier (Sonnet while Opus is off) send the Task to re-planning. A transport failure retries once at
   the same tier. Each attempt starts a fresh Pi session.
@@ -32,9 +32,9 @@ transcripts in the actor's SQLite file, and resumes after a restart. The actor h
   marks the Change `budget_blocked`.
 - Claims: a run takes advisory Claims (ADR 0015).
 - Liveness: while a run is active, AgentDO checks it every 60 s (`scheduleEvery(60)`). It sets no
-  timers when idle. Each check counts against the daily cap on self-scheduled callbacks (`DAILY_ALARM_CAP`, 2,000
-  per actor per UTC day). A run that ends without
-  a terminal tool counts as `no_outcome`. After 15 checks, AgentDO stops the run (`timeout`).
+  timers when idle. Each check counts against the daily cap on self-scheduled callbacks
+  (`DAILY_ALARM_CAP`, 2,000 per actor per UTC day). A run that ends without a terminal tool counts
+  as `no_outcome`. After 15 checks, AgentDO stops the run (`timeout`).
 - The core service registers `AgentDO` on the actor host as the `AGENT` namespace. Each
   instance has its own SQLite file.
 

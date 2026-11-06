@@ -30,8 +30,8 @@ const MAX_CALLS_PER_RUN = { haiku: 16, sonnet: 32, opus: 32 } as const;
 const CLEF_DAILY_CAP = 200;
 /**
  * Fallback for the `SANDBOX_MONTHLY_SECONDS` binding; mirrors MONTHLY_SECONDS in
- * workers/agents/src/workspace.ts and integration candidate-sandbox.ts. ADR 0017 sets the binding
- * to 20 hours.
+ * workers/agents/src/workspace.ts and integration candidate-sandbox.ts. Compose sets the binding
+ * to 72000 s (20 hours).
  */
 const SANDBOX_MONTHLY_SECONDS = 36_000;
 

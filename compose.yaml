@@ -64,7 +64,7 @@ services:
       ANTHROPIC_MONTHLY_BUDGET_USD: ${ANTHROPIC_MONTHLY_BUDGET_USD:-100}
       ALLOW_OPUS: ${ALLOW_OPUS:-false}
       SANDBOX_MONTHLY_SECONDS: ${SANDBOX_MONTHLY_SECONDS:-72000}
-      BROWSER_DAILY_SECONDS: ${BROWSER_DAILY_SECONDS:-960}
+      BROWSER_DAILY_SECONDS: ${BROWSER_DAILY_SECONDS:-3600}
     volumes: [core-data:/data]
     # A fixed address: workerd in apps resolves `core` once, at start.
     networks:

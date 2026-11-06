@@ -11,14 +11,14 @@ Promotion is one atomic `S<n> -> S<n+1>` transition. Eight preconditions must be
 5. The policy version is valid.
 6. The current Canonical Generation equals the expected generation.
 7. The current canonical tree equals the expected tree, when the tree check is on.
-8. The Candidate Artifact still exists.
+8. The Candidate fork still holds the composed commit.
 
 Most of these preconditions read data that ProjectRootDO does not own. Candidate status, the
 Verification Plan, Evidence, and approvals are rows in the product database. The Candidate
 commit is in a fork in the git service. ProjectRootDO owns only the Canonical Generation, tree,
-ref, and active policy version. An actor that reads the product database inside its transaction
-cannot make those reads atomic with its own SQLite state. Those reads also make the most
-important correctness boundary depend on a second database.
+ref, and active policy version. An actor cannot read the product database atomically with its
+own SQLite state. Such reads also make the most important correctness boundary depend on a second
+database.
 
 ## Decision
 
@@ -59,8 +59,8 @@ records `candidate.stale`. Rhumbatron does not retry a stale promotion blind.
 `POST /v1/changes/:changeId/approve` records one decision per Candidate in `approvals`
 (migration 0008). The approver is the authenticated Project owner or admin from the session. The
 request body never names the approver. Only a verified Candidate that needs approval can get a
-decision. The first decision is final, and an identical repeat returns the stored row. A rejection also sets the Candidate to
-`rejected`. The policy is deterministic (`approvalRequired`, `checkApprovalDecision`). No model
+decision. The first decision is final. An identical repeat returns the stored row. A rejection
+also sets the Candidate to `rejected`. The policy is deterministic (`approvalRequired`, `checkApprovalDecision`). No model
 takes part. The integration module records `approval.requested` for a verified Candidate that
 needs approval. That Candidate has no siblings, or it is the winner of a selection (ADR 0026).
 The Event has `reason` (one sentence, also the Candidate status reason, from `approvalReason` or
@@ -72,7 +72,7 @@ The Event has `reason` (one sentence, also the Candidate status reason, from `ap
 ProjectRootDO is the authority, so the canonical repository in the git service moves after the
 compare-and-swap. The integration module fetches the Candidate fork with isomorphic-git into memory.
 It pushes the composed commit to `main` of the canonical repository as a fast-forward only (no
-force push; receive-pack also checks the old value). Then it writes
+force push; receive-pack also checks the expected value). Then it writes
 `source/<project>/<tree>/index.json`. Agents and the verification workflow use that index to find
 the canonical commit, so the integration module writes it only after `main` moves. The canonical
 ref is `artifacts://<project>@<commit>`.
@@ -86,7 +86,7 @@ on a commit that `main` does not have. The sync uses no Sandbox time.
 
 - On `canonical.advanced`, the Causal Router marks every other in-flight Candidate of the Project
   on an older base as `stale` (one database batch, deterministic). It marks the promoted Candidate
-  `promoted`. This repairs the database mirror if the integration module stopped between the
+  `promoted`. This step repairs the database copy when the integration module stops between the
   compare-and-swap and its own write. A Change in `awaiting_approval` with no verified Candidate
   goes back to `verifying`.
 - The Causal Router then sends `candidates.recompose` on the `integration` queue. The promotion
@@ -99,7 +99,7 @@ on a commit that `main` does not have. The sync uses no Sandbox time.
 
 - The actor trusts its caller for rules 1 to 4 and 8. Only code with a `PROJECT_ROOT` binding
   can call it, and only the integration module calls `promote`. ProjectRootDO has no public route.
-- A precondition can change between the check and the compare-and-swap (for example, a new
+- A precondition can change between the check and the compare-and-swap (for example, an added
   Evidence row). Evidence IDs are stable per check. Only the verification workflow of a Candidate
   writes its Evidence, and that workflow is finished when the Candidate is `verified`.
 - The API code gets the `INTEGRATION` binding from the core service (`services/core/src/main.ts`).

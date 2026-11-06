@@ -37,22 +37,27 @@ and rollback in full. This ADR states the decisions and their limits.
     `<slug>-<6 characters of the Project ID>`. A reserved slug gets the suffix `-app`.
 - Pointer: the product database table `app_deployments` (migration 0018), one row per Project and
   channel (`production` or `preview:<id>`), unique on (label, channel). The router reads it through
-  the core internal API (`services/apps/CONTRACT.md`) and caches rows in the isolate for 10 s. A row keeps its last good bundle while a build runs
-  or after a build fails. Status `removed` answers 410 for the app and all its previews.
-- Pages: plain HTML, no scripts, `noindex`: 404 (no app), 410 (removed), 503 with refresh
-  (building, build failed with no earlier bundle, limit reached), 502 (the app threw), and 200
-  "Nothing built yet" (a tree with no code, ADR 0022).
+  the core internal API (`services/apps/CONTRACT.md`) and caches rows in the isolate for 10 s. A
+  row keeps its last good bundle while a build runs or after a build fails. Status `removed`
+  answers 410 for the app and all its previews.
+- Router pages are plain HTML with no scripts and `noindex`:
+  - 404: no app.
+  - 410: the app is removed.
+  - 503 with refresh: the app is building, a build failed with no earlier bundle, or a limit is
+    reached.
+  - 502: the app threw.
+  - 200 "Nothing built yet": the tree has no code (ADR 0022).
 
 ### Bundles
 
 - Format: `apps/<project>/<commit>/bundle.json` (modules, compatibility settings, asset manifest)
-  plus one object per static asset under `.../assets/<path>`, in the evidence bucket. Previews use `app-previews/`.
-  The builder writes `bundle.json` last. The commit is the content address, so the builder uses a
+  plus one object per static asset under `.../assets/<path>`, in the evidence bucket. Previews use
+  `app-previews/`. The builder writes `bundle.json` last. The commit is the content address, so the builder uses a
   stored bundle again and never builds it again.
 - Builder: the `AppBuilder` entrypoint of the apps Worker, with `@cloudflare/worker-bundler` 0.2.6
-  (esbuild-wasm). It runs in the apps Worker, so builds use no Sandbox time.
-  npm dependencies come from the public registry at build time, through the workerd `internet`
-  service (public addresses only).
+  (esbuild-wasm). It runs in the apps Worker, so builds use no Sandbox time. npm dependencies come
+  from the public registry at build time, through the workerd `internet` service (public
+  addresses only).
 - The integration module reads the build inputs of one commit through its `ARTIFACTS` binding (the
   git service): one read per directory and per file. It skips tests, benchmarks, lockfiles, and
   Markdown files. Then it calls `APPS.build(...)`. `APPS` is the RPC client of the apps service
@@ -67,37 +72,44 @@ and rollback in full. This ADR states the decisions and their limits.
 
 ### Static assets
 
-The router serves a matching asset before it runs the app, with the rules of Worker static assets
-(`assets.directory` and `not_found_handling` from the `wrangler.jsonc` of the app). Apps can also
-call `env.ASSETS.fetch(request)`. `ASSETS` is the `AppAssets` entrypoint of the router, passed
-through `ctx.exports` with `props.bundleKey`. An app with `run_worker_first: true` gets each
-request.
+The router serves a matching asset before it runs the app. The `wrangler.jsonc` of the app sets
+the rules: `assets.directory`, `not_found_handling` (`none`, `single-page-application`, or
+`404-page`), and `run_worker_first`.
+
+- An app whose client handles its own routes sets `not_found_handling` to
+  `single-page-application` (`APP_CONVENTIONS`). A direct load of such a route then serves
+  `public/index.html`.
+- An app with `run_worker_first: true` gets each request.
+- Apps can also call `env.ASSETS.fetch(request)`. `ASSETS` is the `AppAssets` entrypoint of the
+  router, passed through `ctx.exports` with `props.bundleKey`.
 
 ### Per-app storage
 
 `env.DATA` is a small string key-value store with `get`, `put`, `delete`, and
 `list({ prefix, limit })`. It is the `AppData` entrypoint of the router with `props.storeName`.
-Each store is one SQLite-backed `AppDataDO` (a workerd Durable Object namespace on `localDisk`,
-the `apps-data` volume). Production, each preview, and each version host have
-separate stores, so a preview never writes production data. Limits: keys up to 512 characters,
-values up to 128 KiB, and 10,000 keys.
+Each store is one SQLite-backed `AppDataDO` actor. The workerd config declares it in
+`durableObjectNamespaces`, with storage on `localDisk` in the `apps-data` volume. Production, each
+preview, and each version host have separate stores, so a preview never writes production data.
+Limits: keys up to 512 characters, values up to 128 KiB, and 10,000 keys.
 
-Rhumbatron does not use Durable Object facets in workerd. A facet needs the app to export a
-Durable Object class, and then each app request goes through one object. With the binding, apps
-stay plain fetch Workers, and only storage calls reach `AppDataDO`.
+An app exports no actor class. Each app stays a plain fetch Worker, so an app request does not go
+through one object. Only storage calls reach `AppDataDO`.
 
 ### Security
 
 - `globalOutbound` is `null`, so an app cannot reach the network.
 - The router passes limits per request: 50 ms CPU and 20 subrequests (binding calls included). A
-  limit hit returns 503. workerd does not verify these limits, so treat them as not enforced.
+  limit hit returns 503. workerd does not enforce these limits.
 - The app env holds only `ASSETS` and `DATA`. It has no Rhumbatron binding, secret, or token.
-- Cookies (`workers/apps/src/cookies.ts`):
-  - The router renames each app `Set-Cookie` to `rba_<name>` on the host of the app.
-  - The router drops a `Set-Cookie` that has a `Domain` attribute.
-  - Requests carry only the `rba_` cookies, without the prefix. Cookies that other hosts set for
-    the whole parent domain never reach app code. The router also removes the
-    `cf-access-jwt-assertion` and `cf-access-authenticated-user-email` request headers.
+- Cookies (`workers/apps/src/cookies.ts`, `cookies.critical.test.ts`):
+  - The router stores each app cookie under the `rba_` prefix on the host of the app. An app
+    `Set-Cookie` for `name` becomes `rba_name`.
+  - The router drops a `Set-Cookie` that has a `Domain` attribute. An app cannot set a cookie for
+    `rhumbatron.localhost` or for another app.
+  - A request to the app carries only the `rba_` cookies, with the prefix removed. Cookies that
+    other hosts set for the whole parent domain never reach app code.
+  - The router also strips the `cf-access-jwt-assertion` and
+    `cf-access-authenticated-user-email` request headers.
 - Real auth check: a build fails when `package.json` or an import names a real auth SDK or a
   password-hashing library (Clerk, Auth.js, Better Auth, Lucia, Supabase auth, Firebase auth,
   Auth0, Passport, Okta, Amplify, WorkOS, Stytch, Kinde, Descope, bcrypt, argon2), or when markup
@@ -105,8 +117,8 @@ stay plain fetch Workers, and only storage calls reach `AppDataDO`.
 - Clerk cookies on `rhumbatron.localhost`:
   - `__session` and `__session_<suffix>` have no `Domain`. They are host-only on
     `rhumbatron.localhost`, and app hosts never get them.
-  - A cookie with `Domain=rhumbatron.localhost`, such as `__client_uat`, reaches app hosts. The
-    router removes every cookie that does not have the `rba_` prefix.
+  - The browser sends a cookie with `Domain=rhumbatron.localhost`, such as `__client_uat`, to app
+    hosts. The router removes every cookie that does not have the `rba_` prefix.
 
 ### Fake identity
 
@@ -149,9 +161,9 @@ These are runtime data. No change to the Compose stack runs at release time.
     the contract Evidence of the released Candidate. Routes that the Change added go first. Without
     a route table, the probes call only `/`.
   - A release that starts late never moves the pointer back to an older generation.
-- **Smoke failure.** The pointer moves back to the version that it replaced, as a recorded
-  transition (`deployment.completed` with status `restored`). The release is `smoke_failed`. The
-  Canonical Generation stays promoted.
+- **Smoke failure.** The pointer moves back to the version that is live before the release. This
+  move is a recorded transition (`deployment.completed` with status `restored`). The release is
+  `smoke_failed`. The Canonical Generation stays promoted.
 - **Versions.** Each deployed generation also gets a version row `preview:v<generation, 7 digits>`
   that points at its production bundle, for example `v0000003--market.rhumbatron.localhost`. `v`
   is not a hex digit, so a version ID never equals a Candidate preview ID. A version host has its own data
@@ -164,8 +176,8 @@ These are runtime data. No change to the Compose stack runs at release time.
   the stored bundle of Sk. Nothing in the history is deleted. The file index of the tree points at
   the rollback commit, so later Candidates compose on it.
 - **Stale recomposition.** When canonical advances, a stale Candidate is composed again on the
-  current Canonical State (same ChangeSets, a real merge, all checks). This occurs at most 2 times
-  per lineage (`MAX_RECOMPOSES`). After that, the Candidate is blocked. Recompositions do not
+  current Canonical State (same ChangeSets, a real merge, all checks). This occurs at most 6 times
+  per lineage (`MAX_RECOMPOSES`). After that, the Candidate is blocked, and a person decides. Recompositions do not
   count against the Candidate limit. Triggers: verification finds the base behind, canonical moves during the checks,
   ProjectRootDO refuses the compare-and-swap, or a promotion settles the Candidates behind it
   (ADR 0013). A rollback Candidate, a Change that already promoted a sibling, and a closed,
@@ -179,8 +191,8 @@ releases. A Project without a live app ends its Change at promotion.
 
 - **Trigger.** Promotion fast-forwards canonical `main` (ADR 0013). After the push, promotion
   starts `ReleaseWorkflow` with instance ID `rel_<project>_<generation>`, so each generation has
-  one release. A promotion retry starts no second release. When a release starts, it marks each
-  older `queued` or `building` release of the Project `superseded`.
+  one release. A promotion retry starts no second release. When a release starts, it gives each
+  `queued` or `building` release of a lower generation the status `superseded`.
 - **Steps.**
   1. Confirm that the generation is still canonical (ProjectRootDO). If not, the release is
      `superseded`. Else record `build.started`.
@@ -189,17 +201,17 @@ releases. A Project without a live app ends its Change at promotion.
   3. Move the production pointer by compare-and-swap and record `deployment.completed`. A pointer
      that does not move makes the release `failed`. A newer live generation makes it `superseded`.
   4. Run the smoke check through the router. If it fails, a second check runs 10 s later.
-  5. Write the Evidence to the object store and `evidence_index`, with check ID `release-s<generation>`. The API
-     keeps `release-*` rows out of the Candidate verification views. They never feed a promotion
-     gate.
+  5. Write the Evidence to the object store and `evidence_index`, with check ID
+     `release-s<generation>`. The API keeps `release-*` rows out of the Candidate verification
+     views. They never feed a promotion gate.
   6. If the smoke check passes, the release is `deployed`. Else the pointer moves back (see Smoke
      failure), and the release is `smoke_failed`, with `release.smoke_failed`. A probe without a
      response is a gap, never a pass.
 - **Statuses.** `queued -> building -> deployed | failed | smoke_failed`, and
-  `queued | building -> superseded`. A final state does not change, except that failure injection
-  can move `deployed` to `smoke_failed`. A release takes 6 to 9 workflow steps.
+  `queued | building -> superseded`. A final state does not change. One exception applies: failure
+  injection can move `deployed` to `smoke_failed`. A release takes 6 to 9 workflow steps.
 - **Failure semantics.** A failed release never moves the Canonical Generation
-  back and never deletes history. Recovery is a new canonical transition: a Change and a promotion
+  back and never deletes history. Recovery is a further canonical transition: a Change and a promotion
   (a fix, or a rollback). No path releases the same generation again. The event router sweep ends
   a Change that is still `releasing` 45 minutes after promotion (`RELEASE_STUCK_AFTER_MS`).
 - **Failure injection.** `POST /v1/projects/:projectId/releases/inject-failure` (Project owner
@@ -225,7 +237,7 @@ sequenceDiagram
     alt probes pass
       W->>W: deployed, Evidence release-sN to the object store and database
     else probe fails
-      W->>D: move the pointer back to the replaced version
+      W->>D: move the pointer back to the live version before the release
       W->>W: smoke_failed
     end
   end
@@ -235,16 +247,18 @@ sequenceDiagram
 
 - **Remove app.** `DELETE /v1/projects/:projectId/app` marks each row `removed` (410 on each host
   at once) and queues `app.remove`. The cleanup wipes the data stores (`AppBuilder.wipeData`),
-  deletes both object prefixes and the preview and version rows, and then reduces the production row to
-  a tombstone (status `removed`, no commit, no bundle). The hosts answer 410. The Project and its
+  deletes both object prefixes and the preview and version rows. Then it reduces the production
+  row to a tombstone (status `removed`, no commit, no bundle). The hosts answer 410. The Project and its
   history stay. "Deploy app" uses the tombstone again and publishes on the same label.
 - **Cost.** At most 60 app builds per UTC day (`APP_BUILDS_PER_DAY`, `usage_counters`
   `app-builds`), checked before each build. Builds and app requests run on the local host and
   have no usage charge. The cap limits the host time that a loop of builds can take.
-- **Retention.** Production bundles under `apps/` have no lifecycle rule. Each promoted generation
-  keeps its bundle, so a rollback never builds again. The daily sweep deletes the preview rows and
-  their data stores after 7 days. Core deletes preview bundles under `app-previews/` after 7 days
-  (`services/core/src/expiry.ts`). Version rows never expire.
+- **Retention.** Production bundles under `apps/` stay until the Project is deleted. Each promoted
+  generation keeps its bundle, so a rollback never builds again. The daily sweep deletes the
+  preview rows and their data stores after 7 days. Version rows never expire.
+- **Object expiry.** Core runs the object expiry (`services/core/src/expiry.ts`). It deletes
+  objects under `app-previews/` after 7 days, under `tmp/` after 7 days, and under `events/` after
+  365 days. Objects under `apps/` and `evidence/` stay until the Project is deleted.
 
 ### Compose stack
 
@@ -283,8 +297,8 @@ Every item runs on the local host. None has a usage charge. The table shows the 
   cannot read the host-only `__session`. But it can write a cookie for
   `Domain=rhumbatron.localhost` with `document.cookie` (cookie tossing), and the router cannot see
   that. The impact is a forced sign-out, or a sign-in as the account of the attacker on
-  `rhumbatron.localhost`. A separate parent domain for apps removes this risk. A `Content-Security-Policy: sandbox` header also blocks it, but it breaks same-origin
-  storage.
+  `rhumbatron.localhost`. A separate parent domain for apps removes this risk. A
+  `Content-Security-Policy: sandbox` header also blocks it, but it breaks same-origin storage.
 - The apps Worker carries the esbuild-wasm module (`esbuild.wasm`, written by
   `services/apps/build.ts`). Only the builder imports it. If the start of the apps service becomes
   slow, move the builder into its own Worker.

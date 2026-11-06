@@ -99,14 +99,13 @@ export function classifySecurity(check: VerificationCheck, run: CheckRun): Check
 
 // --- Browser check ------------------------------------------------------------------------
 
-/** One browser session per check, at most this long (Browser Run free timeout is 60 s). */
-export const BROWSER_SESSION_MS = 55_000;
+/** One browser session per check, at most this long. */
+export const BROWSER_SESSION_MS = 120_000;
 /** Max full browser verification runs per Candidate. */
 export const MAX_BROWSER_RUNS_PER_CANDIDATE = 2;
 /**
- * Daily Browser Run guard when the `BROWSER_DAILY_SECONDS` binding is absent or invalid: a safe
- * value below prod's. Prod sets the binding from Terraform `browser_daily_seconds = 960`
- * (envs/prod, ADR 0017: 80 % of the included 10 browser hours per month).
+ * Daily browser guard when the `BROWSER_DAILY_SECONDS` binding is absent or invalid: a safe low
+ * value. Compose sets the binding to 3600 s per UTC day (`compose.yaml`).
  */
 export const BROWSER_DAILY_SECONDS = 500;
 /** Seconds reserved before a session opens; settled to the real duration after it closes. */
@@ -155,7 +154,7 @@ export function classifyBrowser(run: BrowserRun): CheckOutcome {
     return {
       status: "error",
       coverage: "not_checked",
-      summary: `Browser Run did not start: ${run.detail.slice(0, 200)}. A gap, never a pass.`,
+      summary: `The browser did not start: ${run.detail.slice(0, 200)}. A gap, never a pass.`,
     };
   }
   const passed = run.steps.filter((s) => s.ok).length;

@@ -4,11 +4,11 @@ This runbook tells how a promoted Candidate becomes a live app. It also tells ho
 
 Promotion advances the Canonical Generation. A release then serves the promoted commit. `ReleaseWorkflow` (`workers/integration/src/release-workflow.ts`) checks each release with executable Evidence. No model decides whether a release is authorized.
 
-A release never deletes history. A failed release keeps the Canonical Generation. To recover, promote a new generation with a fix Change or a rollback.
+A release keeps all history. A failed release keeps the Canonical Generation. To recover, promote a fix Change or a rollback as the next generation.
 
 ## 1. Live app release
 
-Each Project has a live app at `https://<slug>.rhumbatron.localhost`. The `apps` service runs it on workerd with the Worker Loader ([ADR 0020](../adr/0020-live-apps-dynamic-workers.md), [live-apps.md](../architecture/live-apps.md)). A deploy is runtime data: a bundle in the object store and a pointer row in `app_deployments`. No container or configuration changes for a deploy.
+Each Project has a live app at `https://<slug>.rhumbatron.localhost`. The `apps` service runs it on workerd with the Worker Loader ([ADR 0020](../adr/0020-live-apps-dynamic-workers.md), [live-apps.md](../architecture/live-apps.md)). A deploy is runtime data: a bundle in the object store and a pointer row in `app_deployments`. A deploy changes no container and no configuration.
 
 ```mermaid
 sequenceDiagram
@@ -27,18 +27,18 @@ sequenceDiagram
   alt smoke passes
     R->>R: Evidence release-sN, status deployed
   else smoke fails
-    R->>D: move pointer back to the previous version
+    R->>D: move pointer back to the earlier version
     R->>R: Evidence, status smoke_failed
   end
 ```
 
-1. Start: the promotion fast-forwards canonical `main` in the Project repository on the git service. It records a `queued` release with the ID `rel_<project>_<generation>` and sends `release.start` on the `release` command queue. The integration module starts `ReleaseWorkflow` with the release ID as the instance ID.
+1. Start: the promotion fast-forwards canonical `main` in the Project repository on the git service. It records a `queued` release with the ID `rel_<project>_<generation>`. It sends `release.start` on the `release` command queue. The integration module starts `ReleaseWorkflow` with the release ID as the instance ID.
 2. Check: the workflow confirms that the generation is still canonical. A newer promotion during the release sets the release to `superseded`.
-3. Bundle: the workflow uses the stored bundle of the promoted commit, the bundle of the same tree, or the bundle of the Candidate preview. Otherwise it builds the bundle from the Project source on the apps service. The cap is 60 builds per UTC day (`APP_BUILDS_PER_DAY`).
-4. Pointer: the workflow moves the production pointer by compare-and-swap on the row that it read. The previous version stays.
+3. Bundle: the workflow uses the stored bundle of the promoted commit, the bundle of the same tree, or the bundle of the Candidate preview. When none of these exists, it builds the bundle from the Project source on the apps service. The cap is 60 builds per UTC day (`APP_BUILDS_PER_DAY`).
+4. Pointer: the workflow moves the production pointer by compare-and-swap on the row that it read. The workflow keeps the earlier version.
 5. Smoke check: the workflow probes the app through the apps router. It probes `/` (a real page, not a router status page) and up to 3 static `GET` routes from the route table of the app (`workers/integration/src/release-model.ts`). After a failed check, it waits 10 seconds and runs the check once more.
 6. Evidence: the workflow stores release Evidence with the check ID `release-s<generation>` in the object store and in `evidence_index`.
-7. Status: a passed smoke check sets `deployed`. A failed smoke check moves the pointer back to the version it replaced and sets `smoke_failed`. A missing bundle or a failed build sets `failed`.
+7. Status: a passed smoke check sets `deployed`. A failed smoke check moves the pointer back to the earlier version and sets `smoke_failed`. A missing bundle or a failed build sets `failed`.
 
 ### Hosts
 
@@ -48,11 +48,11 @@ sequenceDiagram
 | `<previewId>--<slug>.rhumbatron.localhost` | The preview of one Candidate. A Change keeps at most 3 previews. The daily sweep deletes preview rows and their data stores after 7 days ([cleanup.md](./cleanup.md)). |
 | `v0000001--<slug>.rhumbatron.localhost` | One kept version. The number is the Canonical Generation with 7 digits. |
 
-A Project with no shipped Change shows "Nothing built yet". After "Remove app", the host answers 410.
+A Project without a shipped Change shows "Nothing built yet". After "Remove app", the host answers 410.
 
 ### Rollback
 
-A rollback to generation Sk is a new canonical transition from Sn to Sn+1. The new tree is equal to the tree of Sk. It takes the same path as every promotion, with the approval policy and the release.
+A rollback to generation Sk is one more canonical transition, from Sn to Sn+1. The tree of Sn+1 is equal to the tree of Sk. It takes the same path as every promotion, with the approval policy and the release.
 
 ### Stuck releases
 
@@ -63,7 +63,7 @@ Every 5 minutes, the event router sweep queues `release.recover` for each Change
 - A Project without a live app completes the Change.
 - A Project with a live app but no release gets a failed release record.
 
-While the stack is down, the sweep does not run. The recovery runs after `bun run stack:up`.
+The sweep runs only while the stack runs. After `bun run stack:up`, the next sweep does the recovery.
 
 ## 2. Check a release
 

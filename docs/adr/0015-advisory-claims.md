@@ -4,12 +4,12 @@
 
 ResourceShardDO implements Claims as renewable leases. Each Project and semantic resource has at
 most one active Claim. The shard writes `claim.*` events in the same transaction as the lease
-change. The shard alarm expires a Claim. Conflict detection needs a signal
-that two agents work on one resource at the same time.
+change. The shard alarm expires a Claim. Conflict detection needs a signal that two agents work
+on one resource at the same time.
 
 A blocking lock does not fit the product. Rhumbatron runs parallel agents on one resource, and it
-can fork two Candidates that implement one resource in two ways. A lock that
-makes agents wait serializes the work that must diverge and then converge with Evidence.
+can fork two Candidates that implement one resource in two ways. A lock that makes agents wait
+serializes the work that must diverge and then converge with Evidence.
 
 ## Decision
 
@@ -46,8 +46,8 @@ Claims are advisory leases for agent runs.
 
 - The Claims feed shows real `claim.acquired`, `claim.renewed`, `claim.released`, and
   `claim.expired` facts for every run.
-- `claim.contended` is an Event type. The Claims feed API and its partial index in the product database list it with the
-  four lifecycle types, so the Claims feed shows contention too.
+- `claim.contended` is an Event type. The Claims feed API and its partial index in the product
+  database list it with the four lifecycle types, so the Claims feed shows contention too.
 - Contention with an agent of another Change stays an event and a `claim_contention` metric. It
   does not enter that Change's conflict pass, because the other Intent is not compared there.
 - Parallel Tasks of one Change that share a resource produce a `suspected` conflict, also when
@@ -65,8 +65,8 @@ Claims are advisory leases for agent runs.
 - A blocking lock held by a stopped agent stalls a Change for up to one lease. An advisory lease
   only loses a signal for that time.
 - Claim ownership needs strong consistency. Source needs no exclusive write access. Ownership is
-  strongly consistent, because one shard transaction keeps one active Claim per resource. Per-run
-  Artifact forks isolate source. Promotion safety comes from compare-and-swap with executable
+  strongly consistent, because one shard transaction keeps one active Claim per resource. Per-run forks
+  in the git service isolate source. Promotion safety comes from compare-and-swap with executable
   Evidence (ADR 0013).
 
 ## Diagram

@@ -2,11 +2,10 @@
 
 ## Context
 
-The web app renders on the server, but signed-in pages read their data in the browser after
-hydration. The first paint shows skeletons. On a phone, Lighthouse measures the largest contentful
-paint at 3 to 8 seconds, and most of that time is render delay. When the data arrives, sections
-change height, and the page shifts (cumulative layout shift up to 0.59). Labels of 10 and 11px
-fail the legible text audit on phone widths.
+A signed-in page that reads its data in the browser after hydration paints skeletons first. On a
+phone, Lighthouse then measures the largest contentful paint at 3 to 8 seconds, mostly render
+delay. When the data arrives, sections change height, and the page shifts (cumulative layout shift
+up to 0.59). Labels of 10 and 11px fail the legible text audit on phone widths.
 
 ## Decision
 
@@ -15,7 +14,8 @@ fail the legible text audit on phone widths.
   writes the cache into the HTML. The components read the same query keys with the same server
   functions, so their first render has the data. On the client, the loaders do nothing. A
   client-side navigation renders at once, and the components read their data in the browser.
-- The server functions call the API module with the user's Clerk session during the server render.
+- During the server render, the server functions call the API in core (`API_INTERNAL_URL`) with
+  the Clerk session of the user.
   A failed read stays in the cache as an error. The page shows its error state and the client
   reads again.
 - The event feeds and the Project timeline start from the first page that the loader read. Their
@@ -38,7 +38,7 @@ fail the legible text audit on phone widths.
 - The time to first byte of a signed-in page includes its slowest primary read. The loader runs
   independent reads in parallel.
 - The server render makes the API reads of the first page view. Hover preloads make no reads.
-  The Project overview makes up to 27 service-binding calls in one render: 7 page reads and one
+  The Project overview makes up to 27 API calls to core in one render: 7 page reads and one
   Task read for each of the newest 20 Changes.
 - On a first visit without the `rh-tz` cookie, clock times show in UTC until the next full page
   load.

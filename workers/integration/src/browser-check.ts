@@ -10,7 +10,7 @@ import {
 } from "./check-semantics.ts";
 
 /**
- * Candidate browser check in Browser Run. The composed app runs
+ * Candidate browser check in the browser service (Playwright server). The composed app runs
  * in the Project Sandbox; the browser reaches it only through request interception: every request
  * to the preview host is answered by `containerFetch` into the Sandbox, every other request is
  * blocked. So the preview has no public URL and the browser has no other network access.
@@ -18,9 +18,8 @@ import {
  * Cost guards, all enforced before a session opens:
  * - one session per check run, closed after at most `BROWSER_SESSION_MS`;
  * - at most `MAX_BROWSER_RUNS_PER_CANDIDATE` runs per Candidate (retries included);
- * - at most the `BROWSER_DAILY_SECONDS` binding (fallback: the constant, 500) per UTC day on this
- *   environment's D1 meter. ADR 0017 sets 960 s, 80 % of the
- *   included 10 browser hours per month.
+ * - at most the `BROWSER_DAILY_SECONDS` binding (fallback: the constant, 500) per UTC day on the
+ *   `browser-seconds` usage meter. Compose sets 3600 s.
  */
 
 const PREVIEW_HOST = "candidate.preview.invalid";
@@ -70,7 +69,7 @@ async function reserveBrowserRun(
     )
     .first<{ count: number }>();
   if (!seconds) {
-    return `daily Browser Run guard reached (${dailyCap} s per UTC day)`;
+    return `daily browser guard reached (${dailyCap} s per UTC day)`;
   }
   const runs = await db
     .prepare(
@@ -111,9 +110,45 @@ function assert(condition: unknown, message: string): asserts condition {
 type Session = {
   page: Page;
   proxyErrors: string[];
+  /** Uncaught errors in the app's own page scripts. */
+  appErrors: string[];
+  /** The app's own pages and assets that answered 4xx or 5xx (API routes not included). */
+  failedLoads: string[];
   shots: Uint8Array[];
   steps: BrowserStep[];
 };
+
+/**
+ * Fetches from the preview and follows same-preview redirects, as a browser does: 301, 302 and 303
+ * turn a POST into a GET; 307 and 308 keep the method. An intercepted response cannot be a
+ * redirect for the browser, so the browser gets the final response. At most 5 hops.
+ */
+async function followRedirects(
+  preview: CandidatePreview,
+  path: string,
+  init: { method: string; headers: Record<string, string>; body: string | null },
+): Promise<Response> {
+  let current = { path, ...init };
+  for (let hop = 0; ; hop++) {
+    const res = await preview.fetch(current.path, current);
+    const location = res.headers.get("location");
+    if (res.status < 300 || res.status >= 400 || !location || hop >= 5) return res;
+    const next = new URL(location, `${ORIGIN}${current.path}`);
+    if (next.hostname !== PREVIEW_HOST) return res;
+    const keep = res.status === 307 || res.status === 308;
+    const headers = { ...current.headers };
+    if (!keep) {
+      delete headers["content-type"];
+      delete headers["Content-Type"];
+    }
+    current = {
+      path: `${next.pathname}${next.search}`,
+      method: keep ? current.method : "GET",
+      headers,
+      body: keep ? current.body : null,
+    };
+  }
+}
 
 /** Answers preview requests from the Sandbox and blocks the rest of the network. */
 function intercept(session: Session, preview: CandidatePreview) {
@@ -138,7 +173,7 @@ function intercept(session: Session, preview: CandidatePreview) {
     const method = req.method();
     const body = method === "GET" || method === "HEAD" ? undefined : req.postData();
     try {
-      const res = await preview.fetch(path, { method, headers, body: body ?? null });
+      const res = await followRedirects(preview, path, { method, headers, body: body ?? null });
       const bytes = new Uint8Array(await res.arrayBuffer());
       const out: Record<string, string> = {};
       res.headers.forEach((v, k) => {
@@ -146,6 +181,12 @@ function intercept(session: Session, preview: CandidatePreview) {
           out[k] = v;
         }
       });
+      if (
+        (res.status >= 500 || (res.status >= 400 && !path.startsWith("/api/"))) &&
+        !path.startsWith("/favicon.ico")
+      ) {
+        session.failedLoads.push(`${res.status} ${method} ${path}`);
+      }
       await route.fulfill({ status: res.status, headers: out, body: Buffer.from(bytes) });
     } catch (error) {
       session.proxyErrors.push(`${method} ${path}: ${String(error).slice(0, 160)}`);
@@ -199,10 +240,16 @@ async function goto(session: Session, path: string) {
 }
 
 /**
- * Flow for any app: the home page renders visible text and the API answers its health route (the
- * app conventions, packages/protocol APP_CONVENTIONS).
+ * Flow for any app:
+ * 1. The home page renders visible text.
+ * 2. The API answers its health route (the app conventions, packages/protocol APP_CONVENTIONS).
+ * 3. Every page the app links to opens, as a person reaches it: by a click from the page that
+ *    links it (client routing) and by a direct load of its URL (a reload or a shared link). At
+ *    most MAX_PAGES pages, breadth first from the home page. Each page must answer below 400 and
+ *    show text. No page script may throw, and no page or asset of the app may answer 4xx or 5xx.
  */
-const APP_STEPS = 2;
+const APP_STEPS = 3;
+const MAX_PAGES = 8;
 async function appFlow(s: Session) {
   const { page } = s;
   await step(s, "home page shows content", async () => {
@@ -216,6 +263,136 @@ async function appFlow(s: Session) {
     const status = await apiStatus(s, "/api/health");
     assert(status === 200, `GET /api/health returned ${status}`);
   });
+  await step(s, "every linked page opens, by click and by direct load", async () => {
+    await explorePages(s);
+    await shot(s);
+  });
+}
+
+/** Same-origin page links of the current page, as paths. API routes and anchors are skipped. */
+async function pageLinks(page: Page): Promise<string[]> {
+  const hrefs = await page.$$eval("a[href]", (as) => as.map((a) => a.getAttribute("href") ?? ""));
+  const paths = new Set<string>();
+  for (const href of hrefs) {
+    if (!href || href.startsWith("#") || /^(mailto|tel|javascript):/i.test(href)) continue;
+    let url: URL;
+    try {
+      url = new URL(href, `${ORIGIN}/`);
+    } catch {
+      continue;
+    }
+    if (url.hostname !== PREVIEW_HOST || url.pathname.startsWith("/api/")) continue;
+    paths.add(`${url.pathname}${url.search}`);
+  }
+  return [...paths];
+}
+
+async function visibleText(page: Page): Promise<string> {
+  return page.$eval("body", (el) => (el as unknown as { innerText?: string }).innerText ?? "");
+}
+
+/** A page whose whole text is a not-found message, as a bare server 404 or a router fallback. */
+const NOT_FOUND = /^\s*(404\b|not found\b)/i;
+
+/**
+ * Waits until the page stops loading data (at most 5 s), so client-rendered text and links exist.
+ * The short pause first lets a refetch that a click or a submit starts begin.
+ */
+async function settled(page: Page): Promise<void> {
+  await page.waitForTimeout(400);
+  await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+}
+
+/** Fills and submits each form on the page once, with sample values, so the app creates data. */
+const MAX_FORMS_PER_PAGE = 3;
+async function submitForms(s: Session, path: string): Promise<void> {
+  const { page } = s;
+  const forms = page.locator("form");
+  const count = Math.min(await forms.count(), MAX_FORMS_PER_PAGE);
+  for (let i = 0; i < count; i++) {
+    const form = forms.nth(i);
+    if (!(await form.isVisible().catch(() => false))) continue;
+    const fields = form.locator(
+      "input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]), textarea",
+    );
+    for (let f = 0; f < (await fields.count()); f++) {
+      const field = fields.nth(f);
+      if (!(await field.isEditable().catch(() => false))) continue;
+      const type = ((await field.getAttribute("type")) ?? "text").toLowerCase();
+      const value =
+        type === "number"
+          ? "12"
+          : type === "email"
+            ? "person@example.com"
+            : type === "date"
+              ? "2026-01-15"
+              : type === "url"
+                ? "https://example.com"
+                : `Sample ${f + 1}`;
+      await field.fill(value).catch(() => undefined);
+    }
+    for (const box of await form.locator("input[type=checkbox]").all())
+      await box.check().catch(() => undefined);
+    for (const select of await form.locator("select").all()) {
+      const options = await select.locator("option").count();
+      if (options > 1) await select.selectOption({ index: 1 }).catch(() => undefined);
+    }
+    const submit = form.locator("button[type=submit], input[type=submit]").first();
+    const button = (await submit.count()) > 0 ? submit : form.locator("button").last();
+    if (!(await button.isVisible().catch(() => false))) continue;
+    await button.click({ timeout: WAIT_MS });
+    await settled(page);
+    const text = await visibleText(page);
+    assert(text.trim().length > 0, `the page at ${path} shows no text after a form was submitted`);
+  }
+}
+
+async function explorePages(s: Session) {
+  const { page } = s;
+  const seen = new Set<string>(["/"]);
+  const queue: { path: string; from: string }[] = [];
+  const enqueue = (links: string[], from: string) => {
+    for (const path of links) {
+      if (seen.has(path) || seen.size > MAX_PAGES) continue;
+      seen.add(path);
+      queue.push({ path, from });
+    }
+  };
+  await goto(s, "/");
+  await settled(page);
+  await submitForms(s, "/");
+  enqueue(await pageLinks(page), "/");
+  for (let item = queue.shift(); item; item = queue.shift()) {
+    const { path, from } = item;
+    // By click: open the linking page and follow the link, as a person does.
+    await goto(s, from);
+    await settled(page);
+    const link = page.locator(`a[href="${path}"], a[href="${ORIGIN}${path}"]`).first();
+    if (await link.isVisible().catch(() => false)) {
+      await link.click({ timeout: WAIT_MS });
+      await page.waitForLoadState("domcontentloaded", { timeout: WAIT_MS });
+      await settled(page);
+      const clicked = await visibleText(page);
+      assert(
+        clicked.trim().length > 0,
+        `the page at ${path} shows no text after a click from ${from}`,
+      );
+      assert(!NOT_FOUND.test(clicked), `the link to ${path} on ${from} opens a not-found page`);
+    }
+    // By direct load: a reload, a bookmark, or a shared link.
+    await goto(s, path);
+    await settled(page);
+    const loaded = await visibleText(page);
+    assert(loaded.trim().length > 0, `a direct load of ${path} shows no text`);
+    assert(!NOT_FOUND.test(loaded), `a direct load of ${path} shows a not-found page`);
+    await submitForms(s, path);
+    enqueue(await pageLinks(page), path);
+  }
+  assert(s.appErrors.length === 0, `a page script threw: ${s.appErrors.slice(0, 2).join("; ")}`);
+  assert(
+    s.failedLoads.length === 0,
+    `the app answered errors: ${[...new Set(s.failedLoads)].slice(0, 3).join("; ")}`,
+  );
 }
 
 /** GETs an app API path from the page, so the request goes through the browser and the proxy. */
@@ -300,7 +477,15 @@ export async function runBrowserCheck(
       return done({ kind: "launch_failed", detail: String(error) });
     }
     const page = await browser.newPage({ viewport: VIEWPORT });
-    const session: Session = { page, proxyErrors: [], shots: [], steps: [] };
+    const session: Session = {
+      page,
+      proxyErrors: [],
+      appErrors: [],
+      failedLoads: [],
+      shots: [],
+      steps: [],
+    };
+    page.on("pageerror", (error) => session.appErrors.push(String(error.message).slice(0, 200)));
     await page.route("**/*", intercept(session, preview));
 
     const total = 1 + APP_STEPS;

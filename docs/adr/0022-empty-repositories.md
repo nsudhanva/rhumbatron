@@ -2,9 +2,9 @@
 
 ## Context
 
-Agent tools need a repository to write to. A Project without a repository in the git service gives agents
-no place for files. Its test Tasks fail, and no live app can start. The product has no templates and no
-prefilled files.
+Agent tools need a repository to write to. A Project without a repository in the git service gives
+agents no place for files. Its test Tasks fail, and no live app can start. The product has no
+templates and no prefilled files.
 
 ## Decision
 
@@ -16,7 +16,7 @@ prefilled files.
   canonical source is unassigned at Generation 0. ProjectRootDO `assignSource` enforces the same
   rule at the write. A repeat never changes a Project that has source.
 - Backfill: `POST /v1/projects/:id/provision` (no body) and `POST /v1/projects/:id/app` ("Deploy
-  app") both create the empty repository when the source is unassigned.
+  app") both make the empty repository when the source is unassigned.
   `bun scripts/seed-repo.ts <projectId> local [--user <Clerk user ID or email>]` calls them.
 - The app conventions are model instructions (`APP_CONVENTIONS` in
   `packages/protocol/src/app.ts`), and they add no files. They ask for these items:
@@ -34,18 +34,24 @@ prefilled files.
   Application code checks this and asks for one repair turn when the plan breaks the rule.
 - Verification of the first Change: the contract check treats a base without `package.json` as a
   base with no contract. It passes when the Candidate prints a valid route table. A missing
-  Candidate table is a gap. The browser check runs a generic flow (home page text,
-  `GET /api/health`).
+  Candidate table is a gap.
+- The browser check runs one flow for every app. It is a required check for each Candidate whose
+  Change touches UI, at every risk tier. The flow has three steps:
+  1. The home page shows text.
+  2. `GET /api/health` answers.
+  3. Every linked page opens, by a click and by a direct load. The check explores breadth first
+     from the home page, up to 8 pages, and submits up to 3 forms per page with sample values.
 - Live app: for a tree with no code file, the production row is `ready` with no bundle. The
   router answers 200 "Nothing built yet. Tell Rhumbatron what to make." The first release moves
   the pointer to a bundle.
 - Goal suggestions (`GET /v1/projects/:id/suggestions`, `workers/agents/src/suggestions.ts`).
-  A Clef question is a bounded choice and returns no text. So `clef-flash` ranks a fixed list of short goals
-  ("start" goals for a repository with no code, "extend" goals for other repositories). The inputs
+  A Clef question is a bounded choice and returns no text. So `clef-flash` ranks a fixed list of
+  short goals: "start" goals for a repository with no code, "extend" goals for other repositories. The inputs
   are the Project name, up to 200 file paths, and the last 5 goals. The top 4 goals show as pills
-  under the goal box. A click puts the goal in the box. The product database caches the result per Project and
-  Canonical Generation (`goal_suggestions`, migration 0020). The cap is 100 calls per UTC day
-  (`usage_counters` `goal-suggestions`). When the cap is reached or the call fails, no pills show.
+  under the goal box. A click puts the goal in the box. The product database caches the result
+  per Project and Canonical Generation (`goal_suggestions`, migration 0020). The cap is 100 calls per UTC day
+  (`usage_counters` `goal-suggestions`). When the cap is reached or the call fails, the page shows
+  no pills.
 
 ## Consequences
 

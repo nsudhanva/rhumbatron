@@ -1,6 +1,6 @@
 # Costs, Quotas, and Budget Caps Runbook
 
-This runbook covers what costs money, the caps, and what to do when a cap trips.
+This runbook tells what costs money, what the caps are, and what to do when a cap trips.
 
 The stack runs on one computer. The only paid service is the Anthropic API ([ADR 0021](../adr/0021-anthropic-model-provider.md)). Every other service is open source and runs in Docker ([ADR 0034](../adr/0034-docker-compose-stack.md)). The local caps protect the computer, not a bill.
 
@@ -28,8 +28,8 @@ flowchart TB
 | Cap | Value | Set by |
 |---|---|---|
 | Anthropic spend | 100 USD per calendar month | `ANTHROPIC_MONTHLY_BUDGET_USD` in `.env` (default `100`) |
-| Sandbox time | 72,000 seconds (20 hours) per UTC month | `SANDBOX_MONTHLY_SECONDS` (core default) |
-| Browser checks | 960 seconds per UTC day | `BROWSER_DAILY_SECONDS` (core default) |
+| Sandbox time | 72,000 seconds (20 hours) per UTC month | `SANDBOX_MONTHLY_SECONDS` in `.env` (default `72000`) |
+| Browser checks | 3,600 seconds per UTC day | `BROWSER_DAILY_SECONDS` in `.env` (default `3600`) |
 | Agent model calls | 1,000 per UTC day | `AGENT_DAILY_CALL_CAP` in `packages/model-router/src/budget.ts` |
 | Model calls per Task run | 16 for Haiku, 32 for Sonnet and Opus | `MAX_CALLS_PER_RUN` in the same file |
 | Clef-flash questions | 200 per UTC day, shared counter `clef-flash` | The event router, the agents, and the intake gate |
@@ -42,24 +42,27 @@ All meters are rows of `usage_counters` in the product database.
 ### Anthropic (`ANTHROPIC_MONTHLY_BUDGET_USD`)
 
 - The meter is the counter `anthropic-usd-micro`, in micro-USD per calendar month.
-- Every model call of the model router first reserves an estimate in one conditional SQL statement. The reservation then settles to the exact cost from the usage fields of the response, cache reads and writes included. A refused reservation stops the work. Rhumbatron does not try another provider.
-- Core passes the cap to every module. Code without the value uses 10 USD (`packages/model-router/src/budget.ts`).
-- Clef and Clef-flash questions go to Claude Haiku from `packages/platform/src/ai/models.ts`, with at most 1,024 output tokens each. The Anthropic meter does not count them. The daily `clef-flash` and goal suggestion quotas bound them.
-- `ALLOW_OPUS` is `false` by default. The opus tier then runs on Sonnet 5.5, and the Decision Receipt records the downgrade.
+- Every model call of the model router first reserves an estimate in one conditional SQL statement. The reservation then settles to the exact cost from the usage fields of the response, with cache reads and writes. A refused reservation stops the work. Anthropic is the only provider.
+- Core gives the cap to every module. Code without the value uses 10 USD (`ANTHROPIC_MONTHLY_BUDGET_FALLBACK_USD` in `packages/model-router/src/budget.ts`).
+- Clef and Clef-flash questions go to Claude Haiku from `packages/platform/src/ai/models.ts`, with at most 1,024 output tokens each. The Anthropic meter does not count them. The daily `clef-flash` and goal suggestion quotas limit them.
+- `ALLOW_OPUS` is `false` by default. Then the opus tier runs on Sonnet 5.5, and the Decision Receipt records the downgrade.
 
 ### Sandbox (`SANDBOX_MONTHLY_SECONDS`)
 
 - Agent Workspaces (`workers/agents/src/workspace.ts`), Candidate checks (`workers/integration/src/candidate-sandbox.ts`), and Code page edit session commands (`workers/integration/src/code-sessions.ts`, [ADR 0029](../adr/0029-code-edit-sessions.md)) share the meter.
 - Each Project has one Sandbox, `proj-<project>`. sandboxd removes it with its disk after 2 idle minutes (`SANDBOX_IDLE_MS`). At most 4 Sandboxes are live at one time (`SANDBOX_MAX`).
 - Each use reserves seconds before the Sandbox starts. A reservation that passes the cap is refused.
-- When a use ends, it refunds its reservation and charges only the time it adds to the Sandbox's awake block (`sandbox_awake`), plus one 120-second idle tail (`workers/integration/src/sandbox-meter.ts`). Agents, checks, and commands that overlap in one Sandbox count once.
+- When a use ends, it refunds its reservation. It charges only the time that it adds to the awake block of the Sandbox (`sandbox_awake`), plus one 120-second idle tail (`workers/integration/src/sandbox-meter.ts`). Agents, checks, and commands that overlap in one Sandbox count once.
 - A code edit session starts the Sandbox only at its first command. Each command reserves 480 seconds and runs at most 120 seconds. A session ends after 10 idle minutes or 2 hours.
 
 ### Browser checks (`BROWSER_DAILY_SECONDS`)
 
-- One browser session per check on the `browser` service, closed after at most 55 seconds. At most 2 browser checks per Candidate (`workers/integration/src/check-semantics.ts`).
-- Only a Change with risk `high` or `critical` that touches pages gets the browser check (`packages/evidence/src/plan.ts`).
-- The API reads the value only to show the cap on the admin overview.
+- Every Candidate whose Change touches pages gets the required browser check, at every risk tier (`packages/evidence/src/plan.ts`).
+- A check opens one session on the `browser` service. The session lasts at most 120 seconds (`BROWSER_SESSION_MS`). The check timeout is 180 seconds.
+- A Candidate gets at most 2 browser runs, retries included (`MAX_BROWSER_RUNS_PER_CANDIDATE` in `workers/integration/src/check-semantics.ts`).
+- Before a session opens, the check reserves 60 seconds on the `browser-seconds` meter. After the session closes, the reservation settles to the measured seconds.
+- When the value is not a positive integer, the check uses 500 seconds per day (`BROWSER_DAILY_SECONDS` constant in `check-semantics.ts`).
+- The admin overview shows the cap.
 
 ### Budget scopes
 
@@ -92,7 +95,7 @@ A person selects the budget that pays for a request ([ADR 0030](../adr/0030-budg
 | Project monthly budget (`project_budget`) | The Project meter refuses the reservation. Every Change of the Project that calls a model stops. | An owner or admin raises or removes the Project monthly budget in Settings. The stopped Changes resume. The meter starts again at the next UTC calendar month. |
 | User monthly budget (`account_budget`) | The requester meter refuses the reservation. Every Change of that requester stops, in every Project. | The requester raises or removes their monthly budget on the Account page. The stopped Changes resume. |
 | Agent model calls (1,000 per day) | The Task stops. The Change is `budget_blocked` with the limit `daily_model_calls`. | Look for looping Tasks. The meter starts again at 00:00 UTC. A person can raise the Change budget to resume. |
-| Sandbox (72,000 s per month) | New Sandbox starts are refused. An agent gets "The monthly Sandbox budget is used up". Candidate checks that need the Sandbox do not run. A Code page terminal command gets 429 `sandbox_cap`; file edits and submit still work. | Look for long tests. The meter starts again at the next UTC calendar month. To stop all work, run `bun run stack:down`. |
-| Browser checks (960 s per day) | The browser check does not start. It records `not_checked`, a gap for the required check, so the Candidate cannot promote. | Wait for the next UTC day, then verify the Candidate again. |
+| Sandbox (72,000 s per month) | The meter refuses each Sandbox start. An agent gets "The monthly Sandbox budget is used up". Candidate verification rejects the Candidate with "Monthly Sandbox budget reached; no check ran." A Code page terminal command gets 429 `sandbox_cap`. File edits and submit continue to work. | Look for long tests. The meter starts again at the next UTC calendar month. To stop all work, run `bun run stack:down`. |
+| Browser checks (3,600 s per day) | The browser check does not start. It records `not_checked`. This is a gap in a required check, so the Candidate cannot promote. | Wait for the next UTC day, then verify the Candidate again. To raise the cap, set `BROWSER_DAILY_SECONDS` in `.env` and run `docker compose up -d`. |
 | App builds (60 per day) | The build is refused with "The daily app build cap (60) is reached." | Wait for the next UTC day. |
 | Clef-flash questions (200 per day) | The caller abstains and uses its deterministic fallback. | No action. The quota starts again at 00:00 UTC. |

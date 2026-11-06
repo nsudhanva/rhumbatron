@@ -10,9 +10,9 @@ interface Env {
   ANTHROPIC_MONTHLY_BUDGET_USD?: string;
   /** "true" enables Opus; otherwise the opus tier runs on Sonnet (ADR 0021). */
   ALLOW_OPUS?: string;
-  /** Sandbox seconds per calendar month on this environment's meter (ADR 0017). Default 36000. */
+  /** Sandbox seconds per calendar month on the usage meter. Compose sets 72000; the fallback is 36000. */
   SANDBOX_MONTHLY_SECONDS?: string;
-  /** Browser Run seconds per UTC day on this environment's meter (ADR 0017). Default 500. */
+  /** Browser seconds per UTC day on the usage meter. Compose sets 3600; the fallback is 500. */
   BROWSER_DAILY_SECONDS?: string;
   /**
    * Live apps bundle builder (ADR 0020): service binding to the apps Worker's `AppBuilder`

@@ -40,7 +40,7 @@ an earlier request creates must plan on the tree that has that work.
     requester gets `request_not_selected`.
   - `apply_theirs`: the later request becomes `queued` with outcome `follows`. When the earlier
     request promotes or ends, the later request returns to `compiling` at the current Canonical
-    Generation. It plans again on the current canonical tree, without a new intake round. It is a
+    Generation. It plans again on the current canonical tree, without another intake round. It is a
     follow-up Change, so its details apply on top of the earlier request. The later requester gets
     `request_choice_made`.
 - When nobody chooses within 7 days (`CHOICE_DAYS`), the earlier version stays. The choice is
@@ -72,7 +72,7 @@ an earlier request creates must plan on the tree that has that work.
 | Remove the conflicting criteria from the later request | The later requester sees a request that is rejected in part, without a person deciding. The remaining criteria plan against a stale base. |
 | An admin or the owner decides | The role of a person says nothing about two requests (ADR 0025). The earlier requester knows what their request needs. |
 | The later requester decides | They would override work that started first. |
-| Build both and let promotion order decide | The later build plans against the empty or old tree and fails to merge, as in the case above. |
+| Build both and let promotion order decide | The later build plans against the empty or earlier tree and fails to merge, as in the case above. |
 | A separate queue or scheduler service | The product database, the existing ChangeWorkflow, and workflow events cover the wait. |
 
 ## Consequences

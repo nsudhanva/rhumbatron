@@ -1,17 +1,18 @@
 # Rhumbatron architecture guide
 
-This guide describes the code on `main` with text, tables, and diagrams.
+This guide uses text, tables, and diagrams to describe the code on `main`.
 
 ## Product summary
 
 1. A user submits a goal for one Project. The goal becomes a Change.
-2. An intake gate checks the request. An unclear, duplicate, or conflicting request waits for its requester (ADR 0025).
+2. An intake gate checks the request. An unclear, duplicate, or conflicting request waits for an answer from its requester (ADR 0025).
 3. A Root Planner model splits the goal into a Work Graph of small Tasks.
 4. Agents run the ready Tasks in parallel. A Task that changes source works in its own Git fork and Sandbox directory.
 5. Each Agent publishes a ChangeSet and declares a typed Intent.
 6. Deterministic code compares the Intents and finds semantic conflicts that Git cannot see.
 7. Complementary Tasks integrate into one Candidate. Two conflicting designs become two Candidates.
 8. A CandidateVerificationWorkflow runs executable checks on each Candidate.
+   A Change that touches pages also gets the required browser check, at every risk tier.
    Only `checked_supported` Evidence with status `pass` satisfies a required check.
 9. Sibling Candidates wait for each other. Then the system selects one winner (ADR 0026).
 10. Policy or a person promotes the winner. ProjectRootDO advances the Canonical Generation with compare-and-swap.
@@ -80,12 +81,13 @@ flowchart LR
 | State | The git service, the S3 bucket, the product database, actor SQLite, `CONFIG`, `MEMORY` | `services/git`, `packages/platform/src/sql`, `packages/platform/src/objects`, `workers/integration`, `workers/indexer` |
 | Observability | `METRICS` and `EVENT_METRICS` rows, JSON logs | `packages/platform/src/sql/metrics.ts`, `packages/platform/src/log.ts` |
 
-The integration module drives the Playwright server for the browser check.
-The browser reaches the composed app in the Sandbox only through request interception (`containerFetch`).
+The integration module connects to the Playwright server in the `browser` service for the browser check (`ws://browser:3000/`).
+Request interception sends each browser request for the preview host to the composed app in the Sandbox.
+The interception blocks every other request.
 
 Policy and tracing:
 
-- The `project_policies` table is the source of truth for the Project policy. No API writes it.
+- The `project_policies` table is the source of truth for the Project policy. Application code only reads this table.
   `CONFIG` holds a 5-minute snapshot (`workers/integration/src/policy.ts`).
   Each reader gets the policy from one source:
 
@@ -95,13 +97,12 @@ Policy and tracing:
   | Verification plan, approval gate, auto-promotion decision, composition compatibility check | Stored row through the `CONFIG` snapshot, read once per verification run. Without a row: `DEFAULT_POLICY`, which protects no resource. |
   | Conflict detection, conflict review, Product Graph | `protectedResources` of the stored row only. Without a row: nothing is protected. |
 
-- Rhumbatron configures no tracing.
 
 ## Services map
 
 Rhumbatron runs as one Docker Compose stack (ADR 0034).
 [Infrastructure and cost](infrastructure-and-cost.md) lists every service, network, and volume.
-The application code is in `workers/*`. The `core` service loads six of these modules into one Bun process. The `apps` service runs `workers/apps` on `workerd`.
+The application code is in `workers/*`. The `core` service loads six of these modules into one Bun 1.4.4 process. The `apps` service runs `workers/apps` on `workerd`.
 
 The first diagram shows how the modules and services call each other.
 Solid arrows are in-process calls, actor stubs, Workflow bindings, or HTTP calls between services.
@@ -179,7 +180,7 @@ flowchart TB
 | `apps/web` | `web` service | TanStack Start app and static assets | `https://rhumbatron.localhost` |
 | `workers/api` | `core` | Hono product API and the live socket route | `https://api.rhumbatron.localhost`, and `/live/*` on the web host |
 | `workers/coordinator` | `core` | ProjectRootDO, ResourceShardDO, ProjectViewDO | Actor calls and alarms |
-| `workers/event-router` | `core` | Event log consumer, causal router, dead-letter consumer, housekeeping sweep | The sweep at the start of each minute, the `nudge` call, the `dead-letter` queue |
+| `workers/event-router` | `core` | Event log consumer (`src/event-log.ts`, binding `EVENT_LOG`), causal router, dead-letter consumer, housekeeping sweep | The sweep at the start of each minute, the `nudge` call, the `dead-letter` queue |
 | `workers/integration` | `core` | ChangeWorkflow, CandidateVerificationWorkflow, ReleaseWorkflow, approval and promotion calls | The `integration`, `verification`, and `release` queues, in-process calls |
 | `workers/agents` | `core` | AgentDO (Agents SDK `Agent` with the Pi harness) | The `agent-wakeups` queue, `sandboxSmoke` and `goalSuggestions` calls |
 | `workers/indexer` | `core` | Symbol, dependency, Product Graph, and vector indexes | The `indexing` queue only |
@@ -188,7 +189,9 @@ flowchart TB
 Notes:
 
 - Every module in core gets the same environment, built in `services/core/src/main.ts`. [Infrastructure and cost](infrastructure-and-cost.md#bindings-in-core) lists the bindings.
-- The apps service reaches the product database and the bucket only through the internal shims of core (`services/apps/CONTRACT.md`). Loaded apps have no network.
+- `services/core/src/consumers.ts` holds one table of the queue consumers: queue, module, batch size, retries, dead-letter, and concurrency. `scripts/inject/dead-letter.critical.test.ts` tests it.
+- Each module has a tracked `src/bindings.d.ts` with its binding types. `packages/platform/types/runtime.d.ts` holds the shared runtime interface types.
+- The apps service reaches the product database and the bucket only through the internal shims of core on port 8790 (`services/apps/CONTRACT.md`). Loaded apps have no network access.
 - The docs site is static files in the `edge` service at `https://docs.rhumbatron.localhost`.
 
 ## Reading order

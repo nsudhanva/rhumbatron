@@ -4,7 +4,7 @@
 
 Rhumbatron uses Claude Haiku, Sonnet, and Opus as its model family. Anthropic serves each tier.
 Model calls are the only cost of the stack. Model spend has a hard monthly limit, $100 by
-default. Rhumbatron uses no other model provider.
+default. Anthropic is the only model provider.
 
 The Anthropic API key is organization-level. Each request must send the header
 `anthropic-workspace-id`. An invalid workspace ID gets the Anthropic 400 error
@@ -17,8 +17,8 @@ The Anthropic API key is organization-level. Each request must send the header
   default is `https://api.anthropic.com`. The key is the `ANTHROPIC_API_KEY` setting of the core
   service. The workspace ID is `ANTHROPIC_WORKSPACE_ID` (not a secret). `bun run stack:env`
   (`scripts/local-env.ts`) writes both to `.env` from the environment or from the macOS Keychain
-  items `rhumbatron-anthropic-api-key` and `rhumbatron-anthropic-workspace-id`. Anthropic is the
-  only provider. No fallback to another provider exists.
+  items `rhumbatron-anthropic-api-key` and `rhumbatron-anthropic-workspace-id`. A failed call
+  never goes to another provider.
 - Tier mapping (`packages/model-router/src/models.ts`):
 
   | Tier | Model | Effort |
@@ -35,13 +35,15 @@ The Anthropic API key is organization-level. Each request must send the header
 - Messages API use:
   - Function tools map to Anthropic tools (`input_schema`). `tool_use` blocks map back to tool
     calls. A follow-up turn sends the full assistant turn again, with its thinking blocks.
-  - `max_tokens` comes from the per-tier limits (4,000 haiku, 8,000 sonnet and opus).
+  - Agent runs set `max_tokens` per tier (`workers/agents/src/models.ts`): 8,000 haiku, 16,000
+    sonnet and opus.
+  - Single calls such as the Root Planner use the route limit (`packages/model-router/src/rules.ts`):
+    4,000 haiku, 8,000 sonnet and opus. The intake calls set 900 to 1,200.
   - The API never returns thinking text (`display: "omitted"`), so Rhumbatron stores no reasoning.
   - Prompt caching: `complete()` puts `cache_control` on the stable system prompt, which also
     covers the tool definitions. Pi puts it on the system prompt, the tools, and the latest
     message. Rhumbatron uses only the 5-minute TTL.
-  - Rhumbatron uses no server-side refusal fallback. A refusal is an invalid output, and the cost
-    stays exact.
+  - A refusal is an invalid output. Its cost stays exact.
 - Cost: exact per call, from the response `usage` fields: uncached input, output (thinking
   included), cache reads, and 5-minute and 1-hour cache writes, at the prices below (USD per million
   tokens, `ANTHROPIC_PRICES` in `packages/model-router/src/models.ts`). Haiku bills each token of a
@@ -63,8 +65,8 @@ The Anthropic API key is organization-level. Each request must send the header
     default (`compose.yaml`). Without the setting, the code uses $10. Code enforces the budget on
     the meter `usage_counters` in the product database (`day` = `YYYY-MM`, counter
     `anthropic-usd-micro`, micro-USD). Each call first reserves an estimate (full output cap,
-    prompt uncached) with one conditional statement. Then the call settles to the exact cost. A Pi run
-    settles its share after each call and at the end. A timeout keeps its reservation.
+    prompt uncached) with one conditional statement. Then the call settles to the exact cost. A Pi
+    run settles its share after each call and at the end. A timeout keeps its reservation.
   - A refused reservation, a 429 or 402 that is not a rate limit, or an Anthropic billing error
     is `spend_limited`. The Task is `blocked`, and the Change is `budget_blocked` with the limit
     `monthly_model_spend`. Nothing retries, and no other provider runs.
@@ -76,5 +78,5 @@ The Anthropic API key is organization-level. Each request must send the header
 - Each model call costs money. The monthly meter is the hard stop. A spend limit in the
   Anthropic Console is a second line of defense.
 - The Costs page shows the Claude spend of the month against the monthly budget.
-- The readers of stored Decision Receipts and blocked rows also accept the provider names
-  `openrouter` and `google-vertex-ai` and the limit name `vertex_spend_limit`.
+- The readers of stored Decision Receipts and blocked rows accept the provider names
+  `openrouter` and `google-vertex-ai` and the limit name `vertex_spend_limit` in stored rows.

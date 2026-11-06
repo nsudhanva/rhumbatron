@@ -53,7 +53,7 @@ command such as `bun test` before the person sends it. These rules apply:
 - Submit: all edits become one Change with one human ChangeSet through `recordHumanChange`, the
   path of the single-file save with several files. The commit is in the human workspace fork
   `ws-<k>`. The Change then composes, verifies, previews, and releases as an agent Change does.
-  If canonical advanced and did not change an edited file, the submit moves to the new base. If
+  If canonical advanced and did not change an edited file, the submit moves to the current base. If
   canonical changed an edited file, the submit is refused with 409 `stale_base`. A repeat finds
   the same Change.
 - End: discard, submit, 10 minutes without a request (`CODE_SESSION_IDLE_MS`), 2 hours after the

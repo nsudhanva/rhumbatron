@@ -1,6 +1,6 @@
 # Shared requests demo
 
-This runbook shows two people who change one live Project at the same time. Alice owns the Project. Bob is a member. Before the demo, Alice turns off "Member requests need review" in Settings, so Bob's requests go to the system at once (ADR 0028). Five requests run in parallel. One pair conflicts, and one request repeats another. No role decides between the requests. The system compares them, and in a conflict between two people the earlier requester chooses (ADR 0025, ADR 0032). The design is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
+This runbook shows two people who change one live Project at the same time. Alice owns the Project. Bob is a member. Before the demo, Alice turns off "Member requests need review" in Settings, so Bob's requests go to the system at once (ADR 0028). Five requests run in parallel. One pair conflicts, and one request repeats another. The system compares the requests. In a conflict between two people, the earlier requester chooses (ADR 0025, ADR 0032). The design is in [shared-projects.md](../architecture/shared-projects.md). The API is in [protocols](../protocols/README.md).
 
 Use the local stack (`https://rhumbatron.localhost`, [local-stack.md](../operations/local-stack.md)). You need two accounts with different email addresses and two browser profiles. Alice must own a Project whose live app is a daily planner, with one section per day and checklist items in each section.
 
@@ -36,7 +36,7 @@ sequenceDiagram
 | C2 | Bob | `Change the page background to light yellow.` |
 | D | Bob | `Add a count of items left` |
 
-C1 and C2 ask for different backgrounds, so they conflict. D repeats A. A and B do not conflict with another request.
+C1 and C2 ask for different backgrounds, so they conflict. D repeats A. A and B are independent of the other requests.
 
 ## Steps
 
@@ -46,7 +46,7 @@ C1 and C2 ask for different backgrounds, so they conflict. D repeats A. A and B 
 4. Sign in as Bob in the second browser profile.
 5. Open the Projects page. Find "Shared with you". Make sure that the invitation names Alice and the Project.
 6. Click Accept. Make sure that the Project opens and shows Members, not Share.
-7. Make sure that Bob does not see Approve, Promote, Share, or Remove buttons.
+7. Make sure that the Approve, Promote, Share, and Remove buttons are hidden for Bob.
 8. Send the requests within one minute. Alice sends A, then C1. Bob sends B, then C2, then D.
 9. Open the Project overview. Make sure that the "Requested by" column of the Changes table names the requester of each Change.
 
@@ -65,12 +65,12 @@ The conflict check compares each Change with the earlier Changes that registered
 For the conflict, check these items:
 
 1. C2 reads "Waiting for Alice to choose" on its Change page and on the Board. It has no Task while it waits.
-2. Alice gets `request_choice_needed`. C1 shows "Bob's request conflicts with yours" with both backgrounds and the buttons "Keep mine" and "Apply theirs after mine". Bob and the admins see who chooses, but no buttons.
+2. Alice gets `request_choice_needed`. C1 shows "Bob's request conflicts with yours" with both backgrounds and the buttons "Keep mine" and "Apply theirs after mine". Bob and the admins see who chooses. Only Alice sees the buttons.
 3. After "Keep mine", C2 is `not_selected` with the reason `Not selected: Alice chose to keep their version of "<C1>".` After "Apply theirs after mine", Bob gets `request_choice_made`, and C2 plans on the tree that has C1.
 4. The "Conflicting requests" card shows both goals, both requesters, the criteria that conflict, and a link to the other request.
 5. The Changes that ship reach `completed`, and the live app shows their features.
 
-For D, check that the question quotes the criterion of A that already counts the items left, and that D has no Task.
+For D, make sure that the question quotes the criterion of A that counts the items left. Make sure that D has no Task.
 
 If Bob calls a route for the owner and the admins, the API returns 403.
 
@@ -87,7 +87,7 @@ The intake gate asks at most one round for a request. A Change gets at most 3 ro
 
 - Each request gets the Project default budget. That budget is 3 USD when the Project sets none ([protocols](../protocols/README.md#project-settings)).
 - The intake gate makes one Clef-flash call per request. For each related request that Clef-flash does not clear, it adds two Sonnet coverage runs, one in each order. A request that Clef-flash does not clear as buildable adds one Sonnet clarity call.
-- A Sonnet review runs for each pair of overlapping requests, at most 4 for each Change. A conflict between two people adds no model call. "Apply theirs after mine" adds one plan of C2.
+- A Sonnet review runs for each pair of overlapping requests, at most 8 in each comparison round. A pair past this limit goes to the later requester as a question. The choice in a conflict between two people needs no model call. "Apply theirs after mine" adds one plan of C2.
 - Model spend counts against the cap of 100 USD per calendar month (`ANTHROPIC_MONTHLY_BUDGET_USD`, ADR 0021). Read the meters on `/admin` before and after the demo ([costs.md](../operations/costs.md)).
 
 ## Cleanup

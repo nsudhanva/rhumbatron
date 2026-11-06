@@ -39,21 +39,21 @@ Research on model cascades and model judges sets the method:
 - Intake gate, a ChangeWorkflow step before the Root Planner (`workers/integration/src/intake.ts`):
   1. Retrieval (deterministic): the open Changes plus the 20 latest completed Changes. Each is
      embedded as goal plus acceptance criteria (bge-small-en-v1.5 on the `embed` llama.cpp
-     server). Up to 10 with
-     cosine >= 0.55 stay. When embeddings fail, shared product words select them.
-     bge-reranker-base on the `rerank` llama.cpp server orders them, and 5 go on. When its source is readable and not
-     empty, the current app (canonical file list, `package.json` dependency names, stack hints) is
-     one more item. Cosine never decides.
+     server). Up to 10 with cosine >= 0.55 stay. When embeddings fail, shared product words select
+     them. bge-reranker-base on the `rerank` llama.cpp server orders them, and 5 go on. The
+     current app is one more item when its source is readable and not empty. This item holds the
+     canonical file list, the `package.json` dependency names, and stack hints. Cosine never
+     decides.
   2. Clef-flash makes one call inside the shared counter of 200 calls per UTC day. It reads the
      request, the items, and a short copy of the app context. For each pair it picks one of
      `duplicate`, `already_covered`, `extends`, `overlaps`, and `unrelated`. It also answers
      "buildable as stated". Claude Haiku answers Clef-flash, so its errors correlate with
      Sonnet's. It can only clear a pair. The pair drops when P(`unrelated`) >= 0.9.
   3. Duplicates: Sonnet answers "which criteria of the existing request, or which features of the
-     app, already deliver the new request?" with quotes. It runs twice with the order swapped. Code
+     app, already deliver the later request?" with quotes. It runs twice with the order swapped. Code
      drops an answer with a quote that is not in the packet. When Clef and both Sonnet orders say
-     covered, the kind is `duplicate`. When one or both Sonnet orders say covered without that full
-     agreement, the kind is `unclear`, with the quoted criteria. Clef alone never marks a
+     covered, the kind is `duplicate`. When one or both Sonnet orders say covered but the
+     agreement is not full, the kind is `unclear`, with the quoted criteria. Clef alone never marks a
      duplicate. Haiku is not a confirming vote.
   4. Clarity, read against the app. The app context is deterministic and small. It holds up to 60
      canonical file paths, the `package.json` name and description, the first 600 characters of
@@ -78,9 +78,10 @@ Research on model cascades and model judges sets the method:
   `changes.assumptions_json`. The Change page shows them as "Assumptions". A follow-up request
   changes one.
 - A question makes the Change `needs_input`, with a `ChangeClarification` in
-  `changes.clarification_json`. The ChangeWorkflow waits for the event `clarification`. It reads the
-  product database after each event and once a day. It cancels the Change after 7 days without an answer. The
-  requester, the owner, or an admin answers with `POST /v1/changes/:changeId/clarify`:
+  `changes.clarification_json`. The ChangeWorkflow waits for the event `clarification`. It reads
+  the product database after each event and once a day. It cancels the Change after 7 days without
+  an answer. The requester, the owner, or an admin answers with
+  `POST /v1/changes/:changeId/clarify`:
   - answers, one for each answered question (a picked reading or free text), which go to
     `clarification_answers_json` and to the goal that the planner reads;
   - `proceed_anyway`;
@@ -126,9 +127,9 @@ Research on model cascades and model judges sets the method:
 - An unclear or repeated request waits for its requester before any planning spend. In the C1 and
   C2 case, intake stops C2 as a duplicate.
 - A request with no related items and a clear goal costs one embedding call, one Clef-flash call
-  (Claude Haiku), and no Sonnet call. A pair that Clef-flash cannot clear adds two Sonnet calls (about $0.02). A
-  request that Clef-flash does not clear adds one Sonnet clarity call. The app context adds at
-  most one object store read (`README.md`) and about 1,000 input tokens. A supported conflict adds no
+  (Claude Haiku), and no Sonnet call. A pair that Clef-flash cannot clear adds two Sonnet calls
+  (about $0.02). A request that Clef-flash does not clear adds one Sonnet clarity call. The app
+  context adds at most one object store read (`README.md`) and about 1,000 input tokens. A supported conflict adds no
   model call, because the earlier requester chooses (ADR 0032).
 - The integration code uses the `AI` binding (`SmallModels`) that the core service builds.
   Embeddings and the reranker run on the local host and have no usage charge. Clef-flash stays

@@ -7,11 +7,11 @@ person with a Clerk account can sign in. These requirements apply:
 
 - The operator must see the whole platform: spend against each cap, people, Projects, costs, and
   events. Project roles (ADR 0028) do not give this view. They are per Project.
-- The operator must be able to hold new people until a person approves them, so that a stranger
+- The operator must be able to hold people who sign up until a person approves them, so that a stranger
   cannot spend the shared budget.
 - Each person must see their own spend: per month, per Project, and per request.
-- Prompts and request fields never grant authority (AGENTS.md section 40). Add no new service
-  and no new database.
+- Prompts and request fields never grant authority (AGENTS.md section 40). The design uses the
+  core service and the product database only.
 
 ## Decision
 
@@ -24,9 +24,8 @@ person with a Clerk account can sign in. These requirements apply:
 - The admin panel reads only. Two writes exist: the sign-up approval switch, and the access
   decision of a person (approve, decline, or approve all pending people).
 - Access gate. `users.access_status` is `approved`, `pending`, or `declined` (migration
-  `0035_platform_admin_and_access.sql`). Existing users stay `approved`. `requireAuth` runs the
-  gate after the session check:
-  - The first request of a new person creates the user row. While `platform_settings` key
+  `0035_platform_admin_and_access.sql`). `requireAuth` runs the gate after the session check:
+  - The first request of a person creates the user row. While `platform_settings` key
     `signup_approval_required` is `"true"`, the row is `pending`. Otherwise it is `approved`. A
     missing setting row means `"false"`.
   - A platform admin is always approved.
@@ -76,7 +75,7 @@ person with a Clerk account can sign in. These requirements apply:
 
 | Alternative | Why it lost |
 |---|---|
-| Clerk roles or Clerk Organizations for the admin | Rhumbatron does not use Clerk Organizations (ADR 0028). A setting on the host keeps the admin list outside every API write, and the API checks it without a Clerk call. |
+| Clerk roles or Clerk Organizations for the admin | Projects share through `project_members` (ADR 0023). A setting on the host keeps the admin list outside every API write, and the API checks it without a Clerk call. |
 | An admin flag in the database | A database write could create an admin. The setting changes only on the host, with a restart of core. |
 | An access proxy in front of an admin page | It protects a host, not API routes that the web server calls inside the stack. It adds a second identity system. |
 | Clerk allowlist or restricted sign-up mode | It stops sign-up in Clerk, with no queue for the operator to decide and no record in Rhumbatron. |
@@ -86,13 +85,15 @@ person with a Clerk account can sign in. These requirements apply:
 ## Consequences
 
 - Each authenticated request reads two primary-key rows more (the user status and the setting)
-  in one database query. The first request of a new person adds one write. `users.last_seen_at` is
+  in one database query. The first request of a person adds one write. `users.last_seen_at` is
   written at most once per hour per person.
 - The admin cost report reads `task_runs` through `idx_task_runs_started`, or the monthly meters
   through the `usage_counters` primary key (`day`, `counter`), at most 366 days and 1,000 rows.
-  The list totals read the meters through `idx_usage_counters_counter`. Lists are pages of 50. The event list uses an index on (column, `seq`) for each
-  filter: `project_id`, `actor_id`, and `event_type`.
-- The two new `project_events` indexes add two index writes for each feed row. The feed holds at
+  The list totals read the meters through `idx_usage_counters_counter`. Lists are pages of 50.
+  The event list uses an index on (column, `seq`) for each filter: `project_id`, `actor_id`, and
+  `event_type`.
+- The `actor_id` and `event_type` indexes of `project_events` add two index writes for each feed
+  row. The feed holds at
   most 20,000 rows.
 - A pending person can sign in and read `GET /v1/me`. The web shows one full-page message and no
   Project data.

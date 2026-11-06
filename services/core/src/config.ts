@@ -39,7 +39,7 @@ export const config = {
     namespace: optional("GIT_NAMESPACE", "rhumbatron"),
   },
   sandbox: {
-    baseUrl: optional("SANDBOXD_URL", "http://sandboxd:8080"),
+    baseUrl: optional("SANDBOXD_URL", "http://sandboxd:7070"),
     token: required("SANDBOXD_TOKEN"),
   },
   apps: { rpcUrl: optional("APPS_RPC_URL", "http://apps:8789"), token: required("INTERNAL_TOKEN") },
@@ -57,6 +57,6 @@ export const config = {
     ANTHROPIC_MONTHLY_BUDGET_USD: optional("ANTHROPIC_MONTHLY_BUDGET_USD", "100"),
     ALLOW_OPUS: optional("ALLOW_OPUS", "false"),
     SANDBOX_MONTHLY_SECONDS: optional("SANDBOX_MONTHLY_SECONDS", "72000"),
-    BROWSER_DAILY_SECONDS: optional("BROWSER_DAILY_SECONDS", "960"),
+    BROWSER_DAILY_SECONDS: optional("BROWSER_DAILY_SECONDS", "3600"),
   },
 };
