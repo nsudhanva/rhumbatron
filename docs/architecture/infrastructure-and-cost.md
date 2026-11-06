@@ -73,6 +73,7 @@ Every long-running service has `restart: unless-stopped`.
 | `https://api.rhumbatron.localhost` | `core` |
 | `https://docs.rhumbatron.localhost` | The docs site in `edge` |
 | `https://rhumbatron.com` | The public docs site: the Cloudflare Worker `rhumbatron-docs`, with static assets only |
+| `https://www.rhumbatron.com` | A `301` redirect to `https://rhumbatron.com` |
 | `https://<slug>.rhumbatron.localhost`, `https://<previewId>--<slug>.rhumbatron.localhost` | `apps` |
 
 ### Networks

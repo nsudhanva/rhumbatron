@@ -192,7 +192,7 @@ Notes:
 - `services/core/src/consumers.ts` holds one table of the queue consumers: queue, module, batch size, retries, dead-letter, and concurrency. `scripts/inject/dead-letter.critical.test.ts` tests it.
 - Each module has a tracked `src/bindings.d.ts` with its binding types. `packages/platform/types/runtime.d.ts` holds the shared runtime interface types.
 - The apps service reaches the product database and the bucket only through the internal shims of core on port 8790 (`services/apps/CONTRACT.md`). Loaded apps have no network access.
-- The docs site is static files in the `edge` service at `https://docs.rhumbatron.localhost`. `bun run docs:deploy` publishes the same files to `https://rhumbatron.com`, a Cloudflare Worker with static assets only.
+- The docs site is static files in the `edge` service at `https://docs.rhumbatron.localhost`. The `docs` workflow publishes the same files to `https://rhumbatron.com`, a Cloudflare Worker with static assets only, after each push to `main` that changes them.
 
 ## Reading order
 

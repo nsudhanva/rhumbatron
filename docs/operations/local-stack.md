@@ -170,25 +170,44 @@ Then run `bun run stack:up` and `bun run stack:trust` on the server.
 
 ## 10. Continuous integration
 
-`.github/workflows/ci.yml` runs the repository checks on each pull request and on each push to `main`. It uses no secrets. It deploys nothing. The stack runs only where an operator starts it.
+`.github/workflows/ci.yml` runs the repository checks on each pull request and on each push to `main`. It uses no secrets. It deploys nothing. The stack runs only where an operator starts it. The `docs` workflow publishes only the docs site ([Docs site](#11-docs-site)).
 
 ## 11. Docs site
 
-The public docs site is at `https://rhumbatron.com`. It is a Cloudflare Worker with static assets only, named `rhumbatron-docs`. Requests for static assets are free.
+The public docs site is at `https://rhumbatron.com`. It is a Cloudflare Worker with static assets only, named `rhumbatron-docs`. Requests for static assets are free. `apps/docs/wrangler.json` holds the Worker configuration.
 
-To publish the current `docs/` folder:
+| Host | Behavior |
+|---|---|
+| `https://rhumbatron.com` | The docs site. Unknown paths get the `404.html` page of the site. |
+| `https://www.rhumbatron.com` | The zone redirect rule `www_to_apex` sends a `301` to `https://rhumbatron.com` with the same path and query. |
+
+### Publish
+
+The `docs` workflow (`.github/workflows/docs.yml`) publishes the site after each push to `main` that changes `docs/`, `README.md`, or `apps/docs/`. It builds `apps/docs` with `DOCS_SITE=https://rhumbatron.com`, runs `wrangler deploy`, and makes sure that both hosts answer. It runs only when the repository variable `CLOUDFLARE_ACCOUNT_ID` exists. To start it by hand:
+
+```sh
+gh workflow run docs.yml
+```
+
+To publish from this computer without a push:
 
 ```sh
 bun run docs:deploy
 ```
 
-`scripts/deploy-docs.ts` does these steps:
+`scripts/deploy-docs.ts` builds the site, copies it to a deploy folder in the system temporary folder with the configuration from `apps/docs/wrangler.json`, and runs `cf deploy` there. The `cf` CLI must be logged in to the Cloudflare account.
 
-1. It builds `apps/docs` with `DOCS_SITE=https://rhumbatron.com`.
-2. It copies the build and the Worker configuration to a deploy folder in the system temporary folder.
-3. It installs `cf` and `wrangler` in that folder and runs `cf deploy`.
-4. It makes sure that `https://rhumbatron.com` returns `200`.
+### One-time setup
 
-The `cf` CLI must be logged in to the Cloudflare account. The Worker has the custom domain `rhumbatron.com`. Unknown paths get the `404.html` page of the site.
+```sh
+bun scripts/setup-docs-publishing.ts
+```
 
-The docs site is the only part of Rhumbatron on Cloudflare. CI does not publish it. An operator runs `bun run docs:deploy` after a change to `docs/`.
+The script needs the `cf` CLI and the `gh` CLI, both logged in. Each step checks first, so a second run changes nothing.
+
+1. It creates the proxied DNS record `www.rhumbatron.com` and the redirect rule `www_to_apex`.
+2. It creates a Cloudflare API token that can deploy Workers on the account and change Worker routes and DNS on `rhumbatron.com` only. It sends the token through a pipe to the GitHub secret `CLOUDFLARE_API_TOKEN`. It does not print the token.
+3. It sets the GitHub variable `CLOUDFLARE_ACCOUNT_ID`, which turns on the `docs` workflow.
+4. It starts the `docs` workflow once.
+
+The docs site is the only part of Rhumbatron on Cloudflare.

@@ -163,8 +163,8 @@ flowchart LR
 | Lefthook 2.2, commitlint 21 | Pre-commit, commit-msg, and pre-push hooks. The commit scopes name the modules and the Compose services, for example `core`, `platform`, `git`, `sandboxd`, `edge`, and `stack` | `lefthook.yml`, `commitlint.config.ts` |
 | Gitleaks | Secret scan in the pre-commit hook and `bun run check:secrets` | `lefthook.yml` |
 | `scripts/check-guardrails.ts` | Refuses a tracked local secret file, and a Docker socket mount on any service except the socket proxy | `scripts` |
-| GitHub Actions | `ci` runs the checks on each pull request and each push to `main`. It also validates `compose.yaml` | `.github/workflows/ci.yml` |
-| Astro 7.3, Starlight 0.42, Mermaid 12.1 | This documentation site at `https://docs.rhumbatron.localhost` and `https://rhumbatron.com`. The `edge` image builds it and Caddy serves the files. `bun run docs:deploy` publishes it to a Cloudflare Worker with static assets only. Each diagram renders when it comes near the viewport | `apps/docs`, `services/edge/Dockerfile`, `scripts/deploy-docs.ts` |
+| GitHub Actions | `ci` runs the checks on each pull request and each push to `main`. It also validates `compose.yaml`. `docs` publishes the docs site to `https://rhumbatron.com` after a push to `main` that changes it | `.github/workflows/ci.yml`, `.github/workflows/docs.yml` |
+| Astro 7.3, Starlight 0.42, Mermaid 12.1 | This documentation site at `https://docs.rhumbatron.localhost` and `https://rhumbatron.com`. The `edge` image builds it and Caddy serves the files. The `docs` workflow publishes it to a Cloudflare Worker with static assets only. Each diagram renders when it comes near the viewport | `apps/docs`, `services/edge/Dockerfile`, `apps/docs/wrangler.json` |
 
 ## Model routing
 
