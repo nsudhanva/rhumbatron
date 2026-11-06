@@ -3,21 +3,17 @@
   "ui": "stream",
   "agentGuidance": false,
   "tasks": {
-    "cf:types": {
-      "inputs": ["wrangler.jsonc"],
-      "outputs": ["worker-configuration.d.ts"]
-    },
     "typecheck": {
-      "dependsOn": ["^typecheck", "cf:types"],
+      "dependsOn": ["^typecheck"],
       "outputs": []
     },
     "build": {
-      "dependsOn": ["^build", "cf:types"],
+      "dependsOn": ["^build"],
       "outputs": ["dist/**"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"]
     },
     "test:critical": {
-      "dependsOn": ["cf:types"],
+      "dependsOn": [],
       "outputs": []
     },
     "dev": {

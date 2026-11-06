@@ -1,4 +1,4 @@
-// A K2 outage must not lose or corrupt events.
+// An event log outage must not lose or corrupt events.
 // Runs the real OutboxPublisher against SQLite (node:sqlite) behind a minimal SqlStorage adapter.
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
@@ -45,13 +45,14 @@ function insertEvent(sql: SqlStorage, eventId: string) {
   );
 }
 
-/** A K2 producer whose availability the test controls. Every EVENTS_NN binding points at it. */
+/** An event stream producer whose availability the test controls. Every EVENTS_NN binding points at it. */
 function controllableK2() {
   const sent: string[] = [];
   let up = false;
   const producer = {
     send: async (records: { headers?: Record<string, string> }[]): Promise<K2SendResult> => {
-      if (!up) return { success: false, error: { message: "K2 unavailable", retryable: true } };
+      if (!up)
+        return { success: false, error: { message: "event log unavailable", retryable: true } };
       sent.push(...records.map((r) => r.headers?.["event-id"] ?? ""));
       return { success: true };
     },
@@ -62,8 +63,8 @@ function controllableK2() {
   return { env, sent, recover: () => (up = true) };
 }
 
-describe("outbox under a K2 outage", () => {
-  it("keeps events during the outage and publishes all of them once K2 recovers", async () => {
+describe("outbox under an event log outage", () => {
+  it("keeps events during the outage and publishes all of them once the event log recovers", async () => {
     const sql = fakeSql();
     migrateOutbox(sql);
     for (const id of ["e1", "e2", "e3"]) insertEvent(sql, id);
@@ -126,6 +127,6 @@ describe("outbox under a K2 outage", () => {
     const [row] = sql
       .exec<{ last_error: string }>("SELECT last_error FROM outbox WHERE event_id = 'e1'")
       .toArray();
-    expect(row?.last_error).toContain(`no K2 producer binding ${binding}`);
+    expect(row?.last_error).toContain(`no event stream producer binding ${binding}`);
   });
 });

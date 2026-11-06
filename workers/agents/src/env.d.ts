@@ -1,5 +1,4 @@
-// Secrets and Terraform-only vars are not in wrangler.jsonc, so `wrangler types` cannot see them.
-// Local: workers/agents/.dev.vars. Remote: Terraform secret_text or plain_text binding.
+// Secrets and settings from the environment. services/core/src/config.ts reads them (compose.yaml).
 interface Env {
   /** Anthropic API key (organization-level) for Claude through the AI Gateway (ADR 0021). */
   ANTHROPIC_API_KEY: string;

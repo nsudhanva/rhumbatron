@@ -8,7 +8,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/routeTree.gen.ts", "!**/worker-configuration.d.ts", "!**/.terraform"]
+    "includes": ["**", "!**/routeTree.gen.ts", "!packages/platform/types/runtime.d.ts"]
   },
   "formatter": {
     "enabled": true,
