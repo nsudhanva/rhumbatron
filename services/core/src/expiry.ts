@@ -13,7 +13,7 @@ const RULES = [
 ];
 const DAY_MS = 86_400_000;
 
-export async function expireObjects(bucket: ObjectBucket, now = Date.now()): Promise<number> {
+async function expireObjects(bucket: ObjectBucket, now = Date.now()): Promise<number> {
   let deleted = 0;
   for (const rule of RULES) {
     const cutoff = now - rule.days * DAY_MS;
