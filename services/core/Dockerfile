@@ -1,6 +1,7 @@
 # Core: API, coordinator actors, agents, integration, event router and indexer in one Bun process.
 # Build from the repository root:  docker build -f services/core/Dockerfile .
-FROM oven/bun:1.3.14
+# Bun 1.4: Playwright connect() to the browser service hangs on Bun 1.3 (its bundled ws upgrade).
+FROM oven/bun:1.4.4
 WORKDIR /repo
 COPY . .
 RUN bun install --frozen-lockfile --ignore-scripts \

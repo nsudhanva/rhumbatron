@@ -76,7 +76,7 @@ Every long-running service has `restart: unless-stopped`.
 
 | Network | Members | Rule |
 |---|---|---|
-| `default` | All services except `socket-proxy` and `sandbox-image` | Normal Compose network with a route out. |
+| `default` | All services except `socket-proxy` and `sandbox-image` | Normal Compose network with a route out, subnet `172.31.240.0/24`. `core` has the fixed address `172.31.240.10`: workerd in `apps` resolves `core` once, at start, so the address must not change when `core` restarts. |
 | `rhumbatron_sbx` (`sbx`) | Sandboxes, `sandboxd`, `egress`, `git` | `internal: true`. A Sandbox reaches only `egress:4750`, `git:8080`, `sandboxd`, and other Sandboxes. |
 | `rhumbatron_docker` (`docker`) | `sandboxd`, `socket-proxy` | `internal: true`. Only sandboxd reaches the socket proxy. |
 

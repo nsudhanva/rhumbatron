@@ -66,6 +66,9 @@ services:
       SANDBOX_MONTHLY_SECONDS: ${SANDBOX_MONTHLY_SECONDS:-72000}
       BROWSER_DAILY_SECONDS: ${BROWSER_DAILY_SECONDS:-960}
     volumes: [core-data:/data]
+    # A fixed address: workerd in apps resolves `core` once, at start.
+    networks:
+      default: { ipv4_address: 172.31.240.10 }
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 10s
@@ -83,8 +86,7 @@ services:
       INTERNAL_TOKEN: ${INTERNAL_TOKEN}
       APPS_DOMAIN: rhumbatron.localhost
     volumes: [apps-data:/data]
-    # workerd resolves the core address once, at start. A new core container gets a new address,
-    # so Compose restarts apps whenever it recreates or restarts core.
+    # workerd resolves `core` once, at start. Core has a fixed address, so a restart of core keeps it.
     depends_on:
       core: { condition: service_healthy, restart: true }
 
@@ -231,7 +233,9 @@ volumes:
   models: {}
 
 networks:
-  default: {}
+  default:
+    ipam:
+      config: [{ subnet: 172.31.240.0/24 }]
   # Sandboxes, egress, sandboxd (preview fetches) and git. No route out.
   sbx:
     name: rhumbatron_sbx

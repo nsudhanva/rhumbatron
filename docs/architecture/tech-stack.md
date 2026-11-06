@@ -142,7 +142,8 @@ flowchart LR
 |---|---|---|
 | Docker Compose | One stack of 14 services, 8 volumes, and 3 networks | `compose.yaml` |
 | Caddy 2.11.7 (`local_certs`) | Edge: TLS from its own local CA, routing by host name, WebSocket proxy, docs files | `services/edge` |
-| Bun 1.3.14 images (`oven/bun:1.3.14`, `oven/bun:1.3.14-debian`) | Base image of `core`, `web`, `git`, `sandboxd`, and the Sandbox | `services/*/Dockerfile`, `apps/web/Dockerfile`, `containers/sandbox/Dockerfile` |
+| Bun 1.4.4 image (`oven/bun:1.4.4`) | Base image of `core`. Playwright `connect()` to the browser service needs Bun 1.4: on Bun 1.3 its WebSocket upgrade does not complete | `services/core/Dockerfile` |
+| Bun 1.3.14 images (`oven/bun:1.3.14`, `oven/bun:1.3.14-debian`) | Base image of `web`, `git`, `sandboxd`, and the Sandbox | `services/*/Dockerfile`, `apps/web/Dockerfile`, `containers/sandbox/Dockerfile` |
 | `scripts/local-env.ts` | Writes `.env`: Clerk development keys, the Anthropic key, and random internal tokens | `bun run stack:env` |
 | `scripts/trust-local-ca.ts` | Trusts Caddy's local CA on the computer | `bun run stack:trust` |
 
