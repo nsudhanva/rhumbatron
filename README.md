@@ -1,6 +1,8 @@
 # Rhumbatron
 
-Rhumbatron lets a team of people and AI agents change one codebase at the same time. You describe an outcome in plain language. Agents do the work in parallel. Before their work merges, Rhumbatron finds conflicts between their plans. It then builds and tests each version. It deploys only a version that passes all of its required checks.
+Rhumbatron lets a team of people and AI agents change one codebase at the same time. You describe an outcome in plain language. Agents do the work in parallel. Before their work merges, Rhumbatron finds conflicts between their plans. It then builds each version, tests it, and uses it in a real browser. It deploys only a version that passes all of its required checks. When a check fails, a repair Task starts automatically.
+
+Rhumbatron runs on your computer as one Docker Compose stack, at `https://rhumbatron.localhost`. Every component is open source. Only the model calls to Anthropic cost money.
 
 Made by [Sudhanva Narayana](https://sudhanva.me) and [Maanasa Narayan](https://maanasa.dev).
 
@@ -28,14 +30,14 @@ flowchart LR
 - **Parallel agents.** Each agent has an isolated Git workspace and a Sandbox. Agents without ready work stay asleep.
 - **Semantic conflict detection.** Rhumbatron finds conflicts between designs, for example two data models for one feature, even when the text merges cleanly.
 - **Evidence-based merge.** Build, test, contract, browser, and acceptance checks decide which version ships. A skipped check never counts as a pass.
-- **Browser check.** Each version that changes pages opens in a real browser. Every linked page must open by a click and by a direct load.
+- **Browser check.** Each version that changes pages opens in a real browser, at every risk tier. The check submits each form with sample data, then opens every linked page by a click and by a direct load. A not-found page, a script error, or a failed page or asset stops the version, and a repair Task starts.
 - **Safe promotion.** One compare-and-swap per version, so two merges cannot overwrite each other.
 - **Teams.** Owner, admin, member, and viewer roles. A Board shows each request by person and by stage.
 - **Cost control.** Budgets for each request, Project, and person. Small Tasks use less expensive models.
 
 ## Components
 
-Rhumbatron runs as one Docker Compose stack behind Caddy at `https://rhumbatron.localhost` ([ADR 0034](docs/adr/0034-docker-compose-stack.md)). Every component is open source. Only the model calls to Anthropic cost money.
+The stack runs behind Caddy at `https://rhumbatron.localhost` ([ADR 0034](docs/adr/0034-docker-compose-stack.md)).
 
 | Function | Component | What Rhumbatron uses it for |
 |---|---|---|
